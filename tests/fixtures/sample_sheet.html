@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>LeakSheet Sample</title>
+</head>
+<body>
+  <!-- Simulates a Google Sheets HTML export for a leak spreadsheet -->
+  <div id="sheets-viewport">
+    <!-- Sheet selector tabs -->
+    <ul id="sheet-menu">
+      <li id="sheet-button-0" class="active">
+        <a href="#gid=0">Drake</a>
+      </li>
+      <li id="sheet-button-1">
+        <a href="#gid=1">Kanye West</a>
+      </li>
+    </ul>
+
+    <!-- Sheet 0: Drake -->
+    <div id="gid=0" class="ritz grid-container" style="display:block">
+      <table class="waffle" cellspacing="0" cellpadding="0">
+        <thead>
+          <tr>
+            <th class="freezebar-cell"></th>
+            <th id="0C0" style="width:300px">A</th>
+            <th id="0C1" style="width:150px">B</th>
+            <th id="0C2" style="width:200px">C</th>
+            <th id="0C3" style="width:200px">D</th>
+            <th id="0C4" style="width:100px">E</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Column header row -->
+          <tr style="height:21px">
+            <th id="0R0" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">1</div>
+            </th>
+            <td class="s0" dir="ltr">Song Name</td>
+            <td class="s0" dir="ltr">Version</td>
+            <td class="s0" dir="ltr">Features</td>
+            <td class="s0" dir="ltr">Notes</td>
+            <td class="s0" dir="ltr">Length</td>
+          </tr>
+          <!-- Era header row (merged across all columns) -->
+          <tr style="height:21px">
+            <th id="0R1" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">2</div>
+            </th>
+            <td class="s1" colspan="5" dir="ltr" style="background-color:#b7e1cd">Thank Me Later Era (2010)</td>
+          </tr>
+          <!-- Song rows -->
+          <tr style="height:21px">
+            <th id="0R2" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">3</div>
+            </th>
+            <td class="s2" dir="ltr">Fear</td>
+            <td class="s2" dir="ltr">Demo</td>
+            <td class="s2" dir="ltr"></td>
+            <td class="s2" dir="ltr">Unreleased</td>
+            <td class="s2" dir="ltr">3:42</td>
+          </tr>
+          <tr style="height:21px">
+            <th id="0R3" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">4</div>
+            </th>
+            <td class="s2" dir="ltr">Closer</td>
+            <td class="s2" dir="ltr">V1</td>
+            <td class="s2" dir="ltr">Lil Wayne</td>
+            <td class="s2" dir="ltr">Snippet only</td>
+            <td class="s2" dir="ltr">0:35</td>
+          </tr>
+          <tr style="height:21px">
+            <th id="0R4" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">5</div>
+            </th>
+            <td class="s2" dir="ltr">Halfway Through The Night</td>
+            <td class="s2" dir="ltr">Official Leak</td>
+            <td class="s2" dir="ltr"></td>
+            <td class="s2" dir="ltr">Full</td>
+            <td class="s2" dir="ltr">4:05</td>
+          </tr>
+          <!-- Another era header -->
+          <tr style="height:21px">
+            <th id="0R5" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">6</div>
+            </th>
+            <td class="s1" colspan="5" dir="ltr" style="background-color:#b7e1cd">Take Care Era (2011)</td>
+          </tr>
+          <!-- Songs in second era -->
+          <tr style="height:21px">
+            <th id="0R6" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">7</div>
+            </th>
+            <td class="s2" dir="ltr">Dreams Money Can Buy</td>
+            <td class="s2" dir="ltr">V2</td>
+            <td class="s2" dir="ltr">Rick Ross</td>
+            <td class="s2" dir="ltr">Unreleased</td>
+            <td class="s2" dir="ltr">5:12</td>
+          </tr>
+          <tr style="height:21px">
+            <th id="0R7" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">8</div>
+            </th>
+            <td class="s2" dir="ltr">Lord Knows</td>
+            <td class="s2" dir="ltr">Demo</td>
+            <td class="s2" dir="ltr"></td>
+            <td class="s2" dir="ltr">Different from released</td>
+            <td class="s2" dir="ltr">4:28</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Sheet 1: Kanye West -->
+    <div id="gid=1" class="ritz grid-container" style="display:none">
+      <table class="waffle" cellspacing="0" cellpadding="0">
+        <thead>
+          <tr>
+            <th class="freezebar-cell"></th>
+            <th id="1C0" style="width:300px">A</th>
+            <th id="1C1" style="width:150px">B</th>
+            <th id="1C2" style="width:200px">C</th>
+            <th id="1C3" style="width:200px">D</th>
+            <th id="1C4" style="width:100px">E</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Column header row -->
+          <tr style="height:21px">
+            <th id="1R0" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">1</div>
+            </th>
+            <td class="s0" dir="ltr">Song Name</td>
+            <td class="s0" dir="ltr">Version</td>
+            <td class="s0" dir="ltr">Features</td>
+            <td class="s0" dir="ltr">Notes</td>
+            <td class="s0" dir="ltr">Length</td>
+          </tr>
+          <!-- Era header row -->
+          <tr style="height:21px">
+            <th id="1R1" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">2</div>
+            </th>
+            <td class="s1" colspan="5" dir="ltr" style="background-color:#ffd966">Late Registration Era (2005)</td>
+          </tr>
+          <!-- Song rows -->
+          <tr style="height:21px">
+            <th id="1R2" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">3</div>
+            </th>
+            <td class="s2" dir="ltr">Gone</td>
+            <td class="s2" dir="ltr">Alternate</td>
+            <td class="s2" dir="ltr">Otis Redding</td>
+            <td class="s2" dir="ltr">Early version</td>
+            <td class="s2" dir="ltr">4:20</td>
+          </tr>
+          <tr style="height:21px">
+            <th id="1R3" style="height:21px" class="row-headers-background">
+              <div class="row-header-wrapper" style="line-height:21px">4</div>
+            </th>
+            <td class="s2" dir="ltr">Gold Digger</td>
+            <td class="s2" dir="ltr">Original Demo</td>
+            <td class="s2" dir="ltr"></td>
+            <td class="s2" dir="ltr">No Jamie Foxx</td>
+            <td class="s2" dir="ltr">3:56</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
