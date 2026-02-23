@@ -1,0 +1,7 @@
+agents.md
+/memory
+/.claude
+/.pytest_cache
+/Trackers
+*__pycache__
+ 
