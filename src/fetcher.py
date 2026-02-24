@@ -13,7 +13,10 @@ Strategy:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse, urlencode
 
@@ -28,7 +31,9 @@ from src.parser import parse_sheet
 # ---------------------------------------------------------------------------
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
+DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Regex to extract sheet GIDs from the htmlview page JS
 GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
@@ -133,6 +138,53 @@ def _discover_gids(html: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# File-based cache
+# ---------------------------------------------------------------------------
+
+def _cache_key(url: str) -> str:
+    """SHA-256 hash of URL as cache filename."""
+    return hashlib.sha256(url.encode()).hexdigest()
+
+
+def _get_cached(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> tuple[str, str] | None:
+    """Return (html, title) from cache if fresh, else None."""
+    key = _cache_key(url)
+    cache_file = CACHE_DIR / f"{key}.html"
+    meta_file = CACHE_DIR / f"{key}.meta.json"
+
+    if cache_file.exists() and meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            if time.time() - meta.get("timestamp", 0) < cache_ttl:
+                return cache_file.read_text(encoding="utf-8"), meta.get("title", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _set_cache(url: str, html: str, title: str) -> None:
+    """Write HTML and metadata to cache."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    key = _cache_key(url)
+    (CACHE_DIR / f"{key}.html").write_text(html, encoding="utf-8")
+    (CACHE_DIR / f"{key}.meta.json").write_text(
+        json.dumps({"url": url, "title": title, "timestamp": time.time()}),
+        encoding="utf-8",
+    )
+
+
+def clear_cache() -> int:
+    """Remove all cached files. Returns number of files deleted."""
+    if not CACHE_DIR.exists():
+        return 0
+    count = 0
+    for f in CACHE_DIR.iterdir():
+        f.unlink()
+        count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -141,6 +193,8 @@ def fetch_sheet_html(
     *,
     gid: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
+    cache_ttl: float = DEFAULT_CACHE_TTL,
+    use_cache: bool = True,
 ) -> tuple[str, str]:
     """Fetch the HTML table content from a Google Sheets tracker URL.
 
@@ -148,6 +202,8 @@ def fetch_sheet_html(
         url: The tracker URL (Google Sheets htmlview or custom domain).
         gid: Specific sheet GID. If None, auto-discovered from the page.
         timeout: HTTP request timeout in seconds.
+        cache_ttl: Cache time-to-live in seconds (0 to disable).
+        use_cache: Whether to use file-based caching.
 
     Returns:
         Tuple of (html_content, page_title).
@@ -157,6 +213,12 @@ def fetch_sheet_html(
         httpx.HTTPError: On network errors.
     """
     url = _normalize_url(url)
+
+    # Check cache first
+    if use_cache and cache_ttl > 0:
+        cached = _get_cached(url, cache_ttl)
+        if cached is not None:
+            return cached
 
     client = httpx.Client(
         follow_redirects=True,
@@ -172,6 +234,8 @@ def fetch_sheet_html(
             r.raise_for_status()
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
+            if use_cache:
+                _set_cache(url, r.text, title)
             return r.text, title
 
         # Step 1: Fetch the base page to discover GIDs
@@ -183,6 +247,8 @@ def fetch_sheet_html(
 
         # If the base page already has tables (local file or direct sheet), return it
         if "<table" in base_html.lower():
+            if use_cache:
+                _set_cache(url, base_html, title)
             return base_html, title
 
         # Step 2: Discover GIDs
@@ -200,6 +266,8 @@ def fetch_sheet_html(
                 sheet_url = _build_sheet_html_url(url, try_gid)
                 r = client.get(sheet_url)
                 if r.status_code == 200 and "<table" in r.text.lower():
+                    if use_cache:
+                        _set_cache(url, r.text, title)
                     return r.text, title
             except Exception as e:
                 last_error = e
@@ -219,6 +287,8 @@ def fetch_and_parse(
     artist_name: str | None = None,
     gid: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
+    cache_ttl: float = DEFAULT_CACHE_TTL,
+    use_cache: bool = True,
 ) -> Artist:
     """Fetch a tracker URL and parse it into an Artist model.
 
@@ -227,11 +297,13 @@ def fetch_and_parse(
         artist_name: Override artist name (if None, inferred from page title).
         gid: Specific sheet GID (if None, auto-discovered).
         timeout: HTTP timeout in seconds.
+        cache_ttl: Cache TTL in seconds.
+        use_cache: Whether to use file-based caching.
 
     Returns:
         Parsed Artist object.
     """
-    html, title = fetch_sheet_html(url, gid=gid, timeout=timeout)
+    html, title = fetch_sheet_html(url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache)
 
     if not artist_name:
         artist_name = _infer_artist_name(title)

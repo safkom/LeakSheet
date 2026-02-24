@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -67,19 +66,24 @@ VERSION_TAG_PATTERN = re.compile(
 
 class SongVersion(BaseModel):
     """A specific version of a song with its metadata."""
-    name: str = Field(..., description="Full display name including version tag")
-    version_tag: Optional[str] = Field(None, description="Version identifier, e.g. 'V1', 'V2', 'Alt.'")
-    badge: Optional[Badge] = Field(None, description="Emoji badge classification")
-    notes: Optional[str] = Field(None, description="Description/history text")
-    track_length: Optional[str] = Field(None, description="Duration, e.g. '3:14'")
-    file_date: Optional[str] = Field(None, description="Date the file was created")
-    leak_date: Optional[str] = Field(None, description="Date the version leaked")
-    available_length: Optional[str] = Field(None, description="Full/Partial/Snippet/etc.")
-    quality: Optional[str] = Field(None, description="CD Quality/High Quality/etc.")
+    name: str = Field(..., description="Song title (first line only, no credits)")
+    version_tag: str | None = Field(None, description="Version identifier, e.g. 'V1', 'V2', 'Alt.'")
+    badge: Badge | None = Field(None, description="Emoji badge classification")
+    featuring: str | None = Field(None, description="Featured artists, e.g. 'Rhymefest & Kanye West'")
+    producers: str | None = Field(None, description="Producers, e.g. 'Kanye West & Andy C.'")
+    collaboration: str | None = Field(None, description="Collaboration artist, e.g. 'Go Getters'")
+    refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
+    alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
+    notes: str | None = Field(None, description="Description/history text")
+    track_length: str | None = Field(None, description="Duration, e.g. '3:14'")
+    file_date: str | None = Field(None, description="Date the file was created")
+    leak_date: str | None = Field(None, description="Date the version leaked")
+    available_length: str | None = Field(None, description="Full/Partial/Snippet/etc.")
+    quality: str | None = Field(None, description="CD Quality/High Quality/etc.")
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
     # Carti-specific fields
-    date_of_recording: Optional[str] = Field(None, description="Date of recording (Carti tracker)")
-    type: Optional[str] = Field(None, description="Song type (Carti tracker)")
+    date_of_recording: str | None = Field(None, description="Date of recording (Carti tracker)")
+    type: str | None = Field(None, description="Song type (Carti tracker)")
 
 
 class Song(BaseModel):
@@ -88,7 +92,7 @@ class Song(BaseModel):
     versions: list[SongVersion] = Field(default_factory=list)
 
     @property
-    def badge(self) -> Optional[Badge]:
+    def badge(self) -> Badge | None:
         """Return the badge from any version (badges are per-song semantically)."""
         for v in self.versions:
             if v.badge is not None:
@@ -96,28 +100,126 @@ class Song(BaseModel):
         return None
 
 
+class EraStats(BaseModel):
+    """Parsed statistics from an era header's metadata cell.
+
+    Each tracker era has a stats block like:
+        1 OG File(s)
+        45 Full
+        1 Tagged
+        3 Partial
+        4 Snippet(s)
+        0 Stem Bounce(s)
+        70 Unavailable
+    """
+    og_files: int = Field(0, description="Number of OG files")
+    full: int = Field(0, description="Number of full versions")
+    tagged: int = Field(0, description="Number of tagged versions")
+    partial: int = Field(0, description="Number of partial versions")
+    snippets: int = Field(0, description="Number of snippets")
+    stem_bounces: int = Field(0, description="Number of stem bounces")
+    unavailable: int = Field(0, description="Number of unavailable songs")
+
+    @property
+    def total(self) -> int:
+        """Total song count from stats (all categories summed)."""
+        return (
+            self.og_files + self.full + self.tagged + self.partial
+            + self.snippets + self.stem_bounces + self.unavailable
+        )
+
+
+class TrackerStats(BaseModel):
+    """Global tracker statistics found at the bottom of each tracker sheet.
+
+    Contains aggregated totals across all eras.
+    """
+    # Links
+    total_links: int = Field(0)
+    missing_links: int = Field(0)
+    sources_needed: int = Field(0)
+    not_available_links: int = Field(0)
+
+    # Quality
+    lossless: int = Field(0)
+    cd_quality: int = Field(0)
+    high_quality: int = Field(0)
+    low_quality: int = Field(0)
+    recordings: int = Field(0)
+    not_available_quality: int = Field(0)
+
+    # Availability
+    total_full: int = Field(0)
+    og_files: int = Field(0)
+    stem_bounces: int = Field(0)
+    full: int = Field(0)
+    tagged: int = Field(0)
+    partial: int = Field(0)
+    snippets: int = Field(0)
+    unavailable: int = Field(0)
+
+    # Highlighted / badges
+    best_of: int = Field(0)
+    special: int = Field(0)
+    grails: int = Field(0)
+    wanted: int = Field(0)
+    worst_of: int = Field(0)
+
+
+class Section(BaseModel):
+    """A named sub-section within an era (e.g. 'Early Sessions', 'July 2020')."""
+    name: str = Field("", description="Section name, empty for default section")
+    songs: list[Song] = Field(default_factory=list)
+
+
+class TimelineEvent(BaseModel):
+    """A single historical event in an era's timeline."""
+    date: str = Field(..., description="Date string, e.g. '06/08/1977', '2016', 'Late 2004'")
+    event: str = Field(..., description="Event description")
+
+
 class Era(BaseModel):
     """An album era / creative period containing songs."""
     name: str = Field(..., description="Era/album name")
-    description: Optional[str] = Field(None, description="Historical context paragraph")
-    stats_raw: Optional[str] = Field(None, description="Raw stats string, e.g. '3 OG File(s)...'")
-    songs: list[Song] = Field(default_factory=list)
+    description: str | None = Field(None, description="Historical context / notes paragraph")
+    timeline: list[TimelineEvent] = Field(default_factory=list, description="Historical timeline events")
+    stats_raw: str | None = Field(None, description="Raw stats string, e.g. '3 OG File(s)...'")
+    stats: EraStats | None = Field(None, description="Parsed era statistics")
+    art_url: str | None = Field(None, description="Cover art image URL for this era")
+    sections: list[Section] = Field(default_factory=list)
+
+    @property
+    def songs(self) -> list[Song]:
+        """Flat list of all songs across all sections."""
+        return [s for sec in self.sections for s in sec.songs]
 
     @property
     def song_count(self) -> int:
-        return len(self.songs)
+        return sum(len(sec.songs) for sec in self.sections)
 
     @property
     def version_count(self) -> int:
-        return sum(len(s.versions) for s in self.songs)
+        return sum(len(s.versions) for sec in self.sections for s in sec.songs)
+
+
+class ParseMetadata(BaseModel):
+    """Metadata about the parsing process for debugging and diagnostics."""
+    total_rows: int = Field(0, description="Total non-header rows processed")
+    song_rows: int = Field(0, description="Rows successfully parsed as songs")
+    skipped_rows: int = Field(0, description="Rows that matched no era and were skipped")
+    unmatched_rows: list[str] = Field(default_factory=list, description="First 50 unmatched row summaries")
+    footer_rows: int = Field(0, description="Rows detected as footer content")
+    fuzzy_matched_rows: int = Field(0, description="Rows matched via fuzzy era matching")
 
 
 class Artist(BaseModel):
     """Top-level artist with all parsed tracker data."""
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
-    source_url: Optional[str] = Field(None, description="Original Google Sheets URL")
+    source_url: str | None = Field(None, description="Original Google Sheets URL")
     eras: list[Era] = Field(default_factory=list)
+    tracker_stats: TrackerStats | None = Field(None, description="Global tracker statistics")
+    parse_metadata: ParseMetadata | None = Field(None, description="Parsing diagnostics")
 
     @property
     def total_songs(self) -> int:
@@ -128,7 +230,7 @@ class Artist(BaseModel):
         return sum(e.version_count for e in self.eras)
 
 
-def extract_badge(name: str) -> tuple[Optional[Badge], str]:
+def extract_badge(name: str) -> tuple[Badge | None, str]:
     """Extract leading badge emoji from a song name.
 
     Returns (badge, cleaned_name) where cleaned_name has the emoji stripped.
@@ -142,7 +244,7 @@ def extract_badge(name: str) -> tuple[Optional[Badge], str]:
     return None, name.strip()
 
 
-def extract_version_tag(name: str) -> tuple[Optional[str], str]:
+def extract_version_tag(name: str) -> tuple[str | None, str]:
     """Extract version tag from a song name.
 
     Returns (version_tag, base_name) where base_name has the tag stripped.
@@ -164,3 +266,213 @@ def slugify(text: str) -> str:
     text = re.sub(r"[\s_]+", "-", text)
     text = re.sub(r"-+", "-", text)
     return text.strip("-")
+
+
+# ---------------------------------------------------------------------------
+# Stats parsing
+# ---------------------------------------------------------------------------
+
+# Regex to extract "N Label" pairs from stats text.
+# Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
+# Also handles emoji-prefixed labels ("🔗 616 Total Links").
+_STAT_LINE_PATTERN = re.compile(
+    r"(\d+)\s+([A-Za-z][A-Za-z /()]+?)(?=\d|\Z)",
+)
+
+
+def _extract_stat_pairs(raw: str) -> dict[str, int]:
+    """Parse stats text into {lowercase_label: count} dict.
+
+    Handles both formats:
+      "1 OG File(s)\\n45 Full\\n1 Tagged..."
+      "🔗 616 Total Links\\n❌ 0 Missing Links..."
+    """
+    # Strip all emoji characters first
+    cleaned = re.sub(
+        r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+",
+        "",
+        raw,
+    )
+    # Replace newlines with a separator that won't interfere
+    cleaned = cleaned.replace("\n", " ")
+    # Collapse multiple spaces
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    result: dict[str, int] = {}
+    for m in _STAT_LINE_PATTERN.finditer(cleaned):
+        count = int(m.group(1))
+        label = m.group(2).strip().lower()
+        # Normalize: strip "(s)" suffix (e.g. "Snippet(s)" → "snippet")
+        if label.endswith("(s)"):
+            label = label[:-3]
+        elif label.endswith("("):
+            label = label[:-1]
+        result[label] = count
+    return result
+
+
+def parse_era_stats(raw: str) -> EraStats:
+    """Parse a raw era stats string into an EraStats model."""
+    pairs = _extract_stat_pairs(raw)
+
+    return EraStats(
+        og_files=pairs.get("og file", pairs.get("og files", 0)),
+        full=_match_stat(pairs, ["total full", "full"]),
+        tagged=pairs.get("tagged", 0),
+        partial=_match_stat(pairs, ["partial", "partial / cut"]),
+        snippets=pairs.get("snippet", pairs.get("snippets", 0)),
+        stem_bounces=pairs.get("stem bounce", pairs.get("stem bounces", 0)),
+        unavailable=pairs.get("unavailable", 0),
+    )
+
+
+def _match_stat(pairs: dict[str, int], keys: list[str]) -> int:
+    """Return the first matching stat value from a list of priority keys."""
+    for key in keys:
+        if key in pairs:
+            return pairs[key]
+    return 0
+
+
+def parse_tracker_stats(
+    links_text: str,
+    quality_text: str,
+    availability_text: str,
+    highlights_text: str,
+) -> TrackerStats:
+    """Parse the global stats row into a TrackerStats model.
+
+    Each argument is the raw text from one cell of the global stats row.
+    """
+    lp = _extract_stat_pairs(links_text) if links_text else {}
+    qp = _extract_stat_pairs(quality_text) if quality_text else {}
+    ap = _extract_stat_pairs(availability_text) if availability_text else {}
+    hp = _extract_stat_pairs(highlights_text) if highlights_text else {}
+
+    return TrackerStats(
+        # Links
+        total_links=lp.get("total links", lp.get("total link", 0)),
+        missing_links=lp.get("missing links", lp.get("missing link", 0)),
+        sources_needed=lp.get("sources needed", 0),
+        not_available_links=_match_stat(lp, ["not avaliable", "not available"]),
+
+        # Quality
+        lossless=qp.get("lossless", 0),
+        cd_quality=qp.get("cd quality", 0),
+        high_quality=qp.get("high quality", 0),
+        low_quality=qp.get("low quality", 0),
+        recordings=qp.get("recordings", qp.get("recording", 0)),
+        not_available_quality=_match_stat(qp, ["not available", "not avaliable"]),
+
+        # Availability
+        total_full=ap.get("total full", 0),
+        og_files=ap.get("og files", ap.get("og file", 0)),
+        stem_bounces=ap.get("stem bounces", ap.get("stem bounce", 0)),
+        full=ap.get("full", 0),
+        tagged=ap.get("tagged", 0),
+        partial=ap.get("partial", 0),
+        snippets=ap.get("snippets", ap.get("snippet", 0)),
+        unavailable=_match_stat(ap, ["unavailable"]),
+
+        # Highlighted
+        best_of=hp.get("best of", 0),
+        special=hp.get("special", 0),
+        grails=hp.get("grails", hp.get("grail", 0)),
+        wanted=hp.get("wanted", 0),
+        worst_of=hp.get("worst of", 0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Song credit parsing
+# ---------------------------------------------------------------------------
+
+# Patterns for extracting credit info from song name sub-lines
+_FEAT_PATTERN = re.compile(r"\((?:feat\.?|featuring|ft\.?)\s+(.+?)\)", re.IGNORECASE)
+_PROD_PATTERN = re.compile(r"\(prod\.?\s+(.+?)\)", re.IGNORECASE)
+_WITH_PATTERN = re.compile(r"\(with\s+(.+?)\)", re.IGNORECASE)
+_REF_PATTERN = re.compile(r"\(ref\.?\s+(.+?)\)", re.IGNORECASE)
+
+
+def parse_song_credits(
+    raw_name: str,
+) -> tuple[str, str | None, str | None, str | None, str | None, list[str]]:
+    """Parse a raw multi-line song name into title + structured credits.
+
+    Raw names look like:
+        10 in a Benz
+        (with Go Getters) (feat. Rhymefest) (prod. Kanye West & Andy C.)
+        (On 10 in a Benz)
+
+    Returns (title, featuring, producers, collaboration, refs, alt_titles).
+    """
+    text = raw_name
+
+    # Extract all credit patterns from full text
+    feat_matches = _FEAT_PATTERN.findall(text)
+    prod_matches = _PROD_PATTERN.findall(text)
+    with_matches = _WITH_PATTERN.findall(text)
+    ref_matches = _REF_PATTERN.findall(text)
+
+    # Remove credit patterns to get clean text
+    cleaned = _FEAT_PATTERN.sub("", text)
+    cleaned = _PROD_PATTERN.sub("", cleaned)
+    cleaned = _WITH_PATTERN.sub("", cleaned)
+    cleaned = _REF_PATTERN.sub("", cleaned)
+
+    # Split by newline: first line = title, rest = alt titles
+    lines = [ln.strip() for ln in cleaned.split("\n")]
+    title = lines[0].strip()
+
+    # Remaining non-empty lines → alt titles
+    alt_titles: list[str] = []
+    for line in lines[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        # Strip wrapping parens: "(All I Have)" → "All I Have"
+        if line.startswith("(") and line.endswith(")"):
+            alt_titles.append(line[1:-1].strip())
+        else:
+            alt_titles.append(line)
+
+    featuring = ", ".join(feat_matches) if feat_matches else None
+    producers = ", ".join(prod_matches) if prod_matches else None
+    collaboration = ", ".join(with_matches) if with_matches else None
+    refs = ", ".join(ref_matches) if ref_matches else None
+
+    return title, featuring, producers, collaboration, refs, alt_titles
+
+
+# ---------------------------------------------------------------------------
+# Timeline parsing
+# ---------------------------------------------------------------------------
+
+# Matches a line starting with (date) followed by optional (event) or event text
+_TIMELINE_LINE_PATTERN = re.compile(r"^\(([^)]+)\)\s*(.*)", re.MULTILINE)
+
+
+def parse_timeline(text: str) -> list[TimelineEvent]:
+    """Parse timeline text into a list of TimelineEvent objects.
+
+    Handles two formats:
+      - Ye/Kendrick: (06/08/1977) (Ye is born in Atlanta)
+      - Keem/Carti:  (2016) Baby Keem releases "Come Thru" to soundcloud.
+    """
+    events: list[TimelineEvent] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = _TIMELINE_LINE_PATTERN.match(line)
+        if m:
+            date = m.group(1).strip()
+            rest = m.group(2).strip()
+            # Strip wrapping parens from event if present
+            if rest.startswith("(") and rest.endswith(")"):
+                event = rest[1:-1].strip()
+            else:
+                event = rest
+            if date and event:
+                events.append(TimelineEvent(date=date, event=event))
+    return events

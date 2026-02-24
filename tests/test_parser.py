@@ -232,8 +232,8 @@ class TestAllTrackers:
 
 class TestYeTracker:
     def test_era_count(self, ye):
-        # Ye has ~42 eras
-        assert ye.total_songs > 5000
+        # Ye has ~42 eras; total unique songs ~3400+ (songs group by clean base name)
+        assert ye.total_songs > 3000
         assert len(ye.eras) >= 40
 
     def test_yeezus_2_era_exists(self, ye):
@@ -242,9 +242,9 @@ class TestYeTracker:
         assert len(matching) == 1
 
     def test_yeezus_2_song_count(self, ye):
-        """Yeezus 2 should have ~245 songs based on dump."""
+        """Yeezus 2 should have ~150 songs (matches era stats OG File count)."""
         era = next(e for e in ye.eras if "Yeezus 2" in e.name)
-        assert era.song_count >= 200
+        assert era.song_count >= 130
 
     def test_yeezus_2_a_pas_de_velour(self, ye):
         """First song in Yeezus 2 era — from screenshot verification."""
@@ -426,10 +426,15 @@ class TestVersionTagGrouping:
         song = None
         for era in carti.eras:
             for s in era.songs:
-                if "Location" in s.base_name and "Harry Fraud" in s.base_name:
-                    song = s
-                    break
-        assert song is not None, "Location (Harry Fraud) not found in Carti tracker"
+                if "Location" in s.base_name:
+                    # Find the Location produced by Harry Fraud
+                    if any(
+                        v.producers and "Harry Fraud" in v.producers
+                        for v in s.versions
+                    ):
+                        song = s
+                        break
+        assert song is not None, "Location (prod. Harry Fraud) not found in Carti tracker"
         version_tags = {v.version_tag for v in song.versions}
         assert "V1" in version_tags, f"Expected V1 in {version_tags}"
         assert "MASTER" in version_tags, f"Expected MASTER in {version_tags}"
@@ -525,3 +530,448 @@ class TestFetcherHelpers:
         url = _build_sheet_html_url("https://yetracker.net/", "34972268")
         assert "yetracker.net/htmlview/sheet" in url
         assert "gid=34972268" in url
+
+
+# ---------------------------------------------------------------------------
+# Era stats parsing tests
+# ---------------------------------------------------------------------------
+
+class TestEraStatsParsing:
+    """Test structured parsing of era stats metadata."""
+
+    def test_parse_era_stats_basic(self):
+        from src.models import parse_era_stats
+        raw = "1 OG File(s)\n45 Full\n1 Tagged\n3 Partial\n4 Snippet(s)\n0 Stem Bounce(s)\n70 Unavailable"
+        stats = parse_era_stats(raw)
+        assert stats.og_files == 1
+        assert stats.full == 45
+        assert stats.tagged == 1
+        assert stats.partial == 3
+        assert stats.snippets == 4
+        assert stats.stem_bounces == 0
+        assert stats.unavailable == 70
+        assert stats.total == 124
+
+    def test_parse_era_stats_concatenated(self):
+        """Stats without newlines (old parser behavior before br fix)."""
+        from src.models import parse_era_stats
+        raw = "1 OG File(s)45 Full1 Tagged3 Partial4 Snippet(s)0 Stem Bounce(s)70 Unavailable"
+        stats = parse_era_stats(raw)
+        assert stats.og_files == 1
+        assert stats.full == 45
+        assert stats.total == 124
+
+    def test_parse_era_stats_carti_format(self):
+        """Carti trackers use 'Total Full' instead of 'Full'."""
+        from src.models import parse_era_stats
+        raw = "1 Total Full\n0 OG File\n0 Partial / Cut\n0 Snippet\n3 Unavailable"
+        stats = parse_era_stats(raw)
+        assert stats.full == 1
+        assert stats.unavailable == 3
+        assert stats.total == 4
+
+    def test_ye_eras_have_stats(self, ye):
+        """All Ye eras should have parsed stats."""
+        for era in ye.eras:
+            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+            assert era.stats.total >= 0
+
+    def test_keem_eras_have_stats(self, keem):
+        for era in keem.eras:
+            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+
+    def test_kendrick_eras_have_stats(self, kendrick):
+        for era in kendrick.eras:
+            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+
+    def test_carti_eras_have_stats(self, carti):
+        for era in carti.eras:
+            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+
+    def test_ye_total_from_era_stats(self, ye):
+        """Sum of era stats totals should be close to total_versions."""
+        era_sum = sum(e.stats.total for e in ye.eras if e.stats)
+        # Allow small discrepancy due to sub-headers and stale metadata
+        assert abs(era_sum - ye.total_versions) < 50, (
+            f"Era stats sum {era_sum} vs total_versions {ye.total_versions}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Era art tests
+# ---------------------------------------------------------------------------
+
+class TestEraArt:
+    """Test era cover art extraction."""
+
+    def test_ye_at_least_one_era_has_art(self, ye):
+        """At least one Ye era should have art (local files have fewer images than live)."""
+        eras_with_art = [e for e in ye.eras if e.art_url]
+        assert len(eras_with_art) >= 1, "No Ye era has art_url"
+
+    def test_keem_at_least_one_era_has_art(self, keem):
+        eras_with_art = [e for e in keem.eras if e.art_url]
+        assert len(eras_with_art) >= 1, "No Keem era has art_url"
+
+    def test_art_url_format(self, ye):
+        """Art URLs should be either HTTPS CDN links (live) or relative paths (local)."""
+        for era in ye.eras:
+            if era.art_url:
+                is_live = era.art_url.startswith("https://")
+                is_local = era.art_url.startswith("./") or era.art_url.endswith(".jpg")
+                assert is_live or is_local, f"Unexpected art_url format: {era.art_url}"
+
+
+# ---------------------------------------------------------------------------
+# Global tracker stats tests
+# ---------------------------------------------------------------------------
+
+class TestTrackerStats:
+    """Test global tracker statistics parsing."""
+
+    def test_parse_tracker_stats_basic(self):
+        from src.models import parse_tracker_stats
+        links = "6243 Total Links\n28 Missing Links\n49 Sources Needed\n1023 Not Avaliable"
+        quality = "1150 Lossless\n2714 CD Quality\n868 High Quality\n116 Low Quality\n649 Recordings\n2626 Not Available"
+        avail = "4146 Total Full\n2973 OG Files\n232 Stem Bounces\n880 Full\n61 Tagged\n332 Partial\n889 Snippets\n2756 Unavailable"
+        highlights = "\u2b50 139 Best Of\n\u2728 291 Special\n\U0001f3c6 29 Grails\n\U0001f396 45 Wanted\n\U0001f5d1\ufe0f 69 Worst Of"
+
+        stats = parse_tracker_stats(links, quality, avail, highlights)
+        assert stats.total_links == 6243
+        assert stats.missing_links == 28
+        assert stats.lossless == 1150
+        assert stats.cd_quality == 2714
+        assert stats.total_full == 4146
+        assert stats.og_files == 2973
+        assert stats.best_of == 139
+        assert stats.special == 291
+        assert stats.grails == 29
+        assert stats.wanted == 45
+        assert stats.worst_of == 69
+
+    def test_parse_tracker_stats_emoji_prefix(self):
+        """Kendrick/Keem style: emoji-prefixed stat labels."""
+        from src.models import parse_tracker_stats
+        links = "\U0001f517 616 Total Links\n\u274c 0 Missing Links\n\U0001f4da 0 Sources Needed\n\U0001f6ab 217 Not Available"
+        quality = "\U0001f4bf 53 Lossless\n\U0001f4c0 195 CD Quality\n\U0001f3b5 163 High Quality\n\U0001f4c9 21 Low Quality\n\U0001f399\ufe0f 64 Recordings\n\U0001f6ab 365 Not Available"
+        avail = "\U0001f4c1 282 Total Full\n\U0001f9fe 154 OG Files\n\U0001f3bc 119 Full\n\U0001f3f7\ufe0f 9 Tagged\n\U0001f539 39 Partial\n\u2702\ufe0f 124 Snippets"
+        highlights = "\u2b50 61 Best Of\n\u2728 97 Special\n\U0001f3c6 51 Grails\n\U0001f5d1\ufe0f 9 Worst Of"
+
+        stats = parse_tracker_stats(links, quality, avail, highlights)
+        assert stats.total_links == 616
+        assert stats.lossless == 53
+        assert stats.cd_quality == 195
+        assert stats.total_full == 282
+        assert stats.best_of == 61
+        assert stats.grails == 51
+
+    def test_ye_has_tracker_stats(self, ye):
+        assert ye.tracker_stats is not None
+        assert ye.tracker_stats.total_links > 1000
+
+    def test_keem_has_tracker_stats(self, keem):
+        assert keem.tracker_stats is not None
+        assert keem.tracker_stats.total_links > 100
+
+    def test_kendrick_has_tracker_stats(self, kendrick):
+        assert kendrick.tracker_stats is not None
+        assert kendrick.tracker_stats.total_links > 100
+
+
+# ---------------------------------------------------------------------------
+# Footer detection regression test
+# ---------------------------------------------------------------------------
+
+class TestFooterDetection:
+    """Ensure tracker footer rows are not parsed as songs."""
+
+    def test_kendrick_last_era_not_inflated(self, kendrick):
+        """The last era should not contain changelog/guideline entries."""
+        last_era = kendrick.eras[-1]
+        for song in last_era.songs:
+            for v in song.versions:
+                assert "Tracker Guidelines" not in v.name, (
+                    f"Footer text leaked into last era: {v.name}"
+                )
+                assert "Changelogs" not in v.name
+                assert "Editor Comments" not in v.name
+
+    def test_keem_last_era_not_inflated(self, keem):
+        last_era = keem.eras[-1]
+        for song in last_era.songs:
+            for v in song.versions:
+                assert "Tracker Guidelines" not in v.name
+
+
+# ---------------------------------------------------------------------------
+# Song credit parsing tests
+# ---------------------------------------------------------------------------
+
+class TestSongCreditParsing:
+    """Test parse_song_credits extracts features, producers, alt titles."""
+
+    def test_full_credits(self):
+        from src.models import parse_song_credits
+        raw = "10 in a Benz \n(with Go Getters) (feat. Rhymefest) (prod. Kanye West & Andy C.)\n(On 10 in a Benz)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "10 in a Benz"
+        assert feat == "Rhymefest"
+        assert prod == "Kanye West & Andy C."
+        assert collab == "Go Getters"
+        assert refs is None
+        assert alts == ["On 10 in a Benz"]
+
+    def test_feat_and_prod_only(self):
+        from src.models import parse_song_credits
+        raw = "3 Minutes of Watts\n(feat. J-Rock) (prod. Don-P)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "3 Minutes of Watts"
+        assert feat == "J-Rock"
+        assert prod == "Don-P"
+        assert collab is None
+        assert alts == []
+
+    def test_prod_on_separate_line(self):
+        from src.models import parse_song_credits
+        raw = "Living Reckless [V1]\n(prod. Ski Beatz)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "Living Reckless [V1]"
+        assert prod == "Ski Beatz"
+        assert feat is None
+
+    def test_prod_glued_to_version_tag(self):
+        from src.models import parse_song_credits
+        raw = "After You [V2](prod. Dom $olo)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "After You [V2]"
+        assert prod == "Dom $olo"
+
+    def test_ref_credits(self):
+        from src.models import parse_song_credits
+        raw = "RATHER LIE [Clean](ref. Keith Lawson)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "RATHER LIE [Clean]"
+        assert refs == "Keith Lawson"
+
+    def test_alt_title_only(self):
+        from src.models import parse_song_credits
+        raw = "On My Own\n(My Own)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "On My Own"
+        assert alts == ["My Own"]
+
+    def test_multiple_alt_titles(self):
+        from src.models import parse_song_credits
+        raw = "I'm Him\n(prod. Hykeem Carter)\n(I'm The Man, Thank God)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "I'm Him"
+        assert prod == "Hykeem Carter"
+        assert alts == ["I'm The Man, Thank God"]
+
+    def test_no_credits(self):
+        from src.models import parse_song_credits
+        raw = "Ain't No Money"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "Ain't No Money"
+        assert feat is None
+        assert prod is None
+        assert collab is None
+        assert refs is None
+        assert alts == []
+
+    def test_remix_stays_in_title(self):
+        from src.models import parse_song_credits
+        raw = "Black Skinhead (Remix) [V3]"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "Black Skinhead (Remix) [V3]"
+        assert feat is None
+
+    def test_complex_featuring(self):
+        from src.models import parse_song_credits
+        raw = "All I Need \n(with Go Getters) (feat. Kanye West, Mikkey Halsted, Taji & Miss Criss) (prod. AllDay & Kanye West) \n(All I Have)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "All I Need"
+        assert "Kanye West" in feat
+        assert "Mikkey Halsted" in feat
+        assert collab == "Go Getters"
+        assert "AllDay" in prod
+        assert alts == ["All I Have"]
+
+    def test_artist_prefix_stays_in_title(self):
+        from src.models import parse_song_credits
+        raw = "Jay Rock - To The Top\n(feat. K-Dot) (prod. DJ Mano)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "Jay Rock - To The Top"
+        assert feat == "K-Dot"
+        assert prod == "DJ Mano"
+
+    def test_carti_format(self):
+        from src.models import parse_song_credits
+        raw = "36 Villainz\n(prod. Cold Hart & DJ Anuedy)\n(36IllVillianz)"
+        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
+        assert title == "36 Villainz"
+        assert prod == "Cold Hart & DJ Anuedy"
+        assert alts == ["36IllVillianz"]
+
+
+# ---------------------------------------------------------------------------
+# Song credit fields on parsed tracker data
+# ---------------------------------------------------------------------------
+
+class TestSongCreditsOnParsedData:
+    """Verify credit fields are populated on actual tracker data."""
+
+    def test_ye_songs_have_producers(self, ye):
+        """Many Ye songs have (prod. ...) credits."""
+        songs_with_prod = sum(
+            1 for era in ye.eras for s in era.songs
+            for v in s.versions if v.producers
+        )
+        assert songs_with_prod > 100, f"Expected >100 songs with producers, got {songs_with_prod}"
+
+    def test_ye_songs_have_featuring(self, ye):
+        """Many Ye songs have (feat. ...) credits."""
+        songs_with_feat = sum(
+            1 for era in ye.eras for s in era.songs
+            for v in s.versions if v.featuring
+        )
+        assert songs_with_feat > 50, f"Expected >50 songs with featuring, got {songs_with_feat}"
+
+    def test_ye_10_in_a_benz_credits(self, ye):
+        """Verify 10 in a Benz has correct structured credits."""
+        era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
+        song = next(s for s in era.songs if s.base_name == "10 in a Benz")
+        v = song.versions[0]
+        assert v.featuring == "Rhymefest"
+        assert v.producers == "Kanye West & Andy C."
+        assert v.collaboration == "Go Getters"
+        assert "10 in a Benz" in v.alt_titles[0]
+
+    def test_kendrick_songs_have_producers(self, kendrick):
+        songs_with_prod = sum(
+            1 for era in kendrick.eras for s in era.songs
+            for v in s.versions if v.producers
+        )
+        assert songs_with_prod > 50
+
+    def test_carti_songs_have_producers(self, carti):
+        songs_with_prod = sum(
+            1 for era in carti.eras for s in era.songs
+            for v in s.versions if v.producers
+        )
+        assert songs_with_prod > 100
+
+    def test_song_name_is_clean_title(self, ye):
+        """SongVersion.name should be the clean title line, not multi-line blob."""
+        era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
+        song = next(s for s in era.songs if s.base_name == "10 in a Benz")
+        v = song.versions[0]
+        assert "\n" not in v.name, f"version.name should not contain newlines: {v.name!r}"
+        assert "(prod." not in v.name, "version.name should not contain producer credits"
+        assert "(feat." not in v.name, "version.name should not contain featuring credits"
+
+    def test_base_name_clean(self, ye):
+        """base_name should be the song title without credits or version tags."""
+        era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
+        for song in era.songs[:10]:
+            assert "(prod." not in song.base_name, f"base_name has producer: {song.base_name}"
+            assert "(feat." not in song.base_name, f"base_name has featuring: {song.base_name}"
+            assert "\n" not in song.base_name, f"base_name has newline: {song.base_name}"
+
+
+# ---------------------------------------------------------------------------
+# Timeline parsing tests
+# ---------------------------------------------------------------------------
+
+class TestTimelineParsing:
+    """Test parse_timeline extracts date+event pairs."""
+
+    def test_ye_format(self):
+        from src.models import parse_timeline
+        text = "(06/08/1977) (Ye is born in Atlanta)\n(08/18/2002) (Kanye announces he signed to Roc-A-Fella)"
+        events = parse_timeline(text)
+        assert len(events) == 2
+        assert events[0].date == "06/08/1977"
+        assert events[0].event == "Ye is born in Atlanta"
+        assert events[1].date == "08/18/2002"
+        assert "Roc-A-Fella" in events[1].event
+
+    def test_keem_format(self):
+        from src.models import parse_timeline
+        text = '(2016) Baby Keem releases "Come Thru" to soundcloud.\n(August 16, 2018) Hearts & Darts on streaming.'
+        events = parse_timeline(text)
+        assert len(events) == 2
+        assert events[0].date == "2016"
+        assert "Come Thru" in events[0].event
+        assert events[1].date == "August 16, 2018"
+
+    def test_carti_format(self):
+        from src.models import parse_timeline
+        text = "(Sept 13th, 1996) Jordan Terrell Carter is born\n(2009) JCee starts making music"
+        events = parse_timeline(text)
+        assert len(events) == 2
+        assert events[0].date == "Sept 13th, 1996"
+        assert events[0].event == "Jordan Terrell Carter is born"
+
+    def test_empty_text(self):
+        from src.models import parse_timeline
+        assert parse_timeline("") == []
+
+    def test_single_event(self):
+        from src.models import parse_timeline
+        events = parse_timeline("(2024) Album drops")
+        assert len(events) == 1
+        assert events[0].date == "2024"
+        assert events[0].event == "Album drops"
+
+
+# ---------------------------------------------------------------------------
+# Era timeline and description tests
+# ---------------------------------------------------------------------------
+
+class TestEraTimelineAndDescription:
+    """Verify era headers properly separate timeline from description."""
+
+    def test_ye_first_era_has_timeline(self, ye):
+        era = ye.eras[0]
+        assert len(era.timeline) >= 2
+        assert era.timeline[0].date == "06/08/1977"
+        assert "born" in era.timeline[0].event.lower()
+
+    def test_ye_first_era_has_description(self, ye):
+        era = ye.eras[0]
+        assert era.description is not None
+        assert len(era.description) > 100
+        assert "Go Getters" in era.description
+
+    def test_ye_description_not_timeline(self, ye):
+        """era.description should not contain timeline data."""
+        for era in ye.eras:
+            if era.description:
+                # Description should not start with (date) pattern
+                assert not era.description.startswith("("), (
+                    f"Era '{era.name}' description looks like timeline: {era.description[:80]}"
+                )
+
+    def test_keem_first_era_has_timeline(self, keem):
+        era = keem.eras[0]
+        assert len(era.timeline) >= 1
+
+    def test_keem_first_era_has_description(self, keem):
+        era = keem.eras[0]
+        assert era.description is not None
+        assert len(era.description) > 50
+
+    def test_kendrick_first_era_has_timeline(self, kendrick):
+        era = kendrick.eras[0]
+        assert len(era.timeline) >= 2
+
+    def test_carti_first_era_has_timeline(self, carti):
+        era = carti.eras[0]
+        assert len(era.timeline) >= 2
+
+    def test_all_eras_timeline_is_list(self, ye, keem, kendrick, carti):
+        """Every era should have a timeline list (possibly empty)."""
+        for artist in [ye, keem, kendrick, carti]:
+            for era in artist.eras:
+                assert isinstance(era.timeline, list)

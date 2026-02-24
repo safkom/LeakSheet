@@ -9,18 +9,25 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from src.config import COLUMN_ALIASES
 from src.models import (
     Artist,
     Era,
+    EraStats,
+    ParseMetadata,
+    Section,
     Song,
     SongVersion,
+    TrackerStats,
     VERSION_TAG_PATTERN,
     extract_badge,
     extract_version_tag,
+    parse_era_stats,
+    parse_song_credits,
+    parse_timeline,
+    parse_tracker_stats,
     slugify,
 )
 
@@ -45,6 +52,7 @@ class _TableExtractor(HTMLParser):
         self._current_row: list[_Cell] = []
         self._cell_text = ""
         self._cell_links: list[str] = []
+        self._cell_images: list[str] = []
         self._cell_class = ""
         self._colspan = 1
         self._a_href = ""
@@ -62,11 +70,18 @@ class _TableExtractor(HTMLParser):
             self.in_td = True
             self._cell_text = ""
             self._cell_links = []
+            self._cell_images = []
             self._cell_class = a.get("class", "")
             self._colspan = int(a.get("colspan", "1"))
         elif tag == "a" and self.in_td:
             self.in_a = True
             self._a_href = a.get("href", "")
+        elif tag == "img" and self.in_td:
+            src = a.get("src", "")
+            if src:
+                self._cell_images.append(src)
+        elif tag == "br" and self.in_td:
+            self._cell_text += "\n"
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self.in_a:
@@ -79,6 +94,7 @@ class _TableExtractor(HTMLParser):
             cell = _Cell(
                 text=self._cell_text.strip(),
                 links=list(self._cell_links),
+                images=list(self._cell_images),
                 css_class=self._cell_class,
             )
             self._current_row.append(cell)
@@ -99,23 +115,28 @@ class _TableExtractor(HTMLParser):
 
 
 class _Cell:
-    """A single table cell with text content, extracted links, and CSS class."""
-    __slots__ = ("text", "links", "css_class")
+    """A single table cell with text content, extracted links, images, and CSS class."""
+    __slots__ = ("text", "links", "images", "css_class")
 
     def __init__(
         self,
         text: str = "",
         links: list[str] | None = None,
+        images: list[str] | None = None,
         css_class: str = "",
     ) -> None:
         self.text = text
         self.links = links or []
+        self.images = images or []
         self.css_class = css_class
 
     def __repr__(self) -> str:
+        parts = [f"Cell({self.text!r}"]
         if self.links:
-            return f"Cell({self.text!r}, links={len(self.links)})"
-        return f"Cell({self.text!r})"
+            parts.append(f", links={len(self.links)}")
+        if self.images:
+            parts.append(f", imgs={len(self.images)}")
+        return "".join(parts) + ")"
 
 
 def extract_table(html_content: str) -> list[list[_Cell]]:
@@ -202,6 +223,29 @@ def _is_empty_row(row: list[_Cell]) -> bool:
     return all(not c.text.strip() for c in row)
 
 
+# Keywords that identify the tracker footer section (global stats, changelogs, guidelines).
+# Once we hit one of these, we stop parsing songs.
+_FOOTER_KEYWORDS = {
+    "total links", "total link", "total full",
+    "changelogs", "changelog",
+    "tracker guidelines",
+    "current tracker editors", "editor comments",
+}
+
+
+def _is_tracker_footer(row: list[_Cell]) -> bool:
+    """Check if a row belongs to the tracker footer (stats, changelogs, guidelines).
+
+    This prevents footer content from being attributed to the last era.
+    """
+    for cell in row:
+        text_lower = cell.text.strip().lower()
+        for keyword in _FOOTER_KEYWORDS:
+            if keyword in text_lower:
+                return True
+    return False
+
+
 def _era_match_key(full_era_name: str) -> str:
     """Extract the matching key from an era name, lowercased for matching.
 
@@ -225,6 +269,36 @@ def _era_match_key(full_era_name: str) -> str:
     # Strip version tags like [V1], [V2], [V3]
     key = VERSION_TAG_PATTERN.sub("", key).strip()
     return key.lower()
+
+
+def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
+    """Fuzzy match a row's era key against known era keys.
+
+    Uses word-overlap scoring. Requires at least 2 shared significant
+    words (length > 2) and >= 50% overlap with the smaller word set.
+
+    Handles cases like "Digital Nas Collab" matching
+    "Collaboration with Digital Nas".
+    """
+    key_words = {w for w in key.split() if len(w) > 2}
+    if not key_words:
+        return None
+
+    best_match: Era | None = None
+    best_score = 0.0
+
+    for era_key, era in era_by_key.items():
+        era_words = {w for w in era_key.split() if len(w) > 2}
+        if not era_words:
+            continue
+        overlap = len(key_words & era_words)
+        min_size = min(len(key_words), len(era_words))
+        score = overlap / min_size if min_size > 0 else 0
+        if score > best_score and overlap >= 2:
+            best_score = score
+            best_match = era
+
+    return best_match if best_score >= 0.5 else None
 
 
 # ---------------------------------------------------------------------------
@@ -281,10 +355,19 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     # Step 2: walk rows, classify and extract
     eras: list[Era] = []
-    current_era: Optional[Era] = None
+    current_era: Era | None = None
     # Map from lowercased era matching key → Era object.
     # Keys are lowercase, parenthetical-stripped, version-tag-stripped.
     era_by_key: dict[str, Era] = {}
+    in_footer = False
+
+    # Parse metadata tracking
+    total_rows = len(rows) - 1  # exclude header
+    song_rows = 0
+    skipped_rows = 0
+    unmatched_rows: list[str] = []
+    footer_rows = 0
+    fuzzy_matched_rows = 0
 
     for row_idx, row in enumerate(rows):
         # Skip header row
@@ -295,18 +378,49 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         if _is_empty_row(row):
             continue
 
-        # Skip section separators
+        # Section separators → capture as named sections within current era
         if _is_section_separator(row):
+            if current_era is not None:
+                non_empty = [c for c in row if c.text.strip()]
+                label = non_empty[0].text.strip() if non_empty else ""
+                if label:
+                    current_era.sections.append(Section(name=label))
             continue
 
-        # Check for era header
+        # Check for era header (must come before footer check, since
+        # Carti era stats contain "Total Full" which is also a footer keyword).
+        # Also resets footer state — if data resumes after a footer-like row,
+        # it's a new era, not leftover footer.
         if _is_era_header(row):
+            in_footer = False
             era_name_col = col_map.get("name", 1)
             notes_col = col_map.get("notes", 2)
 
             era_name_full = _get_cell_text(row, era_name_col)
-            era_desc = _get_cell_text(row, notes_col)
-            era_stats = _get_cell_text(row, 0)
+            timeline_raw = _get_cell_text(row, notes_col)
+            era_stats_raw = _get_cell_text(row, 0)
+
+            # Extract era art and find actual description from cells
+            # beyond the timeline column. Description is the longest
+            # text cell that isn't stats, name, or timeline.
+            art_url = None
+            desc_candidates: list[str] = []
+            for i, cell in enumerate(row):
+                if i <= notes_col:
+                    continue  # skip stats, name, timeline columns
+                if cell.images and not art_url:
+                    art_url = cell.images[0]
+                text = cell.text.strip()
+                if text:
+                    desc_candidates.append(text)
+
+            era_desc = max(desc_candidates, key=len) if desc_candidates else None
+
+            # Parse timeline events from the timeline cell
+            timeline = parse_timeline(timeline_raw) if timeline_raw else []
+
+            # Parse structured stats from raw text
+            era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
 
             if era_name_full:
                 era_key = _era_match_key(era_name_full)
@@ -314,10 +428,25 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 current_era = Era(
                     name=era_name_full,
                     description=era_desc if era_desc else None,
-                    stats_raw=era_stats if era_stats else None,
+                    timeline=timeline,
+                    stats_raw=era_stats_raw if era_stats_raw else None,
+                    stats=era_stats,
+                    art_url=art_url,
+                    sections=[Section()],  # default unnamed section
                 )
                 eras.append(current_era)
                 era_by_key[era_key] = current_era
+            continue
+
+        # Footer detection: flag instead of break.
+        # If a new era header appears after footer content, in_footer resets above.
+        if _is_tracker_footer(row):
+            in_footer = True
+            footer_rows += 1
+            continue
+
+        if in_footer:
+            footer_rows += 1
             continue
 
         # Check for song row: first cell should match a known era key
@@ -325,35 +454,104 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         row_era = _get_cell_text(row, era_col)
 
         if row_era:
-            # Case-insensitive lookup
+            # Case-insensitive exact lookup
             row_era_lower = row_era.lower()
             matched_era = era_by_key.get(row_era_lower)
+
+            # Fuzzy match if exact lookup fails
+            if matched_era is None:
+                matched_era = _fuzzy_era_match(row_era_lower, era_by_key)
+                if matched_era is not None:
+                    fuzzy_matched_rows += 1
+
             if matched_era is not None:
                 current_era = matched_era
                 version = _parse_song_row(row, col_map)
                 if version:
                     _add_version_to_era(current_era, version)
+                    song_rows += 1
                 continue
 
             # Fallback: assign to current_era if set (handles abbreviated
-            # era names like "Digital Nas Collab" vs "Collaboration with Digital Nas")
+            # era names that fuzzy matching couldn't resolve)
             if current_era is not None:
                 version = _parse_song_row(row, col_map)
                 if version:
                     _add_version_to_era(current_era, version)
+                    song_rows += 1
                 continue
 
-        # If the first cell is non-empty but doesn't match an era,
-        # and we have no current_era context, skip it.
+        # Unmatched row — track it for diagnostics
+        skipped_rows += 1
+        if len(unmatched_rows) < 50:
+            row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
+            if row_text:
+                unmatched_rows.append(f"Row {row_idx}: {row_text}")
+
+    # Step 3: detect and parse global stats row
+    tracker_stats = _find_global_stats(rows)
+
+    # Step 4: build parse metadata
+    metadata = ParseMetadata(
+        total_rows=total_rows,
+        song_rows=song_rows,
+        skipped_rows=skipped_rows,
+        unmatched_rows=unmatched_rows,
+        footer_rows=footer_rows,
+        fuzzy_matched_rows=fuzzy_matched_rows,
+    )
 
     return Artist(
         name=artist_name,
         slug=slugify(artist_name),
         eras=eras,
+        tracker_stats=tracker_stats,
+        parse_metadata=metadata,
     )
 
 
-def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> Optional[SongVersion]:
+def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
+    """Scan rows for the global tracker stats row and parse it.
+
+    The global stats row is typically near the bottom and contains
+    "Total Links" or "Total Full" in its cells. The row has 4 data cells:
+      - Links stats
+      - Quality stats
+      - Availability stats
+      - Highlighted/badge stats
+
+    Different trackers place these in different column indices due to
+    colspan differences, so we extract by content matching.
+    """
+    for row in reversed(rows):
+        # Look for the signature "Total Links" or "Total Full"
+        cell_texts = [c.text for c in row]
+        has_links = any("Total Links" in t or "Total Link" in t for t in cell_texts)
+        has_avail = any("Total Full" in t for t in cell_texts)
+
+        if has_links or has_avail:
+            links_text = ""
+            quality_text = ""
+            availability_text = ""
+            highlights_text = ""
+
+            for cell in row:
+                t = cell.text
+                if "Total Links" in t or "Total Link" in t or "Missing Links" in t:
+                    links_text = t
+                elif "Lossless" in t or "CD Quality" in t:
+                    quality_text = t
+                elif "Total Full" in t or "OG Files" in t or "OG File" in t:
+                    availability_text = t
+                elif "Best Of" in t or "Special" in t or "Grails" in t:
+                    highlights_text = t
+
+            return parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
+
+    return None
+
+
+def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
     """Parse a song data row into a SongVersion."""
     name_idx = col_map.get("name", 1)
     raw_name = _get_cell_text(row, name_idx)
@@ -362,10 +560,15 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> Optional[SongV
         return None
 
     # Extract badge emoji
-    badge, clean_name = extract_badge(raw_name)
+    badge, after_badge = extract_badge(raw_name)
 
-    # Extract version tag
-    version_tag, _base = extract_version_tag(clean_name)
+    # Parse credits and alt titles from the multi-line name
+    title, featuring, producers, collaboration, refs, alt_titles = (
+        parse_song_credits(after_badge)
+    )
+
+    # Extract version tag from the clean title
+    version_tag, _base = extract_version_tag(title)
 
     # Build the version object
     notes_idx = col_map.get("notes", 2)
@@ -385,9 +588,14 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> Optional[SongV
             merged_links.append(lnk)
 
     version = SongVersion(
-        name=clean_name,
+        name=title,
         version_tag=version_tag,
         badge=badge,
+        featuring=featuring,
+        producers=producers,
+        collaboration=collaboration,
+        refs=refs,
+        alt_titles=alt_titles,
         notes=notes_cell.text if notes_cell.text else None,
         track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
         file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
@@ -406,22 +614,26 @@ def _add_version_to_era(era: Era, version: SongVersion) -> None:
     """Add a version to the appropriate Song in the era, creating it if needed.
 
     Songs with the same base name (ignoring version tags [V1], [V2], etc.) are
-    grouped together.
+    grouped together. New songs are added to the last (current) section.
     """
+    if not era.sections:
+        era.sections.append(Section())
+
     _, base_name = extract_version_tag(version.name)
     # Also strip any sub-info in parens for grouping
     # But keep the base_name as-is for matching — only strip version tags
     base_key = base_name.strip()
 
-    # Look for an existing song with matching base name
-    for song in era.songs:
-        if song.base_name == base_key:
-            song.versions.append(version)
-            return
+    # Search across all sections for grouping (a song may span sections)
+    for section in era.sections:
+        for song in section.songs:
+            if song.base_name == base_key:
+                song.versions.append(version)
+                return
 
-    # Create new song
+    # Create new song in the last (current) section
     song = Song(base_name=base_key, versions=[version])
-    era.songs.append(song)
+    era.sections[-1].songs.append(song)
 
 
 # ---------------------------------------------------------------------------

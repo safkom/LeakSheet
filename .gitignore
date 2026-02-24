@@ -2,6 +2,7 @@ agents.md
 /memory
 /.claude
 /.pytest_cache
+/.cache
 /Trackers
 *__pycache__
  
