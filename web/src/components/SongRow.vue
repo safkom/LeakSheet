@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import VersionRow from './VersionRow.vue'
-import { playTrack } from '../composables/usePlayer.js'
+import { playTrack, isStreamable, playerState } from '../composables/usePlayer.js'
 
 const props = defineProps({
   song: Object,
@@ -14,6 +14,16 @@ const emit = defineEmits(['toggle'])
 
 const hasMultipleVersions = computed(() => props.song.versions?.length > 1)
 const firstVersion = computed(() => props.song.versions?.[0])
+
+const canStream = computed(() => {
+  // Any version streamable → song is streamable
+  return props.song.versions?.some(v => isStreamable(v)) ?? false
+})
+
+const isCurrentSong = computed(() => {
+  return props.song.versions?.some(v => v === playerState.track) ?? false
+})
+
 const badgeEmoji = computed(() => {
   const b = props.song.badge
   if (!b) return null
@@ -43,9 +53,14 @@ function qualityClass(q) {
 
 <template>
   <div class="song-row-wrapper">
-    <button class="song-row" :class="{ expanded }" @click="handleClick">
-      <div class="song-play-icon">
-        <svg v-if="!hasMultipleVersions" viewBox="0 0 16 16" width="14" height="14">
+    <button class="song-row" :class="{ expanded, playing: isCurrentSong }" @click="handleClick">
+      <div class="song-play-icon" :class="{ streamable: canStream }">
+        <svg v-if="isCurrentSong && playerState.isPlaying" viewBox="0 0 16 16" width="14" height="14" class="eq-icon">
+          <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
+          <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
+          <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
+        </svg>
+        <svg v-else-if="!hasMultipleVersions" viewBox="0 0 16 16" width="14" height="14">
           <path fill="currentColor" d="M4 2l12 6-12 6z"/>
         </svg>
         <svg v-else viewBox="0 0 16 16" width="14" height="14" :class="{ rotated: expanded }">
@@ -130,10 +145,25 @@ function qualityClass(q) {
   justify-content: center;
   color: var(--text-dim);
   transition: color 0.1s;
+  opacity: 0.35;
+}
+
+.song-play-icon.streamable {
+  opacity: 1;
 }
 
 .song-row:hover .song-play-icon {
   color: var(--accent);
+  opacity: 1;
+}
+
+.song-row.playing .song-play-icon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.song-row.playing {
+  background: rgba(88,166,255,0.05);
 }
 
 .song-play-icon svg {
@@ -264,5 +294,16 @@ function qualityClass(q) {
   .song-name { font-size: 12px; }
   .quality-badge { font-size: 9px; padding: 1px 4px; }
   .versions-panel { padding-left: 24px; }
+}
+
+/* Equalizer animation */
+.eq-icon { color: var(--accent); }
+.eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
+.eq-1 { animation-delay: 0s; }
+.eq-2 { animation-delay: 0.2s; }
+.eq-3 { animation-delay: 0.4s; }
+@keyframes eq {
+  0% { transform: scaleY(0.3); }
+  100% { transform: scaleY(1); }
 }
 </style>

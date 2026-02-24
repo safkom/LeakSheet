@@ -1,14 +1,17 @@
 # LeakSheet
 
-Parser + API for Google Spreadsheet-based music tracker documents. These spreadsheets catalog unreleased/leaked music from artists, organized into album/mixtape "eras."
+Parser + API + web player for Google Spreadsheet-based music tracker documents. These spreadsheets catalog unreleased/leaked music from artists, organized into album/mixtape "eras."
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
 
-# Parse local HTML exports
-python -c "from src.parser import parse_tracker_directory; artists = parse_tracker_directory('Trackers'); print(f'{len(artists)} artists parsed')"
+# Start the API server (fetches all trackers from links.txt on startup)
+uvicorn src.api:app --reload
+
+# Start the web frontend (separate terminal)
+cd web && npm install && npm run dev
 
 # Parse a live Google Sheets URL
 python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https://yetracker.net/'); print(f'{a.name}: {a.total_songs} songs')"
@@ -16,38 +19,85 @@ python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https:/
 # Inspect with CLI tools
 python -m tests.tools.inspect_eras --tracker ye
 python -m tests.tools.inspect_songs --tracker ye --era "Yeezus 2"
-python -m tests.tools.dump_raw_table --tracker ye --start 0 --rows 5
 
 # Run tests
 python -m pytest tests/
+```
+
+## Architecture
+
+```
+src/
+  models.py     — Pydantic data models (Artist, Era, Song, SongVersion, etc.)
+  parser.py     — HTML table → structured data extraction
+  fetcher.py    — Google Sheets URL fetching with file-based cache
+  streaming.py  — Audio stream URL resolution + proxying (pillows.su, imgur.gg)
+  api.py        — FastAPI HTTP layer with in-memory store
+  config.py     — Column aliases, path management
+
+web/
+  src/
+    composables/usePlayer.js  — HTML5 Audio playback with backend stream proxy
+    composables/useApi.js     — API client
+    components/PlayerBar.vue  — Progress bar, seek, volume, transport controls
+    components/SongRow.vue    — Song display with streamable indicators
+    components/VersionRow.vue — Version display with play/equalizer animation
 ```
 
 ## Input Sources
 
 | Source | Example |
 |--------|---------|
-| Local HTML export | `Trackers/Ye Tracker - Google Drive_files/sheet.html` |
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` |
 | Custom tracker domain | `yetracker.net` (redirects to htmlview) |
 | Links file | `Trackers/links.txt` (one URL per line) |
+| Local HTML export | `Trackers/Ye Tracker - Google Drive_files/sheet.html` |
+
+> Production always uses live URLs. Local HTML files exist for offline development only.
 
 ## Data Hierarchy
 
 ```
 Artist
   └── Era (album/mixtape period)
-        └── Song (logical song, may have multiple versions)
-              └── SongVersion (specific leak/recording with metadata)
+        └── Section (optional sub-group, e.g. "Surfaced")
+              └── Song (logical song, may have multiple versions)
+                    └── SongVersion (specific leak/recording with metadata)
+```
+
+## Audio Streaming
+
+Songs with links to supported file hosts can be streamed directly in the web player.
+The backend proxies audio to avoid CORS issues.
+
+| Host | Link Format | API Endpoint |
+|------|-------------|-------------|
+| pillows.su / pillowcase.su | `pillows.su/f/{id}` | `api.pillows.su/api/get/{id}` |
+| imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` | `temp.imgur.gg/api/file/{id}/download` |
+
+### API Endpoints
+
+```
+GET  /api/artists                    → List all loaded artists
+GET  /api/artists/{slug}             → Artist detail with era list
+GET  /api/artists/{slug}/eras        → All eras for an artist
+GET  /api/artists/{slug}/eras/{idx}  → Era detail with full song data
+GET  /api/artists/{slug}/songs       → All songs flat
+GET  /api/search?q=...               → Full-text search
+POST /api/parse                      → Parse a tracker URL at runtime
+POST /api/cache/clear                → Clear URL fetch cache
+POST /api/stream/resolve             → Check if a link is streamable
+GET  /api/stream?url=...             → Proxy audio stream from supported hosts
 ```
 
 ## Supported Trackers
 
-| Artist | Local | Live URL |
-|--------|-------|----------|
-| Ye | ✅ | `yetracker.net` |
-| Kendrick Lamar | ✅ | Google Sheets htmlview |
-| Baby Keem | ✅ | Google Sheets htmlview |
-| Playboi Carti | ✅ | Google Sheets htmlview |
+| Artist | Live URL |
+|--------|----------|
+| Ye | `yetracker.net` |
+| Kendrick Lamar | Google Sheets htmlview |
+| Baby Keem | Google Sheets htmlview |
+| Playboi Carti | Google Sheets htmlview |
 
 ## CLI Tools
 

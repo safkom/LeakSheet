@@ -1,11 +1,17 @@
 <script setup>
 import { computed } from 'vue'
-import { playTrack } from '../composables/usePlayer.js'
+import { playTrack, isStreamable, playerState } from '../composables/usePlayer.js'
 
 const props = defineProps({
   version: Object,
   artistName: String,
   eraName: String,
+})
+
+const canStream = computed(() => isStreamable(props.version))
+
+const isCurrentTrack = computed(() => {
+  return playerState.track === props.version
 })
 
 function handlePlay() {
@@ -32,9 +38,15 @@ const badgeEmoji = computed(() => {
 </script>
 
 <template>
-  <button class="version-row" @click="handlePlay">
-    <div class="v-play">
-      <svg viewBox="0 0 16 16" width="12" height="12">
+  <button class="version-row" :class="{ playing: isCurrentTrack }" @click="handlePlay">
+    <div class="v-play" :class="{ streamable: canStream }">
+      <!-- Animated equalizer when playing -->
+      <svg v-if="isCurrentTrack && playerState.isPlaying" viewBox="0 0 16 16" width="12" height="12" class="eq-icon">
+        <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
+        <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
+        <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
+      </svg>
+      <svg v-else viewBox="0 0 16 16" width="12" height="12">
         <path fill="currentColor" d="M4 2l12 6-12 6z"/>
       </svg>
     </div>
@@ -91,10 +103,36 @@ const badgeEmoji = computed(() => {
   justify-content: center;
   color: var(--text-dim);
   transition: color 0.1s;
+  opacity: 0.35;
+}
+
+.v-play.streamable {
+  opacity: 1;
 }
 
 .version-row:hover .v-play {
   color: var(--accent);
+  opacity: 1;
+}
+
+.version-row.playing .v-play {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.version-row.playing {
+  background: rgba(88,166,255,0.05);
+}
+
+/* Equalizer animation */
+.eq-icon { color: var(--accent); }
+.eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
+.eq-1 { animation-delay: 0s; }
+.eq-2 { animation-delay: 0.2s; }
+.eq-3 { animation-delay: 0.4s; }
+@keyframes eq {
+  0% { transform: scaleY(0.3); }
+  100% { transform: scaleY(1); }
 }
 
 .v-name {

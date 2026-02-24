@@ -13,9 +13,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from starlette.responses import StreamingResponse
+
 from src.config import TRACKERS_DIR
 from src.fetcher import fetch_and_parse, fetch_links_file, clear_cache
 from src.models import Artist, Era, Song, SongVersion, Section, ParseMetadata, TimelineEvent
+from src.streaming import resolve_stream_url, find_streamable_link, is_streamable, stream_audio
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +81,7 @@ class EraSummary(BaseModel):
     description: str | None = None
     timeline: list[TimelineEvent] = []
     art_url: str | None = None
+    highlighted_producers: list[str] = []
     song_count: int
     version_count: int
     stats_raw: str | None = None
@@ -129,6 +133,20 @@ def list_artists():
     ]
 
 
+def _era_to_summary(e: Era) -> EraSummary:
+    """Convert an Era model to an EraSummary response."""
+    return EraSummary(
+        name=e.name,
+        description=e.description,
+        timeline=e.timeline,
+        art_url=e.art_url,
+        highlighted_producers=e.highlighted_producers,
+        song_count=e.song_count,
+        version_count=e.version_count,
+        stats_raw=e.stats_raw,
+    )
+
+
 @app.get("/api/artists/{slug}")
 def get_artist(slug: str):
     """Artist detail with era list."""
@@ -143,18 +161,7 @@ def get_artist(slug: str):
         "total_versions": artist.total_versions,
         "parse_metadata": artist.parse_metadata,
         "tracker_stats": artist.tracker_stats,
-        "eras": [
-            EraSummary(
-                name=e.name,
-                description=e.description,
-                timeline=e.timeline,
-                art_url=e.art_url,
-                song_count=e.song_count,
-                version_count=e.version_count,
-                stats_raw=e.stats_raw,
-            )
-            for e in artist.eras
-        ],
+        "eras": [_era_to_summary(e) for e in artist.eras],
     }
 
 
@@ -164,18 +171,7 @@ def list_eras(slug: str):
     artist = _store.get(slug)
     if not artist:
         raise HTTPException(status_code=404, detail=f"Artist '{slug}' not found")
-    return [
-        EraSummary(
-            name=e.name,
-            description=e.description,
-            timeline=e.timeline,
-            art_url=e.art_url,
-            song_count=e.song_count,
-            version_count=e.version_count,
-            stats_raw=e.stats_raw,
-        )
-        for e in artist.eras
-    ]
+    return [_era_to_summary(e) for e in artist.eras]
 
 
 @app.get("/api/artists/{slug}/eras/{era_index}")
@@ -276,3 +272,77 @@ def api_clear_cache():
     """Clear the URL fetch cache."""
     count = clear_cache()
     return {"cleared": count}
+
+
+# ---------------------------------------------------------------------------
+# Streaming endpoints
+# ---------------------------------------------------------------------------
+
+class StreamRequest(BaseModel):
+    url: str = Field(..., description="Original file-sharing link from the tracker")
+
+
+class StreamInfo(BaseModel):
+    streamable: bool
+    stream_url: str | None = None
+
+
+@app.post("/api/stream/resolve", response_model=StreamInfo)
+def resolve_stream(req: StreamRequest):
+    """Resolve a file-sharing link to a streamable audio URL.
+
+    Returns whether the link is streamable and the resolved URL.
+    """
+    stream_url = resolve_stream_url(req.url)
+    return StreamInfo(streamable=stream_url is not None, stream_url=stream_url)
+
+
+@app.get("/api/stream")
+def proxy_stream(url: str = Query(..., description="Original file-sharing link")):
+    """Proxy an audio stream from a supported file-sharing host.
+
+    Avoids CORS issues by fetching upstream and forwarding the audio bytes.
+    The `url` parameter should be the original tracker link (e.g. pillows.su/f/xxx),
+    not the resolved API URL — resolution happens server-side.
+    """
+    stream_url = resolve_stream_url(url)
+    if stream_url is None:
+        raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
+
+    try:
+        resp = stream_audio(stream_url)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
+
+    # Forward content-type and content-length if available
+    headers: dict[str, str] = {}
+    ct = resp.headers.get("content-type")
+    if ct:
+        headers["Content-Type"] = ct
+    cl = resp.headers.get("content-length")
+    if cl:
+        headers["Content-Length"] = cl
+    cd = resp.headers.get("content-disposition")
+    if cd:
+        headers["Content-Disposition"] = cd
+
+    # Allow range requests for seeking
+    headers["Accept-Ranges"] = "bytes"
+
+    def _iter():
+        try:
+            for chunk in resp.iter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            resp.close()
+            if hasattr(resp, "_client"):
+                resp._client.close()
+
+    return StreamingResponse(
+        _iter(),
+        status_code=200,
+        headers=headers,
+        media_type=ct or "application/octet-stream",
+    )

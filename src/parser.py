@@ -23,8 +23,11 @@ from src.models import (
     TrackerStats,
     VERSION_TAG_PATTERN,
     extract_badge,
+    extract_og_filename,
+    extract_samples,
     extract_version_tag,
     parse_era_stats,
+    parse_highlighted_producers,
     parse_song_credits,
     parse_timeline,
     parse_tracker_stats,
@@ -400,10 +403,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             timeline_raw = _get_cell_text(row, notes_col)
             era_stats_raw = _get_cell_text(row, 0)
 
-            # Extract era art and find actual description from cells
-            # beyond the timeline column. Description is the longest
-            # text cell that isn't stats, name, or timeline.
+            # Extract era art, highlighted producers, and description
+            # from cells beyond the timeline column.
             art_url = None
+            highlighted_producers: list[str] = []
             desc_candidates: list[str] = []
             for i, cell in enumerate(row):
                 if i <= notes_col:
@@ -412,7 +415,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     art_url = cell.images[0]
                 text = cell.text.strip()
                 if text:
-                    desc_candidates.append(text)
+                    if "Highlighted" in text and "Producer" in text:
+                        highlighted_producers = parse_highlighted_producers(text)
+                    else:
+                        desc_candidates.append(text)
 
             era_desc = max(desc_candidates, key=len) if desc_candidates else None
 
@@ -432,6 +438,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     stats_raw=era_stats_raw if era_stats_raw else None,
                     stats=era_stats,
                     art_url=art_url,
+                    highlighted_producers=highlighted_producers,
                     sections=[Section()],  # default unnamed section
                 )
                 eras.append(current_era)
@@ -573,6 +580,11 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     # Build the version object
     notes_idx = col_map.get("notes", 2)
     notes_cell = _get_cell(row, notes_idx)
+    notes_text = notes_cell.text.strip() if notes_cell.text else None
+
+    # Extract structured metadata from notes
+    og_filename = extract_og_filename(notes_text) if notes_text else None
+    samples = extract_samples(notes_text) if notes_text else []
 
     links_idx = col_map.get("links")
     link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
@@ -596,7 +608,9 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         collaboration=collaboration,
         refs=refs,
         alt_titles=alt_titles,
-        notes=notes_cell.text if notes_cell.text else None,
+        notes=notes_text,
+        og_filename=og_filename,
+        samples=samples,
         track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
         file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
         leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,

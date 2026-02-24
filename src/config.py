@@ -63,6 +63,8 @@ COLUMN_ALIASES: dict[str, str] = {
     "link(s)": "links",
     "links": "links",
     "link": "links",
+    # Template uses "Portion" for available length
+    "portion": "available_length",
     # Carti-specific
     "date of recording": "date_of_recording",
     "type": "type",

@@ -75,6 +75,8 @@ class SongVersion(BaseModel):
     refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
     notes: str | None = Field(None, description="Description/history text")
+    og_filename: str | None = Field(None, description="Original filename from metadata, e.g. 'Bitch Im In The CLub NEW'")
+    samples: list[str] = Field(default_factory=list, description="Sampled songs/works, e.g. ['Got Money by Lil Wayne']")
     track_length: str | None = Field(None, description="Duration, e.g. '3:14'")
     file_date: str | None = Field(None, description="Date the file was created")
     leak_date: str | None = Field(None, description="Date the version leaked")
@@ -186,6 +188,7 @@ class Era(BaseModel):
     stats_raw: str | None = Field(None, description="Raw stats string, e.g. '3 OG File(s)...'")
     stats: EraStats | None = Field(None, description="Parsed era statistics")
     art_url: str | None = Field(None, description="Cover art image URL for this era")
+    highlighted_producers: list[str] = Field(default_factory=list, description="Notable producers for this era")
     sections: list[Section] = Field(default_factory=list)
 
     @property
@@ -476,3 +479,79 @@ def parse_timeline(text: str) -> list[TimelineEvent]:
             if date and event:
                 events.append(TimelineEvent(date=date, event=event))
     return events
+
+
+# ---------------------------------------------------------------------------
+# Notes metadata extraction
+# ---------------------------------------------------------------------------
+
+# OG Filename patterns:
+#   "OG Filename (Metadata): Bitch Im In The CLub NEW"
+#   "OG Filename: Broke My Heart 1"
+_OG_FILENAME_PATTERN = re.compile(
+    r"OG Filename(?:\s*\(Metadata\))?:\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+
+# Samples patterns:
+#   'Samples "Got Money" by Lil Wayne'
+#   "Samples Rufus & Chaka Khan's 'Ain't Nobody'"
+#   'Samples "Ain\'t Nobody" by Rufus & Chaka Khan'
+_SAMPLES_PATTERN = re.compile(
+    r"""Samples\s+[""\u201c](.+?)[""\u201d](?:\s+by\s+(.+?))?(?:\.|,|\n|$)"""
+    r"""|Samples\s+(.+?)(?:'s\s+)?["'\u2018\u2019](.+?)["'\u2018\u2019]""",
+    re.IGNORECASE,
+)
+
+
+def extract_og_filename(notes: str) -> str | None:
+    """Extract OG Filename from notes text.
+
+    Returns the filename string or None.
+    """
+    m = _OG_FILENAME_PATTERN.search(notes)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def extract_samples(notes: str) -> list[str]:
+    """Extract sampled works from notes text.
+
+    Returns list of sample descriptions, e.g. ['"Got Money" by Lil Wayne'].
+    """
+    results: list[str] = []
+    for m in _SAMPLES_PATTERN.finditer(notes):
+        if m.group(1):
+            # Pattern 1: Samples "Song" by Artist
+            song = m.group(1).strip()
+            artist = m.group(2).strip() if m.group(2) else None
+            if artist:
+                results.append(f'"{song}" by {artist}')
+            else:
+                results.append(f'"{song}"')
+        elif m.group(3):
+            # Pattern 2: Samples Artist's "Song"
+            artist = m.group(3).strip()
+            song = m.group(4).strip() if m.group(4) else ""
+            if song:
+                results.append(f'"{song}" by {artist}')
+            else:
+                results.append(artist)
+    return results
+
+
+def parse_highlighted_producers(text: str) -> list[str]:
+    """Parse 'Highlighted Producers' cell text into a list of producer names.
+
+    Input format: "Highlighted Producers:\\n- Kanye West\\n- No I.D.\\n- ???"
+    Returns: ["Kanye West", "No I.D."] (filters out "???")
+    """
+    producers: list[str] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.startswith("- "):
+            name = line[2:].strip()
+            if name and name != "???" and name != "N/A":
+                producers.append(name)
+    return producers
