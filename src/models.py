@@ -15,6 +15,7 @@ class Badge(str, Enum):
     WORST = "worst"        # 🗑️
     GRAIL = "grail"        # 🏆
     WANTED = "wanted"      # 🏅 🥇
+    AI = "ai"              # 🤖
 
 
 # Mapping from emoji characters → Badge enum
@@ -29,11 +30,12 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
     "🏆": Badge.GRAIL,
     "🏅": Badge.WANTED,
     "🥇": Badge.WANTED,
+    "🤖": Badge.AI,
 }
 
 # Regex to detect and strip leading badge emojis from song names
 BADGE_EMOJI_PATTERN = re.compile(
-    r"^[\s]*(⭐️|⭐|✨|🗑️|🗑|🏆|🏅|🥇)[\s]*"
+    r"^[\s]*(⭐️|⭐|✨|🗑️|🗑|🏆|🏅|🥇|🤖)[\s]*"
 )
 
 # Regex to extract version tags like [V1], [V2], [Alt.], [Radio Mix], [MASTER], etc.
@@ -101,6 +103,24 @@ class Song(BaseModel):
                 return v.badge
         return None
 
+    @property
+    def primary(self) -> SongVersion | None:
+        """Return the first/primary version for convenience."""
+        return self.versions[0] if self.versions else None
+
+    def dict(self, **kwargs):
+        d = super().dict(**kwargs)
+        d["badge"] = self.badge.value if self.badge else None
+        # Surface primary version metadata at Song level for convenience
+        p = self.primary
+        if p:
+            d["available_length"] = p.available_length
+            d["quality"] = p.quality
+            d["track_length"] = p.track_length
+            d["leak_date"] = p.leak_date
+            d["file_date"] = p.file_date
+        return d
+
 
 class EraStats(BaseModel):
     """Parsed statistics from an era header's metadata cell.
@@ -129,6 +149,11 @@ class EraStats(BaseModel):
             self.og_files + self.full + self.tagged + self.partial
             + self.snippets + self.stem_bounces + self.unavailable
         )
+
+    def dict(self, **kwargs):
+        d = super().dict(**kwargs)
+        d["total"] = self.total
+        return d
 
 
 class TrackerStats(BaseModel):
@@ -182,7 +207,8 @@ class TimelineEvent(BaseModel):
 
 class Era(BaseModel):
     """An album era / creative period containing songs."""
-    name: str = Field(..., description="Era/album name")
+    name: str = Field(..., description="Era/album name (main title only)")
+    alt_names: list[str] = Field(default_factory=list, description="Alternative/working titles for this era")
     description: str | None = Field(None, description="Historical context / notes paragraph")
     timeline: list[TimelineEvent] = Field(default_factory=list, description="Historical timeline events")
     stats_raw: str | None = Field(None, description="Raw stats string, e.g. '3 OG File(s)...'")
@@ -203,6 +229,13 @@ class Era(BaseModel):
     @property
     def version_count(self) -> int:
         return sum(len(s.versions) for sec in self.sections for s in sec.songs)
+
+    def dict(self, **kwargs):
+        d = super().dict(**kwargs)
+        d["songs"] = [s.dict(**kwargs) for s in self.songs]
+        d["song_count"] = self.song_count
+        d["version_count"] = self.version_count
+        return d
 
 
 class ParseMetadata(BaseModel):
@@ -232,6 +265,12 @@ class Artist(BaseModel):
     def total_versions(self) -> int:
         return sum(e.version_count for e in self.eras)
 
+    def dict(self, **kwargs):
+        d = super().dict(**kwargs)
+        d["total_songs"] = self.total_songs
+        d["total_versions"] = self.total_versions
+        return d
+
 
 def extract_badge(name: str) -> tuple[Badge | None, str]:
     """Extract leading badge emoji from a song name.
@@ -256,8 +295,9 @@ def extract_version_tag(name: str) -> tuple[str | None, str]:
     if match:
         tag = match.group(1)
         # Remove the [Vx] portion to get the base name
-        base = name[:match.start()].strip() + name[match.end():].strip()
-        base = base.strip()
+        before = name[:match.start()].strip()
+        after = name[match.end():].strip()
+        base = (before + " " + after).strip() if before and after else (before or after)
         return tag, base
     return None, name.strip()
 

@@ -75,7 +75,10 @@ class _TableExtractor(HTMLParser):
             self._cell_links = []
             self._cell_images = []
             self._cell_class = a.get("class", "")
-            self._colspan = int(a.get("colspan", "1"))
+            try:
+                self._colspan = int(a.get("colspan", "1") or "1")
+            except (ValueError, TypeError):
+                self._colspan = 1
         elif tag == "a" and self.in_td:
             self.in_a = True
             self._a_href = a.get("href", "")
@@ -83,6 +86,10 @@ class _TableExtractor(HTMLParser):
             src = a.get("src", "")
             if src:
                 self._cell_images.append(src)
+            # Use alt text as cell text when present (handles image-based era names)
+            alt = a.get("alt", "")
+            if alt:
+                self._cell_text += alt
         elif tag == "br" and self.in_td:
             self._cell_text += "\n"
 
@@ -431,8 +438,20 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             if era_name_full:
                 era_key = _era_match_key(era_name_full)
 
+                # Split main name from alt names (newline-separated, alts in parens)
+                name_lines = era_name_full.split("\n")
+                era_name = name_lines[0].strip()
+                alt_names: list[str] = []
+                for _line in name_lines[1:]:
+                    _line = _line.strip()
+                    if _line.startswith("(") and _line.endswith(")"):
+                        _line = _line[1:-1].strip()
+                    if _line:
+                        alt_names.append(_line)
+
                 current_era = Era(
-                    name=era_name_full,
+                    name=era_name,
+                    alt_names=alt_names,
                     description=era_desc if era_desc else None,
                     timeline=timeline,
                     stats_raw=era_stats_raw if era_stats_raw else None,
@@ -486,6 +505,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if version:
                     _add_version_to_era(current_era, version)
                     song_rows += 1
+                else:
+                    # No song data — likely a sub-era header (e.g. "Child Rebel Soldier",
+                    # "Pre-VMAs", "Features"). Capture as a named section.
+                    non_empty = [c for c in row if c.text.strip()]
+                    if len(non_empty) <= 3 and row_era:
+                        current_era.sections.append(Section(name=row_era))
                 continue
 
         # Unmatched row — track it for diagnostics
@@ -576,6 +601,8 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
 
     # Extract version tag from the clean title
     version_tag, _base = extract_version_tag(title)
+    # Use base name (tag stripped) to avoid duplication in the UI
+    title = _base
 
     # Build the version object
     notes_idx = col_map.get("notes", 2)
@@ -661,18 +688,4 @@ def parse_file(path: Path | str, artist_name: str) -> Artist:
     return parse_sheet(html_content, artist_name)
 
 
-def parse_tracker_directory(trackers_dir: Path | str) -> list[Artist]:
-    """Parse all tracker files in a directory.
 
-    Returns a list of Artist models.
-    """
-    from src.config import discover_trackers
-
-    trackers_dir = Path(trackers_dir)
-    artists = []
-
-    for artist_name, sheet_path in discover_trackers(trackers_dir):
-        artist = parse_file(sheet_path, artist_name)
-        artists.append(artist)
-
-    return artists

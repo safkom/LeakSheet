@@ -7,7 +7,7 @@ Parser + API + web player for Google Spreadsheet-based music tracker documents. 
 ```bash
 pip install -r requirements.txt
 
-# Start the API server (fetches all trackers from links.txt on startup)
+# Start the API server
 uvicorn src.api:app --reload
 
 # Start the web frontend (separate terminal)
@@ -37,11 +37,18 @@ src/
 
 web/
   src/
-    composables/usePlayer.js  — HTML5 Audio playback with backend stream proxy
-    composables/useApi.js     — API client
-    components/PlayerBar.vue  — Progress bar, seek, volume, transport controls
-    components/SongRow.vue    — Song display with streamable indicators
-    components/VersionRow.vue — Version display with play/equalizer animation
+    composables/usePlayer.js       — HTML5 Audio playback with backend stream proxy
+    composables/useApi.js          — API client wrapper
+    composables/useUtils.js        — Badge/availability display helpers
+    components/TrackerInput.vue    — Tracker URL input form with validation
+    components/ArtistView.vue      — Artist detail view with search/filter
+    components/EraCard.vue         — Collapsible era card with cover art colors
+    components/SongList.vue        — Song list wrapper
+    components/SongRow.vue         — Song display with streamable indicators
+    components/VersionRow.vue      — Version display with play/equalizer animation
+    components/PlayerBar.vue       — Progress bar, seek, volume, transport controls
+    components/ContextMenu.vue     — Right-click context menu (copy link, download)
+    components/SongDescriptionModal.vue — Detailed song/version info modal
 ```
 
 ## Input Sources
@@ -71,23 +78,18 @@ Songs with links to supported file hosts can be streamed directly in the web pla
 The backend proxies audio to avoid CORS issues.
 
 | Host | Link Format | API Endpoint |
-|------|-------------|-------------|
+|------|-------------|-----------|
 | pillows.su / pillowcase.su | `pillows.su/f/{id}` | `api.pillows.su/api/get/{id}` |
 | imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` | `temp.imgur.gg/api/file/{id}/download` |
+| music.froste.lol | `music.froste.lol/song/{hash}` | `music.froste.lol/song/{hash}/download` |
 
 ### API Endpoints
 
 ```
-GET  /api/artists                    → List all loaded artists
-GET  /api/artists/{slug}             → Artist detail with era list
-GET  /api/artists/{slug}/eras        → All eras for an artist
-GET  /api/artists/{slug}/eras/{idx}  → Era detail with full song data
-GET  /api/artists/{slug}/songs       → All songs flat
-GET  /api/search?q=...               → Full-text search
-POST /api/parse                      → Parse a tracker URL at runtime
-POST /api/cache/clear                → Clear URL fetch cache
-POST /api/stream/resolve             → Check if a link is streamable
+POST /api/sheet                      → Parse tracker URL → full Artist JSON
+GET  /api/image-proxy?url=...        → Proxy images through backend (CORS bypass)
 GET  /api/stream?url=...             → Proxy audio stream from supported hosts
+POST /api/cache/clear                → Clear URL fetch cache
 ```
 
 ## Supported Trackers

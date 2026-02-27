@@ -1,12 +1,20 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { playerState, togglePlay, stopTrack, seekTo, setVolume, formatTime, isStreamable } from '../composables/usePlayer.js'
+import { computed, ref, watch } from 'vue'
+import ContextMenu from './ContextMenu.vue'
+import SongDescriptionModal from './SongDescriptionModal.vue'
+import { playerState, togglePlay, stopTrack, seekTo, setVolume, formatTime, artProxyUrl } from '../composables/usePlayer.js'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
 const loading = computed(() => playerState.loading)
 const error = computed(() => playerState.error)
 const hasStream = computed(() => !!playerState.streamUrl)
+
+const playerArtSrc = computed(() => artProxyUrl(playerState.artUrl))
+const artError = ref(false)
+
+// Reset error state when art URL changes
+watch(() => playerState.artUrl, () => { artError.value = false })
 
 const displayName = computed(() => {
   if (!track.value) return ''
@@ -16,24 +24,24 @@ const displayName = computed(() => {
 })
 
 const displaySub = computed(() => {
-  const parts = []
-  if (playerState.artistName) parts.push(playerState.artistName)
-  if (playerState.eraName) parts.push(playerState.eraName)
-  return parts.join(' · ')
+  return playerState.eraName || ''
 })
 
 const currentTimeStr = computed(() => formatTime(playerState.currentTime))
 const durationStr = computed(() => {
-  if (playerState.duration > 0) return formatTime(playerState.duration)
+  if (playerState.duration > 0 && isFinite(playerState.duration)) return formatTime(playerState.duration)
   return track.value?.track_length || '--:--'
 })
 
 const progressPct = computed(() => {
-  if (!playerState.duration) return 0
+  if (!playerState.duration || !isFinite(playerState.currentTime) || !isFinite(playerState.duration)) return 0
   return (playerState.currentTime / playerState.duration) * 100
 })
 
-const bufferedPct = computed(() => (playerState.buffered * 100))
+const bufferedPct = computed(() => {
+  const b = playerState.buffered
+  return isFinite(b) ? b * 100 : 0
+})
 
 // Volume
 const volumePct = computed(() => Math.round(playerState.volume * 100))
@@ -42,16 +50,43 @@ const volumePct = computed(() => Math.round(playerState.volume * 100))
 const progressBar = ref(null)
 
 function handleSeek(e) {
-  if (!playerState.duration || !hasStream.value) return
+  if (!playerState.duration || !isFinite(playerState.duration) || !hasStream.value) return
+  if (!progressBar.value) return
   const rect = progressBar.value.getBoundingClientRect()
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   seekTo(ratio * playerState.duration)
 }
 
 function handleVolume(e) {
+  if (!e.currentTarget) return
   const rect = e.currentTarget.getBoundingClientRect()
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   setVolume(ratio)
+}
+
+// Player context menu
+const playerMenu = ref(null)
+const showDescModal = ref(false)
+const menuBtnRef = ref(null)
+
+function togglePlayerMenu(e) {
+  if (playerMenu.value) {
+    playerMenu.value = null
+    return
+  }
+  const btn = menuBtnRef.value
+  if (!btn) return
+  const rect = btn.getBoundingClientRect()
+  playerMenu.value = { x: rect.left, y: rect.top - 4 }
+}
+
+function closePlayerMenu() {
+  playerMenu.value = null
+}
+
+function openTrackDescription() {
+  showDescModal.value = true
+  playerMenu.value = null
 }
 </script>
 
@@ -74,6 +109,22 @@ function handleVolume(e) {
     </div>
 
     <div class="player-inner">
+      <!-- Album art -->
+      <div class="player-art" v-if="track">
+        <img
+          v-if="playerArtSrc && !artError"
+          :src="playerArtSrc"
+          alt=""
+          class="player-art-img"
+          @error="artError = true"
+        />
+        <div v-else class="player-art-placeholder">
+          <svg viewBox="0 0 24 24" width="22" height="22">
+            <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+      </div>
+
       <!-- Track info -->
       <div class="player-track-info">
         <div class="player-track-name">
@@ -111,7 +162,7 @@ function handleVolume(e) {
         </button>
       </div>
 
-      <!-- Right side: time + volume + close -->
+      <!-- Right side: time + volume + menu + close -->
       <div class="player-right">
         <span class="player-time" v-if="hasStream">
           {{ currentTimeStr }} / {{ durationStr }}
@@ -131,6 +182,21 @@ function handleVolume(e) {
           </div>
         </div>
 
+        <!-- More options menu -->
+        <button
+          ref="menuBtnRef"
+          class="menu-btn"
+          @click.stop="togglePlayerMenu"
+          title="More options"
+          v-if="track"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14">
+            <circle cx="8" cy="2" r="1.5" fill="currentColor"/>
+            <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+            <circle cx="8" cy="14" r="1.5" fill="currentColor"/>
+          </svg>
+        </button>
+
         <button class="close-btn" @click="stopTrack" title="Close player">
           <svg viewBox="0 0 16 16" width="14" height="14">
             <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
@@ -139,6 +205,29 @@ function handleVolume(e) {
       </div>
     </div>
   </div>
+
+  <!-- Player context menu -->
+  <ContextMenu
+    v-if="playerMenu && track"
+    :x="playerMenu.x"
+    :y="playerMenu.y"
+    :version="track"
+    :artist-name="playerState.artistName"
+    :era-name="playerState.eraName"
+    :era-art="playerState.artUrl"
+    @close="closePlayerMenu"
+    @show-description="openTrackDescription"
+  />
+
+  <!-- Track description from player -->
+  <SongDescriptionModal
+    v-if="showDescModal && track"
+    :version="track"
+    :era-art="playerState.artUrl"
+    :era-name="playerState.eraName"
+    :artist-name="playerState.artistName"
+    @close="showDescModal = false"
+  />
 </template>
 
 <style scoped>
@@ -153,6 +242,7 @@ function handleVolume(e) {
   backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .progress-bar {
@@ -213,7 +303,35 @@ function handleVolume(e) {
   display: flex;
   align-items: center;
   padding: 0 20px;
-  gap: 16px;
+  gap: 12px;
+}
+
+/* Album art */
+.player-art {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.player-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player-art-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  opacity: 0.4;
 }
 
 .player-track-info {
@@ -335,6 +453,21 @@ function handleVolume(e) {
   transition: width 0.05s;
 }
 
+.menu-btn {
+  color: var(--text-dim);
+  padding: 6px;
+  border-radius: 4px;
+  transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .close-btn {
   color: var(--text-dim);
   padding: 4px;
@@ -347,9 +480,12 @@ function handleVolume(e) {
 }
 
 @media (max-width: 640px) {
-  .player-inner { padding: 0 12px; gap: 10px; }
+  .player-inner { padding: 0 10px; gap: 8px; }
   .player-track-name { font-size: 12px; }
   .ctrl-btn { width: 36px; height: 36px; }
+  .player-right { gap: 8px; }
+  .player-time { display: none; }
   .volume-wrap { display: none; }
+  .player-art { width: 44px; height: 44px; border-radius: 4px; }
 }
 </style>

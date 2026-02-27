@@ -101,37 +101,37 @@ class TestExtractVersionTag:
     def test_tag_with_parens_after(self):
         tag, base = extract_version_tag("After You [V2](prod. Dom $olo)")
         assert tag == "V2"
-        assert base == "After You(prod. Dom $olo)"
+        assert base == "After You (prod. Dom $olo)"
 
     def test_master_tag(self):
         tag, base = extract_version_tag("Location [MASTER](prod. Harry Fraud)")
         assert tag == "MASTER"
-        assert base == "Location(prod. Harry Fraud)"
+        assert base == "Location (prod. Harry Fraud)"
 
     def test_cd_version_tag(self):
         tag, base = extract_version_tag("POP OUT [CD VERSION](prod. F1LTHY)")
         assert tag == "CD VERSION"
-        assert base == "POP OUT(prod. F1LTHY)"
+        assert base == "POP OUT (prod. F1LTHY)"
 
     def test_unknown_version_tag(self):
         tag, base = extract_version_tag("Red Lean [V?](feat. Lil Uzi Vert)")
         assert tag == "V?"
-        assert base == "Red Lean(feat. Lil Uzi Vert)"
+        assert base == "Red Lean (feat. Lil Uzi Vert)"
 
     def test_version_range_unknown_upper(self):
         tag, base = extract_version_tag("DRONES. [V1-V?](prod. Sounwave)")
         assert tag == "V1-V?"
-        assert base == "DRONES.(prod. Sounwave)"
+        assert base == "DRONES. (prod. Sounwave)"
 
     def test_album_tag(self):
         tag, base = extract_version_tag("Man On The Moon [Album](feat. Kanye West)")
         assert tag == "Album"
-        assert base == "Man On The Moon(feat. Kanye West)"
+        assert base == "Man On The Moon (feat. Kanye West)"
 
     def test_clean_tag(self):
         tag, base = extract_version_tag("RATHER LIE [Clean](ref. Keith Lawson)")
         assert tag == "Clean"
-        assert base == "RATHER LIE(ref. Keith Lawson)"
+        assert base == "RATHER LIE (ref. Keith Lawson)"
 
     def test_song_number_tag(self):
         tag, base = extract_version_tag("For Real[Song 2]")

@@ -16,6 +16,8 @@ export const playerState = reactive({
   artistName: '',
   /** Era name for display */
   eraName: '',
+  /** Era cover art URL for display */
+  artUrl: '',
   /** Is actively playing */
   isPlaying: false,
   /** Current playback time in seconds */
@@ -32,6 +34,8 @@ export const playerState = reactive({
   streamUrl: '',
   /** Volume 0-1 */
   volume: 1,
+  /** Playback queue (array of { version, artistName, eraName, artUrl }) */
+  queue: [],
 })
 
 // ---------------------------------------------------------------------------
@@ -77,6 +81,11 @@ function _getAudio() {
     _audio.addEventListener('ended', () => {
       playerState.isPlaying = false
       playerState.currentTime = 0
+      // Auto-advance queue
+      if (playerState.queue.length > 0) {
+        const next = playerState.queue.shift()
+        playTrack(next.version, next.artistName, next.eraName, next.artUrl)
+      }
     })
 
     _audio.addEventListener('waiting', () => {
@@ -109,18 +118,42 @@ function _getAudio() {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the proxy stream URL for a given original link.
- * Routes through /api/stream?url=<encoded original link>
+ * Resolve a file-sharing link to its direct stream URL (client-side).
+ *
+ * pillows.su / pillowcase.su  → https://api.pillows.su/api/get/{id}  (direct, no proxy needed)
+ * imgur.gg / temp.imgur.gg     → proxied through /api/stream (CORS restricted)
  */
-function _proxyUrl(originalLink) {
-  return `/api/stream?url=${encodeURIComponent(originalLink)}`
+const _PILLOWS_RE = /^https?:\/\/(?:www\.)?(pillows\.su|pillowcase\.su)\/f\/([A-Za-z0-9_-]+)/i
+const _IMGUR_RE = /^https?:\/\/(?:www\.)?((?:temp\.)?imgur\.gg)\/f\/([A-Za-z0-9_-]+)/i
+const _FROSTE_RE = /^https?:\/\/music\.froste\.lol\/song\/([a-f0-9]+)/i
+
+function _resolveStreamUrl(originalLink) {
+  // Pillowcase: use their API directly (supports CORS)
+  let m = _PILLOWS_RE.exec(originalLink)
+  if (m) {
+    return { url: `https://api.pillows.su/api/get/${m[2]}`, direct: true }
+  }
+
+  // Imgur: proxy through our backend (CORS restricted)
+  m = _IMGUR_RE.exec(originalLink)
+  if (m) {
+    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
+  }
+
+  // music.froste.lol: proxy through our backend (CORS restricted)
+  m = _FROSTE_RE.exec(originalLink)
+  if (m) {
+    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
+  }
+
+  return null
 }
 
 /**
  * Find the first streamable link from a version's links array.
  * Returns the original link or null.
  */
-const _STREAM_HOSTS = /^https?:\/\/(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)\/f\//i
+const _STREAM_HOSTS = /^https?:\/\/(?:(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)\/f\/|music\.froste\.lol\/song\/[a-f0-9]+)/i
 
 export function findStreamableLink(links) {
   if (!links?.length) return null
@@ -142,24 +175,32 @@ export function isStreamable(version) {
 // Playback controls
 // ---------------------------------------------------------------------------
 
-export function playTrack(version, artistName = '', eraName = '') {
+export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
   const link = findStreamableLink(version?.links)
 
   playerState.track = version
   playerState.artistName = artistName
   playerState.eraName = eraName
+  playerState.artUrl = artUrl
   playerState.currentTime = 0
   playerState.buffered = 0
   playerState.error = ''
   playerState.duration = _parseDuration(version?.track_length)
 
   if (link) {
+    const resolved = _resolveStreamUrl(link)
+    if (!resolved) {
+      playerState.streamUrl = ''
+      playerState.isPlaying = false
+      playerState.loading = false
+      return
+    }
+
     const audio = _getAudio()
-    const url = _proxyUrl(link)
-    playerState.streamUrl = url
+    playerState.streamUrl = resolved.url
     playerState.loading = true
 
-    audio.src = url
+    audio.src = resolved.url
     audio.volume = playerState.volume
     audio.play().catch(() => {
       // Browser may block autoplay — user sees play button
@@ -181,9 +222,12 @@ export function togglePlay() {
     // Try to play current track
     const link = findStreamableLink(playerState.track?.links)
     if (link) {
-      audio.src = _proxyUrl(link)
-      audio.volume = playerState.volume
-      audio.play().catch(() => {})
+      const resolved = _resolveStreamUrl(link)
+      if (resolved) {
+        audio.src = resolved.url
+        audio.volume = playerState.volume
+        audio.play().catch(() => {})
+      }
     }
     return
   }
@@ -193,6 +237,10 @@ export function togglePlay() {
   } else {
     audio.play().catch(() => {})
   }
+}
+
+export function addToQueue(version, artistName = '', eraName = '', artUrl = '') {
+  playerState.queue.push({ version, artistName, eraName, artUrl })
 }
 
 export function stopTrack() {
@@ -208,6 +256,8 @@ export function stopTrack() {
   playerState.loading = false
   playerState.error = ''
   playerState.streamUrl = ''
+  playerState.artUrl = ''
+  playerState.queue = []
 }
 
 export function seekTo(seconds) {
@@ -244,4 +294,17 @@ export function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/**
+ * Build proxy URL for an art image.
+ * Handles protocol-relative URLs and routes through /api/image-proxy.
+ */
+export function artProxyUrl(rawUrl) {
+  if (!rawUrl) return null
+  const fullUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl
+  if (fullUrl.startsWith('http')) {
+    return `/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
+  }
+  return rawUrl
 }

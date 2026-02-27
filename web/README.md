@@ -1,5 +1,24 @@
-# Vue 3 + Vite
+# LeakSheet Web UI
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 frontend for LeakSheet. Provides a music tracker browser with search, collapsible era cards, audio streaming, and detailed song metadata.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Setup
+
+```bash
+npm install
+npm run dev      # Dev server (proxies /api to backend)
+npm run build    # Production build
+```
+
+The dev server proxies `/api` requests to `http://localhost:8000` (the FastAPI backend). Start both servers for local development.
+
+## Features
+
+- Tracker URL input with validation and multi-tracker history
+- Artist view with real-time search/filter across eras and songs
+- Era cards with cover art color extraction (ColorThief)
+- Audio streaming via backend proxy (pillows.su, imgur.gg)
+- Player bar with seek, volume, buffering indicators
+- Right-click context menu (copy link, download)
+- Song description modal with credits, samples, links
+- Keyboard shortcuts: Space (play/pause), Arrow Left/Right (seek), Arrow Up/Down (volume)

@@ -1,38 +1,205 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
-import { getEra } from '../composables/useApi.js'
+import VersionRow from './VersionRow.vue'
+import { getEraColors } from '../composables/useEraColors.js'
 
 const props = defineProps({
   artist: Object,
 })
 
-const expandedEra = ref(null) // index of currently expanded era
-const eraData = ref(null)     // full era data (with songs)
-const loadingEra = ref(false)
+const expandedEra = ref(null)
+const bestOf = ref(false)
+const recents = ref(false)
+const searchQuery = ref('')
+const debouncedQuery = ref('')
+let _debounceTimer = null
+
+watch(searchQuery, (val) => {
+  clearTimeout(_debounceTimer)
+  if (!val.trim()) {
+    // Clear instantly for better UX
+    debouncedQuery.value = ''
+    return
+  }
+  _debounceTimer = setTimeout(() => {
+    debouncedQuery.value = val
+  }, 200)
+})
 
 const eras = computed(() => props.artist?.eras || [])
 
-async function toggleEra(index) {
-  if (expandedEra.value === index) {
-    expandedEra.value = null
-    eraData.value = null
-    return
+const _BEST_OF_BADGES = new Set(['best', 'special'])
+
+function isBestOfSong(song) {
+  return _BEST_OF_BADGES.has(song.badge)
+}
+
+/** Filter eras/songs based on search query and best-of mode */
+const filteredEras = computed(() => {
+  let result = eras.value
+
+  // Best-of: only eras that have starred songs
+  if (bestOf.value) {
+    result = result.filter(era => eraSongs(era).some(isBestOfSong))
   }
 
-  expandedEra.value = index
-  loadingEra.value = true
+  const q = debouncedQuery.value.trim().toLowerCase()
+  if (!q) return result
 
-  try {
-    eraData.value = await getEra(props.artist.slug, index)
-  } catch (e) {
-    console.error('Failed to load era:', e)
-    eraData.value = null
-  } finally {
-    loadingEra.value = false
+  return result.filter(era => {
+    // Match era name or alt names
+    if (era.name.toLowerCase().includes(q)) return true
+    if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return true
+    // Match any song in the era
+    return eraSongs(era).some(song => songMatchesQuery(song, q))
+  })
+})
+
+function songMatchesQuery(song, query) {
+  if (song.base_name.toLowerCase().includes(query)) return true
+  return song.versions?.some(v => {
+    if ((v.name || '').toLowerCase().includes(query)) return true
+    if ((v.featuring || '').toLowerCase().includes(query)) return true
+    if ((v.producers || '').toLowerCase().includes(query)) return true
+    if ((v.collaboration || '').toLowerCase().includes(query)) return true
+    if ((v.notes || '').toLowerCase().includes(query)) return true
+    if (v.alt_titles?.some(alt => alt.toLowerCase().includes(query))) return true
+    return false
+  }) ?? false
+}
+
+/** Filter songs within an era when searching or in best-of mode */
+function filteredSongs(era) {
+  let songs = eraSongs(era)
+
+  // Best-of: only starred songs
+  if (bestOf.value) {
+    songs = songs.filter(isBestOfSong)
+  }
+
+  const q = debouncedQuery.value.trim().toLowerCase()
+  if (!q) return songs
+  // If era name or alt name matches, show all (filtered) songs
+  if (era.name.toLowerCase().includes(q)) return songs
+  if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return songs
+  return songs.filter(song => songMatchesQuery(song, q))
+}
+
+const isSearching = computed(() => debouncedQuery.value.trim().length > 0)
+
+/** Flat list of individual version results for search mode (Issues 6+7) */
+const flatSearchResults = computed(() => {
+  const q = debouncedQuery.value.trim().toLowerCase()
+  if (!q) return []
+
+  const results = []
+  for (const era of eras.value) {
+    const songs = eraSongs(era)
+    for (const song of songs) {
+      if (songMatchesQuery(song, q)) {
+        for (const version of (song.versions || [])) {
+          results.push({ song, version, era })
+        }
+      }
+    }
+  }
+  return results
+})
+
+function eraColorStyle(era) {
+  const colors = getEraColors(era.name)
+  if (colors) {
+    return {
+      background: colors.bg,
+      color: colors.text,
+      borderColor: colors.border,
+    }
+  }
+  return {
+    background: 'rgba(78,205,196,0.15)',
+    color: 'var(--accent)',
+    borderColor: 'rgba(78,205,196,0.3)',
   }
 }
+
+function toggleEra(eraName) {
+  if (bestOf.value) return // All eras stay open in best-of mode
+  expandedEra.value = expandedEra.value === eraName ? null : eraName
+}
+
+function isEraExpanded(eraName) {
+  if (bestOf.value) return true
+  return expandedEra.value === eraName
+}
+
+function toggleBestOf() {
+  bestOf.value = !bestOf.value
+  recents.value = false
+  if (!bestOf.value) {
+    expandedEra.value = null
+  }
+}
+
+function toggleRecents() {
+  recents.value = !recents.value
+  bestOf.value = false
+  if (!recents.value) {
+    expandedEra.value = null
+  }
+}
+
+/** Get songs for an era — data is already fully loaded client-side. */
+function eraSongs(era) {
+  if (era.songs) return era.songs
+  if (era.sections) {
+    return era.sections.flatMap(s => s.songs || [])
+  }
+  return []
+}
+
+/** Parse a date string like "12/25/2024", "2024", "December 2024" into a sortable timestamp. */
+function _parseLeakDate(dateStr) {
+  if (!dateStr) return 0
+  // Try Date.parse first — handles "Jan 2, 2026", "February 10, 2026", etc.
+  const parsed = Date.parse(dateStr)
+  if (!isNaN(parsed)) return parsed
+  // Try MM/DD/YYYY or M/D/YYYY
+  const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashMatch) {
+    return new Date(+slashMatch[3], +slashMatch[1] - 1, +slashMatch[2]).getTime()
+  }
+  // Try just year
+  const yearMatch = dateStr.match(/(\d{4})/)
+  if (yearMatch) {
+    return new Date(+yearMatch[1], 0, 1).getTime()
+  }
+  return 0
+}
+
+/** Flat list of recently added versions, sorted by leak_date descending. */
+const recentResults = computed(() => {
+  if (!recents.value) return []
+
+  const results = []
+  for (const era of eras.value) {
+    const songs = eraSongs(era)
+    for (const song of songs) {
+      for (const version of (song.versions || [])) {
+        const leakDate = version.leak_date || version.file_date
+        if (leakDate) {
+          results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })
+        }
+      }
+    }
+  }
+
+  // Sort by date descending (most recent first), limit to 50
+  results.sort((a, b) => b._ts - a._ts)
+  return results.slice(0, 50)
+})
+
 </script>
 
 <template>
@@ -40,32 +207,112 @@ async function toggleEra(index) {
     <div class="artist-header">
       <h2 class="artist-name">{{ artist.name }}</h2>
       <div class="artist-meta">
-        {{ artist.eras?.length || 0 }} eras ·
-        {{ artist.total_songs }} songs ·
-        {{ artist.total_versions }} versions
+        {{ artist.eras?.length || 0 }} eras
       </div>
     </div>
 
-    <div class="eras-list">
-      <div v-for="(era, index) in eras" :key="index" class="era-block">
+    <!-- Search bar + Best Of toggle -->
+    <div class="search-bar-wrap">
+      <div class="search-bar">
+        <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14">
+          <path fill="currentColor" d="M11.5 7a4.499 4.499 0 1 1-8.998 0A4.499 4.499 0 0 1 11.5 7zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04z"/>
+        </svg>
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="search-input"
+          placeholder="Search songs, artists, producers..."
+        />
+        <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">
+          <svg viewBox="0 0 16 16" width="12" height="12">
+            <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
+          </svg>
+        </button>
+        <button class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" title="Best Of">
+          <span class="best-of-star">&#11088;</span>
+        </button>
+        <button class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" title="Recently Added">
+          <svg viewBox="0 0 16 16" width="16" height="16" style="opacity: inherit">
+            <path fill="currentColor" d="M1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0zM8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.87V4.75z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Recents view: flat list sorted by leak date -->
+    <template v-if="recents">
+      <div v-if="recentResults.length === 0" class="no-results">
+        No entries with leak dates found
+      </div>
+      <div v-else class="search-results">
+        <div
+          v-for="(result, idx) in recentResults"
+          :key="'r' + idx"
+          class="search-result-row"
+        >
+          <div class="search-result-meta">
+            <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+            <span v-if="result.version.leak_date" class="leak-date-badge">{{ result.version.leak_date }}</span>
+          </div>
+          <div class="search-result-version">
+            <VersionRow
+              :version="result.version"
+              :artist-name="artist.name"
+              :era-name="result.era.name"
+              :era-art="result.era.art_url"
+              :hide-alt-titles="true"
+            />
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Search results: flat version list -->
+    <template v-else-if="isSearching">
+      <div v-if="flatSearchResults.length === 0" class="no-results">
+        No results for "{{ searchQuery }}"
+      </div>
+      <div v-else class="search-results">
+        <div
+          v-for="(result, idx) in flatSearchResults"
+          :key="idx"
+          class="search-result-row"
+        >
+          <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+          <div class="search-result-version">
+            <VersionRow
+              :version="result.version"
+              :artist-name="artist.name"
+              :era-name="result.era.name"
+              :era-art="result.era.art_url"
+              :hide-alt-titles="true"
+            />
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Normal era browsing -->
+    <div v-else class="eras-list">
+      <div v-for="era in filteredEras" :key="era.name" class="era-block">
         <EraCard
           :era="era"
-          :expanded="expandedEra === index"
-          @click="toggleEra(index)"
+          :expanded="isEraExpanded(era.name)"
+          @click="toggleEra(era.name)"
         />
 
         <!-- Expanded songs panel -->
         <Transition name="slide">
-          <div v-if="expandedEra === index" class="era-songs-panel">
-            <div v-if="loadingEra" class="loading-songs">
-              <div class="spinner-sm"></div>
-              <span>Loading songs...</span>
+          <div v-if="isEraExpanded(era.name)" class="era-songs-panel">
+            <!-- Sticky header label -->
+            <div class="era-sticky-header">
+              <span class="era-sticky-name">{{ era.name }}</span>
             </div>
             <SongList
-              v-else-if="eraData"
-              :songs="eraData.songs || []"
+              :songs="filteredSongs(era)"
               :artist-name="artist.name"
               :era-name="era.name"
+              :era-art="era.art_url"
             />
           </div>
         </Transition>
@@ -82,7 +329,7 @@ async function toggleEra(index) {
 }
 
 .artist-header {
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .artist-name {
@@ -97,45 +344,131 @@ async function toggleEra(index) {
   margin-top: 4px;
 }
 
+/* Search */
+.search-bar-wrap {
+  margin-bottom: 20px;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  transition: border-color 0.15s;
+}
+
+.search-bar:focus-within {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.search-icon {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.search-clear {
+  color: var(--text-dim);
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.1s;
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  color: var(--text-primary);
+}
+
+.best-of-toggle {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.15s;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.best-of-toggle:hover {
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.best-of-toggle.active {
+  opacity: 1;
+  background: rgba(255, 215, 0, 0.12);
+  border-color: rgba(255, 215, 0, 0.3);
+}
+
+.best-of-star {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.no-results {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 40px 0;
+}
+
 .eras-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.era-block {
-  /* Container for card + expanded panel */
+  gap: 12px;
 }
 
 .era-songs-panel {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
-  padding: 16px;
-  overflow: hidden;
+  border-top: 2px solid var(--accent);
+  border-radius: 0 0 12px 12px;
+  padding: 0 16px 16px;
 }
 
-.loading-songs {
+/* Sticky label header within expanded era */
+.era-sticky-header {
+  position: sticky;
+  top: var(--header-height);
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-secondary);
-  padding: 12px 0;
+  padding: 10px 0;
+  margin-bottom: 4px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.era-sticky-name {
   font-size: 13px;
-}
-
-.spinner-sm {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Transition */
@@ -156,8 +489,57 @@ async function toggleEra(index) {
   max-height: 2000px;
 }
 
+/* Search results (flat list) */
+.search-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-result-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 8px 0 0;
+}
+
+.search-result-row:last-child {
+  border-bottom: none;
+}
+
+.era-badge-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 8px;
+}
+
+.search-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.leak-date-badge {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.search-result-version {
+  margin-top: 0;
+}
+
 @media (max-width: 640px) {
   .artist-view { padding: 16px 12px; }
   .artist-name { font-size: 22px; }
+  .era-badge-pill { max-width: 140px; font-size: 8px; padding: 2px 6px; }
 }
 </style>

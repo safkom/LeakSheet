@@ -17,11 +17,6 @@ KNOWN_TRACKERS: dict[str, str] = {
 }
 
 
-def get_sheet_path(tracker_name: str) -> Path:
-    """Get the sheet.html path for a tracker by its directory name."""
-    return TRACKERS_DIR / f"{tracker_name}_files" / "sheet.html"
-
-
 def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]]:
     """Discover all tracker files in the given directory.
 

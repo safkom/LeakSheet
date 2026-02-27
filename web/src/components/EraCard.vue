@@ -1,5 +1,7 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import ColorThief from 'colorthief'
+import { setEraColors } from '../composables/useEraColors.js'
 
 const props = defineProps({
   era: Object,
@@ -8,58 +10,159 @@ const props = defineProps({
 
 const emit = defineEmits(['click'])
 
-const stats = computed(() => {
-  const s = props.era.stats_raw
-  if (!s) return null
-  return s
-})
+const gradientStyle = ref({})
+const titleColor = ref('#e6edf3')
+const colorThief = new ColorThief()
+const colorsReady = ref(false)
 
 const artSrc = computed(() => {
   if (!props.era.art_url) return null
-  // Google Sheets image URLs: may be relative or lh* URLs
   const url = props.era.art_url
-  if (url.startsWith('http')) return url
-  if (url.startsWith('//')) return 'https:' + url
+  const fullUrl = url.startsWith('//') ? 'https:' + url : url
+  if (fullUrl.startsWith('http')) {
+    return `/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
+  }
   return url
 })
+
+function extractColors(imgElement) {
+  if (!imgElement || colorsReady.value) return
+  try {
+    const dom = colorThief.getColor(imgElement)
+    const pal = colorThief.getPalette(imgElement, 5)
+
+    if (pal && pal.length >= 2) {
+      const c1 = pal[0]
+      const c2 = pal[1]
+      const d1 = `rgba(${Math.floor(c1[0] * 0.55)}, ${Math.floor(c1[1] * 0.55)}, ${Math.floor(c1[2] * 0.55)}, 0.95)`
+      const d2 = `rgba(${Math.floor(c2[0] * 0.4)}, ${Math.floor(c2[1] * 0.4)}, ${Math.floor(c2[2] * 0.4)}, 0.9)`
+      const bright = `rgb(${Math.min(255, c1[0] + 60)}, ${Math.min(255, c1[1] + 60)}, ${Math.min(255, c1[2] + 60)})`
+
+      gradientStyle.value = {
+        background: `linear-gradient(135deg, ${d1}, ${d2})`,
+        borderColor: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
+      }
+      titleColor.value = bright
+
+      // Share colors for search result badges
+      setEraColors(props.era.name, {
+        bg: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.2)`,
+        text: bright,
+        border: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
+      })
+    }
+    colorsReady.value = true
+  } catch (e) {
+    colorsReady.value = true
+  }
+}
+
+function onImgLoad(e) {
+  const img = e.target
+  // Defer color extraction to avoid blocking the main thread during initial load
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(() => extractColors(img), { timeout: 2000 })
+  } else {
+    setTimeout(() => extractColors(img), 100)
+  }
+}
+
+function onImgError(e) {
+  // Hide broken image — show placeholder instead
+  if (e.target) {
+    e.target.style.display = 'none'
+    // Show the placeholder sibling
+    const wrapper = e.target.parentElement
+    if (wrapper) {
+      wrapper.classList.add('img-error')
+    }
+  }
+}
 </script>
 
 <template>
   <button
     class="era-card"
-    :class="{ expanded }"
+    :class="{ expanded, 'has-colors': colorsReady }"
+    :style="gradientStyle"
     @click="emit('click')"
   >
-    <div class="era-art" v-if="artSrc">
-      <img :src="artSrc" alt="" loading="lazy" />
-    </div>
-    <div class="era-art era-art-placeholder" v-else>
-      <svg viewBox="0 0 24 24" width="24" height="24">
-        <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-      </svg>
-    </div>
-
-    <div class="era-info">
-      <h3 class="era-name">{{ era.name }}</h3>
-      <div v-if="era.timeline?.length" class="era-timeline">
-        <div v-for="(evt, i) in era.timeline.slice(0, 3)" :key="i" class="timeline-event">
-          <span class="timeline-date">{{ evt.date }}</span>
-          <span class="timeline-sep">&mdash;</span>
-          <span class="timeline-text">{{ evt.event }}</span>
+    <!-- Mobile layout: centered art + title below -->
+    <div class="era-card-mobile">
+      <div class="era-art-wrapper" v-if="artSrc">
+        <img
+          :src="artSrc"
+          alt=""
+          loading="lazy"
+          crossorigin="anonymous"
+          @load="onImgLoad"
+          @error="onImgError"
+          class="era-art-img"
+        />
+        <div class="era-art-fallback">
+          <svg viewBox="0 0 24 24" width="32" height="32">
+            <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
         </div>
       </div>
-      <p v-if="era.description" class="era-desc">{{ era.description }}</p>
-      <div class="era-stats-row">
-        <span class="stat">{{ era.song_count }} songs</span>
-        <span class="stat">{{ era.version_count }} versions</span>
+      <div class="era-art-placeholder" v-else>
+        <svg viewBox="0 0 24 24" width="32" height="32">
+          <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
+      <div class="era-title-group">
+        <h3 class="era-title-mobile" :style="{ color: titleColor }">{{ era.name }}</h3>
+        <div v-if="era.alt_names?.length" class="era-alt-names">{{ era.alt_names.join(', ') }}</div>
       </div>
     </div>
 
-    <div class="era-chevron">
+    <!-- Desktop layout: art left, info right -->
+    <div class="era-card-desktop">
+      <div class="era-art-desktop" v-if="artSrc">
+        <img
+          :src="artSrc"
+          alt=""
+          loading="lazy"
+          crossorigin="anonymous"
+          @load="onImgLoad"
+          @error="onImgError"
+          class="era-art-img-desktop"
+        />
+        <div class="era-art-fallback era-art-fallback-desktop">
+          <svg viewBox="0 0 24 24" width="28" height="28">
+            <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="era-art-desktop era-art-placeholder-desktop" v-else>
+        <svg viewBox="0 0 24 24" width="28" height="28">
+          <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
+
+      <div class="era-info-desktop">
+        <h3 class="era-title-desktop" :style="{ color: titleColor }">{{ era.name }}</h3>
+        <div v-if="era.alt_names?.length" class="era-alt-names era-alt-names-desktop">{{ era.alt_names.join(', ') }}</div>
+
+        <p v-if="era.description" class="era-desc-desktop">{{ era.description }}</p>
+
+        <div v-if="era.timeline?.length" class="era-timeline-desktop">
+          <div v-for="(evt, i) in era.timeline.slice(0, 4)" :key="i" class="timeline-evt">
+            <span class="timeline-date">{{ evt.date }}</span>
+            <span class="timeline-sep">&mdash;</span>
+            <span class="timeline-text">{{ evt.event }}</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Expand indicator -->
+    <div class="era-expand-indicator">
       <svg
         viewBox="0 0 16 16"
-        width="16"
-        height="16"
+        width="14"
+        height="14"
         :class="{ rotated: expanded }"
       >
         <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
@@ -71,146 +174,244 @@ const artSrc = computed(() => {
 <style scoped>
 .era-card {
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
+  border-radius: 12px;
+  padding: 0;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
+  overflow: hidden;
+  cursor: pointer;
 }
 
 .era-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border-hover);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 .era-card.expanded {
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  border-color: var(--border-hover);
-  background: var(--bg-card-hover);
+  border-radius: 12px 12px 0 0;
+  transform: none;
+  box-shadow: none;
 }
 
-.era-art {
-  width: 64px;
-  height: 64px;
-  border-radius: var(--radius-sm);
+/* ── Mobile layout ── */
+.era-card-mobile {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 14px 16px;
+  gap: 14px;
+}
+
+.era-card-desktop {
+  display: none;
+}
+
+.era-art-wrapper {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
-  background: var(--bg-secondary);
+  position: relative;
 }
 
-.era-art img {
+.era-art-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
-.era-art-placeholder {
-  display: flex;
+.era-art-fallback {
+  display: none;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.05);
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
 }
 
-.era-info {
+.img-error .era-art-img,
+.img-error .era-art-img-desktop {
+  display: none !important;
+}
+
+.img-error .era-art-fallback {
+  display: flex;
+}
+
+.era-art-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.era-title-group {
   flex: 1;
   min-width: 0;
+  text-align: left;
 }
 
-.era-name {
+.era-title-mobile {
   font-size: 16px;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 2px;
+  font-weight: 700;
+  text-align: left;
+  line-height: 1.2;
+  transition: color 0.3s;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.era-desc {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-bottom: 4px;
 }
 
-.era-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 4px;
-}
-
-.timeline-event {
+.era-alt-names {
   font-size: 11px;
-  line-height: 1.3;
-  display: flex;
-  gap: 4px;
-  overflow: hidden;
-}
-
-.timeline-date {
-  color: var(--accent);
-  font-weight: 500;
-  flex-shrink: 0;
-  opacity: 0.8;
-}
-
-.timeline-sep {
-  color: var(--text-dim);
-  opacity: 0.4;
-  flex-shrink: 0;
-}
-
-.timeline-text {
-  color: var(--text-dim);
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.era-stats-row {
-  display: flex;
-  gap: 12px;
+/* ── Desktop layout ── */
+@media (min-width: 768px) {
+  .era-card-mobile {
+    display: none;
+  }
+
+  .era-card-desktop {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 16px 20px;
+  }
+
+  .era-art-desktop {
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+  }
+
+  .era-art-img-desktop {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .era-art-placeholder-desktop {
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+  }
+
+  .era-info-desktop {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .era-title-desktop {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 2px;
+    transition: color 0.3s;
+  }
+
+  .era-alt-names-desktop {
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .era-desc-desktop {
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 12px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  .era-timeline-desktop {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 8px;
+  }
+
+  .timeline-evt {
+    font-size: 11px;
+    line-height: 1.4;
+    display: flex;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .timeline-date {
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .timeline-sep {
+    color: rgba(255, 255, 255, 0.2);
+    flex-shrink: 0;
+  }
+
+  .timeline-text {
+    color: rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
-.stat {
-  color: var(--text-dim);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
 
-.era-chevron {
-  flex-shrink: 0;
-  color: var(--text-dim);
+/* ── Expand indicator ── */
+.era-expand-indicator {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  color: rgba(255, 255, 255, 0.3);
   transition: color 0.15s;
 }
 
-.era-card:hover .era-chevron {
-  color: var(--accent);
+.era-card:hover .era-expand-indicator {
+  color: rgba(255, 255, 255, 0.6);
 }
 
-.era-chevron svg {
+.era-expand-indicator svg {
   transition: transform 0.2s ease;
 }
 
-.era-chevron .rotated {
+.era-expand-indicator .rotated {
   transform: rotate(180deg);
 }
 
-@media (max-width: 640px) {
-  .era-card { padding: 10px 12px; gap: 12px; }
-  .era-art { width: 48px; height: 48px; }
-  .era-name { font-size: 14px; }
-  .era-desc { display: none; }
+@media (max-width: 767px) {
+  .era-expand-indicator {
+    bottom: 6px;
+    right: 10px;
+  }
 }
 </style>

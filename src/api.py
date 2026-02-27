@@ -1,348 +1,345 @@
 """LeakSheet — FastAPI HTTP layer.
 
-Serves parsed tracker data from an in-memory store.
-On startup, fetches and parses all URLs from Trackers/links.txt.
+Endpoints:
+  POST /api/sheet       — send a tracker URL, get parsed Artist JSON back
+  GET  /api/image-proxy — proxy images through backend (CORS bypass)
+  GET  /api/stream      — proxy audio from supported file hosts (CORS bypass)
+  POST /api/cache/clear — clear the URL fetch cache
 """
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from pathlib import Path
+import re
 
-from fastapi import FastAPI, HTTPException, Query
+import httpx
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
-
 from starlette.responses import StreamingResponse
 
-from src.config import TRACKERS_DIR
-from src.fetcher import fetch_and_parse, fetch_links_file, clear_cache
-from src.models import Artist, Era, Song, SongVersion, Section, ParseMetadata, TimelineEvent
-from src.streaming import resolve_stream_url, find_streamable_link, is_streamable, stream_audio
+from src.fetcher import (
+    async_fetch_and_parse,
+    clear_cache,
+    InvalidURLError,
+    NetworkError,
+    NoTablesError,
+    ParseError,
+)
+from src.streaming import resolve_stream_url, stream_audio
 
 
 # ---------------------------------------------------------------------------
-# In-memory store
+# App
 # ---------------------------------------------------------------------------
-
-_store: dict[str, Artist] = {}
-
-
-def _load_trackers() -> None:
-    """Parse all URLs from links.txt into the in-memory store."""
-    links_path = TRACKERS_DIR / "links.txt"
-    artists = fetch_links_file(links_path)
-    for artist in artists:
-        _store[artist.slug] = artist
-
-
-# ---------------------------------------------------------------------------
-# App lifecycle
-# ---------------------------------------------------------------------------
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Startup: load trackers from links.txt into memory."""
-    _load_trackers()
-    yield
-
 
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
-    version="0.1.0",
-    lifespan=lifespan,
+    version="0.3.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
 
 # ---------------------------------------------------------------------------
-# Response models (thin wrappers — avoid exposing full internal models)
+# POST /api/sheet — parse a tracker URL → full Artist JSON
 # ---------------------------------------------------------------------------
 
-class ArtistSummary(BaseModel):
-    name: str
-    slug: str
-    source_url: str | None = None
-    era_count: int
-    total_songs: int
-    total_versions: int
+class SheetRequest(BaseModel):
+    url: str = Field(..., description="Tracker URL (Google Sheets htmlview or custom domain)")
+    artist_name: str | None = Field(None, description="Override inferred artist name")
+    use_cache: bool = Field(True, description="Whether to use cached data")
+    force_refresh: bool = Field(False, description="Force a fresh fetch, ignoring cache")
 
 
-class EraSummary(BaseModel):
-    name: str
-    description: str | None = None
-    timeline: list[TimelineEvent] = []
-    art_url: str | None = None
-    highlighted_producers: list[str] = []
-    song_count: int
-    version_count: int
-    stats_raw: str | None = None
+@app.post("/api/sheet")
+async def parse_sheet(req: SheetRequest):
+    """Fetch and parse a tracker spreadsheet.
 
+    Accepts a Google Sheets /htmlview URL or a custom tracker domain.
+    Returns the full parsed Artist object with all eras, songs, and versions.
+    """
+    cache_ttl = 0 if req.force_refresh else 3600
+    use_cache = req.use_cache and not req.force_refresh
 
-class SongDetail(BaseModel):
-    base_name: str
-    era_name: str
-    versions: list[SongVersion]
-
-
-class SearchResult(BaseModel):
-    artist_name: str
-    artist_slug: str
-    era_name: str
-    song: Song
-
-
-class ParseRequest(BaseModel):
-    url: str = Field(..., description="Tracker URL to parse")
-    artist_name: str | None = Field(None, description="Override artist name")
-
-
-class ParseResponse(BaseModel):
-    name: str
-    slug: str
-    era_count: int
-    total_songs: int
-    parse_metadata: ParseMetadata | None = None
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/api/artists", response_model=list[ArtistSummary])
-def list_artists():
-    """List all loaded artists."""
-    return [
-        ArtistSummary(
-            name=a.name,
-            slug=a.slug,
-            source_url=a.source_url,
-            era_count=len(a.eras),
-            total_songs=a.total_songs,
-            total_versions=a.total_versions,
-        )
-        for a in _store.values()
-    ]
-
-
-def _era_to_summary(e: Era) -> EraSummary:
-    """Convert an Era model to an EraSummary response."""
-    return EraSummary(
-        name=e.name,
-        description=e.description,
-        timeline=e.timeline,
-        art_url=e.art_url,
-        highlighted_producers=e.highlighted_producers,
-        song_count=e.song_count,
-        version_count=e.version_count,
-        stats_raw=e.stats_raw,
-    )
-
-
-@app.get("/api/artists/{slug}")
-def get_artist(slug: str):
-    """Artist detail with era list."""
-    artist = _store.get(slug)
-    if not artist:
-        raise HTTPException(status_code=404, detail=f"Artist '{slug}' not found")
-    return {
-        "name": artist.name,
-        "slug": artist.slug,
-        "source_url": artist.source_url,
-        "total_songs": artist.total_songs,
-        "total_versions": artist.total_versions,
-        "parse_metadata": artist.parse_metadata,
-        "tracker_stats": artist.tracker_stats,
-        "eras": [_era_to_summary(e) for e in artist.eras],
-    }
-
-
-@app.get("/api/artists/{slug}/eras", response_model=list[EraSummary])
-def list_eras(slug: str):
-    """All eras for an artist."""
-    artist = _store.get(slug)
-    if not artist:
-        raise HTTPException(status_code=404, detail=f"Artist '{slug}' not found")
-    return [_era_to_summary(e) for e in artist.eras]
-
-
-@app.get("/api/artists/{slug}/eras/{era_index}")
-def get_era(slug: str, era_index: int):
-    """Era detail with songs. era_index is 0-based."""
-    artist = _store.get(slug)
-    if not artist:
-        raise HTTPException(status_code=404, detail=f"Artist '{slug}' not found")
-    if era_index < 0 or era_index >= len(artist.eras):
-        raise HTTPException(status_code=404, detail=f"Era index {era_index} out of range")
-
-    era = artist.eras[era_index]
-    return {
-        "name": era.name,
-        "description": era.description,
-        "timeline": era.timeline,
-        "art_url": era.art_url,
-        "stats_raw": era.stats_raw,
-        "stats": era.stats,
-        "song_count": era.song_count,
-        "version_count": era.version_count,
-        "sections": [
-            {"name": sec.name, "songs": sec.songs}
-            for sec in era.sections
-        ],
-        "songs": era.songs,
-    }
-
-
-@app.get("/api/artists/{slug}/songs", response_model=list[SongDetail])
-def list_songs(slug: str):
-    """All songs across all eras (flat)."""
-    artist = _store.get(slug)
-    if not artist:
-        raise HTTPException(status_code=404, detail=f"Artist '{slug}' not found")
-    result = []
-    for era in artist.eras:
-        for song in era.songs:
-            result.append(SongDetail(
-                base_name=song.base_name,
-                era_name=era.name,
-                versions=song.versions,
-            ))
-    return result
-
-
-@app.get("/api/search", response_model=list[SearchResult])
-def search_songs(q: str = Query(..., min_length=1, description="Search query")):
-    """Full-text search across all songs."""
-    q_lower = q.lower()
-    results = []
-    for artist in _store.values():
-        for era in artist.eras:
-            for song in era.songs:
-                # Search in base name
-                if q_lower in song.base_name.lower():
-                    results.append(SearchResult(
-                        artist_name=artist.name,
-                        artist_slug=artist.slug,
-                        era_name=era.name,
-                        song=song,
-                    ))
-                    continue
-                # Search in version names and notes
-                for v in song.versions:
-                    if (q_lower in v.name.lower()
-                            or (v.notes and q_lower in v.notes.lower())):
-                        results.append(SearchResult(
-                            artist_name=artist.name,
-                            artist_slug=artist.slug,
-                            era_name=era.name,
-                            song=song,
-                        ))
-                        break
-    return results
-
-
-@app.post("/api/parse", response_model=ParseResponse)
-def parse_tracker(req: ParseRequest):
-    """Parse a tracker from URL and add to the in-memory store."""
     try:
-        artist = fetch_and_parse(req.url, artist_name=req.artist_name)
-    except Exception as e:
+        artist = await async_fetch_and_parse(
+            req.url,
+            artist_name=req.artist_name,
+            cache_ttl=cache_ttl,
+            use_cache=use_cache,
+        )
+    except InvalidURLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {e}")
+    except NetworkError as e:
+        raise HTTPException(status_code=502, detail=f"Network error: {e}")
+    except NoTablesError as e:
+        raise HTTPException(status_code=404, detail=f"No table data found: {e}")
+    except ParseError as e:
+        raise HTTPException(status_code=422, detail=f"Parse error: {e}")
+    except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
-    _store[artist.slug] = artist
-    return ParseResponse(
-        name=artist.name,
-        slug=artist.slug,
-        era_count=len(artist.eras),
-        total_songs=artist.total_songs,
-        parse_metadata=artist.parse_metadata,
-    )
+    data = artist.dict()
+    return data
 
+
+# ---------------------------------------------------------------------------
+# POST /api/cache/clear — clear the fetch cache
+# ---------------------------------------------------------------------------
 
 @app.post("/api/cache/clear")
-def api_clear_cache():
+async def clear_fetch_cache():
     """Clear the URL fetch cache."""
     count = clear_cache()
     return {"cleared": count}
 
 
 # ---------------------------------------------------------------------------
-# Streaming endpoints
+# GET /api/image-proxy — proxy images with CORS headers
 # ---------------------------------------------------------------------------
 
-class StreamRequest(BaseModel):
-    url: str = Field(..., description="Original file-sharing link from the tracker")
+@app.get("/api/image-proxy")
+async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
+    """Proxy an image through the backend to avoid CORS issues.
 
-
-class StreamInfo(BaseModel):
-    streamable: bool
-    stream_url: str | None = None
-
-
-@app.post("/api/stream/resolve", response_model=StreamInfo)
-def resolve_stream(req: StreamRequest):
-    """Resolve a file-sharing link to a streamable audio URL.
-
-    Returns whether the link is streamable and the resolved URL.
+    Used by the frontend to load era cover art images from Google CDN
+    which don't serve Access-Control-Allow-Origin headers.
     """
-    stream_url = resolve_stream_url(req.url)
-    return StreamInfo(streamable=stream_url is not None, stream_url=stream_url)
+    # Fix protocol-relative URLs
+    if url.startswith("//"):
+        url = "https:" + url
 
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme")
+
+    # Build candidate URLs in order of preference
+    candidates = []
+
+    # 1) Resized version (larger) — only if no ?key= that may be tied to original size
+    if "?key=" not in url:
+        sized = re.sub(r'=(?:w\d+-h\d+|s\d+)', '=w400-h400', url)
+        if sized != url:
+            candidates.append(sized)
+
+    # 2) Original URL as-is
+    candidates.append(url)
+
+    # 3) Strip ?key= param as last resort (keys can expire)
+    stripped = re.sub(r'\?key=[^&]+', '', url)
+    if stripped != url:
+        candidates.append(stripped)
+
+    # Conditional headers — only send Google Referer for Google domains
+    is_google = any(h in url for h in (
+        'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
+    ))
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+    }
+    if is_google:
+        headers["Referer"] = "https://docs.google.com/"
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=15,
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
+            for candidate in candidates:
+                resp = await client.get(candidate)
+                ct = resp.headers.get("content-type", "")
+                if resp.status_code == 200 and ct.startswith("image/"):
+                    return Response(
+                        content=resp.content,
+                        media_type=ct,
+                        headers={
+                            "Cache-Control": "public, max-age=86400",
+                            "Access-Control-Allow-Origin": "*",
+                        },
+                    )
+
+            # All candidates failed
+            raise HTTPException(
+                status_code=resp.status_code,
+                detail="Upstream image fetch failed",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Image proxy error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/stream — proxy audio (CORS bypass) with range request support
+# ---------------------------------------------------------------------------
 
 @app.get("/api/stream")
-def proxy_stream(url: str = Query(..., description="Original file-sharing link")):
+async def proxy_stream(
+    request: Request,
+    url: str = Query(..., description="Original file-sharing link"),
+):
     """Proxy an audio stream from a supported file-sharing host.
 
-    Avoids CORS issues by fetching upstream and forwarding the audio bytes.
-    The `url` parameter should be the original tracker link (e.g. pillows.su/f/xxx),
-    not the resolved API URL — resolution happens server-side.
+    Supports HTTP Range requests for proper seeking.
+    When upstream doesn't support Range, synthesises partial responses locally.
     """
     stream_url = resolve_stream_url(url)
     if stream_url is None:
         raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
 
+    # Forward Range header from client if present
+    range_header = request.headers.get("range")
+
     try:
-        resp = stream_audio(stream_url)
+        resp, client = stream_audio(stream_url, range_header=range_header)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
 
-    # Forward content-type and content-length if available
-    headers: dict[str, str] = {}
     ct = resp.headers.get("content-type")
-    if ct:
-        headers["Content-Type"] = ct
-    cl = resp.headers.get("content-length")
-    if cl:
-        headers["Content-Length"] = cl
-    cd = resp.headers.get("content-disposition")
-    if cd:
-        headers["Content-Disposition"] = cd
+    total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
 
-    # Allow range requests for seeking
-    headers["Accept-Ranges"] = "bytes"
+    # ---------- upstream DID handle Range → pass through as-is ----------
+    if resp.status_code == 206:
+        headers: dict[str, str] = {"Accept-Ranges": "bytes"}
+        if ct:
+            headers["Content-Type"] = ct
+        cl = resp.headers.get("content-length")
+        if cl:
+            headers["Content-Length"] = cl
+        cr = resp.headers.get("content-range")
+        if cr:
+            headers["Content-Range"] = cr
 
-    def _iter():
+        def _iter_passthrough():
+            try:
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    yield chunk
+            finally:
+                resp.close()
+                client.close()
+
+        return StreamingResponse(
+            _iter_passthrough(),
+            status_code=206,
+            headers=headers,
+            media_type=ct or "application/octet-stream",
+        )
+
+    # ---------- upstream returned 200 (no Range support) ----------------
+    # If the client didn't ask for Range either, just pass the full body.
+    if not range_header:
+        headers = {"Accept-Ranges": "bytes"}
+        if ct:
+            headers["Content-Type"] = ct
+        if total_size is not None:
+            headers["Content-Length"] = str(total_size)
+
+        def _iter_full():
+            try:
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    yield chunk
+            finally:
+                resp.close()
+                client.close()
+
+        return StreamingResponse(
+            _iter_full(),
+            status_code=200,
+            headers=headers,
+            media_type=ct or "application/octet-stream",
+        )
+
+    # Client requested Range but upstream ignored it — synthesise 206.
+    import re as _re
+    m = _re.match(r"bytes=(\d+)-(\d*)", range_header)
+    if not m:
+        resp.close(); client.close()
+        raise HTTPException(status_code=416, detail="Malformed Range header")
+
+    range_start = int(m.group(1))
+    range_end = int(m.group(2)) if m.group(2) else (total_size - 1 if total_size else None)
+
+    if total_size and range_start >= total_size:
+        resp.close(); client.close()
+        raise HTTPException(status_code=416, detail="Range start beyond file size")
+
+    if range_end is None:
+        # Unknown total — stream from offset, skip leading bytes
+        def _iter_skip():
+            try:
+                skipped = 0
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if skipped + len(chunk) <= range_start:
+                        skipped += len(chunk)
+                        continue
+                    if skipped < range_start:
+                        offset = range_start - skipped
+                        yield chunk[offset:]
+                        skipped += len(chunk)
+                    else:
+                        yield chunk
+            finally:
+                resp.close()
+                client.close()
+
+        return StreamingResponse(
+            _iter_skip(),
+            status_code=200,
+            headers={"Accept-Ranges": "bytes", "Content-Type": ct or "application/octet-stream"},
+            media_type=ct or "application/octet-stream",
+        )
+
+    # Known total — return proper 206 with Content-Range
+    content_length = range_end - range_start + 1
+
+    def _iter_range():
         try:
+            skipped = 0
+            sent = 0
             for chunk in resp.iter_bytes(chunk_size=65536):
-                yield chunk
+                chunk_end = skipped + len(chunk)
+                # Entirely before range_start — skip
+                if chunk_end <= range_start:
+                    skipped += len(chunk)
+                    continue
+                # Compute the slice of this chunk we need
+                start_in_chunk = max(0, range_start - skipped)
+                end_in_chunk = min(len(chunk), range_end + 1 - skipped)
+                portion = chunk[start_in_chunk:end_in_chunk]
+                if portion:
+                    yield portion
+                    sent += len(portion)
+                skipped += len(chunk)
+                # Past range_end — stop
+                if skipped > range_end:
+                    break
         finally:
             resp.close()
-            if hasattr(resp, "_client"):
-                resp._client.close()
+            client.close()
 
     return StreamingResponse(
-        _iter(),
-        status_code=200,
-        headers=headers,
+        _iter_range(),
+        status_code=206,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Type": ct or "application/octet-stream",
+            "Content-Length": str(content_length),
+            "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
+        },
         media_type=ct or "application/octet-stream",
     )

@@ -43,6 +43,9 @@ SHEET_ID_PATTERN = re.compile(
     r"docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]+)"
 )
 
+# Regex to extract GID from URL fragment (#gid=...) or query param (?gid=...)
+_URL_GID_PATTERN = re.compile(r"[#?&]gid=(\d+)")
+
 # Regex to extract title
 TITLE_PATTERN = re.compile(r"<title>([^<]+)</title>", re.IGNORECASE)
 
@@ -121,6 +124,15 @@ def _infer_artist_name(title: str) -> str:
 # GID discovery
 # ---------------------------------------------------------------------------
 
+def _extract_gid_from_url(url: str) -> str | None:
+    """Extract a sheet GID from the URL fragment or query params.
+
+    Handles: #gid=123, ?gid=123, &gid=123
+    """
+    m = _URL_GID_PATTERN.search(url)
+    return m.group(1) if m else None
+
+
 def _discover_gids(html: str) -> list[str]:
     """Extract sheet GIDs from the htmlview page HTML/JS.
 
@@ -135,6 +147,28 @@ def _discover_gids(html: str) -> list[str]:
             seen.add(gid)
             unique.append(gid)
     return unique
+
+
+def _infer_artist_from_sheet(html: str) -> str | None:
+    """Try to infer artist name from sheet content (header row era names).
+
+    For multi-sheet workbooks, the page <title> may not match the actual
+    sheet content. This looks at era headers for clues.
+    """
+    # Look for sheet tab names in the HTML
+    # Google Sheets htmlview includes sheet names in the page
+    tab_pattern = re.compile(r'class="[^"]*sheet-tab[^"]*"[^>]*>([^<]+)<', re.I)
+    tabs = tab_pattern.findall(html)
+    if tabs:
+        # The sheet tab name often contains the artist name
+        for tab in tabs:
+            cleaned = tab.strip()
+            for suffix in TITLE_SUFFIXES:
+                if cleaned.endswith(suffix):
+                    cleaned = cleaned[:-len(suffix)].strip()
+            if cleaned and len(cleaned) > 1:
+                return cleaned
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +248,10 @@ def fetch_sheet_html(
     """
     url = _normalize_url(url)
 
+    # Extract GID from URL fragment/query if not explicitly provided
+    if not gid:
+        gid = _extract_gid_from_url(url)
+
     # Check cache first
     if use_cache and cache_ttl > 0:
         cached = _get_cached(url, cache_ttl)
@@ -269,11 +307,11 @@ def fetch_sheet_html(
                     if use_cache:
                         _set_cache(url, r.text, title)
                     return r.text, title
-            except Exception as e:
+            except (httpx.HTTPError, ValueError, KeyError) as e:
                 last_error = e
                 continue
 
-        raise ValueError(
+        raise NoTablesError(
             f"No valid sheet data found at {url}. "
             f"Tried GIDs: {gids}. Last error: {last_error}"
         )
@@ -306,40 +344,159 @@ def fetch_and_parse(
     html, title = fetch_sheet_html(url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache)
 
     if not artist_name:
+        # Try to infer from page title first, then from sheet content
         artist_name = _infer_artist_name(title)
+        # For multi-sheet workbooks the title may belong to a different sheet.
+        # Check if the sheet HTML itself has a better artist indicator
+        # (e.g. a different sheet tab name).
+        sheet_artist = _infer_artist_from_sheet(html)
+        if sheet_artist and sheet_artist.lower() != artist_name.lower():
+            # The sheet content suggests a different artist — prefer it
+            artist_name = sheet_artist
 
     artist = parse_sheet(html, artist_name)
     artist.source_url = url
     return artist
 
 
-def fetch_links_file(
-    links_path: Path | str,
+# ---------------------------------------------------------------------------
+# Typed fetch errors for granular API error handling
+# ---------------------------------------------------------------------------
+
+class FetchError(Exception):
+    """Base class for fetch errors."""
+    pass
+
+
+class NetworkError(FetchError):
+    """URL is unreachable or timed out."""
+    pass
+
+
+class NoTablesError(FetchError):
+    """HTML was fetched but contains no <table> elements."""
+    pass
+
+
+class ParseError(FetchError):
+    """HTML parsed but produced 0 eras or otherwise invalid data."""
+    pass
+
+
+class InvalidURLError(FetchError):
+    """URL is malformed or not a valid tracker URL."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Async variants
+# ---------------------------------------------------------------------------
+
+async def async_fetch_sheet_html(
+    url: str,
     *,
+    gid: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
-) -> list[Artist]:
-    """Parse all URLs from a links.txt file.
+    cache_ttl: float = DEFAULT_CACHE_TTL,
+    use_cache: bool = True,
+) -> tuple[str, str]:
+    """Async version of fetch_sheet_html — uses httpx.AsyncClient."""
+    url = _normalize_url(url)
 
-    Args:
-        links_path: Path to the links file (one URL per line).
-        timeout: HTTP timeout per URL.
+    # Extract GID from URL fragment/query if not explicitly provided
+    if not gid:
+        gid = _extract_gid_from_url(url)
 
-    Returns:
-        List of parsed Artist objects.
-    """
-    path = Path(links_path)
-    if not path.exists():
-        return []
+    # Check cache first (file I/O is fast enough sync)
+    if use_cache and cache_ttl > 0:
+        cached = _get_cached(url, cache_ttl)
+        if cached is not None:
+            return cached
 
-    artists: list[Artist] = []
-    for line in path.read_text().splitlines():
-        url = line.strip()
-        if not url or url.startswith("#"):
-            continue
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=timeout,
+        headers={"User-Agent": USER_AGENT},
+    ) as client:
         try:
-            artist = fetch_and_parse(url, timeout=timeout)
-            artists.append(artist)
-        except Exception as e:
-            print(f"Warning: Failed to fetch {url}: {e}")
+            if gid:
+                sheet_url = _build_sheet_html_url(url, gid)
+                r = await client.get(sheet_url)
+                r.raise_for_status()
+                title_match = TITLE_PATTERN.search(r.text)
+                title = title_match.group(1) if title_match else ""
+                if use_cache:
+                    _set_cache(url, r.text, title)
+                return r.text, title
 
-    return artists
+            # Step 1: Fetch the base page
+            r = await client.get(url)
+            r.raise_for_status()
+            base_html = r.text
+            title_match = TITLE_PATTERN.search(base_html)
+            title = title_match.group(1) if title_match else ""
+
+            if "<table" in base_html.lower():
+                if use_cache:
+                    _set_cache(url, base_html, title)
+                return base_html, title
+
+            # Step 2: Discover GIDs
+            gids = _discover_gids(base_html)
+            if not gids:
+                gids = ["0"]
+
+            # Step 3: Try each GID
+            last_error = None
+            for try_gid in gids:
+                try:
+                    sheet_url = _build_sheet_html_url(url, try_gid)
+                    r = await client.get(sheet_url)
+                    if r.status_code == 200 and "<table" in r.text.lower():
+                        if use_cache:
+                            _set_cache(url, r.text, title)
+                        return r.text, title
+                except (httpx.HTTPError, ValueError, KeyError) as e:
+                    last_error = e
+                    continue
+
+            raise NoTablesError(
+                f"No valid sheet data found at {url}. "
+                f"Tried GIDs: {gids}. Last error: {last_error}"
+            )
+
+        except httpx.TimeoutException as e:
+            raise NetworkError(f"Request timed out: {e}") from e
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Cannot connect to {url}: {e}") from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise InvalidURLError(f"URL not found (404): {url}") from e
+            raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+
+
+async def async_fetch_and_parse(
+    url: str,
+    *,
+    artist_name: str | None = None,
+    gid: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    cache_ttl: float = DEFAULT_CACHE_TTL,
+    use_cache: bool = True,
+) -> Artist:
+    """Async version of fetch_and_parse."""
+    html, title = await async_fetch_sheet_html(
+        url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+    )
+
+    if not artist_name:
+        artist_name = _infer_artist_name(title)
+        sheet_artist = _infer_artist_from_sheet(html)
+        if sheet_artist and sheet_artist.lower() != artist_name.lower():
+            artist_name = sheet_artist
+
+    artist = parse_sheet(html, artist_name)
+    if not artist.eras:
+        raise ParseError(f"Parsing produced 0 eras for {url}")
+    artist.source_url = url
+    return artist

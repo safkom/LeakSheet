@@ -6,6 +6,7 @@ const props = defineProps({
   songs: Array,
   artistName: String,
   eraName: String,
+  eraArt: String,
 })
 
 const expandedSong = ref(null)
@@ -25,6 +26,7 @@ function toggleSong(index) {
       :expanded="expandedSong === index"
       :artist-name="artistName"
       :era-name="eraName"
+      :era-art="eraArt"
       @toggle="toggleSong(index)"
     />
   </div>

@@ -1,5 +1,10 @@
 /**
- * LeakSheet API client — thin wrapper around fetch().
+ * LeakSheet API client.
+ *
+ * POST /api/sheet  { url, artist_name?, use_cache?, force_refresh? } → full Artist JSON
+ * GET  /api/image-proxy?url=... → proxied images (CORS bypass)
+ * GET  /api/stream?url=... → proxied audio (CORS bypass)
+ * POST /api/cache/clear → clear fetch cache
  */
 
 const BASE = '/api'
@@ -16,30 +21,17 @@ async function request(path, options = {}) {
   return res.json()
 }
 
-/** POST /api/parse — parse a tracker URL */
-export function parseTracker(url, artistName = null) {
-  return request('/parse', {
+/**
+ * POST /api/sheet — parse a tracker URL and return full Artist data.
+ */
+export function parseSheet(url, { artistName = null, useCache = true, forceRefresh = false } = {}) {
+  return request('/sheet', {
     method: 'POST',
-    body: JSON.stringify({ url, artist_name: artistName }),
+    body: JSON.stringify({
+      url,
+      artist_name: artistName,
+      use_cache: useCache,
+      force_refresh: forceRefresh,
+    }),
   })
-}
-
-/** GET /api/artists — list all loaded artists */
-export function listArtists() {
-  return request('/artists')
-}
-
-/** GET /api/artists/:slug — full artist data with eras */
-export function getArtist(slug) {
-  return request(`/artists/${slug}`)
-}
-
-/** GET /api/artists/:slug/eras/:index — single era with songs */
-export function getEra(slug, eraIndex) {
-  return request(`/artists/${slug}/eras/${eraIndex}`)
-}
-
-/** GET /api/search?q=... — full-text search */
-export function searchSongs(query) {
-  return request(`/search?q=${encodeURIComponent(query)}`)
 }
