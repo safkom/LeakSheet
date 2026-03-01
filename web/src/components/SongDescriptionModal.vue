@@ -1,6 +1,14 @@
 <script setup>
 import { computed } from 'vue'
-import { artProxyUrl } from '../composables/usePlayer.js'
+import { artProxyUrl } from '../composables/usePlayer'
+import {
+  Dialog,
+  DialogScrollContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 
 const props = defineProps({
   song: Object,
@@ -13,6 +21,10 @@ const props = defineProps({
 const artSrc = computed(() => props.eraArt ? artProxyUrl(props.eraArt) : null)
 
 const emit = defineEmits(['close'])
+
+function handleOpenChange(open) {
+  if (!open) emit('close')
+}
 
 const v = computed(() => props.version || props.song?.versions?.[0])
 
@@ -59,28 +71,27 @@ const details = computed(() => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="modal-backdrop" @click="emit('close')">
-      <div class="modal-content" @click.stop>
-        <!-- Art Header -->
-        <div v-if="artSrc" class="modal-art-header">
-          <img :src="artSrc" class="modal-art-img" alt="" />
-          <div class="modal-art-overlay"></div>
-          <div class="modal-art-info">
-            <span v-if="badgeInfo" class="modal-badge">{{ badgeInfo.emoji }} {{ badgeInfo.label }}</span>
-            <span v-if="eraName" class="modal-era-label">{{ eraName }}</span>
-          </div>
+  <Dialog :open="true" @update:open="handleOpenChange">
+    <DialogScrollContent class="!max-w-[520px] !p-0 !border-white/10 !bg-[#1a1e26] !overflow-y-auto !rounded-xl">
+      <!-- Art Header -->
+      <div v-if="artSrc" class="modal-art-header">
+        <img :src="artSrc" class="modal-art-img" alt="" />
+        <div class="modal-art-overlay"></div>
+        <div class="modal-art-info">
+          <Badge v-if="badgeInfo" variant="secondary" class="!bg-white/15 !text-white !border-transparent text-[11px] !rounded-[4px]">
+            {{ badgeInfo.emoji }} {{ badgeInfo.label }}
+          </Badge>
+          <span v-if="eraName" class="text-xs text-white/70 font-medium">{{ eraName }}</span>
         </div>
+      </div>
 
-        <div class="modal-body">
-        <div class="modal-header">
-          <h3 class="modal-title">{{ displayName }}</h3>
-          <button class="modal-close" @click="emit('close')">
-            <svg viewBox="0 0 16 16" width="16" height="16">
-              <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
-            </svg>
-          </button>
-        </div>
+      <div class="p-6">
+        <DialogHeader class="mb-5 !text-left">
+          <DialogTitle class="!text-lg !font-bold !leading-tight">{{ displayName }}</DialogTitle>
+          <DialogDescription :class="artSrc ? 'sr-only' : 'text-sm text-muted-foreground'">
+            {{ eraName || displayName }}
+          </DialogDescription>
+        </DialogHeader>
 
         <!-- Credits -->
         <div v-if="credits.length" class="modal-section">
@@ -125,47 +136,16 @@ const details = computed(() => {
             <a :href="link" target="_blank" rel="noopener">{{ link }}</a>
           </div>
         </div>
-        </div><!-- .modal-body -->
       </div>
-    </div>
-  </Teleport>
+    </DialogScrollContent>
+  </Dialog>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9000;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  animation: fade-in 0.15s ease;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.modal-content {
-  background: #1a1e26;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  max-width: 520px;
-  width: 100%;
-  max-height: 80vh;
-  overflow-y: auto;
-  animation: modal-in 0.2s ease;
-}
-
 .modal-art-header {
   position: relative;
   height: 140px;
   overflow: hidden;
-  border-radius: 12px 12px 0 0;
 }
 
 .modal-art-img {
@@ -189,63 +169,6 @@ const details = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.modal-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-}
-
-.modal-era-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
-}
-
-.modal-body {
-  padding: 24px;
-}
-
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.modal-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.modal-title {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.3;
-}
-
-.modal-close {
-  flex-shrink: 0;
-  color: var(--text-dim);
-  padding: 4px;
-  border-radius: 6px;
-  transition: all 0.1s;
-}
-
-.modal-close:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.1);
 }
 
 .modal-section {
@@ -321,7 +244,7 @@ const details = computed(() => {
 
 .link-item a {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-color);
   word-break: break-all;
   line-height: 1.6;
 }

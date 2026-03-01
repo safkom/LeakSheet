@@ -7,8 +7,8 @@ direct audio stream URLs.  Supported hosts:
     https://pillows.su/f/{id}  →  https://api.pillows.su/api/get/{id}
 
   imgur.gg / temp.imgur.gg
-    https://temp.imgur.gg/f/{id}  →  https://temp.imgur.gg/api/file/{id}/download
-    https://imgur.gg/f/{id}       →  https://imgur.gg/api/file/{id}/download
+    https://temp.imgur.gg/f/{id}  →  fetch /api/file/{id} JSON  →  cdnUrl
+    https://imgur.gg/f/{id}       →  fetch /api/file/{id} JSON  →  cdnUrl
 
   music.froste.lol
     https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/download
@@ -39,33 +39,8 @@ _FROSTE_PATTERN = re.compile(
     r"https?://music\.froste\.lol/song/([a-f0-9]+)",
 )
 
-def resolve_stream_url(link: str) -> str | None:
-    """Convert a file-sharing link to a direct audio stream URL.
-
-    Returns the API URL if the link matches a known host, else None.
-    """
-    m = _PILLOWS_PATTERN.match(link)
-    if m:
-        file_id = m.group(2)
-        # Both pillows.su and pillowcase.su use api.pillows.su
-        return f"https://api.pillows.su/api/get/{file_id}"
-
-    m = _IMGUR_PATTERN.match(link)
-    if m:
-        domain = m.group(1)  # "imgur.gg" or "temp.imgur.gg"
-        file_id = m.group(2)
-        return f"https://{domain}/api/file/{file_id}/download"
-
-    m = _FROSTE_PATTERN.match(link)
-    if m:
-        song_hash = m.group(1)
-        return f"https://music.froste.lol/song/{song_hash}/download"
-
-    return None
-
-
 # ---------------------------------------------------------------------------
-# Proxy streaming — fetches audio from upstream and yields chunks
+# Constants
 # ---------------------------------------------------------------------------
 
 _STREAM_TIMEOUT = 30.0
@@ -79,6 +54,103 @@ _AUDIO_MIMES = {
     "binary/octet-stream",
 }
 
+def resolve_stream_url(link: str) -> str | None:
+    """Convert a file-sharing link to a direct audio stream URL.
+
+    Returns the API URL if the link matches a known host, else None.
+    For imgur.gg, returns the metadata API URL (caller must resolve CDN via
+    ``resolve_imgur_cdn_url``).
+    """
+    m = _PILLOWS_PATTERN.match(link)
+    if m:
+        file_id = m.group(2)
+        # Both pillows.su and pillowcase.su use api.pillows.su
+        return f"https://api.pillows.su/api/get/{file_id}"
+
+    m = _IMGUR_PATTERN.match(link)
+    if m:
+        file_id = m.group(2)
+        # Always use temp.imgur.gg — imgur.gg API returns 404
+        return f"https://temp.imgur.gg/api/file/{file_id}"
+
+    m = _FROSTE_PATTERN.match(link)
+    if m:
+        song_hash = m.group(1)
+        return f"https://music.froste.lol/song/{song_hash}/download"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# imgur.gg CDN URL resolution
+# ---------------------------------------------------------------------------
+
+_IMGUR_API_PATTERN = re.compile(
+    r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/api/file/([A-Za-z0-9_-]+)$",
+)
+
+
+def is_imgur_api_url(url: str) -> bool:
+    """Return True if *url* is an imgur.gg metadata API endpoint."""
+    return _IMGUR_API_PATTERN.match(url) is not None
+
+
+def resolve_imgur_cdn_url(api_url: str) -> str:
+    """Fetch imgur.gg file metadata and return the CDN stream URL.
+
+    Tries the given URL first; if it fails and the domain isn't already
+    temp.imgur.gg, retries with temp.imgur.gg (the only domain whose
+    API reliably works).
+
+    Args:
+        api_url: e.g. ``https://temp.imgur.gg/api/file/wGLEqSB``
+
+    Returns:
+        The ``cdnUrl`` from the JSON response.
+
+    Raises ValueError on network or API errors.
+    """
+    urls_to_try = [api_url]
+    # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
+    if "://imgur.gg/" in api_url or "://www.imgur.gg/" in api_url:
+        fallback = api_url.replace("://imgur.gg/", "://temp.imgur.gg/").replace(
+            "://www.imgur.gg/", "://temp.imgur.gg/"
+        )
+        urls_to_try.append(fallback)
+
+    last_err: Exception | None = None
+    for url in urls_to_try:
+        try:
+            with httpx.Client(
+                timeout=10,
+                follow_redirects=True,
+                headers={"User-Agent": _STREAM_USER_AGENT},
+            ) as client:
+                resp = client.get(url)
+                if resp.status_code != 200:
+                    last_err = ValueError(
+                        f"imgur.gg API returned {resp.status_code} for {url}"
+                    )
+                    continue
+                data = resp.json()
+                cdn_url = data.get("cdnUrl")
+                if not cdn_url:
+                    last_err = ValueError(
+                        f"imgur.gg API response missing cdnUrl: {url}"
+                    )
+                    continue
+                return cdn_url
+        except httpx.HTTPError as exc:
+            last_err = ValueError(f"imgur.gg API request failed: {exc}")
+            continue
+
+    raise last_err  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Proxy streaming — fetches audio from upstream and yields chunks
+# ---------------------------------------------------------------------------
+
 
 def _is_audio_content_type(ct: str) -> bool:
     """Return True if content-type looks like audio or binary."""
@@ -91,6 +163,9 @@ def stream_audio(
 ) -> tuple[httpx.Response, httpx.Client]:
     """Open a streaming connection to the resolved audio URL.
 
+    For imgur.gg metadata URLs, first resolves the CDN URL via the API,
+    then streams from the CDN.
+
     Args:
         stream_url: The resolved API URL to stream from.
         range_header: Optional HTTP Range header to forward (e.g. "bytes=0-1024").
@@ -99,6 +174,10 @@ def stream_audio(
 
     Raises ValueError if upstream returns non-audio content.
     """
+    # imgur.gg: resolve metadata API → CDN URL first
+    if is_imgur_api_url(stream_url):
+        stream_url = resolve_imgur_cdn_url(stream_url)
+
     req_headers = {"User-Agent": _STREAM_USER_AGENT}
     if range_header:
         req_headers["Range"] = range_header

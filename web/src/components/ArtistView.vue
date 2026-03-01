@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
-import { getEraColors } from '../composables/useEraColors.js'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { getEraColors } from '../composables/useEraColors'
 
 const props = defineProps({
   artist: Object,
@@ -26,6 +28,10 @@ watch(searchQuery, (val) => {
   _debounceTimer = setTimeout(() => {
     debouncedQuery.value = val
   }, 200)
+})
+
+onUnmounted(() => {
+  clearTimeout(_debounceTimer)
 })
 
 const eras = computed(() => props.artist?.eras || [])
@@ -87,6 +93,29 @@ function filteredSongs(era) {
   return songs.filter(song => songMatchesQuery(song, q))
 }
 
+/** Return sections for an era, preserving section structure for dividers */
+function eraSections(era) {
+  if (!era.sections?.length) return []
+  const q = debouncedQuery.value.trim().toLowerCase()
+  const filtering = bestOf.value || q
+
+  if (!filtering) return era.sections
+
+  // When filtering, still preserve section structure but filter songs within
+  return era.sections
+    .map(sec => {
+      let songs = sec.songs || []
+      if (bestOf.value) songs = songs.filter(isBestOfSong)
+      if (q) {
+        const eraNameMatch = era.name.toLowerCase().includes(q) ||
+          era.alt_names?.some(alt => alt.toLowerCase().includes(q))
+        if (!eraNameMatch) songs = songs.filter(song => songMatchesQuery(song, q))
+      }
+      return { ...sec, songs }
+    })
+    .filter(sec => sec.songs.length > 0)
+}
+
 const isSearching = computed(() => debouncedQuery.value.trim().length > 0)
 
 /** Flat list of individual version results for search mode (Issues 6+7) */
@@ -98,6 +127,8 @@ const flatSearchResults = computed(() => {
   for (const era of eras.value) {
     const songs = eraSongs(era)
     for (const song of songs) {
+      // Apply best-of filter if active
+      if (bestOf.value && !isBestOfSong(song)) continue
       if (songMatchesQuery(song, q)) {
         for (const version of (song.versions || [])) {
           results.push({ song, version, era })
@@ -119,7 +150,7 @@ function eraColorStyle(era) {
   }
   return {
     background: 'rgba(78,205,196,0.15)',
-    color: 'var(--accent)',
+    color: 'var(--accent-color)',
     borderColor: 'rgba(78,205,196,0.3)',
   }
 }
@@ -136,16 +167,14 @@ function isEraExpanded(eraName) {
 
 function toggleBestOf() {
   bestOf.value = !bestOf.value
-  recents.value = false
-  if (!bestOf.value) {
+  if (!bestOf.value && !recents.value) {
     expandedEra.value = null
   }
 }
 
 function toggleRecents() {
   recents.value = !recents.value
-  bestOf.value = false
-  if (!recents.value) {
+  if (!recents.value && !bestOf.value) {
     expandedEra.value = null
   }
 }
@@ -182,10 +211,15 @@ function _parseLeakDate(dateStr) {
 const recentResults = computed(() => {
   if (!recents.value) return []
 
+  const q = debouncedQuery.value.trim().toLowerCase()
   const results = []
   for (const era of eras.value) {
     const songs = eraSongs(era)
     for (const song of songs) {
+      // Apply best-of filter if active
+      if (bestOf.value && !isBestOfSong(song)) continue
+      // Apply search filter if active
+      if (q && !songMatchesQuery(song, q)) continue
       for (const version of (song.versions || [])) {
         const leakDate = version.leak_date || version.file_date
         if (leakDate) {
@@ -217,32 +251,34 @@ const recentResults = computed(() => {
         <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14">
           <path fill="currentColor" d="M11.5 7a4.499 4.499 0 1 1-8.998 0A4.499 4.499 0 0 1 11.5 7zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04z"/>
         </svg>
-        <input
+        <Input
           v-model="searchQuery"
           type="text"
-          class="search-input"
+          class="search-input !border-0 !bg-transparent !ring-0 !ring-offset-0 !h-auto !rounded-none !p-0 !shadow-none focus-visible:!ring-0 focus-visible:!ring-offset-0"
           placeholder="Search songs, artists, producers..."
         />
-        <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">
+        <Button v-if="searchQuery" variant="ghost" size="icon" class="search-clear !h-6 !w-6 !p-0" @click="searchQuery = ''">
           <svg viewBox="0 0 16 16" width="12" height="12">
             <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
           </svg>
-        </button>
-        <button class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" title="Best Of">
+        </Button>
+        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" title="Best Of">
           <span class="best-of-star">&#11088;</span>
-        </button>
-        <button class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" title="Recently Added">
+        </Button>
+        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" title="Recently Added">
           <svg viewBox="0 0 16 16" width="16" height="16" style="opacity: inherit">
             <path fill="currentColor" d="M1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0zM8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.87V4.75z"/>
           </svg>
-        </button>
+        </Button>
       </div>
     </div>
 
     <!-- Recents view: flat list sorted by leak date -->
+    <!-- Recents view: flat list sorted by leak date (optionally filtered by search + best-of) -->
     <template v-if="recents">
       <div v-if="recentResults.length === 0" class="no-results">
-        No entries with leak dates found
+        <template v-if="isSearching">No recent entries matching "{{ searchQuery }}"</template>
+        <template v-else>No entries with leak dates found</template>
       </div>
       <div v-else class="search-results">
         <div
@@ -267,7 +303,7 @@ const recentResults = computed(() => {
       </div>
     </template>
 
-    <!-- Search results: flat version list -->
+    <!-- Search results: flat version list (optionally filtered by best-of) -->
     <template v-else-if="isSearching">
       <div v-if="flatSearchResults.length === 0" class="no-results">
         No results for "{{ searchQuery }}"
@@ -294,21 +330,20 @@ const recentResults = computed(() => {
 
     <!-- Normal era browsing -->
     <div v-else class="eras-list">
-      <div v-for="era in filteredEras" :key="era.name" class="era-block">
+      <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block">
         <EraCard
           :era="era"
           :expanded="isEraExpanded(era.name)"
+          :index="eraIdx"
+          :sticky="isEraExpanded(era.name)"
           @click="toggleEra(era.name)"
         />
 
         <!-- Expanded songs panel -->
         <Transition name="slide">
           <div v-if="isEraExpanded(era.name)" class="era-songs-panel">
-            <!-- Sticky header label -->
-            <div class="era-sticky-header">
-              <span class="era-sticky-name">{{ era.name }}</span>
-            </div>
             <SongList
+              :sections="eraSections(era)"
               :songs="filteredSongs(era)"
               :artist-name="artist.name"
               :era-name="era.name"
@@ -354,7 +389,7 @@ const recentResults = computed(() => {
   align-items: center;
   gap: 8px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 8px 14px;
   transition: border-color 0.15s;
@@ -371,9 +406,6 @@ const recentResults = computed(() => {
 
 .search-input {
   flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
   font-size: 14px;
   color: var(--text-primary);
 }
@@ -384,9 +416,6 @@ const recentResults = computed(() => {
 
 .search-clear {
   color: var(--text-dim);
-  padding: 2px;
-  border-radius: 4px;
-  transition: color 0.1s;
   flex-shrink: 0;
 }
 
@@ -396,28 +425,18 @@ const recentResults = computed(() => {
 
 .best-of-toggle {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  transition: all 0.15s;
-  cursor: pointer;
   opacity: 0.5;
+  border: 1px solid transparent !important;
 }
 
 .best-of-toggle:hover {
   opacity: 0.8;
-  background: rgba(255, 255, 255, 0.05);
 }
 
 .best-of-toggle.active {
   opacity: 1;
-  background: rgba(255, 215, 0, 0.12);
-  border-color: rgba(255, 215, 0, 0.3);
+  background: rgba(255, 215, 0, 0.12) !important;
+  border-color: rgba(255, 215, 0, 0.3) !important;
 }
 
 .best-of-star {
@@ -440,35 +459,10 @@ const recentResults = computed(() => {
 
 .era-songs-panel {
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--accent);
+  border: 1px solid var(--border-color);
+  border-top: 2px solid var(--accent-color);
   border-radius: 0 0 12px 12px;
   padding: 0 16px 16px;
-}
-
-/* Sticky label header within expanded era */
-.era-sticky-header {
-  position: sticky;
-  top: var(--header-height);
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 0;
-  margin-bottom: 4px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.era-sticky-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Transition */

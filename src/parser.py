@@ -174,6 +174,7 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
         if paren_idx > 0:
             raw = raw[:paren_idx]
         key = raw.strip().lower()
+        key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
 
         canonical = COLUMN_ALIASES.get(key)
 
@@ -197,8 +198,22 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
 
 # Pattern for era stats rows, e.g. "0 OG File(s)1 Full0 Tagged2 Partial..."
 # or "1 Total Full0 OG File0 Partial / Cut0 Snippet3 Unavailable" (Carti)
+# Also matches variant formats found across 400+ trackers:
+#   - "3 of Leaks\n0 of Snippets" (Billie Eilish)
+#   - "0 Streaming | 1 Off-Streaming" (Joji)
+#   - "27 tracks" (Gucci Mane, Chief Keef)
+#   - "0 Released | 1 Deleted | 5 Lost" (XXXTENTACION)
+#   - "5 Leaks\n2 Snippets" (common template variant)
 ERA_STATS_PATTERN = re.compile(
-    r"\d+\s+(OG File|Total Full|Full|Tagged|Partial|Snippet|Stem|Unavailable)",
+    r"\d+\s+"
+    r"("
+    r"OG File|Total Full|Full|Tagged|Partial|Snippet|Stem|Unavailable"
+    r"|of Leaks|of Snippets|of Partials|of Recordings|of Unavailable|of Full"
+    r"|Leaks?|Snippets?|Partials?"
+    r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
+    r"|tracks?|songs?"
+    r"|Released|Deleted|Lost|Privated"
+    r")",
     re.IGNORECASE,
 )
 
@@ -215,6 +230,50 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     return bool(ERA_STATS_PATTERN.search(row[0].text))
+
+
+def _looks_like_era_name(text: str) -> bool:
+    """Check if text looks like a plausible era name (not an announcement/footer).
+
+    Era names are typically short (1-8 words) like "Rap Hard", "Barter 7",
+    "Birds in the Trap". Announcements are long multi-line texts like
+    "MASS KENDRICK/KEEM GB THAT INCLUDES: ..."
+    Footer labels like "Links" or "Changelog" are also excluded.
+    """
+    # Multi-line blocks (3+ lines) are almost always announcements
+    lines = [l for l in text.split("\n") if l.strip()]
+    if len(lines) >= 3:
+        return False
+
+    # Take the first line only
+    first_line = lines[0].strip() if lines else text.strip()
+    # Strip parenthetical suffix for length check
+    paren_idx = first_line.find("(")
+    if paren_idx > 0:
+        first_line = first_line[:paren_idx].strip()
+
+    words = first_line.split()
+    # Too long or too many words → announcement
+    if len(words) > 10 or len(first_line) > 80:
+        return False
+    # Ends with colon → announcement/label
+    if first_line.endswith(":"):
+        return False
+
+    # Known non-era labels that appear in the era column
+    non_era = {
+        "links", "link", "changelog", "changelogs", "notes",
+        "tracker guidelines", "guidelines", "discord", "credits",
+        "editors", "current editors", "update notes", "resources",
+        "template", "template:", "about", "info", "key", "legend",
+        "recent additions", "what's new", "what's new?",
+    }
+    if first_line.lower() in non_era:
+        return False
+    # Contains "tracker" → likely a header/label, not an era
+    if "tracker" in first_line.lower():
+        return False
+    return len(words) >= 1
 
 
 def _is_section_separator(row: list[_Cell]) -> bool:
@@ -269,12 +328,18 @@ def _era_match_key(full_era_name: str) -> str:
     - "Ca$ino(Child With Wolves, Janice)" → "ca$ino"  (matches "CA$INO")
     - "Tu Pimp A Caterpillar [V1](...)" → "tu pimp a caterpillar"
     - "THC: The High Chronical$" → "thc: the high chronical$"
+    - "(Mollyworld, Balaclava Era)" → "mollyworld, balaclava era"
     """
     key = full_era_name
     # Strip from first '(' onward
     paren_idx = key.find("(")
     if paren_idx > 0:
         key = key[:paren_idx]
+    elif paren_idx == 0:
+        # Entire name is parenthetical — use content inside parens
+        close = key.find(")")
+        if close > 0:
+            key = key[1:close]
     key = key.strip()
     # Strip version tags like [V1], [V2], [V3]
     key = VERSION_TAG_PATTERN.sub("", key).strip()
@@ -369,6 +434,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Map from lowercased era matching key → Era object.
     # Keys are lowercase, parenthetical-stripped, version-tag-stripped.
     era_by_key: dict[str, Era] = {}
+    # Eras whose name cell had an image but no usable text — backfill from
+    # the first song row's era column.
+    _needs_name_backfill: set[int] = set()  # id(era) values
     in_footer = False
 
     # Parse metadata tracking
@@ -415,6 +483,20 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             art_url = None
             highlighted_producers: list[str] = []
             desc_candidates: list[str] = []
+
+            # Check name cell for images.
+            # If the cell also has usable text, the image is album art.
+            # If the cell has NO text (image-based era name like Carti's
+            # Narcissist logo), the image is the era name — not art.
+            name_cell = _get_cell(row, era_name_col)
+            name_text = name_cell.text.strip()
+            name_has_usable_text = bool(
+                name_text
+                and not (name_text.startswith("(") and name_text.endswith(")"))
+            )
+            if name_cell.images and name_has_usable_text:
+                art_url = name_cell.images[0]
+
             for i, cell in enumerate(row):
                 if i <= notes_col:
                     continue  # skip stats, name, timeline columns
@@ -435,19 +517,33 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             # Parse structured stats from raw text
             era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
 
-            if era_name_full:
-                era_key = _era_match_key(era_name_full)
+            # Split main name from alt names (newline-separated, alts in parens)
+            name_lines = era_name_full.split("\n") if era_name_full else [""]
+            era_name = name_lines[0].strip()
+            alt_names: list[str] = []
+            for _line in name_lines[1:]:
+                _line = _line.strip()
+                if _line.startswith("(") and _line.endswith(")"):
+                    _line = _line[1:-1].strip()
+                if _line:
+                    alt_names.append(_line)
 
-                # Split main name from alt names (newline-separated, alts in parens)
-                name_lines = era_name_full.split("\n")
-                era_name = name_lines[0].strip()
-                alt_names: list[str] = []
-                for _line in name_lines[1:]:
-                    _line = _line.strip()
-                    if _line.startswith("(") and _line.endswith(")"):
-                        _line = _line[1:-1].strip()
-                    if _line:
-                        alt_names.append(_line)
+            # Detect image-based era names: the name cell has an image
+            # but no usable text (empty, or purely parenthetical like
+            # "(Mollyworld, Balaclava Era)").  In that case the real era
+            # name will be backfilled from the first song row's era column.
+            needs_backfill = False
+            if not era_name or (era_name.startswith("(") and era_name.endswith(")")):
+                # Move parenthetical first-line to alt_names
+                if era_name.startswith("(") and era_name.endswith(")"):
+                    inner = era_name[1:-1].strip()
+                    if inner and inner not in alt_names:
+                        alt_names.insert(0, inner)
+                    era_name = ""
+                needs_backfill = True
+
+            if era_name or needs_backfill:
+                era_key = _era_match_key(era_name) if era_name else ""
 
                 current_era = Era(
                     name=era_name,
@@ -461,7 +557,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     sections=[Section()],  # default unnamed section
                 )
                 eras.append(current_era)
-                era_by_key[era_key] = current_era
+                if era_key:
+                    era_by_key[era_key] = current_era
+                if needs_backfill:
+                    _needs_name_backfill.add(id(current_era))
             continue
 
         # Footer detection: flag instead of break.
@@ -478,6 +577,25 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         # Check for song row: first cell should match a known era key
         era_col = col_map.get("era", 0)
         row_era = _get_cell_text(row, era_col)
+
+        # If current era needs name backfill (image-only header), assign
+        # this song row to it *before* the normal lookup — otherwise fuzzy
+        # matching can steal it for a similarly-named era (e.g. WLR [V3]
+        # swallowing WLR [V4] songs because version tags are stripped).
+        if (
+            row_era
+            and current_era is not None
+            and id(current_era) in _needs_name_backfill
+        ):
+            current_era.name = row_era
+            era_key = _era_match_key(row_era)
+            era_by_key[era_key] = current_era
+            _needs_name_backfill.discard(id(current_era))
+            version = _parse_song_row(row, col_map)
+            if version:
+                _add_version_to_era(current_era, version)
+                song_rows += 1
+            continue
 
         if row_era:
             # Case-insensitive exact lookup
@@ -498,19 +616,118 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     song_rows += 1
                 continue
 
-            # Fallback: assign to current_era if set (handles abbreviated
-            # era names that fuzzy matching couldn't resolve)
+            # No matching era found in era_by_key (exact or fuzzy).
+            # Two paths depending on whether we already have a current_era.
             if current_era is not None:
+                # There IS a current era from a previous header/auto-creation.
+                # Check if this row's era name is the same as current era (case-insensitive).
+                # If yes → assign. If different → auto-create a new era.
+                current_key = _era_match_key(current_era.name) if current_era.name else ""
+                row_key = _era_match_key(row_era)
+                if current_key and row_key == current_key:
+                    # Same era (abbreviated or exact) — assign to current
+                    version = _parse_song_row(row, col_map)
+                    if version:
+                        _add_version_to_era(current_era, version)
+                        song_rows += 1
+                    else:
+                        non_empty = [c for c in row if c.text.strip()]
+                        if len(non_empty) <= 3 and row_era:
+                            current_era.sections.append(Section(name=row_era))
+                    continue
+                else:
+                    # Different era name — auto-create a new era if plausible
+                    version = _parse_song_row(row, col_map)
+                    if version and _looks_like_era_name(row_era):
+                        era_key = _era_match_key(row_era)
+                        new_era = Era(name=row_era, sections=[Section()])
+                        eras.append(new_era)
+                        era_by_key[era_key] = new_era
+                        current_era = new_era
+                        _add_version_to_era(current_era, version)
+                        song_rows += 1
+                    elif version:
+                        # Not a plausible era name but has song data —
+                        # assign to current era as fallback
+                        _add_version_to_era(current_era, version)
+                        song_rows += 1
+                    else:
+                        # No song data — could be a sub-era section header
+                        # or a stats-less era header. Use heuristic: if very
+                        # few cells are filled, it's a section of current era.
+                        non_empty = sum(1 for c in row if c.text.strip())
+                        if non_empty <= 2 or not _looks_like_era_name(row_era):
+                            current_era.sections.append(Section(name=row_era))
+                        else:
+                            # Enough data to be an era header without stats
+                            era_key = _era_match_key(row_era)
+                            notes_idx = col_map.get("notes", 2)
+                            name_idx = col_map.get("name", 1)
+                            timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
+                            timeline = parse_timeline(timeline_raw) if timeline_raw else []
+                            new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
+                            eras.append(new_era)
+                            era_by_key[era_key] = new_era
+                            current_era = new_era
+                    continue
+            else:
+                # No current era at all — auto-create from this row.
+                # Handles trackers with no era headers (Young Thug, etc.)
+                if not _looks_like_era_name(row_era):
+                    # Skip non-era rows (announcements, footers, etc.)
+                    skipped_rows += 1
+                    if len(unmatched_rows) < 50:
+                        row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
+                        if row_text:
+                            unmatched_rows.append(f"Row {row_idx}: {row_text}")
+                    continue
+
                 version = _parse_song_row(row, col_map)
                 if version:
+                    era_key = _era_match_key(row_era)
+                    new_era = Era(name=row_era, sections=[Section()])
+                    eras.append(new_era)
+                    era_by_key[era_key] = new_era
+                    current_era = new_era
                     _add_version_to_era(current_era, version)
                     song_rows += 1
                 else:
-                    # No song data — likely a sub-era header (e.g. "Child Rebel Soldier",
-                    # "Pre-VMAs", "Features"). Capture as a named section.
-                    non_empty = [c for c in row if c.text.strip()]
-                    if len(non_empty) <= 3 and row_era:
-                        current_era.sections.append(Section(name=row_era))
+                    # No song data — stats-less era header (Kid Cudi style)
+                    era_key = _era_match_key(row_era)
+                    notes_idx = col_map.get("notes", 2)
+                    name_idx = col_map.get("name", 1)
+                    timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
+                    timeline = parse_timeline(timeline_raw) if timeline_raw else []
+                    new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
+                    eras.append(new_era)
+                    era_by_key[era_key] = new_era
+                    current_era = new_era
+                continue
+
+        # Sub-era section header OR name-column era header:
+        # era_col is empty but name_col has text, with very few filled cells.
+        # In Yung Lean, "Before Unknown Death" appears in the name column
+        # as an era header. In other trackers, this is a section label.
+        name_col_idx = col_map.get("name", 1)
+        name_val = _get_cell_text(row, name_col_idx)
+        if name_val:
+            non_empty = sum(1 for c in row if c.text.strip())
+            if non_empty <= 3:
+                if current_era is not None:
+                    # Check if subsequent rows use this value as their era key.
+                    # Simple heuristic: if the name_val appears later in the
+                    # era column, treat it as a new era. Otherwise, section.
+                    # For now, add as section — auto-era creation from the
+                    # era column will handle it if needed.
+                    current_era.sections.append(Section(name=name_val))
+                else:
+                    # No current era — create one from the name column.
+                    # This handles Yung Lean style trackers.
+                    era_key = _era_match_key(name_val)
+                    new_era = Era(name=name_val, sections=[Section()])
+                    eras.append(new_era)
+                    era_by_key[era_key] = new_era
+                    current_era = new_era
                 continue
 
         # Unmatched row — track it for diagnostics

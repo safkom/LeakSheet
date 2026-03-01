@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { addToQueue } from '../composables/usePlayer.js'
+import { addToQueue } from '../composables/usePlayer'
 
 const props = defineProps({
   x: Number,

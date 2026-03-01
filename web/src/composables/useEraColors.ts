@@ -4,12 +4,12 @@
  */
 import { reactive } from 'vue'
 
-const _cache = reactive(new Map())
+const _cache = reactive({})
 
 export function setEraColors(eraName, colors) {
-  _cache.set(eraName, colors)
+  _cache[eraName] = colors
 }
 
 export function getEraColors(eraName) {
-  return _cache.get(eraName) || null
+  return _cache[eraName] || null
 }

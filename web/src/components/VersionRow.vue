@@ -2,8 +2,9 @@
 import { computed, ref } from 'vue'
 import ContextMenu from './ContextMenu.vue'
 import SongDescriptionModal from './SongDescriptionModal.vue'
-import { playTrack, isStreamable, playerState } from '../composables/usePlayer.js'
-import { effectiveBadge, availabilityClass, BADGE_MAP } from '../composables/useUtils.js'
+import { Badge } from '@/components/ui/badge'
+import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
+import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
 
 const props = defineProps({
   version: Object,
@@ -15,9 +16,7 @@ const props = defineProps({
 
 const canStream = computed(() => isStreamable(props.version))
 
-const isCurrentTrack = computed(() => {
-  return playerState.track === props.version
-})
+const isCurrentTrack = computed(() => isTrackMatch(props.version))
 
 // Context menu state
 const contextMenu = ref(null)
@@ -60,7 +59,7 @@ const availBadge = computed(() => {
   const q = (props.version.quality || '').toLowerCase().trim()
   if (q && q !== 'not available' && q !== 'n/a') {
     if (['full', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
-      return { text: avail, cssClass: availabilityClass(avail) }
+      return { text: avail, variant: availabilityVariant(avail) }
     }
   }
   return null
@@ -80,36 +79,28 @@ const badgeEmoji = computed(() => {
     @click="handlePlay"
     @contextmenu="handleContextMenu"
   >
-    <div class="v-play streamable">
-      <svg v-if="isCurrentTrack && playerState.isPlaying" viewBox="0 0 16 16" width="12" height="12" class="eq-icon">
-        <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
-        <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
-        <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
-      </svg>
-      <svg v-else-if="!canStream" viewBox="0 0 16 16" width="12" height="12">
-        <path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75zM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
-      </svg>
-      <svg v-else viewBox="0 0 16 16" width="12" height="12">
-        <path fill="currentColor" d="M4 2l12 6-12 6z"/>
-      </svg>
-    </div>
-
     <div class="v-content">
       <!-- Title line -->
       <div class="v-title-line">
+        <!-- Equalizer when playing -->
+        <svg v-if="isCurrentTrack && playerState.isPlaying" viewBox="0 0 16 16" width="12" height="12" class="eq-icon inline-eq">
+          <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
+          <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
+          <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
+        </svg>
         <span v-if="badgeEmoji" class="v-badge">{{ badgeEmoji }}</span>
         <span class="v-title">{{ version.name }}</span>
         <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
-        <span v-if="badge" class="quality-badge" :class="badge.cssClass">{{ badge.text }}</span>
-        <span v-if="availBadge" class="avail-pill" :class="availBadge.cssClass">{{ availBadge.text }}</span>
+        <Badge v-if="badge" :variant="badge.variant">{{ badge.text }}</Badge>
+        <Badge v-if="availBadge" :variant="availBadge.variant">{{ availBadge.text }}</Badge>
       </div>
 
       <!-- Credits lines -->
       <div v-if="version.collaboration || version.featuring || version.producers || version.refs" class="v-credits">
-        <span v-if="version.collaboration" class="v-credit">(with {{ version.collaboration }})</span>
-        <span v-if="version.featuring" class="v-credit"> (feat. {{ version.featuring }})</span>
-        <span v-if="version.producers" class="v-credit prod"> (prod. {{ version.producers }})</span>
-        <span v-if="version.refs" class="v-credit ref"> (ref. {{ version.refs }})</span>
+        <span v-if="version.collaboration" class="v-credit v-credit-collab">with {{ version.collaboration }}</span>
+        <span v-if="version.featuring" class="v-credit v-credit-feat">feat. {{ version.featuring }}</span>
+        <span v-if="version.producers" class="v-credit v-credit-prod">prod. {{ version.producers }}</span>
+        <span v-if="version.refs" class="v-credit v-credit-ref">ref. {{ version.refs }}</span>
       </div>
 
       <div v-if="!hideAltTitles && version.alt_titles?.length" class="v-alt-titles">
@@ -153,50 +144,32 @@ const badgeEmoji = computed(() => {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 6px 6px;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s;
-  font-size: 12px;
+  gap: 0;
+  padding: 8px 8px;
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  font-size: 13px;
+  border: 1px solid transparent;
 }
 
 .version-row:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.v-play {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  transition: color 0.1s;
-  opacity: 0.35;
-  margin-top: 1px;
-}
-
-.v-play.streamable {
-  opacity: 1;
-}
-
-.version-row:hover .v-play {
-  color: var(--accent);
-  opacity: 1;
-}
-
-.version-row.playing .v-play {
-  color: var(--accent);
-  opacity: 1;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.03);
+  transform: translateX(2px);
 }
 
 .version-row.playing {
-  background: rgba(88,166,255,0.05);
+  background: rgba(88, 166, 255, 0.05);
+  border-color: rgba(88, 166, 255, 0.1);
+}
+
+.inline-eq {
+  flex-shrink: 0;
+  margin-right: 2px;
 }
 
 /* Equalizer animation */
-.eq-icon { color: var(--accent); }
+.eq-icon { color: var(--accent-color); }
 .eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
 .eq-1 { animation-delay: 0s; }
 .eq-2 { animation-delay: 0.2s; }
@@ -240,36 +213,61 @@ const badgeEmoji = computed(() => {
 
 .v-credits {
   font-size: 11px;
-  color: var(--text-secondary);
-  opacity: 0.6;
   line-height: 1.4;
   text-align: left;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
 }
 
-.v-credit.prod {
-  color: var(--text-dim);
+.v-credit {
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.v-credit.ref {
+.v-credit-collab {
+  color: var(--text-primary);
+}
+
+.v-credit-feat {
+  color: var(--text-primary);
+}
+
+.v-credit-prod {
+  color: var(--text-secondary);
+}
+
+.v-credit-ref {
   color: var(--text-dim);
   font-style: italic;
 }
 
 .v-alt-titles {
-  font-size: 10px;
-  color: var(--text-secondary);
-  font-style: italic;
-  opacity: 0.65;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
   line-height: 1.4;
-  margin-top: 2px;
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .v-alt-item {
-  display: inline-block;
-  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
 }
-.v-alt-item::before { content: '('; }
-.v-alt-item::after  { content: ')'; }
+
+.v-alt-item::before {
+  content: '\B7';
+  margin-right: 0;
+  color: var(--text-dim);
+}
 
 .v-right {
   display: flex;
@@ -279,42 +277,13 @@ const badgeEmoji = computed(() => {
   margin-top: 1px;
 }
 
-.quality-badge {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.q-og { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.q-hq { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.q-cd { background: rgba(163,113,247,0.15); color: var(--badge-cd); }
-.q-lq { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.q-rec { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.q-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-
-.a-full { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.a-partial { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.a-snippet { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.a-confirmed { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.a-unavailable { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-.a-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-
-.avail-pill {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
+/* quality-badge, q-*, avail-pill, a-* base classes are in global style.css */
+/* VersionRow-specific size overrides */
+.quality-badge { font-size: 9px; padding: 1px 5px; }
+.avail-pill { font-size: 9px; padding: 1px 5px; }
 
 .v-length {
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

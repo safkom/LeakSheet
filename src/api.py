@@ -40,6 +40,20 @@ app = FastAPI(
     version="0.3.0",
 )
 
+# Global HTTP client for proxies to reuse connection pools
+proxy_client = httpx.AsyncClient(
+    timeout=15,
+    follow_redirects=True,
+    headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+    }
+)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await proxy_client.aclose()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -124,58 +138,31 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
-    # Build candidate URLs in order of preference
-    candidates = []
-
-    # 1) Resized version (larger) — only if no ?key= that may be tied to original size
-    if "?key=" not in url:
-        sized = re.sub(r'=(?:w\d+-h\d+|s\d+)', '=w400-h400', url)
-        if sized != url:
-            candidates.append(sized)
-
-    # 2) Original URL as-is
-    candidates.append(url)
-
-    # 3) Strip ?key= param as last resort (keys can expire)
-    stripped = re.sub(r'\?key=[^&]+', '', url)
-    if stripped != url:
-        candidates.append(stripped)
-
-    # Conditional headers — only send Google Referer for Google domains
+    # Conditional headers — send browser-like headers for Google domains
     is_google = any(h in url for h in (
         'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
     ))
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-    }
+    headers = {}
     if is_google:
         headers["Referer"] = "https://docs.google.com/"
 
     try:
-        async with httpx.AsyncClient(
-            timeout=15,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-            for candidate in candidates:
-                resp = await client.get(candidate)
-                ct = resp.headers.get("content-type", "")
-                if resp.status_code == 200 and ct.startswith("image/"):
-                    return Response(
-                        content=resp.content,
-                        media_type=ct,
-                        headers={
-                            "Cache-Control": "public, max-age=86400",
-                            "Access-Control-Allow-Origin": "*",
-                        },
-                    )
-
-            # All candidates failed
-            raise HTTPException(
-                status_code=resp.status_code,
-                detail="Upstream image fetch failed",
+        resp = await proxy_client.get(url, headers=headers)
+        ct = resp.headers.get("content-type", "")
+        if resp.status_code == 200 and ct.startswith("image/"):
+            return Response(
+                content=resp.content,
+                media_type=ct,
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*",
+                },
             )
+
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail="Upstream image fetch failed",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -265,8 +252,7 @@ async def proxy_stream(
         )
 
     # Client requested Range but upstream ignored it — synthesise 206.
-    import re as _re
-    m = _re.match(r"bytes=(\d+)-(\d*)", range_header)
+    m = re.match(r"bytes=(\d+)-(\d*)", range_header)
     if not m:
         resp.close(); client.close()
         raise HTTPException(status_code=416, detail="Malformed Range header")

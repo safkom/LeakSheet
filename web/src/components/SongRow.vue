@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import VersionRow from './VersionRow.vue'
 import ContextMenu from './ContextMenu.vue'
 import SongDescriptionModal from './SongDescriptionModal.vue'
-import { playTrack, isStreamable, playerState } from '../composables/usePlayer.js'
-import { effectiveBadge, availabilityClass, BADGE_MAP } from '../composables/useUtils.js'
+import { Badge } from '@/components/ui/badge'
+import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
+import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
 
 const props = defineProps({
   song: Object,
@@ -24,7 +25,7 @@ const canStream = computed(() => {
 })
 
 const isCurrentSong = computed(() => {
-  return props.song.versions?.some(v => v === playerState.track) ?? false
+  return props.song.versions?.some(v => isTrackMatch(v)) ?? false
 })
 
 const badgeEmoji = computed(() => {
@@ -38,6 +39,23 @@ const badge = computed(() => {
   return effectiveBadge(firstVersion.value.quality, firstVersion.value.available_length)
 })
 
+/** Collect all unique alt titles across all versions for multi-version songs */
+const allAltTitles = computed(() => {
+  if (!hasMultipleVersions.value) return []
+  const seen = new Set()
+  const titles = []
+  for (const v of (props.song.versions || [])) {
+    for (const alt of (v.alt_titles || [])) {
+      const key = alt.toLowerCase().trim()
+      if (!seen.has(key)) {
+        seen.add(key)
+        titles.push(alt)
+      }
+    }
+  }
+  return titles
+})
+
 const availBadge = computed(() => {
   if (!firstVersion.value || hasMultipleVersions.value) return null
   const avail = firstVersion.value.available_length
@@ -49,7 +67,7 @@ const availBadge = computed(() => {
   if (q && q !== 'not available' && q !== 'n/a') {
     // Quality badge is already shown — show availability only if it adds info
     if (['full', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
-      return { text: avail, cssClass: availabilityClass(avail) }
+      return { text: avail, variant: availabilityVariant(avail) }
     }
   }
   return null
@@ -104,50 +122,46 @@ function openDescription() {
       @click="handleClick"
       @contextmenu="handleContextMenu"
     >
-      <div class="song-play-icon" :class="{ streamable: canStream || isConfirmedOnly }">
-        <svg v-if="isCurrentSong && playerState.isPlaying" viewBox="0 0 16 16" width="14" height="14" class="eq-icon">
-          <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
-          <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
-          <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
-        </svg>
-        <svg v-else-if="isConfirmedOnly" viewBox="0 0 16 16" width="14" height="14">
-          <path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75zM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
-        </svg>
-        <svg v-else-if="!hasMultipleVersions" viewBox="0 0 16 16" width="14" height="14">
-          <path fill="currentColor" d="M4 2l12 6-12 6z"/>
-        </svg>
-        <svg v-else viewBox="0 0 16 16" width="14" height="14" :class="{ rotated: expanded }">
-          <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
-        </svg>
-      </div>
-
       <div class="song-content">
         <!-- Title line -->
         <div class="song-title-line">
+          <!-- Equalizer when playing -->
+          <svg v-if="isCurrentSong && playerState.isPlaying" viewBox="0 0 16 16" width="14" height="14" class="eq-icon inline-eq">
+            <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
+            <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
+            <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
+          </svg>
           <span v-if="badgeEmoji" class="badge-emoji">{{ badgeEmoji }}</span>
           <span class="song-title">{{ song.base_name }}</span>
-          <span
+          <Badge
             v-if="!hasMultipleVersions && badge"
-            class="quality-badge"
-            :class="badge.cssClass"
-          >{{ badge.text }}</span>
-          <span
+            :variant="badge.variant"
+          >{{ badge.text }}</Badge>
+          <Badge
             v-if="!hasMultipleVersions && availBadge"
-            class="avail-pill"
-            :class="availBadge.cssClass"
-          >{{ availBadge.text }}</span>
+            :variant="availBadge.variant"
+          >{{ availBadge.text }}</Badge>
           <span v-if="hasMultipleVersions" class="version-count">
             {{ song.versions.length }} versions
           </span>
+          <!-- Expand chevron for multi-version -->
+          <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
+            <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
+          </svg>
         </div>
 
-        <!-- Credits lines (multi-line, stacked) -->
+        <!-- Alt titles for multi-version songs (shown on parent, not per-version) -->
+        <div v-if="hasMultipleVersions && allAltTitles.length" class="song-alt-titles">
+          <span v-for="(alt, i) in allAltTitles" :key="i" class="alt-title"><span class="alt-title-inner">{{ alt }}</span></span>
+        </div>
+
+        <!-- Credits lines -->
         <template v-if="!hasMultipleVersions && firstVersion">
-          <div class="song-credits">
-            <span v-if="firstVersion.collaboration" class="credit-line">(with {{ firstVersion.collaboration }})</span>
-            <span v-if="firstVersion.featuring" class="credit-line"> (feat. {{ firstVersion.featuring }})</span>
-            <span v-if="firstVersion.producers" class="credit-line prod"> (prod. {{ firstVersion.producers }})</span>
-            <span v-if="firstVersion.refs" class="credit-line ref"> (ref. {{ firstVersion.refs }})</span>
+          <div v-if="firstVersion.collaboration || firstVersion.featuring || firstVersion.producers || firstVersion.refs" class="song-credits">
+            <span v-if="firstVersion.collaboration" class="credit-item credit-collab">with {{ firstVersion.collaboration }}</span>
+            <span v-if="firstVersion.featuring" class="credit-item credit-feat">feat. {{ firstVersion.featuring }}</span>
+            <span v-if="firstVersion.producers" class="credit-item credit-prod">prod. {{ firstVersion.producers }}</span>
+            <span v-if="firstVersion.refs" class="credit-item credit-ref">ref. {{ firstVersion.refs }}</span>
           </div>
           <div v-if="firstVersion.alt_titles?.length" class="song-alt-titles">
             <span v-for="(alt, i) in firstVersion.alt_titles" :key="i" class="alt-title">{{ alt }}</span>
@@ -176,6 +190,7 @@ function openDescription() {
           :artist-name="artistName"
           :era-name="eraName"
           :era-art="eraArt"
+          :hide-alt-titles="true"
         />
       </div>
     </Transition>
@@ -220,52 +235,39 @@ function openDescription() {
   width: 100%;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 8px;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s;
+  gap: 0;
+  padding: 12px 10px;
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
 }
 
 .song-row:hover {
   background: rgba(255, 255, 255, 0.03);
-}
-
-.song-play-icon {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  transition: color 0.1s;
-  opacity: 0.35;
-  margin-top: 2px;
-}
-
-.song-play-icon.streamable {
-  opacity: 1;
-}
-
-.song-row:hover .song-play-icon {
-  color: var(--accent);
-  opacity: 1;
-}
-
-.song-row.playing .song-play-icon {
-  color: var(--accent);
-  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateX(2px);
 }
 
 .song-row.playing {
-  background: rgba(88,166,255,0.05);
+  background: rgba(88, 166, 255, 0.05);
+  border-color: rgba(88, 166, 255, 0.1);
 }
 
-.song-play-icon svg {
+/* Inline indicators */
+.inline-eq {
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.expand-chevron {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  margin-left: 2px;
   transition: transform 0.2s ease;
 }
 
-.song-play-icon .rotated {
+.expand-chevron.rotated {
   transform: rotate(180deg);
 }
 
@@ -304,43 +306,68 @@ function openDescription() {
 }
 
 .song-credits {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 11px;
   line-height: 1.5;
-  opacity: 0.7;
   text-align: left;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
 }
 
-.credit-line {
-  /* inline so they wrap naturally */
+.credit-item {
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.credit-line.prod {
-  color: var(--text-dim);
+.credit-collab {
+  color: var(--text-primary);
 }
 
-.credit-line.ref {
+.credit-feat {
+  color: var(--text-primary);
+}
+
+.credit-prod {
+  color: var(--text-secondary);
+}
+
+.credit-ref {
   color: var(--text-dim);
   font-style: italic;
 }
 
 .song-alt-titles {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-style: italic;
-  opacity: 0.65;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
   line-height: 1.5;
-  margin-top: 2px;
+  margin-top: 4px;
   text-align: left;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .alt-title {
-  display: inline-block;
-  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
 }
 
-.alt-title::before { content: '('; }
-.alt-title::after  { content: ')'; }
+.alt-title::before {
+  content: '\B7';
+  margin-right: 0;
+  color: var(--text-dim);
+}
+
+.alt-title-inner,
+.alt-title {
+  /* no wrapping pseudo-parens, just comma-separated */
+}
 
 /* ── Right side ── */
 .song-right {
@@ -351,43 +378,8 @@ function openDescription() {
   margin-top: 2px;
 }
 
-.quality-badge {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.q-og { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.q-hq { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.q-cd { background: rgba(163,113,247,0.15); color: var(--badge-cd); }
-.q-lq { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.q-rec { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.q-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-
-/* Availability badges */
-.a-full { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.a-partial { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.a-snippet { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.a-confirmed { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.a-unavailable { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-.a-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-
-.avail-pill {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
 .track-length {
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -395,7 +387,7 @@ function openDescription() {
 
 /* Versions accordion */
 .versions-panel {
-  padding: 0 0 4px 34px;
+  padding: 0 0 4px 16px;
   overflow: hidden;
 }
 
@@ -415,14 +407,13 @@ function openDescription() {
 }
 
 @media (max-width: 640px) {
-  .song-row { padding: 8px 4px; gap: 8px; }
+  .song-row { padding: 8px 4px; }
   .song-title-line { font-size: 13px; }
-  .quality-badge, .avail-pill { font-size: 9px; padding: 1px 4px; }
-  .versions-panel { padding-left: 24px; }
+  .versions-panel { padding-left: 12px; }
 }
 
 /* Equalizer animation */
-.eq-icon { color: var(--accent); }
+.eq-icon { color: var(--accent-color); }
 .eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
 .eq-1 { animation-delay: 0s; }
 .eq-2 { animation-delay: 0.2s; }

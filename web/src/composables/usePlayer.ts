@@ -51,6 +51,18 @@ function _getAudio() {
 
     _audio.addEventListener('timeupdate', () => {
       playerState.currentTime = _audio.currentTime
+      // Update MediaSession position state
+      if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+        try {
+          if (isFinite(_audio.duration) && _audio.duration > 0) {
+            navigator.mediaSession.setPositionState({
+              duration: _audio.duration,
+              playbackRate: _audio.playbackRate,
+              position: _audio.currentTime,
+            })
+          }
+        } catch (e) { /* ignore */ }
+      }
     })
 
     _audio.addEventListener('durationchange', () => {
@@ -175,6 +187,69 @@ export function isStreamable(version) {
 // Playback controls
 // ---------------------------------------------------------------------------
 
+/** Badge emoji map for MediaSession titles */
+const _BADGE_EMOJI = {
+  best: '⭐',
+  special: '✨',
+  grail: '🏆',
+  wanted: '🏅',
+  worst: '🗑️',
+  ai: '🤖',
+}
+
+/**
+ * Update the browser MediaSession metadata (iOS lock screen, Android notification, etc.)
+ */
+function _updateMediaSession() {
+  if (!('mediaSession' in navigator)) return
+
+  const track = playerState.track
+  if (!track) {
+    navigator.mediaSession.metadata = null
+    return
+  }
+
+  // Build title with badge emoji and version tag
+  let title = track.name || ''
+  const badge = track.badge
+  if (badge && _BADGE_EMOJI[badge]) {
+    title = `${_BADGE_EMOJI[badge]} ${title}`
+  }
+  if (track.version_tag) {
+    title += ` [${track.version_tag}]`
+  }
+
+  const artwork = []
+  if (playerState.artUrl) {
+    const fullUrl = playerState.artUrl.startsWith('//') ? 'https:' + playerState.artUrl : playerState.artUrl
+    if (fullUrl.startsWith('http')) {
+      const proxyUrl = `${window.location.origin}/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
+      artwork.push({ src: proxyUrl, sizes: '512x512', type: 'image/jpeg' })
+    }
+  }
+
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title,
+    artist: playerState.artistName || '',
+    album: playerState.eraName || '',
+    artwork,
+  })
+
+  // Set action handlers
+  navigator.mediaSession.setActionHandler('play', () => togglePlay())
+  navigator.mediaSession.setActionHandler('pause', () => togglePlay())
+  navigator.mediaSession.setActionHandler('seekbackward', () => {
+    seekTo(Math.max(0, playerState.currentTime - 10))
+  })
+  navigator.mediaSession.setActionHandler('seekforward', () => {
+    seekTo(playerState.currentTime + 10)
+  })
+  navigator.mediaSession.setActionHandler('seekto', (details) => {
+    if (details.seekTime != null) seekTo(details.seekTime)
+  })
+  navigator.mediaSession.setActionHandler('stop', () => stopTrack())
+}
+
 export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
   const link = findStreamableLink(version?.links)
 
@@ -213,6 +288,8 @@ export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
     playerState.isPlaying = false
     playerState.loading = false
   }
+
+  _updateMediaSession()
 }
 
 export function togglePlay() {
@@ -258,6 +335,7 @@ export function stopTrack() {
   playerState.streamUrl = ''
   playerState.artUrl = ''
   playerState.queue = []
+  _updateMediaSession()
 }
 
 export function seekTo(seconds) {
@@ -279,10 +357,22 @@ export function setVolume(v) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Check if a version matches the currently playing track.
+ * Uses value comparison (not reference equality) so it works after re-parsing.
+ */
+export function isTrackMatch(version) {
+  if (!version || !playerState.track) return false
+  return version.name === playerState.track.name
+    && version.version_tag === playerState.track.version_tag
+    && version.track_length === playerState.track.track_length
+}
+
 /** Parse "3:14" → 194 seconds */
 function _parseDuration(str) {
   if (!str || str.includes('?')) return 0
   const parts = str.split(':').map(Number)
+  if (parts.some(isNaN)) return 0
   if (parts.length === 2) return parts[0] * 60 + parts[1]
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
   return 0

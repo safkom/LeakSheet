@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import ContextMenu from './ContextMenu.vue'
 import SongDescriptionModal from './SongDescriptionModal.vue'
-import { playerState, togglePlay, stopTrack, seekTo, setVolume, formatTime, artProxyUrl } from '../composables/usePlayer.js'
+import { Slider } from '@/components/ui/slider'
+import { Button } from '@/components/ui/button'
+import { playerState, togglePlay, stopTrack, seekTo, setVolume, formatTime, artProxyUrl } from '../composables/usePlayer'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
@@ -57,11 +59,10 @@ function handleSeek(e) {
   seekTo(ratio * playerState.duration)
 }
 
-function handleVolume(e) {
-  if (!e.currentTarget) return
-  const rect = e.currentTarget.getBoundingClientRect()
-  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-  setVolume(ratio)
+function handleVolumeSlider(value) {
+  if (Array.isArray(value) && value.length > 0) {
+    setVolume(value[0] / 100)
+  }
 }
 
 // Player context menu
@@ -92,22 +93,6 @@ function openTrackDescription() {
 
 <template>
   <div class="player-bar">
-    <!-- Progress bar - top edge of player -->
-    <div
-      class="progress-bar"
-      ref="progressBar"
-      @click="handleSeek"
-      :class="{ disabled: !hasStream }"
-    >
-      <div class="progress-buffered" :style="{ width: bufferedPct + '%' }"></div>
-      <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
-      <div
-        v-if="progressPct > 0"
-        class="progress-thumb"
-        :style="{ left: progressPct + '%' }"
-      ></div>
-    </div>
-
     <div class="player-inner">
       <!-- Album art -->
       <div class="player-art" v-if="track">
@@ -125,7 +110,7 @@ function openTrackDescription() {
         </div>
       </div>
 
-      <!-- Track info -->
+      <!-- Track info + progress -->
       <div class="player-track-info">
         <div class="player-track-name">
           <span v-if="loading" class="loading-dot"></span>
@@ -136,6 +121,27 @@ function openTrackDescription() {
             <span class="player-error">{{ error }}</span>
           </template>
           <template v-else>{{ displaySub }}</template>
+        </div>
+
+        <!-- Progress bar - inside player body for better mobile touch -->
+        <div class="progress-row">
+          <span class="player-time time-left" v-if="hasStream">{{ currentTimeStr }}</span>
+          <div
+            class="progress-bar"
+            ref="progressBar"
+            @click="handleSeek"
+            :class="{ disabled: !hasStream }"
+          >
+            <div class="progress-buffered" :style="{ width: bufferedPct + '%' }"></div>
+            <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+            <div
+              v-if="progressPct > 0"
+              class="progress-thumb"
+              :style="{ left: progressPct + '%' }"
+            ></div>
+          </div>
+          <span class="player-time time-right" v-if="hasStream">{{ durationStr }}</span>
+          <span class="player-time time-right" v-else>{{ durationStr }}</span>
         </div>
       </div>
 
@@ -162,24 +168,21 @@ function openTrackDescription() {
         </button>
       </div>
 
-      <!-- Right side: time + volume + menu + close -->
+      <!-- Right side: volume + menu + close -->
       <div class="player-right">
-        <span class="player-time" v-if="hasStream">
-          {{ currentTimeStr }} / {{ durationStr }}
-        </span>
-        <span class="player-time" v-else>
-          {{ durationStr }}
-        </span>
-
         <!-- Volume -->
         <div class="volume-wrap" v-if="hasStream">
           <svg viewBox="0 0 16 16" width="14" height="14" class="volume-icon">
             <path fill="currentColor" d="M7.56 2.45A.5.5 0 0 1 8 2.9v10.2a.5.5 0 0 1-.82.38L4.25 10.5H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h2.25l2.93-3.03a.5.5 0 0 1 .38-.12z"/>
             <path v-if="playerState.volume > 0" fill="currentColor" d="M10.3 5.7a.5.5 0 0 1 .7 0 4 4 0 0 1 0 4.6.5.5 0 1 1-.7-.7 3 3 0 0 0 0-3.2.5.5 0 0 1 0-.7z" opacity="0.7"/>
           </svg>
-          <div class="volume-bar" @click="handleVolume">
-            <div class="volume-fill" :style="{ width: volumePct + '%' }"></div>
-          </div>
+          <Slider
+            :model-value="[volumePct]"
+            :max="100"
+            :step="1"
+            class="w-[60px] [&_[data-orientation=horizontal]]:h-1 [&_span[role=slider]]:h-3 [&_span[role=slider]]:w-3 [&_span[role=slider]]:border-[1.5px]"
+            @update:model-value="handleVolumeSlider"
+          />
         </div>
 
         <!-- More options menu -->
@@ -237,26 +240,33 @@ function openTrackDescription() {
   left: 0;
   right: 0;
   background: var(--bg-player);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-color);
   z-index: 200;
   backdrop-filter: blur(12px);
-  display: flex;
-  flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .progress-bar {
   position: relative;
-  width: 100%;
-  height: 4px;
-  background: rgba(255,255,255,0.06);
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
   cursor: pointer;
-  flex-shrink: 0;
-  transition: height 0.15s;
+  border-radius: 3px;
+  /* Enlarge touch target without changing visual size */
+}
+
+.progress-bar::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: 0;
+  right: 0;
 }
 
 .progress-bar:hover {
-  height: 6px;
+  height: 8px;
 }
 
 .progress-bar.disabled {
@@ -278,7 +288,7 @@ function openTrackDescription() {
   top: 0;
   left: 0;
   height: 100%;
-  background: var(--accent);
+  background: var(--accent-color);
   transition: width 0.1s linear;
 }
 
@@ -286,10 +296,10 @@ function openTrackDescription() {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-color);
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -299,7 +309,7 @@ function openTrackDescription() {
 }
 
 .player-inner {
-  height: calc(var(--player-height) - 4px);
+  height: var(--player-height);
   display: flex;
   align-items: center;
   padding: 0 20px;
@@ -309,8 +319,8 @@ function openTrackDescription() {
 /* Album art */
 .player-art {
   flex-shrink: 0;
-  width: 56px;
-  height: 56px;
+  width: 100px;
+  height: 100px;
   border-radius: 6px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.05);
@@ -337,10 +347,24 @@ function openTrackDescription() {
 .player-track-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.time-left, .time-right {
+  flex-shrink: 0;
 }
 
 .player-track-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -348,14 +372,16 @@ function openTrackDescription() {
   display: flex;
   align-items: center;
   gap: 6px;
+  color: var(--text-primary);
 }
 
 .player-track-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0.9;
 }
 
 .player-error {
@@ -375,7 +401,7 @@ function openTrackDescription() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-color);
   color: var(--bg-primary);
   transition: background 0.15s;
 }
@@ -403,7 +429,7 @@ function openTrackDescription() {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-color);
   animation: pulse 1s ease-in-out infinite;
 }
 
@@ -419,8 +445,8 @@ function openTrackDescription() {
 }
 
 .player-time {
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -435,22 +461,6 @@ function openTrackDescription() {
 .volume-icon {
   color: var(--text-dim);
   flex-shrink: 0;
-}
-
-.volume-bar {
-  width: 60px;
-  height: 4px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 2px;
-  cursor: pointer;
-  position: relative;
-}
-
-.volume-fill {
-  height: 100%;
-  background: var(--text-secondary);
-  border-radius: 2px;
-  transition: width 0.05s;
 }
 
 .menu-btn {
@@ -484,8 +494,11 @@ function openTrackDescription() {
   .player-track-name { font-size: 12px; }
   .ctrl-btn { width: 36px; height: 36px; }
   .player-right { gap: 8px; }
-  .player-time { display: none; }
   .volume-wrap { display: none; }
-  .player-art { width: 44px; height: 44px; border-radius: 4px; }
+  .player-art { width: 80px; height: 80px; border-radius: 4px; }
+  .player-time { font-size: 11px; }
+  .progress-bar { height: 8px; }
+  .progress-bar::before { top: -16px; bottom: -16px; }
+  .progress-thumb { opacity: 1; width: 14px; height: 14px; }
 }
 </style>

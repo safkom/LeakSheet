@@ -3,8 +3,10 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
 import PlayerBar from './components/PlayerBar.vue'
-import { parseSheet } from './composables/useApi.js'
-import { playerState, togglePlay, seekTo, setVolume } from './composables/usePlayer.js'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { parseSheet } from './composables/useApi'
+import { playerState, togglePlay, seekTo, setVolume } from './composables/usePlayer'
 
 const activeArtist = ref(null)
 const loading = ref(false)
@@ -35,6 +37,8 @@ async function handleParse(url) {
   try {
     const data = await parseSheet(url)
     activeArtist.value = data
+    // Preload era artwork images for faster rendering
+    _preloadEraImages(data)
     // Add to history (or update existing) and persist
     const existing = trackerHistory.value.find(h => h.source_url === url)
     if (existing) {
@@ -57,6 +61,19 @@ async function handleParse(url) {
 
 function goHome() {
   activeArtist.value = null
+}
+
+/** Preload era artwork images so they're cached before scrolling */
+function _preloadEraImages(artist) {
+  if (!artist?.eras) return
+  for (const era of artist.eras.slice(0, 10)) {
+    if (!era.art_url) continue
+    const url = era.art_url.startsWith('//') ? 'https:' + era.art_url : era.art_url
+    if (url.startsWith('http')) {
+      const img = new Image()
+      img.src = `/api/image-proxy?url=${encodeURIComponent(url)}`
+    }
+  }
 }
 
 function loadFromHistory(entry) {
@@ -122,23 +139,11 @@ onUnmounted(() => {
     <div v-if="activeArtist" class="header-artist">
       {{ activeArtist.name }}
     </div>
-    <!-- Multi-artist history -->
-    <div v-if="trackerHistory.length > 1" class="header-history">
-      <button
-        v-for="entry in trackerHistory"
-        :key="entry.source_url"
-        class="history-btn"
-        :class="{ active: activeArtist?.name === entry.name }"
-        @click="loadFromHistory(entry)"
-      >
-        {{ entry.name }}
-      </button>
-    </div>
   </header>
 
   <main class="app-main" :class="{ 'has-player': hasPlayer }">
     <!-- Landing / Home -->
-    <div v-if="!activeArtist" class="landing">
+    <div v-if="!activeArtist && !loading" class="landing">
       <div class="landing-hero">
         <h1><span class="hero-text">Leak</span><span class="hero-accent">Sheet</span></h1>
         <p class="hero-sub">Parse and explore unreleased music trackers</p>
@@ -151,15 +156,27 @@ onUnmounted(() => {
       <!-- History on landing page -->
       <div v-if="trackerHistory.length" class="landing-history">
         <h3 class="history-title">Recent Trackers</h3>
-        <button
+        <Button
           v-for="entry in trackerHistory"
           :key="entry.source_url"
+          variant="outline"
           class="history-card"
           @click="loadFromHistory(entry)"
         >
           <span class="history-card-name">{{ entry.name }}</span>
           <span class="history-card-meta">{{ entry.total_songs }} songs</span>
-        </button>
+        </Button>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div v-else-if="loading" class="landing">
+      <div class="loading-skeleton">
+        <Skeleton class="h-8 w-48 mb-4" />
+        <Skeleton class="h-5 w-32 mb-8" />
+        <div class="skeleton-eras">
+          <Skeleton v-for="i in 5" :key="i" class="h-24 w-full rounded-xl" />
+        </div>
       </div>
     </div>
 
@@ -177,7 +194,7 @@ onUnmounted(() => {
   z-index: 100;
   height: var(--header-height);
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   padding: 0 20px;
@@ -190,7 +207,7 @@ onUnmounted(() => {
   letter-spacing: -0.5px;
 }
 .logo-text { color: var(--text-primary); }
-.logo-accent { color: var(--accent); }
+.logo-accent { color: var(--accent-color); }
 
 .header-artist {
   color: var(--text-secondary);
@@ -220,12 +237,17 @@ onUnmounted(() => {
 
 .landing-hero h1 {
   font-size: 48px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -1.5px;
   margin-bottom: 8px;
+  display: inline-block;
 }
 .hero-text { color: var(--text-primary); }
-.hero-accent { color: var(--accent); }
+.hero-accent {
+  background: linear-gradient(135deg, var(--accent-color), #58a6ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
 
 .hero-sub {
   color: var(--text-secondary);
@@ -238,24 +260,6 @@ onUnmounted(() => {
   margin-top: 12px;
   font-size: 13px;
 }
-
-/* Multi-artist history (header tabs) */
-.header-history {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.history-btn {
-  padding: 4px 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-radius: 12px;
-  background: transparent;
-  transition: background 0.15s, color 0.15s;
-}
-.history-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-.history-btn.active { background: rgba(255,255,255,0.1); color: var(--accent); }
 
 /* Landing history cards */
 .landing-history {
@@ -272,24 +276,36 @@ onUnmounted(() => {
 
 .history-card {
   width: 100%;
-  display: flex;
-  justify-content: space-between;
+  display: flex !important;
+  justify-content: space-between !important;
   align-items: center;
-  padding: 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  height: auto !important;
+  padding: 12px 16px !important;
   margin-bottom: 8px;
-  color: var(--text-primary);
-  transition: background 0.15s, border-color 0.15s;
+  white-space: normal !important;
 }
+
 .history-card:hover {
-  background: rgba(255,255,255,0.04);
-  border-color: var(--accent);
+  border-color: var(--accent-color) !important;
 }
 
 .history-card-name {
   font-size: 14px;
   font-weight: 500;
+  text-align: left;
+}
+
+/* Skeleton loading */
+.loading-skeleton {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+.skeleton-eras {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .history-card-meta {

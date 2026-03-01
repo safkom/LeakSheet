@@ -45,22 +45,68 @@ def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]
     return results
 
 
-# Column name normalization — maps various header text to canonical field names
+# Column name normalization — maps various header text to canonical field names.
+# Covers 400+ tracker variants observed in the wild.
 COLUMN_ALIASES: dict[str, str] = {
+    # Core columns (present in nearly all trackers)
     "era": "era",
     "name": "name",
+    "title": "name",              # Billie Eilish, Childish Gambino, Travis Scott
+    "song name": "name",          # XXXTENTACION
+    "song title": "name",
     "notes": "notes",
+    "notes & information": "notes",
+    "track number / info": "notes",  # Yuno Miles
+    "info": "notes",
+    "description": "notes",
+
+    # Track length variants
     "track length": "track_length",
+    "length": "track_length",      # Billie Eilish, Gucci Mane, etc.
+    "track duration": "track_length",
+    "duration": "track_length",
+
+    # Dates
     "file date": "file_date",
+    "creation date": "file_date",  # Kid Cudi
+    "date created": "file_date",
     "leak date": "leak_date",
+    "release date": "leak_date",   # Gucci Mane, Yuno Miles
+    "obtained on:": "leak_date",   # Wu-Tang Clan
+    "obtained on": "leak_date",
+
+    # Availability
     "available length": "available_length",
+    "currently available": "available_length",  # Kid Cudi, Chief Keef
+    "available?": "available_length",             # Yung Lean
+    "available": "available_length",
+    "song status": "available_length",            # XXXTENTACION
+    "status": "available_length",
+    "portion": "available_length",                # Template variant
+
+    # Quality
     "quality": "quality",
+
+    # Links
     "link(s)": "links",
     "links": "links",
     "link": "links",
-    # Template uses "Portion" for available length
-    "portion": "available_length",
-    # Carti-specific
-    "date of recording": "date_of_recording",
+    "download(s)": "links",       # XXXTENTACION
+    "downloads": "links",
+    "download": "links",
+    "og link(s)": "links",        # XXXTENTACION (secondary links)
+
+    # Streaming (treated as availability info or skipped)
+    "streaming": "streaming",
+    "streaming?": "streaming",
+    "in circulation": "available_length",  # Yung Lean
+
+    # Type variants
     "type": "type",
+    "track type": "type",          # XXXTENTACION
+    "song type": "type",
+
+    # Recording date variants
+    "date of recording": "date_of_recording",  # Carti
+    "recording date": "date_of_recording",      # Gucci Mane
 }

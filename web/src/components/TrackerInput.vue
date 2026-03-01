@@ -1,5 +1,7 @@
 <script setup>
 import { ref } from 'vue'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 
 const props = defineProps({
   loading: Boolean,
@@ -22,17 +24,22 @@ function handleSubmit() {
       <svg class="input-icon" viewBox="0 0 16 16" width="16" height="16">
         <path fill="currentColor" d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0z"></path>
       </svg>
-      <input
+      <Input
         v-model="url"
         type="text"
-        class="url-input"
+        class="!border-0 !bg-transparent !ring-0 !ring-offset-0 !h-auto !rounded-none flex-1 px-3 py-2.5 text-sm focus-visible:!ring-0 focus-visible:!ring-offset-0"
         placeholder="Paste a tracker URL (Google Sheets or yetracker.net)..."
         :disabled="loading"
       />
-      <button type="submit" class="parse-btn" :disabled="loading || !url.trim()">
+      <Button
+        type="submit"
+        size="sm"
+        :disabled="loading || !url.trim()"
+        class="flex-shrink-0 !rounded-md"
+      >
         <span v-if="loading" class="spinner"></span>
         <span v-else>Parse</span>
-      </button>
+      </Button>
     </div>
   </form>
 </template>
@@ -46,14 +53,17 @@ function handleSubmit() {
   display: flex;
   align-items: center;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 4px 4px 4px 14px;
-  transition: border-color 0.15s;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .input-wrapper:focus-within {
-  border-color: var(--accent);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-dim), 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
 }
 
 .input-icon {
@@ -61,62 +71,17 @@ function handleSubmit() {
   flex-shrink: 0;
 }
 
-.url-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  padding: 10px 12px;
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.url-input::placeholder {
-  color: var(--text-dim);
-}
-
-.parse-btn {
-  flex-shrink: 0;
-  background: var(--accent);
-  color: var(--bg-primary);
-  font-weight: 600;
-  font-size: 13px;
-  padding: 8px 20px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s;
-}
-
-.parse-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.parse-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .spinner {
   display: inline-block;
   width: 14px;
   height: 14px;
   border: 2px solid transparent;
-  border-top-color: var(--bg-primary);
+  border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@media (max-width: 640px) {
-  .url-input {
-    font-size: 13px;
-    padding: 8px 8px;
-  }
-  .parse-btn {
-    padding: 8px 14px;
-    font-size: 12px;
-  }
 }
 </style>

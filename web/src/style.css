@@ -1,3 +1,32 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ── shadcn CSS variables (mapped from existing theme) ── */
+@layer base {
+  :root {
+    --background: 215 28% 5%;      /* #0d1117 */
+    --foreground: 213 31% 91%;     /* #e6edf3 */
+    --card: 220 24% 15%;           /* #1c2333 */
+    --card-foreground: 213 31% 91%;
+    --popover: 216 22% 11%;        /* #161b22 */
+    --popover-foreground: 213 31% 91%;
+    --primary: 175 53% 55%;        /* #4ecdc4 teal accent */
+    --primary-foreground: 215 28% 5%;
+    --secondary: 216 22% 11%;      /* #161b22 */
+    --secondary-foreground: 213 31% 91%;
+    --muted: 216 22% 11%;
+    --muted-foreground: 215 10% 57%; /* #8b949e */
+    --accent: 175 53% 55%;
+    --accent-foreground: 215 28% 5%;
+    --destructive: 0 72% 51%;
+    --border: 215 14% 21%;         /* #30363d */
+    --input: 215 28% 5%;
+    --ring: 175 53% 55%;
+    --radius: 0.625rem;
+  }
+}
+
+/* ── Original custom vars (still used by many components) ── */
 :root {
   /* Dark theme */
   --bg-primary: #0d1117;
@@ -8,7 +37,7 @@
   --bg-player: #161b22;
 
   /* Teal/Cyan accents */
-  --accent: #4ecdc4;
+  --accent-color: #4ecdc4;
   --accent-hover: #45b7af;
   --accent-dim: rgba(78, 205, 196, 0.15);
 
@@ -18,7 +47,7 @@
   --text-dim: #525a65;
 
   /* Borders */
-  --border: #30363d;
+  --border-color: #30363d;
   --border-hover: #4ecdc4;
 
   /* Quality badges */
@@ -30,8 +59,9 @@
   --badge-na: #525a65;
 
   /* Sizes */
-  --player-height: 72px;
+  --player-height: 112px;
   --header-height: 56px;
+  --sticky-era-height: 50px;
 
   /* Radius */
   --radius-sm: 6px;
@@ -45,42 +75,46 @@
   color: var(--text-primary);
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
-html, body {
-  height: 100%;
-  background: var(--bg-primary);
-  overflow-x: hidden;
-}
+  html, body {
+    height: 100%;
+    background: var(--bg-primary);
+    background-image: radial-gradient(circle at 50% 0%, rgba(78, 205, 196, 0.05), transparent 60%);
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
 
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-a:hover {
-  text-decoration: underline;
-}
+  a {
+    color: var(--accent-color);
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
 
-button {
-  cursor: pointer;
-  border: none;
-  background: none;
-  font-family: inherit;
-  color: inherit;
-}
+  button {
+    cursor: pointer;
+    border: none;
+    background: none;
+    font-family: inherit;
+    color: inherit;
+  }
 
-input {
-  font-family: inherit;
-  color: inherit;
+  input {
+    font-family: inherit;
+    color: inherit;
+  }
 }
 
 #app {
@@ -91,5 +125,41 @@ input {
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── Quality badges (shared across SongRow & VersionRow) ── */
+.quality-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.q-og { background: rgba(78,205,196,0.15); color: var(--badge-og); }
+.q-hq { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
+.q-cd { background: rgba(163,113,247,0.15); color: var(--badge-cd); }
+.q-lq { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
+.q-rec { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
+.q-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
+
+/* ── Availability badges (shared across SongRow & VersionRow) ── */
+.avail-pill {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.a-full { background: rgba(78,205,196,0.15); color: var(--badge-og); }
+.a-partial { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
+.a-snippet { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
+.a-confirmed { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
+.a-unavailable { background: rgba(82,90,101,0.15); color: var(--badge-na); }
+.a-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }

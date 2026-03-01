@@ -1,11 +1,13 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ColorThief from 'colorthief'
-import { setEraColors } from '../composables/useEraColors.js'
+import { setEraColors } from '../composables/useEraColors'
 
 const props = defineProps({
   era: Object,
   expanded: Boolean,
+  index: { type: Number, default: 0 },
+  sticky: Boolean,
 })
 
 const emit = defineEmits(['click'])
@@ -14,6 +16,8 @@ const gradientStyle = ref({})
 const titleColor = ref('#e6edf3')
 const colorThief = new ColorThief()
 const colorsReady = ref(false)
+const imgRetries = ref(0)
+const MAX_RETRIES = 2
 
 const artSrc = computed(() => {
   if (!props.era.art_url) return null
@@ -68,10 +72,21 @@ function onImgLoad(e) {
 }
 
 function onImgError(e) {
-  // Hide broken image — show placeholder instead
+  // Retry failed images up to MAX_RETRIES times
+  if (e.target && imgRetries.value < MAX_RETRIES) {
+    imgRetries.value++
+    // Retry after a small delay with cache-busting
+    setTimeout(() => {
+      if (e.target && artSrc.value) {
+        const sep = artSrc.value.includes('?') ? '&' : '?'
+        e.target.src = `${artSrc.value}${sep}_r=${imgRetries.value}`
+      }
+    }, 500 * imgRetries.value)
+    return
+  }
+  // Give up — show placeholder
   if (e.target) {
     e.target.style.display = 'none'
-    // Show the placeholder sibling
     const wrapper = e.target.parentElement
     if (wrapper) {
       wrapper.classList.add('img-error')
@@ -83,7 +98,7 @@ function onImgError(e) {
 <template>
   <button
     class="era-card"
-    :class="{ expanded, 'has-colors': colorsReady }"
+    :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky }"
     :style="gradientStyle"
     @click="emit('click')"
   >
@@ -93,7 +108,7 @@ function onImgError(e) {
         <img
           :src="artSrc"
           alt=""
-          loading="lazy"
+          :loading="index < 6 ? 'eager' : 'lazy'"
           crossorigin="anonymous"
           @load="onImgLoad"
           @error="onImgError"
@@ -122,7 +137,7 @@ function onImgError(e) {
         <img
           :src="artSrc"
           alt=""
-          loading="lazy"
+          :loading="index < 6 ? 'eager' : 'lazy'"
           crossorigin="anonymous"
           @load="onImgLoad"
           @error="onImgError"
@@ -176,7 +191,7 @@ function onImgError(e) {
   width: 100%;
   position: relative;
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0;
   text-align: left;
@@ -279,7 +294,7 @@ function onImgError(e) {
 
 .era-alt-names {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.65);
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,10 +423,99 @@ function onImgError(e) {
   transform: rotate(180deg);
 }
 
+/* ── Sticky era card (mobile) ── */
 @media (max-width: 767px) {
   .era-expand-indicator {
     bottom: 6px;
     right: 10px;
+  }
+
+  .era-card.era-sticky {
+    position: sticky;
+    top: var(--header-height);
+    z-index: 10;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
+  .era-card.era-sticky .era-card-mobile {
+    padding: 8px 16px;
+    gap: 10px;
+  }
+
+  .era-card.era-sticky .era-art-wrapper {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+  }
+
+  .era-card.era-sticky .era-art-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+  }
+
+  .era-card.era-sticky .era-art-placeholder svg,
+  .era-card.era-sticky .era-art-wrapper svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .era-card.era-sticky .era-title-mobile {
+    font-size: 14px;
+    -webkit-line-clamp: 1;
+  }
+
+  .era-card.era-sticky .era-alt-names {
+    display: none;
+  }
+
+  .era-card.era-sticky .era-expand-indicator {
+    bottom: 50%;
+    transform: translateY(50%);
+    right: 10px;
+  }
+}
+
+/* ── Sticky era card (desktop) ── */
+@media (min-width: 768px) {
+  .era-card.era-sticky {
+    position: sticky;
+    top: var(--header-height);
+    z-index: 10;
+    border-radius: 6px 6px 0 0;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .era-card.era-sticky .era-card-desktop {
+    padding: 10px 16px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .era-card.era-sticky .era-art-desktop {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+  }
+
+  .era-card.era-sticky .era-desc-desktop,
+  .era-card.era-sticky .era-timeline-desktop,
+  .era-card.era-sticky .era-alt-names-desktop {
+    display: none;
+  }
+
+  .era-card.era-sticky .era-title-desktop {
+    font-size: 15px;
+    margin-bottom: 0;
+  }
+
+  .era-card.era-sticky .era-expand-indicator {
+    bottom: 50%;
+    transform: translateY(50%);
+    right: 16px;
   }
 }
 </style>

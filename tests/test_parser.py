@@ -163,6 +163,13 @@ class TestEraMatchKey:
         assert _era_match_key("Tu Pimp A Caterpillar [V1](early version)") == "tu pimp a caterpillar"
         assert _era_match_key("To Pimp A Butterfly [V2](studio)") == "to pimp a butterfly"
 
+    def test_purely_parenthetical(self):
+        """Image-based era names may leave only parenthetical alt-names as text."""
+        assert _era_match_key("(Mollyworld, Balaclava Era)") == "mollyworld, balaclava era"
+
+    def test_empty_name(self):
+        assert _era_match_key("") == ""
+
 
 # ---------------------------------------------------------------------------
 # Column detection tests
@@ -582,11 +589,13 @@ class TestEraStatsParsing:
 
     def test_kendrick_eras_have_stats(self, kendrick):
         for era in kendrick.eras:
-            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+            if era.stats_raw:  # only eras from stat-based headers
+                assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
 
     def test_carti_eras_have_stats(self, carti):
         for era in carti.eras:
-            assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
+            if era.stats_raw:  # only eras from stat-based headers
+                assert era.stats is not None, f"Era '{era.name}' has no parsed stats"
 
     def test_ye_total_from_era_stats(self, ye):
         """Sum of era stats totals should be close to total_versions."""
@@ -963,7 +972,8 @@ class TestEraTimelineAndDescription:
         assert len(era.description) > 50
 
     def test_kendrick_first_era_has_timeline(self, kendrick):
-        era = kendrick.eras[0]
+        # Find first era with stats (skip any auto-created annotation eras)
+        era = next((e for e in kendrick.eras if e.stats_raw), kendrick.eras[0])
         assert len(era.timeline) >= 2
 
     def test_carti_first_era_has_timeline(self, carti):

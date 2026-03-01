@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from enum import Enum
 
+import pydantic
 from pydantic import BaseModel, Field
+
+_PYDANTIC_V2 = int(pydantic.VERSION.split(".")[0]) >= 2
 
 
 class Badge(str, Enum):
@@ -109,7 +112,7 @@ class Song(BaseModel):
         return self.versions[0] if self.versions else None
 
     def dict(self, **kwargs):
-        d = super().dict(**kwargs)
+        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["badge"] = self.badge.value if self.badge else None
         # Surface primary version metadata at Song level for convenience
         p = self.primary
@@ -120,6 +123,9 @@ class Song(BaseModel):
             d["leak_date"] = p.leak_date
             d["file_date"] = p.file_date
         return d
+
+    def model_dump(self, **kwargs):
+        return self.dict(**kwargs)
 
 
 class EraStats(BaseModel):
@@ -151,9 +157,12 @@ class EraStats(BaseModel):
         )
 
     def dict(self, **kwargs):
-        d = super().dict(**kwargs)
+        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["total"] = self.total
         return d
+
+    def model_dump(self, **kwargs):
+        return self.dict(**kwargs)
 
 
 class TrackerStats(BaseModel):
@@ -231,11 +240,14 @@ class Era(BaseModel):
         return sum(len(s.versions) for sec in self.sections for s in sec.songs)
 
     def dict(self, **kwargs):
-        d = super().dict(**kwargs)
+        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["songs"] = [s.dict(**kwargs) for s in self.songs]
         d["song_count"] = self.song_count
         d["version_count"] = self.version_count
         return d
+
+    def model_dump(self, **kwargs):
+        return self.dict(**kwargs)
 
 
 class ParseMetadata(BaseModel):
@@ -266,10 +278,13 @@ class Artist(BaseModel):
         return sum(e.version_count for e in self.eras)
 
     def dict(self, **kwargs):
-        d = super().dict(**kwargs)
+        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["total_songs"] = self.total_songs
         d["total_versions"] = self.total_versions
         return d
+
+    def model_dump(self, **kwargs):
+        return self.dict(**kwargs)
 
 
 def extract_badge(name: str) -> tuple[Badge | None, str]:
