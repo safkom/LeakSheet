@@ -82,13 +82,7 @@ const badgeEmoji = computed(() => {
     <div class="v-content">
       <!-- Title line -->
       <div class="v-title-line">
-        <!-- Equalizer when playing -->
-        <svg v-if="isCurrentTrack && playerState.isPlaying" viewBox="0 0 16 16" width="12" height="12" class="eq-icon inline-eq">
-          <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
-          <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
-          <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
-        </svg>
-        <span v-if="badgeEmoji" class="v-badge">{{ badgeEmoji }}</span>
+        <span class="v-badge-slot">{{ badgeEmoji || '' }}</span>
         <span class="v-title">{{ version.name }}</span>
         <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
         <Badge v-if="badge" :variant="badge.variant">{{ badge.text }}</Badge>
@@ -146,15 +140,19 @@ const badgeEmoji = computed(() => {
   align-items: flex-start;
   gap: 0;
   padding: 8px 8px;
+  min-height: 44px;
   border-radius: var(--radius-md);
   transition: all 0.2s ease;
   font-size: 13px;
   border: 1px solid transparent;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .version-row:hover {
   background: rgba(255, 255, 255, 0.02);
   border-color: rgba(255, 255, 255, 0.03);
+  border-left-color: hsl(var(--primary) / 0.3);
+  border-left-width: 2px;
   transform: translateX(2px);
 }
 
@@ -163,20 +161,37 @@ const badgeEmoji = computed(() => {
   border-color: rgba(88, 166, 255, 0.1);
 }
 
-.inline-eq {
-  flex-shrink: 0;
-  margin-right: 2px;
+/* Equalizer animation for playing state */
+.version-row.playing .v-badge-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5px;
 }
 
-/* Equalizer animation */
-.eq-icon { color: var(--accent-color); }
-.eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
-.eq-1 { animation-delay: 0s; }
-.eq-2 { animation-delay: 0.2s; }
-.eq-3 { animation-delay: 0.4s; }
-@keyframes eq {
-  0% { transform: scaleY(0.3); }
-  100% { transform: scaleY(1); }
+.version-row.playing .v-badge-slot::before,
+.version-row.playing .v-badge-slot::after {
+  content: '';
+  display: block;
+  width: 2px;
+  border-radius: 1px;
+  background: hsl(var(--primary));
+  animation: eq-bar 0.8s ease-in-out infinite alternate;
+}
+
+.version-row.playing .v-badge-slot::before {
+  height: 8px;
+  animation-delay: 0s;
+}
+
+.version-row.playing .v-badge-slot::after {
+  height: 5px;
+  animation-delay: 0.3s;
+}
+
+@keyframes eq-bar {
+  0% { height: 3px; }
+  100% { height: 10px; }
 }
 
 .v-content {
@@ -194,9 +209,12 @@ const badgeEmoji = computed(() => {
   line-height: 1.4;
 }
 
-.v-badge {
+.v-badge-slot {
+  width: 18px;
+  min-width: 18px;
   font-size: 12px;
   flex-shrink: 0;
+  text-align: center;
 }
 
 .v-title {
@@ -277,11 +295,6 @@ const badgeEmoji = computed(() => {
   margin-top: 1px;
 }
 
-/* quality-badge, q-*, avail-pill, a-* base classes are in global style.css */
-/* VersionRow-specific size overrides */
-.quality-badge { font-size: 9px; padding: 1px 5px; }
-.avail-pill { font-size: 9px; padding: 1px 5px; }
-
 .v-length {
   color: var(--text-secondary);
   font-size: 11px;
@@ -291,6 +304,5 @@ const badgeEmoji = computed(() => {
 
 @media (max-width: 640px) {
   .version-row { font-size: 11px; gap: 6px; }
-  .quality-badge, .avail-pill { font-size: 8px; }
 }
 </style>

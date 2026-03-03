@@ -95,7 +95,7 @@ def is_imgur_api_url(url: str) -> bool:
     return _IMGUR_API_PATTERN.match(url) is not None
 
 
-def resolve_imgur_cdn_url(api_url: str) -> str:
+async def resolve_imgur_cdn_url(api_url: str) -> str:
     """Fetch imgur.gg file metadata and return the CDN stream URL.
 
     Tries the given URL first; if it fails and the domain isn't already
@@ -121,12 +121,12 @@ def resolve_imgur_cdn_url(api_url: str) -> str:
     last_err: Exception | None = None
     for url in urls_to_try:
         try:
-            with httpx.Client(
+            async with httpx.AsyncClient(
                 timeout=10,
                 follow_redirects=True,
                 headers={"User-Agent": _STREAM_USER_AGENT},
             ) as client:
-                resp = client.get(url)
+                resp = await client.get(url)
                 if resp.status_code != 200:
                     last_err = ValueError(
                         f"imgur.gg API returned {resp.status_code} for {url}"
@@ -158,9 +158,9 @@ def _is_audio_content_type(ct: str) -> bool:
     return any(ct.startswith(m) for m in _AUDIO_MIMES)
 
 
-def stream_audio(
+async def stream_audio(
     stream_url: str, *, range_header: str | None = None
-) -> tuple[httpx.Response, httpx.Client]:
+) -> tuple[httpx.Response, httpx.AsyncClient]:
     """Open a streaming connection to the resolved audio URL.
 
     For imgur.gg metadata URLs, first resolves the CDN URL via the API,
@@ -176,7 +176,7 @@ def stream_audio(
     """
     # imgur.gg: resolve metadata API → CDN URL first
     if is_imgur_api_url(stream_url):
-        stream_url = resolve_imgur_cdn_url(stream_url)
+        stream_url = await resolve_imgur_cdn_url(stream_url)
 
     req_headers = {"User-Agent": _STREAM_USER_AGENT}
     if range_header:
@@ -187,14 +187,14 @@ def stream_audio(
         song_page = stream_url.removesuffix("/download")
         req_headers["Referer"] = song_page
 
-    client = httpx.Client(
+    client = httpx.AsyncClient(
         follow_redirects=True,
         timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
         headers=req_headers,
     )
 
     request = client.build_request("GET", stream_url)
-    resp = client.send(request, stream=True)
+    resp = await client.send(request, stream=True)
 
     try:
         ct = resp.headers.get("content-type", "")
@@ -204,8 +204,8 @@ def stream_audio(
         if ct and not _is_audio_content_type(ct):
             raise ValueError(f"Upstream returned non-audio content: {ct}")
     except Exception:
-        resp.close()
-        client.close()
+        await resp.aclose()
+        await client.aclose()
         raise
 
     return resp, client

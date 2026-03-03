@@ -39,8 +39,9 @@ CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 
 # Regex to extract spreadsheet ID from Google Sheets URLs
+# Handles both /d/ID and /u/N/d/ID paths (user-scoped URLs)
 SHEET_ID_PATTERN = re.compile(
-    r"docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]+)"
+    r"docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)"
 )
 
 # Regex to extract GID from URL fragment (#gid=...) or query param (?gid=...)
@@ -57,6 +58,15 @@ TITLE_SUFFIXES = [
     " Music Tracker",
     " Tracker [Currently in Use]",
     " Tracker",
+    " Leak Tracker",
+    " Leaks Tracker",
+]
+
+# Prefixes to strip from inferred artist names (e.g. "Updated Lil Uzi Vert")
+TITLE_PREFIXES = [
+    "Updated ",
+    "New ",
+    "Official ",
 ]
 
 
@@ -126,13 +136,44 @@ def _infer_artist_name(title: str) -> str:
     E.g. "Ye Tracker - Google Drive" → "Ye"
          "Baby Keem Music Tracker - Google Drive" → "Baby Keem"
          "Playboi Carti Tracker [Currently in Use] - Google Drive" → "Playboi Carti"
+         "Updated Lil Uzi Vert Tracker - Google Drive" → "Lil Uzi Vert"
+         "The Guy From Degrassi Tracker (reup 12.29.25) - Google Drive" → "Drake"
     """
     name = title.strip()
+
+    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.)
     for suffix in TITLE_SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)].strip()
-    # Also strip leading emoji
+
+    # Step 2: Strip trailing parenthetical metadata like "(reup 12.29.25)"
+    # that prevents suffix stripping on the first pass
+    paren_match = re.search(r"\s*\([^)]*\)\s*$", name)
+    if paren_match:
+        stripped = name[: paren_match.start()].strip()
+        # Re-apply suffix stripping on the cleaned name
+        for suffix in TITLE_SUFFIXES:
+            if stripped.endswith(suffix):
+                stripped = stripped[: -len(suffix)].strip()
+        if stripped:
+            name = stripped
+
+    # Step 3: Strip known prefixes ("Updated ", etc.)
+    for prefix in TITLE_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix):].strip()
+
+    # Step 4: Strip leading emoji
     name = re.sub(r"^[\U0001f300-\U0001f9ff\s]+", "", name).strip()
+
+    # Step 5: Map well-known tracker aliases to real artist names
+    _TRACKER_ALIASES = {
+        "the guy from degrassi": "Drake",
+    }
+    name_lower = name.lower()
+    if name_lower in _TRACKER_ALIASES:
+        name = _TRACKER_ALIASES[name_lower]
+
     return name or title.strip()
 
 
@@ -383,14 +424,20 @@ def fetch_and_parse(
                 name = sheet_artist
         return name
 
-    # If a specific GID was requested, fetch just that one
+    # If a specific GID was requested, try it first.
+    # If it produces 0 eras, fall through to GID discovery.
     if gid:
-        html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
-                                        cache_ttl=cache_ttl, use_cache=use_cache)
-        name = _resolve_artist_name(html, title)
-        artist = parse_sheet(html, name)
-        artist.source_url = url
-        return artist
+        try:
+            html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
+                                            cache_ttl=cache_ttl, use_cache=use_cache)
+            name = _resolve_artist_name(html, title)
+            artist = parse_sheet(html, name)
+            if artist.eras:
+                artist.source_url = url
+                return artist
+            # GID produced 0 eras — fall through to GID discovery below
+        except (FetchError, httpx.HTTPError, ValueError):
+            pass  # GID failed — fall through to GID discovery
 
     # No specific GID — discover all GIDs and try them.
     # The first GID with tables might be a landing page (Doja Cat, Sabrina
@@ -653,15 +700,21 @@ async def async_fetch_and_parse(
                 name = sheet_artist
         return name
 
-    # If a specific GID was requested, fetch just that one
+    # If a specific GID was requested, try it first.
+    # If it produces 0 eras, fall through to GID discovery.
     if gid:
-        html, title = await async_fetch_sheet_html(
-            url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-        )
-        name = _resolve_name(html, title)
-        artist = parse_sheet(html, name)
-        artist.source_url = url
-        return artist
+        try:
+            html, title = await async_fetch_sheet_html(
+                url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+            )
+            name = _resolve_name(html, title)
+            artist = parse_sheet(html, name)
+            if artist.eras:
+                artist.source_url = url
+                return artist
+            # GID produced 0 eras — fall through to GID discovery below
+        except (FetchError, httpx.HTTPError, ValueError):
+            pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
     async with httpx.AsyncClient(

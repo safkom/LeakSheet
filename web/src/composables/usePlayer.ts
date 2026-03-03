@@ -320,6 +320,29 @@ export function addToQueue(version, artistName = '', eraName = '', artUrl = '') 
   playerState.queue.push({ version, artistName, eraName, artUrl })
 }
 
+export function removeFromQueue(index) {
+  if (index >= 0 && index < playerState.queue.length) {
+    playerState.queue.splice(index, 1)
+  }
+}
+
+export function clearQueue() {
+  playerState.queue.splice(0, playerState.queue.length)
+}
+
+export function moveInQueue(fromIndex, toIndex) {
+  if (fromIndex < 0 || fromIndex >= playerState.queue.length) return
+  if (toIndex < 0 || toIndex >= playerState.queue.length) return
+  const [item] = playerState.queue.splice(fromIndex, 1)
+  playerState.queue.splice(toIndex, 0, item)
+}
+
+export function playFromQueue(index) {
+  if (index < 0 || index >= playerState.queue.length) return
+  const item = playerState.queue.splice(index, 1)[0]
+  playTrack(item.version, item.artistName, item.eraName, item.artUrl)
+}
+
 export function stopTrack() {
   if (_audio) {
     _audio.pause()
@@ -360,12 +383,13 @@ export function setVolume(v) {
 /**
  * Check if a version matches the currently playing track.
  * Uses value comparison (not reference equality) so it works after re-parsing.
+ * Compares name + version_tag + first link for robust identity.
  */
 export function isTrackMatch(version) {
   if (!version || !playerState.track) return false
   return version.name === playerState.track.name
     && version.version_tag === playerState.track.version_tag
-    && version.track_length === playerState.track.track_length
+    && (version.links?.[0] || '') === (playerState.track.links?.[0] || '')
 }
 
 /** Parse "3:14" → 194 seconds */

@@ -7,6 +7,7 @@ structured Artist/Era/Song/SongVersion objects.
 from __future__ import annotations
 
 import re
+import unicodedata
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -208,6 +209,7 @@ ERA_STATS_PATTERN = re.compile(
     r"\d+\s+"
     r"("
     r"OG File|Total Full|Full|Tagged|Partial|Snippet|Stem|Unavailable"
+    r"|Edited"                                                          # Michael Jackson
     r"|of Leaks|of Snippets|of Partials|of Recordings|of Unavailable|of Full"
     r"|Leaks?|Snippets?|Partials?"
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
@@ -217,11 +219,16 @@ ERA_STATS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Section separators (Carti-specific rows with just a category label)
+# Section separators — rows with a single category label.
+# These become named sections within the current era rather than eras.
 SECTION_SEPARATORS = {
     "surfaced", "unsurfaced", "unavailable",
     "og files for released songs & alternate versions",
     "unknown collaborations",
+    # Cross-tracker section labels
+    "features", "collaborations", "collaboration", "featured",
+    "collaborations & features", "loosies", "guest verses",
+    "guest features",
 }
 
 
@@ -230,6 +237,13 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     return bool(ERA_STATS_PATTERN.search(row[0].text))
+
+
+# Regex for date-prefixed changelog entries like "22.10.2025 - Big findings"
+_DATE_PREFIX_RE = re.compile(
+    r"^\d{1,2}[./]\d{1,2}[./]\d{2,4}"
+    r"|^\d{4}-\d{1,2}-\d{1,2}"
+)
 
 
 def _looks_like_era_name(text: str) -> bool:
@@ -247,6 +261,11 @@ def _looks_like_era_name(text: str) -> bool:
 
     # Take the first line only
     first_line = lines[0].strip() if lines else text.strip()
+
+    # Empty or whitespace-only → not an era
+    if not first_line:
+        return False
+
     # Strip parenthetical suffix for length check
     paren_idx = first_line.find("(")
     if paren_idx > 0:
@@ -260,6 +279,8 @@ def _looks_like_era_name(text: str) -> bool:
     if first_line.endswith(":"):
         return False
 
+    lower = first_line.lower()
+
     # Known non-era labels that appear in the era column
     non_era = {
         "links", "link", "changelog", "changelogs", "notes",
@@ -267,22 +288,65 @@ def _looks_like_era_name(text: str) -> bool:
         "editors", "current editors", "update notes", "resources",
         "template", "template:", "about", "info", "key", "legend",
         "recent additions", "what's new", "what's new?",
+        # Meta-labels that aren't music eras
+        "types", "type", "owner", "general information", "release date",
+        "updates", "mega folder", "performance tracks",
+        "progress reports", "rules", "highlighted",
+        "current editor", "current editors", "editor comments",
+        # Collaboration/feature labels → should be sections, not eras
+        "features", "collaborations", "collaboration", "featured",
+        "collaborations & features", "loosies", "guest verses",
+        "guest features",
     }
-    if first_line.lower() in non_era:
+    if lower in non_era:
         return False
+
+    # Starts with "Collaboration with" → section label, not era
+    if lower.startswith("collaboration with"):
+        return False
+
     # Contains "tracker" → likely a header/label, not an era
-    if "tracker" in first_line.lower():
+    if "tracker" in lower:
         return False
+
+    # Navigation rows: "Skip to DRILL", "Click to view..."
+    if lower.startswith("skip to ") or "click to view" in lower or "click here" in lower:
+        return False
+
+    # URLs / discord links → not an era name
+    if any(tok in lower for tok in ("discord.gg/", "discord.com/", "http://", "https://", ".gg/")):
+        return False
+
+    # Date-prefixed changelog: "22.10.2025 - Big findings", "2024-01-05: ..."
+    if _DATE_PREFIX_RE.match(first_line):
+        return False
+
+    # Changelog verbs: "Added ...", "Removed ...", "Updated ...", "Renamed ..."
+    changelog_verbs = ("added ", "removed ", "updated ", "renamed ", "started ", "finished ")
+    if lower.startswith(changelog_verbs):
+        return False
+
+    # Pure number or very short numeric: "31", "7", "3" — not an era
+    if first_line.isdigit() and len(first_line) <= 3:
+        return False
+
     return len(words) >= 1
 
 
 def _is_section_separator(row: list[_Cell]) -> bool:
-    """Check if a row is a Carti-style section separator."""
-    # Usually a row where most cells are empty and one contains a separator keyword
+    """Check if a row is a section separator (e.g. 'Features', 'Collaborations').
+
+    Usually a row where most cells are empty and one or two contain a
+    separator keyword. Also matches 'Collaboration with X' patterns.
+    """
     non_empty = [c for c in row if c.text.strip()]
     if len(non_empty) <= 2:
         for cell in non_empty:
-            if cell.text.strip().lower() in SECTION_SEPARATORS:
+            cell_lower = cell.text.strip().lower()
+            if cell_lower in SECTION_SEPARATORS:
+                return True
+            # "Collaboration with X" → treat as section
+            if cell_lower.startswith("collaboration with"):
                 return True
     return False
 
@@ -297,8 +361,14 @@ def _is_empty_row(row: list[_Cell]) -> bool:
 _FOOTER_KEYWORDS = {
     "total links", "total link", "total full",
     "changelogs", "changelog",
-    "tracker guidelines",
+    "tracker guidelines", "unreleased guidelines",
     "current tracker editors", "editor comments",
+    "progress reports",
+    "want to contribute",
+    "update notes", "spreadsheet data",
+    "guide & information", "link & invites",
+    "whole spreadsheet data",
+    "availability summary",
 }
 
 
@@ -315,6 +385,17 @@ def _is_tracker_footer(row: list[_Cell]) -> bool:
     return False
 
 
+def _normalize_unicode(text: str) -> str:
+    """Normalize Unicode text by replacing diacritics with their base characters.
+
+    Handles cases like "geëky" → "geeky", "ROSALÍA" → "ROSALIA".
+    """
+    # NFKD decomposition splits characters like ë into e + combining diaeresis
+    decomposed = unicodedata.normalize("NFKD", text)
+    # Remove combining characters (diacritics)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 def _era_match_key(full_era_name: str) -> str:
     """Extract the matching key from an era name, lowercased for matching.
 
@@ -329,6 +410,7 @@ def _era_match_key(full_era_name: str) -> str:
     - "Tu Pimp A Caterpillar [V1](...)" → "tu pimp a caterpillar"
     - "THC: The High Chronical$" → "thc: the high chronical$"
     - "(Mollyworld, Balaclava Era)" → "mollyworld, balaclava era"
+    - "Super geëky" → "super geeky"  (diacritics normalized)
     """
     key = full_era_name
     # Strip from first '(' onward
@@ -343,6 +425,8 @@ def _era_match_key(full_era_name: str) -> str:
     key = key.strip()
     # Strip version tags like [V1], [V2], [V3]
     key = VERSION_TAG_PATTERN.sub("", key).strip()
+    # Normalize Unicode diacritics (ë→e, á→a, etc.)
+    key = _normalize_unicode(key)
     return key.lower()
 
 
@@ -398,6 +482,34 @@ def _extract_links_from_cell(cell: _Cell) -> list[str]:
     return [_clean_link(link) for link in cell.links if link]
 
 
+def _register_era_keys(
+    era: Era,
+    era_name: str,
+    era_by_key: dict[str, Era],
+) -> None:
+    """Register all matching keys for an era (primary, full, alt-names, slash parts).
+
+    Uses setdefault so earlier (more authoritative) registrations win.
+    """
+    primary = _era_match_key(era_name)
+    if primary:
+        era_by_key.setdefault(primary, era)
+    full = _normalize_unicode(era_name).lower().strip()
+    if full and full != primary:
+        era_by_key.setdefault(full, era)
+    # Alt names
+    for alt in era.alt_names:
+        alt_key = _era_match_key(alt)
+        if alt_key:
+            era_by_key.setdefault(alt_key, era)
+    # Slash-separated: "38 Baby / Ay Ay" → register both parts
+    if " / " in era_name:
+        for part in era_name.split(" / "):
+            part_key = _era_match_key(part)
+            if part_key:
+                era_by_key.setdefault(part_key, era)
+
+
 # ---------------------------------------------------------------------------
 # High-level parser
 # ---------------------------------------------------------------------------
@@ -425,8 +537,20 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     if not rows:
         return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
 
-    # Step 1: detect column layout from header row
+    # Step 1: detect column layout from header row.
+    # Some trackers have a title/instruction row before the actual column
+    # headers (e.g. "Avicii Leaks by Azyy" in row 0, actual headers in
+    # row 2).  If rows[0] produces no column detections, search subsequent
+    # rows (up to 10) for a row that yields at least 2 canonical columns.
+    header_row_idx = 0
     col_map = detect_columns(rows[0])
+    if len(col_map) < 2:
+        for try_idx in range(1, min(11, len(rows))):
+            candidate_map = detect_columns(rows[try_idx])
+            if len(candidate_map) >= 2:
+                col_map = candidate_map
+                header_row_idx = try_idx
+                break
 
     # Step 2: walk rows, classify and extract
     eras: list[Era] = []
@@ -440,7 +564,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     in_footer = False
 
     # Parse metadata tracking
-    total_rows = len(rows) - 1  # exclude header
+    total_rows = len(rows) - 1 - header_row_idx  # exclude header and pre-header rows
     song_rows = 0
     skipped_rows = 0
     unmatched_rows: list[str] = []
@@ -448,8 +572,8 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     fuzzy_matched_rows = 0
 
     for row_idx, row in enumerate(rows):
-        # Skip header row
-        if row_idx == 0:
+        # Skip header row and any rows before it (title/instruction rows)
+        if row_idx <= header_row_idx:
             continue
 
         # Skip empty rows
@@ -557,8 +681,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     sections=[Section()],  # default unnamed section
                 )
                 eras.append(current_era)
-                if era_key:
-                    era_by_key[era_key] = current_era
+                _register_era_keys(current_era, era_name, era_by_key)
                 if needs_backfill:
                     _needs_name_backfill.add(id(current_era))
             continue
@@ -588,8 +711,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             and id(current_era) in _needs_name_backfill
         ):
             current_era.name = row_era
-            era_key = _era_match_key(row_era)
-            era_by_key[era_key] = current_era
+            _register_era_keys(current_era, row_era, era_by_key)
             _needs_name_backfill.discard(id(current_era))
             version = _parse_song_row(row, col_map)
             if version:
@@ -598,13 +720,19 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             continue
 
         if row_era:
-            # Case-insensitive exact lookup
-            row_era_lower = row_era.lower()
-            matched_era = era_by_key.get(row_era_lower)
+            # Case-insensitive exact lookup with Unicode normalization
+            row_era_norm = _normalize_unicode(row_era).lower()
+            matched_era = era_by_key.get(row_era_norm)
+
+            # Try stripped key (version tags removed) if exact fails
+            if matched_era is None:
+                row_era_stripped = _era_match_key(row_era)
+                if row_era_stripped != row_era_norm:
+                    matched_era = era_by_key.get(row_era_stripped)
 
             # Fuzzy match if exact lookup fails
             if matched_era is None:
-                matched_era = _fuzzy_era_match(row_era_lower, era_by_key)
+                matched_era = _fuzzy_era_match(row_era_norm, era_by_key)
                 if matched_era is not None:
                     fuzzy_matched_rows += 1
 
@@ -639,10 +767,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # Different era name — auto-create a new era if plausible
                     version = _parse_song_row(row, col_map)
                     if version and _looks_like_era_name(row_era):
-                        era_key = _era_match_key(row_era)
                         new_era = Era(name=row_era, sections=[Section()])
                         eras.append(new_era)
-                        era_by_key[era_key] = new_era
+                        _register_era_keys(new_era, row_era, era_by_key)
                         current_era = new_era
                         _add_version_to_era(current_era, version)
                         song_rows += 1
@@ -660,14 +787,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             current_era.sections.append(Section(name=row_era))
                         else:
                             # Enough data to be an era header without stats
-                            era_key = _era_match_key(row_era)
                             notes_idx = col_map.get("notes", 2)
                             name_idx = col_map.get("name", 1)
                             timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                             timeline = parse_timeline(timeline_raw) if timeline_raw else []
                             new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
                             eras.append(new_era)
-                            era_by_key[era_key] = new_era
+                            _register_era_keys(new_era, row_era, era_by_key)
                             current_era = new_era
                     continue
             else:
@@ -684,23 +810,21 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
                 version = _parse_song_row(row, col_map)
                 if version:
-                    era_key = _era_match_key(row_era)
                     new_era = Era(name=row_era, sections=[Section()])
                     eras.append(new_era)
-                    era_by_key[era_key] = new_era
+                    _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
                     _add_version_to_era(current_era, version)
                     song_rows += 1
                 else:
                     # No song data — stats-less era header (Kid Cudi style)
-                    era_key = _era_match_key(row_era)
                     notes_idx = col_map.get("notes", 2)
                     name_idx = col_map.get("name", 1)
                     timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                     timeline = parse_timeline(timeline_raw) if timeline_raw else []
                     new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
                     eras.append(new_era)
-                    era_by_key[era_key] = new_era
+                    _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
                 continue
 
@@ -723,10 +847,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 else:
                     # No current era — create one from the name column.
                     # This handles Yung Lean style trackers.
-                    era_key = _era_match_key(name_val)
                     new_era = Era(name=name_val, sections=[Section()])
                     eras.append(new_era)
-                    era_by_key[era_key] = new_era
+                    _register_era_keys(new_era, name_val, era_by_key)
                     current_era = new_era
                 continue
 

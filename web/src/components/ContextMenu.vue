@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { toast } from 'vue-sonner'
 import { addToQueue } from '../composables/usePlayer'
 
 const props = defineProps({
@@ -60,7 +61,11 @@ function getLink() {
 function copyLink() {
   const link = getLink()
   if (link) {
-    navigator.clipboard.writeText(link).catch(() => {})
+    navigator.clipboard.writeText(link).then(() => {
+      toast.success('Link copied')
+    }).catch(() => {
+      toast.error('Failed to copy link')
+    })
   }
   emit('close')
 }
@@ -82,12 +87,27 @@ function download() {
   const v = props.version || props.song?.versions?.[0]
   if (!v?.links?.length) return
   const link = v.links[0]
-  // Use the stream proxy for download
-  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}`
-  const a = document.createElement('a')
-  a.href = downloadUrl
-  a.download = `${v.name || 'track'}.mp3`
-  a.click()
+  const filename = `${v.name || 'track'}.mp3`
+  // Use the stream proxy with download flag for proper Content-Disposition
+  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
+  fetch(downloadUrl)
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.blob()
+    })
+    .then(blob => {
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+      toast.success('Download complete')
+    })
+    .catch(() => {
+      toast.error('Download failed')
+    })
+  toast('Downloading...')
   emit('close')
 }
 
@@ -95,6 +115,7 @@ function queueTrack() {
   const v = props.version || props.song?.versions?.[0]
   if (!v) return
   addToQueue(v, props.artistName || '', props.eraName || '', props.eraArt || '')
+  toast.success('Added to queue')
   emit('close')
 }
 
@@ -165,7 +186,7 @@ const hasLink = getLink() !== null
   position: fixed;
   z-index: 10000;
   min-width: 200px;
-  background: #1e2229;
+  background: hsl(var(--popover));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 4px 0;
@@ -202,7 +223,7 @@ const hasLink = getLink() !== null
 }
 
 .ctx-item.disabled {
-  opacity: 0.35;
+  opacity: 0.5;
   pointer-events: none;
 }
 

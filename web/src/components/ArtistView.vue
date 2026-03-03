@@ -67,10 +67,6 @@ function songMatchesQuery(song, query) {
   if (song.base_name.toLowerCase().includes(query)) return true
   return song.versions?.some(v => {
     if ((v.name || '').toLowerCase().includes(query)) return true
-    if ((v.featuring || '').toLowerCase().includes(query)) return true
-    if ((v.producers || '').toLowerCase().includes(query)) return true
-    if ((v.collaboration || '').toLowerCase().includes(query)) return true
-    if ((v.notes || '').toLowerCase().includes(query)) return true
     if (v.alt_titles?.some(alt => alt.toLowerCase().includes(query))) return true
     return false
   }) ?? false
@@ -254,18 +250,20 @@ const recentResults = computed(() => {
         <Input
           v-model="searchQuery"
           type="text"
-          class="search-input !border-0 !bg-transparent !ring-0 !ring-offset-0 !h-auto !rounded-none !p-0 !shadow-none focus-visible:!ring-0 focus-visible:!ring-offset-0"
-          placeholder="Search songs, artists, producers..."
+          variant="ghost"
+          class="search-input"
+          placeholder="Search songs by title..."
+          aria-label="Search songs"
         />
-        <Button v-if="searchQuery" variant="ghost" size="icon" class="search-clear !h-6 !w-6 !p-0" @click="searchQuery = ''">
+        <Button v-if="searchQuery" variant="ghost" size="icon" class="search-clear h-6 w-6 p-0" @click="searchQuery = ''" aria-label="Clear search">
           <svg viewBox="0 0 16 16" width="12" height="12">
             <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
           </svg>
         </Button>
-        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" title="Best Of">
+        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" aria-label="Toggle best of filter" :aria-pressed="bestOf">
           <span class="best-of-star">&#11088;</span>
         </Button>
-        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" title="Recently Added">
+        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" aria-label="Toggle recently added filter" :aria-pressed="recents">
           <svg viewBox="0 0 16 16" width="16" height="16" style="opacity: inherit">
             <path fill="currentColor" d="M1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0zM8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.87V4.75z"/>
           </svg>
@@ -329,7 +327,7 @@ const recentResults = computed(() => {
     </template>
 
     <!-- Normal era browsing -->
-    <div v-else class="eras-list">
+    <div v-else class="eras-list" role="list" aria-label="Eras">
       <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block">
         <EraCard
           :era="era"
@@ -417,6 +415,9 @@ const recentResults = computed(() => {
 .search-clear {
   color: var(--text-dim);
   flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .search-clear:hover {
@@ -426,7 +427,10 @@ const recentResults = computed(() => {
 .best-of-toggle {
   flex-shrink: 0;
   opacity: 0.5;
-  border: 1px solid transparent !important;
+  border: 1px solid transparent;
+  min-width: 44px;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .best-of-toggle:hover {
@@ -435,8 +439,8 @@ const recentResults = computed(() => {
 
 .best-of-toggle.active {
   opacity: 1;
-  background: rgba(255, 215, 0, 0.12) !important;
-  border-color: rgba(255, 215, 0, 0.3) !important;
+  background: rgba(255, 215, 0, 0.12);
+  border-color: rgba(255, 215, 0, 0.3);
 }
 
 .best-of-star {
@@ -468,19 +472,15 @@ const recentResults = computed(() => {
 /* Transition */
 .slide-enter-active,
 .slide-leave-active {
-  transition: all 0.25s ease;
+  transition: opacity 0.25s ease;
 }
 .slide-enter-from,
 .slide-leave-to {
   opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
 }
 .slide-enter-to,
 .slide-leave-from {
   opacity: 1;
-  max-height: 2000px;
 }
 
 /* Search results (flat list) */

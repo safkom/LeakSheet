@@ -33,12 +33,17 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
     "🏆": Badge.GRAIL,
     "🏅": Badge.WANTED,
     "🥇": Badge.WANTED,
+    "\U0001f949": Badge.WANTED,  # 🥉 Bronze medal — "Wanted" (Lil Uzi Vert)
     "🤖": Badge.AI,
 }
 
 # Regex to detect and strip leading badge emojis from song names
+# Non-badge decorative emojis that precede the actual badge emoji.
+# 💿 = disc indicator (e.g. "💿🥉 WOD Tape") — strip before badge detection.
+_DECORATIVE_EMOJI = r"[💿🎵🎶🔥]*"
+
 BADGE_EMOJI_PATTERN = re.compile(
-    r"^[\s]*(⭐️|⭐|✨|🗑️|🗑|🏆|🏅|🥇|🤖)[\s]*"
+    rf"^[\s]*{_DECORATIVE_EMOJI}[\s]*(⭐️|⭐|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)[\s]*"
 )
 
 # Regex to extract version tags like [V1], [V2], [Alt.], [Radio Mix], [MASTER], etc.

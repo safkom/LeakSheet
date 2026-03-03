@@ -5,8 +5,9 @@ import ArtistView from './components/ArtistView.vue'
 import PlayerBar from './components/PlayerBar.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Toaster } from '@/components/ui/sonner'
 import { parseSheet } from './composables/useApi'
-import { playerState, togglePlay, seekTo, setVolume } from './composables/usePlayer'
+import { playerState, togglePlay, seekTo } from './composables/usePlayer'
 
 const activeArtist = ref(null)
 const loading = ref(false)
@@ -80,6 +81,11 @@ function loadFromHistory(entry) {
   handleParse(entry.source_url)
 }
 
+function clearHistory() {
+  trackerHistory.value = []
+  localStorage.removeItem(STORAGE_KEY)
+}
+
 // ---------------------------------------------------------------------------
 // Keyboard controls
 // ---------------------------------------------------------------------------
@@ -107,18 +113,9 @@ function handleKeyboard(e) {
         seekTo(playerState.currentTime + 5)
       }
       break
-    case 'ArrowUp':
-      if (playerState.track) {
-        e.preventDefault()
-        setVolume(Math.min(1, playerState.volume + 0.05))
-      }
-      break
-    case 'ArrowDown':
-      if (playerState.track) {
-        e.preventDefault()
-        setVolume(Math.max(0, playerState.volume - 0.05))
-      }
-      break
+    // Note: ArrowUp/ArrowDown intentionally not intercepted —
+    // they conflict with normal page scrolling. Volume is controlled
+    // via the slider in the player bar instead.
   }
 }
 
@@ -155,7 +152,10 @@ onUnmounted(() => {
 
       <!-- History on landing page -->
       <div v-if="trackerHistory.length" class="landing-history">
-        <h3 class="history-title">Recent Trackers</h3>
+        <div class="history-header">
+          <h3 class="history-title">Recent Trackers</h3>
+          <button class="history-clear" @click="clearHistory">Clear</button>
+        </div>
         <Button
           v-for="entry in trackerHistory"
           :key="entry.source_url"
@@ -185,6 +185,7 @@ onUnmounted(() => {
   </main>
 
   <PlayerBar v-if="hasPlayer" />
+  <Toaster position="bottom-center" :offset="hasPlayer ? 80 : 16" />
 </template>
 
 <style scoped>
@@ -202,6 +203,7 @@ onUnmounted(() => {
 }
 
 .logo-btn {
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.5px;
@@ -236,9 +238,10 @@ onUnmounted(() => {
 }
 
 .landing-hero h1 {
+  font-family: var(--font-display);
   font-size: 48px;
   font-weight: 800;
-  letter-spacing: -1.5px;
+  letter-spacing: -2px;
   margin-bottom: 8px;
   display: inline-block;
 }
@@ -266,27 +269,46 @@ onUnmounted(() => {
   margin-top: 40px;
 }
 
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
 .history-title {
   font-size: 13px;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 12px;
+}
+
+.history-clear {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+
+.history-clear:hover {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
 }
 
 .history-card {
   width: 100%;
-  display: flex !important;
-  justify-content: space-between !important;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  height: auto !important;
-  padding: 12px 16px !important;
+  height: auto;
+  padding: 12px 16px;
   margin-bottom: 8px;
-  white-space: normal !important;
+  white-space: normal;
 }
 
 .history-card:hover {
-  border-color: var(--accent-color) !important;
+  border-color: var(--accent-color);
 }
 
 .history-card-name {

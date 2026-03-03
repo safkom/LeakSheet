@@ -125,13 +125,7 @@ function openDescription() {
       <div class="song-content">
         <!-- Title line -->
         <div class="song-title-line">
-          <!-- Equalizer when playing -->
-          <svg v-if="isCurrentSong && playerState.isPlaying" viewBox="0 0 16 16" width="14" height="14" class="eq-icon inline-eq">
-            <rect class="eq-bar eq-1" x="1" y="6" width="3" height="10" rx="1" fill="currentColor"/>
-            <rect class="eq-bar eq-2" x="6" y="3" width="3" height="13" rx="1" fill="currentColor"/>
-            <rect class="eq-bar eq-3" x="11" y="5" width="3" height="11" rx="1" fill="currentColor"/>
-          </svg>
-          <span v-if="badgeEmoji" class="badge-emoji">{{ badgeEmoji }}</span>
+          <span class="badge-slot">{{ badgeEmoji || '' }}</span>
           <span class="song-title">{{ song.base_name }}</span>
           <Badge
             v-if="!hasMultipleVersions && badge"
@@ -183,15 +177,17 @@ function openDescription() {
     <!-- Accordion: version list -->
     <Transition name="versions">
       <div v-if="expanded && hasMultipleVersions" class="versions-panel">
-        <VersionRow
-          v-for="(v, i) in song.versions"
-          :key="i"
-          :version="v"
-          :artist-name="artistName"
-          :era-name="eraName"
-          :era-art="eraArt"
-          :hide-alt-titles="true"
-        />
+        <div class="versions-panel-inner">
+          <VersionRow
+            v-for="(v, i) in song.versions"
+            :key="i"
+            :version="v"
+            :artist-name="artistName"
+            :era-name="eraName"
+            :era-art="eraArt"
+            :hide-alt-titles="true"
+          />
+        </div>
       </div>
     </Transition>
 
@@ -237,14 +233,18 @@ function openDescription() {
   align-items: flex-start;
   gap: 0;
   padding: 12px 10px;
+  min-height: 44px;
   border-radius: var(--radius-md);
   transition: all 0.2s ease;
   border: 1px solid transparent;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .song-row:hover {
   background: rgba(255, 255, 255, 0.03);
   border-color: rgba(255, 255, 255, 0.05);
+  border-left-color: hsl(var(--primary) / 0.4);
+  border-left-width: 2px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateX(2px);
 }
@@ -254,10 +254,37 @@ function openDescription() {
   border-color: rgba(88, 166, 255, 0.1);
 }
 
-/* Inline indicators */
-.inline-eq {
-  flex-shrink: 0;
-  margin-right: 2px;
+/* Equalizer animation for playing state */
+.song-row.playing .badge-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5px;
+}
+
+.song-row.playing .badge-slot::before,
+.song-row.playing .badge-slot::after {
+  content: '';
+  display: block;
+  width: 2.5px;
+  border-radius: 1px;
+  background: hsl(var(--primary));
+  animation: eq-bar 0.8s ease-in-out infinite alternate;
+}
+
+.song-row.playing .badge-slot::before {
+  height: 10px;
+  animation-delay: 0s;
+}
+
+.song-row.playing .badge-slot::after {
+  height: 6px;
+  animation-delay: 0.3s;
+}
+
+@keyframes eq-bar {
+  0% { height: 3px; }
+  100% { height: 12px; }
 }
 
 .expand-chevron {
@@ -292,9 +319,12 @@ function openDescription() {
   white-space: nowrap;
 }
 
-.badge-emoji {
+.badge-slot {
+  width: 20px;
+  min-width: 20px;
   font-size: 14px;
   flex-shrink: 0;
+  text-align: center;
 }
 
 .version-count {
@@ -386,24 +416,31 @@ function openDescription() {
 }
 
 /* Versions accordion */
-.versions-panel {
+.versions-panel-inner {
   padding: 0 0 4px 16px;
   overflow: hidden;
+  min-height: 0;
+}
+
+/* Accordion transition using grid technique */
+.versions-panel {
+  display: grid;
+  grid-template-rows: 1fr;
 }
 
 .versions-enter-active,
 .versions-leave-active {
-  transition: all 0.2s ease;
+  transition: grid-template-rows 0.25s ease, opacity 0.2s ease;
 }
 .versions-enter-from,
 .versions-leave-to {
+  grid-template-rows: 0fr;
   opacity: 0;
-  max-height: 0;
 }
 .versions-enter-to,
 .versions-leave-from {
+  grid-template-rows: 1fr;
   opacity: 1;
-  max-height: 1000px;
 }
 
 @media (max-width: 640px) {
@@ -412,14 +449,5 @@ function openDescription() {
   .versions-panel { padding-left: 12px; }
 }
 
-/* Equalizer animation */
-.eq-icon { color: var(--accent-color); }
-.eq-bar { transform-origin: bottom; animation: eq 0.8s ease-in-out infinite alternate; }
-.eq-1 { animation-delay: 0s; }
-.eq-2 { animation-delay: 0.2s; }
-.eq-3 { animation-delay: 0.4s; }
-@keyframes eq {
-  0% { transform: scaleY(0.3); }
-  100% { transform: scaleY(1); }
-}
+
 </style>

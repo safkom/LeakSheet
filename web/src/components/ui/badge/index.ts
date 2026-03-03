@@ -15,19 +15,19 @@ export const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
-        // Quality badge variants
-        og: "border-transparent bg-[rgba(78,205,196,0.15)] text-[#4ecdc4]",
-        hq: "border-transparent bg-[rgba(88,166,255,0.15)] text-[#58a6ff]",
-        cd: "border-transparent bg-[rgba(163,113,247,0.15)] text-[#a371f7]",
-        lq: "border-transparent bg-[rgba(240,136,62,0.15)] text-[#f0883e]",
-        rec: "border-transparent bg-[rgba(210,168,255,0.15)] text-[#d2a8ff]",
-        na: "border-transparent bg-[rgba(82,90,101,0.15)] text-[#525a65]",
+        // Quality badge variants (using CSS variable tokens)
+        og: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
+        hq: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
+        cd: "border-transparent bg-[hsl(var(--badge-cd)/0.15)] text-[hsl(var(--badge-cd))]",
+        lq: "border-transparent bg-[hsl(var(--badge-lq)/0.15)] text-[hsl(var(--badge-lq))]",
+        rec: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
+        na: "border-transparent bg-[hsl(var(--badge-na)/0.15)] text-[hsl(var(--badge-na))]",
         // Availability badge variants
-        full: "border-transparent bg-[rgba(78,205,196,0.15)] text-[#4ecdc4]",
-        partial: "border-transparent bg-[rgba(240,136,62,0.15)] text-[#f0883e]",
-        snippet: "border-transparent bg-[rgba(210,168,255,0.15)] text-[#d2a8ff]",
-        confirmed: "border-transparent bg-[rgba(88,166,255,0.15)] text-[#58a6ff]",
-        unavailable: "border-transparent bg-[rgba(82,90,101,0.15)] text-[#525a65]",
+        full: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
+        partial: "border-transparent bg-[hsl(var(--badge-lq)/0.15)] text-[hsl(var(--badge-lq))]",
+        snippet: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
+        confirmed: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
+        unavailable: "border-transparent bg-[hsl(var(--badge-na)/0.15)] text-[hsl(var(--badge-na))]",
       },
     },
     defaultVariants: {

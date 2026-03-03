@@ -1,75 +1,80 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* ── shadcn CSS variables (mapped from existing theme) ── */
+/* ── shadcn CSS variables — single source of truth ── */
 @layer base {
   :root {
-    --background: 215 28% 5%;      /* #0d1117 */
-    --foreground: 213 31% 91%;     /* #e6edf3 */
-    --card: 220 24% 15%;           /* #1c2333 */
+    --background: 215 28% 5%;         /* #0d1117 */
+    --foreground: 213 31% 91%;        /* #e6edf3 */
+    --card: 220 24% 15%;              /* #1c2333 */
     --card-foreground: 213 31% 91%;
-    --popover: 216 22% 11%;        /* #161b22 */
+    --card-hover: 220 25% 19%;        /* #242d3d */
+    --popover: 216 22% 11%;           /* #161b22 */
     --popover-foreground: 213 31% 91%;
-    --primary: 175 53% 55%;        /* #4ecdc4 teal accent */
+    --primary: 175 53% 55%;           /* #4ecdc4 teal */
     --primary-foreground: 215 28% 5%;
-    --secondary: 216 22% 11%;      /* #161b22 */
+    --primary-hover: 175 45% 50%;     /* #45b7af */
+    --secondary: 216 22% 11%;         /* #161b22 */
     --secondary-foreground: 213 31% 91%;
     --muted: 216 22% 11%;
-    --muted-foreground: 215 10% 57%; /* #8b949e */
+    --muted-foreground: 215 10% 57%;  /* #8b949e */
     --accent: 175 53% 55%;
     --accent-foreground: 215 28% 5%;
     --destructive: 0 72% 51%;
-    --border: 215 14% 21%;         /* #30363d */
+    --border: 215 14% 21%;            /* #30363d */
     --input: 215 28% 5%;
     --ring: 175 53% 55%;
     --radius: 0.625rem;
+
+    /* Extended semantic tokens */
+    --dim-foreground: 215 11% 36%;    /* #525a65 */
+    --player: 216 22% 11%;            /* same as secondary */
+
+    /* Badge color tokens (HSL triplets) */
+    --badge-og: 175 53% 55%;          /* #4ecdc4 teal */
+    --badge-hq: 214 100% 67%;         /* #58a6ff blue */
+    --badge-cd: 263 90% 71%;           /* #a371f7 purple */
+    --badge-lq: 25 86% 59%;           /* #f0883e orange */
+    --badge-rec: 270 100% 83%;        /* #d2a8ff light purple */
+    --badge-na: 215 11% 36%;          /* #525a65 gray */
   }
 }
 
-/* ── Original custom vars (still used by many components) ── */
+/* ── Semantic aliases (backward-compatible with existing component styles) ── */
 :root {
-  /* Dark theme */
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-card: #1c2333;
-  --bg-card-hover: #242d3d;
-  --bg-input: #0d1117;
-  --bg-player: #161b22;
+  --bg-primary: hsl(var(--background));
+  --bg-secondary: hsl(var(--secondary));
+  --bg-card: hsl(var(--card));
+  --bg-card-hover: hsl(var(--card-hover));
+  --bg-input: hsl(var(--input));
+  --bg-player: hsl(var(--player));
 
-  /* Teal/Cyan accents */
-  --accent-color: #4ecdc4;
-  --accent-hover: #45b7af;
-  --accent-dim: rgba(78, 205, 196, 0.15);
+  --accent-color: hsl(var(--primary));
+  --accent-hover: hsl(var(--primary-hover));
+  --accent-dim: hsl(var(--primary) / 0.15);
 
-  /* Text */
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-dim: #525a65;
+  --text-primary: hsl(var(--foreground));
+  --text-secondary: hsl(var(--muted-foreground));
+  --text-dim: hsl(var(--dim-foreground));
 
-  /* Borders */
-  --border-color: #30363d;
-  --border-hover: #4ecdc4;
+  --border-color: hsl(var(--border));
+  --border-hover: hsl(var(--primary));
 
-  /* Quality badges */
-  --badge-og: #4ecdc4;
-  --badge-hq: #58a6ff;
-  --badge-cd: #a371f7;
-  --badge-lq: #f0883e;
-  --badge-recording: #d2a8ff;
-  --badge-na: #525a65;
-
-  /* Sizes */
-  --player-height: 112px;
+  /* Layout constants */
+  --player-height: 64px;
   --header-height: 56px;
   --sticky-era-height: 50px;
 
-  /* Radius */
+  /* Radius aliases */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
 
-  /* Font */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Typography */
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
@@ -85,7 +90,7 @@
   html, body {
     height: 100%;
     background: var(--bg-primary);
-    background-image: radial-gradient(circle at 50% 0%, rgba(78, 205, 196, 0.05), transparent 60%);
+    background-image: radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.05), transparent 60%);
     background-attachment: fixed;
     overflow-x: hidden;
   }
@@ -93,6 +98,11 @@
   body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Display font for headings */
+  h1, h2, h3 {
+    font-family: var(--font-display);
   }
 
   a {
@@ -128,38 +138,25 @@
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-/* ── Quality badges (shared across SongRow & VersionRow) ── */
-.quality-badge {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
+/* Subtle noise texture overlay for depth */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px;
 }
 
-.q-og { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.q-hq { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.q-cd { background: rgba(163,113,247,0.15); color: var(--badge-cd); }
-.q-lq { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.q-rec { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.q-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-
-/* ── Availability badges (shared across SongRow & VersionRow) ── */
-.avail-pill {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
-
-.a-full { background: rgba(78,205,196,0.15); color: var(--badge-og); }
-.a-partial { background: rgba(240,136,62,0.15); color: var(--badge-lq); }
-.a-snippet { background: rgba(210,168,255,0.15); color: var(--badge-recording); }
-.a-confirmed { background: rgba(88,166,255,0.15); color: var(--badge-hq); }
-.a-unavailable { background: rgba(82,90,101,0.15); color: var(--badge-na); }
-.a-na { background: rgba(82,90,101,0.15); color: var(--badge-na); }

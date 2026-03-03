@@ -10,6 +10,7 @@ Endpoints:
 from __future__ import annotations
 
 import re
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -31,28 +32,74 @@ from src.streaming import resolve_stream_url, stream_audio
 
 
 # ---------------------------------------------------------------------------
+# SSRF protection — domain allowlists for proxy endpoints
+# ---------------------------------------------------------------------------
+
+_IMAGE_ALLOWED_DOMAINS = {
+    "googleusercontent.com",
+    "ggpht.com",
+    "google.com",
+    "gstatic.com",
+    "lh3.googleusercontent.com",
+    "lh7-rt.googleusercontent.com",
+}
+
+_STREAM_ALLOWED_DOMAINS = {
+    "pillows.su",
+    "pillowcase.su",
+    "api.pillows.su",
+    "imgur.gg",
+    "temp.imgur.gg",
+    "music.froste.lol",
+}
+
+
+def _is_allowed_domain(url: str, allowed: set[str]) -> bool:
+    """Check if the URL's hostname matches any of the allowed domains.
+
+    Handles both exact matches (e.g. "api.pillows.su") and suffix matches
+    (e.g. "lh3.googleusercontent.com" matches "googleusercontent.com").
+    """
+    from urllib.parse import urlparse
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return False
+        hostname = hostname.lower()
+        return any(hostname == d or hostname.endswith("." + d) for d in allowed)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
+
+# Global HTTP client for proxies to reuse connection pools
+proxy_client: httpx.AsyncClient | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global proxy_client
+    proxy_client = httpx.AsyncClient(
+        timeout=15,
+        follow_redirects=True,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+        },
+    )
+    yield
+    await proxy_client.aclose()
+
 
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
     version="0.3.0",
+    lifespan=lifespan,
 )
-
-# Global HTTP client for proxies to reuse connection pools
-proxy_client = httpx.AsyncClient(
-    timeout=15,
-    follow_redirects=True,
-    headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-    }
-)
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await proxy_client.aclose()
 
 app.add_middleware(
     CORSMiddleware,
@@ -138,6 +185,9 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
+    if not _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS):
+        raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
+
     # Conditional headers — send browser-like headers for Google domains
     is_google = any(h in url for h in (
         'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
@@ -177,21 +227,26 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
 async def proxy_stream(
     request: Request,
     url: str = Query(..., description="Original file-sharing link"),
+    download: bool = Query(False, description="Set Content-Disposition for download"),
 ):
     """Proxy an audio stream from a supported file-sharing host.
 
     Supports HTTP Range requests for proper seeking.
     When upstream doesn't support Range, synthesises partial responses locally.
+    Pass ?download=true to get a Content-Disposition: attachment header.
     """
     stream_url = resolve_stream_url(url)
     if stream_url is None:
         raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
 
+    if not _is_allowed_domain(stream_url, _STREAM_ALLOWED_DOMAINS):
+        raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
+
     # Forward Range header from client if present
     range_header = request.headers.get("range")
 
     try:
-        resp, client = stream_audio(stream_url, range_header=range_header)
+        resp, client = await stream_audio(stream_url, range_header=range_header)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
@@ -200,9 +255,14 @@ async def proxy_stream(
     ct = resp.headers.get("content-type")
     total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
 
+    # When ?download=true, add Content-Disposition to force browser download
+    _disposition = 'attachment; filename="track.mp3"' if download else None
+
     # ---------- upstream DID handle Range → pass through as-is ----------
     if resp.status_code == 206:
         headers: dict[str, str] = {"Accept-Ranges": "bytes"}
+        if _disposition:
+            headers["Content-Disposition"] = _disposition
         if ct:
             headers["Content-Type"] = ct
         cl = resp.headers.get("content-length")
@@ -212,13 +272,13 @@ async def proxy_stream(
         if cr:
             headers["Content-Range"] = cr
 
-        def _iter_passthrough():
+        async def _iter_passthrough():
             try:
-                for chunk in resp.iter_bytes(chunk_size=65536):
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
                     yield chunk
             finally:
-                resp.close()
-                client.close()
+                await resp.aclose()
+                await client.aclose()
 
         return StreamingResponse(
             _iter_passthrough(),
@@ -231,18 +291,20 @@ async def proxy_stream(
     # If the client didn't ask for Range either, just pass the full body.
     if not range_header:
         headers = {"Accept-Ranges": "bytes"}
+        if _disposition:
+            headers["Content-Disposition"] = _disposition
         if ct:
             headers["Content-Type"] = ct
         if total_size is not None:
             headers["Content-Length"] = str(total_size)
 
-        def _iter_full():
+        async def _iter_full():
             try:
-                for chunk in resp.iter_bytes(chunk_size=65536):
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
                     yield chunk
             finally:
-                resp.close()
-                client.close()
+                await resp.aclose()
+                await client.aclose()
 
         return StreamingResponse(
             _iter_full(),
@@ -254,22 +316,22 @@ async def proxy_stream(
     # Client requested Range but upstream ignored it — synthesise 206.
     m = re.match(r"bytes=(\d+)-(\d*)", range_header)
     if not m:
-        resp.close(); client.close()
+        await resp.aclose(); await client.aclose()
         raise HTTPException(status_code=416, detail="Malformed Range header")
 
     range_start = int(m.group(1))
     range_end = int(m.group(2)) if m.group(2) else (total_size - 1 if total_size else None)
 
     if total_size and range_start >= total_size:
-        resp.close(); client.close()
+        await resp.aclose(); await client.aclose()
         raise HTTPException(status_code=416, detail="Range start beyond file size")
 
     if range_end is None:
         # Unknown total — stream from offset, skip leading bytes
-        def _iter_skip():
+        async def _iter_skip():
             try:
                 skipped = 0
-                for chunk in resp.iter_bytes(chunk_size=65536):
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
                     if skipped + len(chunk) <= range_start:
                         skipped += len(chunk)
                         continue
@@ -280,8 +342,8 @@ async def proxy_stream(
                     else:
                         yield chunk
             finally:
-                resp.close()
-                client.close()
+                await resp.aclose()
+                await client.aclose()
 
         return StreamingResponse(
             _iter_skip(),
@@ -293,11 +355,11 @@ async def proxy_stream(
     # Known total — return proper 206 with Content-Range
     content_length = range_end - range_start + 1
 
-    def _iter_range():
+    async def _iter_range():
         try:
             skipped = 0
             sent = 0
-            for chunk in resp.iter_bytes(chunk_size=65536):
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
                 chunk_end = skipped + len(chunk)
                 # Entirely before range_start — skip
                 if chunk_end <= range_start:
@@ -315,8 +377,8 @@ async def proxy_stream(
                 if skipped > range_end:
                     break
         finally:
-            resp.close()
-            client.close()
+            await resp.aclose()
+            await client.aclose()
 
     return StreamingResponse(
         _iter_range(),

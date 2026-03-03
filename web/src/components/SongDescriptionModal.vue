@@ -72,13 +72,13 @@ const details = computed(() => {
 
 <template>
   <Dialog :open="true" @update:open="handleOpenChange">
-    <DialogScrollContent class="!max-w-[520px] !p-0 !border-white/10 !bg-[#1a1e26] !overflow-y-auto !rounded-xl">
+    <DialogScrollContent class="max-w-[520px] p-0 border-white/10 bg-[hsl(220_24%_12%)] overflow-y-auto rounded-xl">
       <!-- Art Header -->
       <div v-if="artSrc" class="modal-art-header">
         <img :src="artSrc" class="modal-art-img" alt="" />
         <div class="modal-art-overlay"></div>
         <div class="modal-art-info">
-          <Badge v-if="badgeInfo" variant="secondary" class="!bg-white/15 !text-white !border-transparent text-[11px] !rounded-[4px]">
+          <Badge v-if="badgeInfo" variant="secondary" class="bg-white/15 text-white border-transparent text-[11px] rounded-[4px]">
             {{ badgeInfo.emoji }} {{ badgeInfo.label }}
           </Badge>
           <span v-if="eraName" class="text-xs text-white/70 font-medium">{{ eraName }}</span>

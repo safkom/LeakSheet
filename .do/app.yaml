@@ -1,0 +1,34 @@
+name: leaksheet
+region: fra
+
+services:
+  - name: api
+    github:
+      repo: safkom/LeakSheet
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    environment_slug: python
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    run_command: uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8080}
+    http_port: 8080
+    routes:
+      - path: /api
+    health_check:
+      http_path: /api/docs
+      initial_delay_seconds: 10
+      period_seconds: 30
+
+static_sites:
+  - name: web
+    github:
+      repo: safkom/LeakSheet
+      branch: main
+      deploy_on_push: true
+    source_dir: /web
+    build_command: npm install && npm run build
+    output_dir: dist
+    routes:
+      - path: /
+    catchall_document: index.html

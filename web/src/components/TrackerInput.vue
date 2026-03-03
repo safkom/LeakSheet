@@ -27,7 +27,8 @@ function handleSubmit() {
       <Input
         v-model="url"
         type="text"
-        class="!border-0 !bg-transparent !ring-0 !ring-offset-0 !h-auto !rounded-none flex-1 px-3 py-2.5 text-sm focus-visible:!ring-0 focus-visible:!ring-offset-0"
+        variant="ghost"
+        class="flex-1 px-3 py-2.5 text-sm"
         placeholder="Paste a tracker URL (Google Sheets or yetracker.net)..."
         :disabled="loading"
       />
@@ -35,7 +36,7 @@ function handleSubmit() {
         type="submit"
         size="sm"
         :disabled="loading || !url.trim()"
-        class="flex-shrink-0 !rounded-md"
+        class="flex-shrink-0 rounded-md"
       >
         <span v-if="loading" class="spinner"></span>
         <span v-else>Parse</span>

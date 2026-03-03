@@ -70,6 +70,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "file date": "file_date",
     "creation date": "file_date",  # Kid Cudi
     "date created": "file_date",
+    "year": "file_date",           # Avicii
     "leak date": "leak_date",
     "release date": "leak_date",   # Gucci Mane, Yuno Miles
     "obtained on:": "leak_date",   # Wu-Tang Clan
@@ -82,6 +83,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "available": "available_length",
     "song status": "available_length",            # XXXTENTACION
     "status": "available_length",
+    "availability": "available_length",          # Lil Uzi Vert
     "portion": "available_length",                # Template variant
 
     # Quality

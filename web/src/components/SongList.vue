@@ -45,7 +45,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 </script>
 
 <template>
-  <div class="song-list">
+  <div class="song-list" role="list" :aria-label="eraName ? eraName + ' songs' : 'Song list'">
     <div v-if="!hasSongs" class="no-songs">No songs found</div>
     <template v-for="item in displayItems" :key="item.key">
       <div v-if="item.type === 'section'" class="section-divider">
