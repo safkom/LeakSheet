@@ -55,8 +55,13 @@ function extractColors(imgElement) {
       }
       titleColor.value = bright
 
-      // Share colors for search result badges
-      extractAndCacheEraColors(props.era.name, imgElement, ct)
+      // Share colors for search result badges + player accent
+      setEraColors(props.era.name, {
+        bg: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.2)`,
+        text: bright,
+        border: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
+        accent: bright,
+      })
     }
     colorsReady.value = true
   } catch (e) {

@@ -135,6 +135,20 @@ function downloadTrack() {
 }
 
 const hasLink = computed(() => getTrackLink() !== null)
+
+// Dynamic accent color from era
+const playerAccentColor = computed(() => {
+  const eraName = playerState.eraName
+  if (!eraName) return null
+  const colors = getEraColors(eraName)
+  return colors?.accent || null
+})
+
+const playerBarStyle = computed(() => {
+  const accent = playerAccentColor.value
+  if (!accent) return {}
+  return { '--player-accent': accent }
+})
 </script>
 
 <template>
@@ -365,7 +379,7 @@ const hasLink = computed(() => getTrackLink() !== null)
   top: 0;
   left: 0;
   height: 100%;
-  background: var(--accent-color);
+  background: var(--player-accent, var(--accent-color));
   transition: width 0.1s linear;
 }
 
@@ -376,7 +390,7 @@ const hasLink = computed(() => getTrackLink() !== null)
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent-color);
+  background: var(--player-accent, var(--accent-color));
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -478,13 +492,13 @@ const hasLink = computed(() => getTrackLink() !== null)
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: var(--accent-color);
+  background: var(--player-accent, var(--accent-color));
   color: var(--bg-primary);
   transition: background 0.15s;
 }
 
 .ctrl-btn:hover {
-  background: var(--accent-hover);
+  filter: brightness(1.15);
 }
 
 .ctrl-btn.disabled {
@@ -537,7 +551,7 @@ const hasLink = computed(() => getTrackLink() !== null)
 
 .menu-btn:hover,
 .close-btn:hover {
-  color: var(--text-primary);
+  color: var(--player-accent, var(--text-primary));
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -546,7 +560,7 @@ const hasLink = computed(() => getTrackLink() !== null)
 }
 
 .queue-toggle-btn.active {
-  color: var(--accent-color);
+  color: var(--player-accent, var(--accent-color));
 }
 
 .queue-badge {
@@ -561,7 +575,7 @@ const hasLink = computed(() => getTrackLink() !== null)
   text-align: center;
   padding: 0 3px;
   border-radius: 7px;
-  background: var(--accent-color);
+  background: var(--player-accent, var(--accent-color));
   color: var(--bg-primary);
   pointer-events: none;
 }
@@ -575,5 +589,25 @@ const hasLink = computed(() => getTrackLink() !== null)
   .player-time-inline { display: none; }
   .progress-bar-top { height: 4px; }
   .progress-bar-top .progress-thumb { opacity: 1; width: 14px; height: 14px; }
+}
+</style>
+
+<!-- Unscoped override for portal-rendered dropdown menu -->
+<style>
+.player-dropdown {
+  background: hsl(0 0% 12%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: none !important;
+}
+</style>
+
+<!-- Unscoped override for portal-rendered dropdown menu -->
+<style>
+.player-dropdown {
+  background: hsl(0 0% 12%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: none !important;
 }
 </style>

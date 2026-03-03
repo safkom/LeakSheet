@@ -1,6 +1,7 @@
 /**
  * Shared reactive era color cache.
- * Populated by EraCard after ColorThief extraction, consumed by ArtistView for search badges.
+ * Populated by EraCard after ColorThief extraction, consumed by ArtistView for search badges
+ * and PlayerBar for dynamic accent coloring.
  */
 import { reactive } from 'vue'
 

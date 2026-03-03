@@ -137,19 +137,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="app-header">
-    <button class="logo-btn" @click="goHome">
-      <span class="logo-text">Leak</span><span class="logo-accent">Sheet</span>
-    </button>
-    <div v-if="activeArtist" class="header-artist">
-      {{ activeArtist.name }}
-    </div>
-    <div v-else-if="loading" class="header-loading">
-      <span class="header-loading-dot"></span>
-      Parsing&hellip;
-    </div>
-  </header>
-
   <main class="app-main" :class="{ 'has-player': hasPlayer }">
     <!-- Landing / Home -->
     <div v-if="!activeArtist && !loading" class="landing">
@@ -215,55 +202,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  height: var(--header-height);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  gap: 16px;
-}
-
-.logo-btn {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-}
-.logo-text { color: var(--text-primary); }
-.logo-accent { color: var(--accent-color); }
-
-.header-artist {
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.header-loading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.header-loading-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-color);
-  animation: pulse-dot 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 0.3; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.2); }
-}
-
 .app-main {
   flex: 1;
   padding-bottom: 20px;

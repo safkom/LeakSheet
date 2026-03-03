@@ -11,7 +11,7 @@ direct audio stream URLs.  Supported hosts:
     https://imgur.gg/f/{id}       →  fetch /api/file/{id} JSON  →  cdnUrl
 
   music.froste.lol
-    https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/download
+    https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/file
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def resolve_stream_url(link: str) -> str | None:
     m = _FROSTE_PATTERN.match(link)
     if m:
         song_hash = m.group(1)
-        return f"https://music.froste.lol/song/{song_hash}/download"
+        return f"https://music.froste.lol/song/{song_hash}/file"
 
     return None
 

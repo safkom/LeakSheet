@@ -11,6 +11,8 @@ const props = defineProps({
   artist: Object,
 })
 
+const emit = defineEmits(['back'])
+
 const expandedEra = ref(null)
 const bestOf = ref(false)
 const recents = ref(false)
@@ -235,9 +237,16 @@ const recentResults = computed(() => {
 <template>
   <div class="artist-view">
     <div class="artist-header">
-      <h2 class="artist-name">{{ artist.name }}</h2>
-      <div class="artist-meta">
-        {{ artist.eras?.length || 0 }} eras
+      <button class="back-btn" @click="emit('back')" aria-label="Back to home">
+        <svg viewBox="0 0 16 16" width="16" height="16">
+          <path fill="currentColor" d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/>
+        </svg>
+      </button>
+      <div class="artist-header-text">
+        <h2 class="artist-name">{{ artist.name }}</h2>
+        <div class="artist-meta">
+          {{ artist.eras?.length || 0 }} eras
+        </div>
       </div>
     </div>
 
@@ -363,6 +372,30 @@ const recentResults = computed(() => {
 
 .artist-header {
   margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.back-btn {
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.back-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.artist-header-text {
+  min-width: 0;
 }
 
 .artist-name {

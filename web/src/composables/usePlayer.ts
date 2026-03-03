@@ -152,10 +152,10 @@ function _resolveStreamUrl(originalLink) {
     return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
   }
 
-  // music.froste.lol: proxy through our backend (CORS restricted)
+  // music.froste.lol: direct (supports CORS + Range natively)
   m = _FROSTE_RE.exec(originalLink)
   if (m) {
-    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
+    return { url: `https://music.froste.lol/song/${m[1]}/file`, direct: true }
   }
 
   return null
@@ -221,9 +221,8 @@ function _updateMediaSession() {
 
   const artwork = []
   if (playerState.artUrl) {
-    let fullUrl = playerState.artUrl.startsWith('//') ? 'https:' + playerState.artUrl : playerState.artUrl
+    const fullUrl = playerState.artUrl.startsWith('//') ? 'https:' + playerState.artUrl : playerState.artUrl
     if (fullUrl.startsWith('http')) {
-      fullUrl = enhanceGoogleImageUrl(fullUrl, 512)
       const proxyUrl = `${window.location.origin}/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
       artwork.push({ src: proxyUrl, sizes: '512x512', type: 'image/jpeg' })
     }
@@ -412,27 +411,13 @@ export function formatTime(seconds) {
 }
 
 /**
- * Enhance Google image URLs to request higher resolution versions.
- * Google CDN URLs support size suffixes like =s800, =w400-h400, etc.
- */
-export function enhanceGoogleImageUrl(url, size = 400) {
-  if (!url) return url
-  if (!url.includes('googleusercontent.com') && !url.includes('ggpht.com')) return url
-  // Strip existing size parameter and add desired one
-  let cleaned = url.replace(/=[swh]\d+(-[swh]\d+)*$/, '')
-  cleaned = cleaned.replace(/[?&]sz=[^&]+/, '')
-  return `${cleaned}=s${size}`
-}
-
-/**
  * Build proxy URL for an art image.
  * Handles protocol-relative URLs and routes through /api/image-proxy.
  */
 export function artProxyUrl(rawUrl) {
   if (!rawUrl) return null
-  let fullUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl
+  const fullUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl
   if (fullUrl.startsWith('http')) {
-    fullUrl = enhanceGoogleImageUrl(fullUrl, 400)
     return `/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
   }
   return rawUrl

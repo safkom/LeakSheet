@@ -36,6 +36,41 @@ from src.streaming import resolve_stream_url, stream_audio
 
 
 # ---------------------------------------------------------------------------
+# MIME type corrections — upstream hosts sometimes send non-standard types
+# that iOS Safari / WebKit rejects as "source not supported".
+# ---------------------------------------------------------------------------
+
+_MIME_CORRECTIONS: dict[str, str] = {
+    # audio/m4a is not a registered IANA type; Safari needs audio/mp4
+    "audio/m4a": "audio/mp4",
+    "audio/m4b": "audio/mp4",
+    # Encourage explicit types over generic binary
+    "application/octet-stream": "audio/mpeg",
+    "binary/octet-stream": "audio/mpeg",
+}
+
+# Map corrected MIME types to file extensions for Content-Disposition
+_MIME_TO_EXT: dict[str, str] = {
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/aac": ".aac",
+    "audio/x-m4a": ".m4a",
+}
+
+
+def _fix_audio_mime(ct: str | None) -> str:
+    """Return a corrected MIME type suitable for browser <audio> playback."""
+    if not ct:
+        return "audio/mpeg"
+    # Strip parameters (e.g. "; charset=utf-8")
+    base = ct.split(";")[0].strip().lower()
+    return _MIME_CORRECTIONS.get(base, base)
+
+
+# ---------------------------------------------------------------------------
 # SSRF protection — domain allowlists for proxy endpoints
 # ---------------------------------------------------------------------------
 
@@ -256,11 +291,16 @@ async def proxy_stream(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
 
-    ct = resp.headers.get("content-type")
+    raw_ct = resp.headers.get("content-type")
+    ct = _fix_audio_mime(raw_ct)
     total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
 
-    # When ?download=true, add Content-Disposition to force browser download
-    _disposition = 'attachment; filename="track.mp3"' if download else None
+    # When ?download=true, add Content-Disposition with correct extension
+    if download:
+        ext = _MIME_TO_EXT.get(ct, ".mp3")
+        _disposition = f'attachment; filename="track{ext}"'
+    else:
+        _disposition = None
 
     # ---------- upstream DID handle Range → pass through as-is ----------
     if resp.status_code == 206:

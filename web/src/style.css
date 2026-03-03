@@ -4,31 +4,31 @@
 /* ── shadcn CSS variables — single source of truth ── */
 @layer base {
   :root {
-    --background: 215 28% 5%;         /* #0d1117 */
-    --foreground: 213 31% 91%;        /* #e6edf3 */
-    --card: 220 24% 15%;              /* #1c2333 */
-    --card-foreground: 213 31% 91%;
-    --card-hover: 220 25% 19%;        /* #242d3d */
-    --popover: 216 22% 11%;           /* #161b22 */
-    --popover-foreground: 213 31% 91%;
+    --background: 0 0% 0%;            /* #000000 OLED black */
+    --foreground: 0 0% 91%;           /* #e8e8e8 */
+    --card: 0 0% 6%;                  /* #0f0f0f */
+    --card-foreground: 0 0% 91%;
+    --card-hover: 0 0% 10%;           /* #1a1a1a */
+    --popover: 0 0% 5%;               /* #0d0d0d */
+    --popover-foreground: 0 0% 91%;
     --primary: 175 53% 55%;           /* #4ecdc4 teal */
-    --primary-foreground: 215 28% 5%;
+    --primary-foreground: 0 0% 0%;
     --primary-hover: 175 45% 50%;     /* #45b7af */
-    --secondary: 216 22% 11%;         /* #161b22 */
-    --secondary-foreground: 213 31% 91%;
-    --muted: 216 22% 11%;
-    --muted-foreground: 215 10% 57%;  /* #8b949e */
+    --secondary: 0 0% 5%;             /* #0d0d0d */
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 5%;
+    --muted-foreground: 0 0% 55%;     /* #8c8c8c */
     --accent: 175 53% 55%;
-    --accent-foreground: 215 28% 5%;
+    --accent-foreground: 0 0% 0%;
     --destructive: 0 72% 51%;
-    --border: 215 14% 21%;            /* #30363d */
-    --input: 215 28% 5%;
+    --border: 0 0% 14%;               /* #242424 */
+    --input: 0 0% 0%;
     --ring: 175 53% 55%;
     --radius: 0.625rem;
 
     /* Extended semantic tokens */
-    --dim-foreground: 215 11% 36%;    /* #525a65 */
-    --player: 216 22% 11%;            /* same as secondary */
+    --dim-foreground: 0 0% 35%;       /* #595959 */
+    --player: 0 0% 3%;               /* #080808 */
 
     /* Badge color tokens (HSL triplets) */
     --badge-og: 175 53% 55%;          /* #4ecdc4 teal */
@@ -36,7 +36,7 @@
     --badge-cd: 263 90% 71%;           /* #a371f7 purple */
     --badge-lq: 25 86% 59%;           /* #f0883e orange */
     --badge-rec: 270 100% 83%;        /* #d2a8ff light purple */
-    --badge-na: 215 11% 36%;          /* #525a65 gray */
+    --badge-na: 0 0% 35%;             /* #595959 gray */
   }
 }
 
@@ -90,8 +90,6 @@
   html, body {
     height: 100%;
     background: var(--bg-primary);
-    background-image: radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.05), transparent 60%);
-    background-attachment: fixed;
     overflow-x: hidden;
   }
 
