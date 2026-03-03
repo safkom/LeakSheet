@@ -11,6 +11,7 @@ import { playerState, togglePlay, seekTo } from './composables/usePlayer'
 
 const activeArtist = ref(null)
 const loading = ref(false)
+const loadingUrl = ref('')
 const error = ref('')
 // Multi-artist: track loaded tracker history (persisted in localStorage)
 const STORAGE_KEY = 'leaksheet_recent_trackers'
@@ -34,6 +35,7 @@ const hasPlayer = computed(() => playerState.track !== null)
 
 async function handleParse(url) {
   loading.value = true
+  loadingUrl.value = url
   error.value = ''
   try {
     const data = await parseSheet(url)
@@ -136,6 +138,10 @@ onUnmounted(() => {
     <div v-if="activeArtist" class="header-artist">
       {{ activeArtist.name }}
     </div>
+    <div v-else-if="loading" class="header-loading">
+      <span class="header-loading-dot"></span>
+      Parsing&hellip;
+    </div>
   </header>
 
   <main class="app-main" :class="{ 'has-player': hasPlayer }">
@@ -170,12 +176,34 @@ onUnmounted(() => {
     </div>
 
     <!-- Loading state -->
-    <div v-else-if="loading" class="landing">
+    <div v-else-if="loading" class="loading-view">
+      <div class="loading-status">
+        <div class="loading-spinner-ring">
+          <svg viewBox="0 0 24 24" width="32" height="32" class="loading-spin">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="50 14" />
+          </svg>
+        </div>
+        <p class="loading-title">Parsing tracker&hellip;</p>
+        <p class="loading-url">{{ loadingUrl }}</p>
+      </div>
+
+      <!-- Skeleton mimicking ArtistView -->
       <div class="loading-skeleton">
-        <Skeleton class="h-8 w-48 mb-4" />
-        <Skeleton class="h-5 w-32 mb-8" />
+        <Skeleton class="h-7 w-44 mb-1 rounded-md" />
+        <Skeleton class="h-4 w-20 mb-5 rounded" />
+
+        <!-- Search bar skeleton -->
+        <Skeleton class="h-10 w-full mb-5 rounded-lg" />
+
+        <!-- Era card skeletons -->
         <div class="skeleton-eras">
-          <Skeleton v-for="i in 5" :key="i" class="h-24 w-full rounded-xl" />
+          <div v-for="i in 6" :key="i" class="skeleton-era-card">
+            <Skeleton class="skeleton-era-art" />
+            <div class="skeleton-era-info">
+              <Skeleton class="h-4 rounded" :style="{ width: [65,80,55,72,60,48][i-1] + '%' }" />
+              <Skeleton class="h-3 w-16 rounded mt-1.5" />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -215,6 +243,27 @@ onUnmounted(() => {
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 500;
+}
+
+.header-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.header-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
 }
 
 .app-main {
@@ -317,17 +366,82 @@ onUnmounted(() => {
   text-align: left;
 }
 
-/* Skeleton loading */
+/* Loading view */
+.loading-view {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 48px 20px 40px;
+}
+
+.loading-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 48px;
+}
+
+.loading-spinner-ring {
+  color: var(--accent-color);
+  margin-bottom: 4px;
+}
+
+.loading-spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.loading-url {
+  font-size: 12px;
+  color: var(--text-dim);
+  max-width: 420px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Skeleton layout matching ArtistView */
 .loading-skeleton {
   max-width: 900px;
   margin: 0 auto;
-  padding: 24px 20px;
 }
 
 .skeleton-eras {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.skeleton-era-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.skeleton-era-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.skeleton-era-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .history-card-meta {
