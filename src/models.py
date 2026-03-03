@@ -246,6 +246,10 @@ class Era(BaseModel):
 
     def dict(self, **kwargs):
         d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d["sections"] = [
+            {"name": sec.name, "songs": [s.dict(**kwargs) for s in sec.songs]}
+            for sec in self.sections
+        ]
         d["songs"] = [s.dict(**kwargs) for s in self.songs]
         d["song_count"] = self.song_count
         d["version_count"] = self.version_count
@@ -284,6 +288,7 @@ class Artist(BaseModel):
 
     def dict(self, **kwargs):
         d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d["eras"] = [era.dict(**kwargs) for era in self.eras]
         d["total_songs"] = self.total_songs
         d["total_versions"] = self.total_versions
         return d
