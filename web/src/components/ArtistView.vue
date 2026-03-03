@@ -1,5 +1,5 @@
-<script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+<script setup lang="ts">
+import { computed, watch, nextTick, ref } from 'vue'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
@@ -7,136 +7,57 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { getEraColors } from '../composables/useEraColors'
 import { playerState, setEraSongs, findStreamableLink } from '../composables/usePlayer'
+import { useEraFiltering, eraSongs } from '../composables/useEraFiltering'
+import type { Artist } from '../composables/useEraFiltering'
 
-const props = defineProps({
-  artist: Object,
-})
+const props = defineProps<{
+  artist: Artist
+}>()
 
-const emit = defineEmits(['back'])
-
-const expandedEra = ref(null)
-const bestOf = ref(false)
-const recents = ref(false)
-const searchQuery = ref('')
-const debouncedQuery = ref('')
-let _debounceTimer = null
-
-watch(searchQuery, (val) => {
-  clearTimeout(_debounceTimer)
-  if (!val.trim()) {
-    // Clear instantly for better UX
-    debouncedQuery.value = ''
-    return
-  }
-  _debounceTimer = setTimeout(() => {
-    debouncedQuery.value = val
-  }, 200)
-})
-
-onUnmounted(() => {
-  clearTimeout(_debounceTimer)
-})
+const emit = defineEmits<{
+  back: []
+}>()
 
 const eras = computed(() => props.artist?.eras || [])
 
-const _BEST_OF_BADGES = new Set(['best', 'special'])
+const {
+  searchQuery,
+  bestOf,
+  recents,
+  isSearching,
+  filteredEras,
+  flatSearchResults,
+  recentResults,
+  filteredSongs,
+  filteredSections: eraSections,
+  toggleEra,
+  isEraExpanded,
+  toggleBestOf,
+  toggleRecents,
+} = useEraFiltering(eras)
 
-function isBestOfSong(song) {
-  return _BEST_OF_BADGES.has(song.badge)
+const eraBlockRefs = ref<Record<string, HTMLElement | null>>({})
+
+function setEraBlockRef(name: string) {
+  return (el: any) => { eraBlockRefs.value[name] = el }
 }
 
-/** Filter eras/songs based on search query and best-of mode */
-const filteredEras = computed(() => {
-  let result = eras.value
-
-  // Best-of: only eras that have starred songs
-  if (bestOf.value) {
-    result = result.filter(era => eraSongs(era).some(isBestOfSong))
-  }
-
-  const q = debouncedQuery.value.trim().toLowerCase()
-  if (!q) return result
-
-  return result.filter(era => {
-    // Match era name or alt names
-    if (era.name.toLowerCase().includes(q)) return true
-    if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return true
-    // Match any song in the era
-    return eraSongs(era).some(song => songMatchesQuery(song, q))
-  })
-})
-
-function songMatchesQuery(song, query) {
-  if (song.base_name.toLowerCase().includes(query)) return true
-  return song.versions?.some(v => {
-    if ((v.name || '').toLowerCase().includes(query)) return true
-    if (v.alt_titles?.some(alt => alt.toLowerCase().includes(query))) return true
-    return false
-  }) ?? false
-}
-
-/** Filter songs within an era when searching or in best-of mode */
-function filteredSongs(era) {
-  let songs = eraSongs(era)
-
-  // Best-of: only starred songs
-  if (bestOf.value) {
-    songs = songs.filter(isBestOfSong)
-  }
-
-  const q = debouncedQuery.value.trim().toLowerCase()
-  if (!q) return songs
-  // If era name or alt name matches, show all (filtered) songs
-  if (era.name.toLowerCase().includes(q)) return songs
-  if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return songs
-  return songs.filter(song => songMatchesQuery(song, q))
-}
-
-/** Return sections for an era, preserving section structure for dividers */
-function eraSections(era) {
-  if (!era.sections?.length) return []
-  const q = debouncedQuery.value.trim().toLowerCase()
-  const filtering = bestOf.value || q
-
-  if (!filtering) return era.sections
-
-  // When filtering, still preserve section structure but filter songs within
-  return era.sections
-    .map(sec => {
-      let songs = sec.songs || []
-      if (bestOf.value) songs = songs.filter(isBestOfSong)
-      if (q) {
-        const eraNameMatch = era.name.toLowerCase().includes(q) ||
-          era.alt_names?.some(alt => alt.toLowerCase().includes(q))
-        if (!eraNameMatch) songs = songs.filter(song => songMatchesQuery(song, q))
-      }
-      return { ...sec, songs }
-    })
-    .filter(sec => sec.songs.length > 0)
-}
-
-const isSearching = computed(() => debouncedQuery.value.trim().length > 0)
-
-/** Flat list of individual version results for search mode (Issues 6+7) */
-const flatSearchResults = computed(() => {
-  const q = debouncedQuery.value.trim().toLowerCase()
-  if (!q) return []
-
-  const results = []
-  for (const era of eras.value) {
-    const songs = eraSongs(era)
-    for (const song of songs) {
-      // Apply best-of filter if active
-      if (bestOf.value && !isBestOfSong(song)) continue
-      if (songMatchesQuery(song, q)) {
-        for (const version of (song.versions || [])) {
-          results.push({ song, version, era })
+function handleToggleEra(eraName: string) {
+  const wasExpanded = isEraExpanded(eraName)
+  toggleEra(eraName)
+  if (!wasExpanded) {
+    // Opening a new era — scroll it into view after DOM settles.
+    // Use a short delay so the old era's collapse doesn't shift the target.
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        const el = eraBlockRefs.value[eraName]
+        if (el) {
+          el.scrollIntoView({ behavior: 'instant', block: 'start' })
         }
-      }
-    }
+      })
+    })
   }
-  return results
-})
+}
 
 function eraColorStyle(era) {
   const colors = getEraColors(era.name)
@@ -154,43 +75,10 @@ function eraColorStyle(era) {
   }
 }
 
-function toggleEra(eraName) {
-  if (bestOf.value) return // All eras stay open in best-of mode
-  expandedEra.value = expandedEra.value === eraName ? null : eraName
-}
-
-function isEraExpanded(eraName) {
-  if (bestOf.value) return true
-  return expandedEra.value === eraName
-}
-
-function toggleBestOf() {
-  bestOf.value = !bestOf.value
-  if (!bestOf.value && !recents.value) {
-    expandedEra.value = null
-  }
-}
-
-function toggleRecents() {
-  recents.value = !recents.value
-  if (!recents.value && !bestOf.value) {
-    expandedEra.value = null
-  }
-}
-
-/** Get songs for an era — data is already fully loaded client-side. */
-function eraSongs(era) {
-  if (era.songs) return era.songs
-  if (era.sections) {
-    return era.sections.flatMap(s => s.songs || [])
-  }
-  return []
-}
-
 /**
- * Auto-queue watcher: when a track starts playing, populate era context
+ * Auto-advance watcher: when a track starts playing, populate era context
  * so the next song in the era plays automatically when it finishes.
- * Respects best-of filter — only queues best/special songs if enabled.
+ * Respects best-of filter — only advances to best/special songs if enabled.
  */
 watch(() => playerState.track, (track) => {
   if (!track) return
@@ -206,7 +94,6 @@ watch(() => playerState.track, (track) => {
   const versions = []
   for (const song of songs) {
     if (!song.versions?.length) continue
-    // Pick the first streamable version (same as what SongRow plays)
     const streamable = song.versions.find(v => findStreamableLink(v.links))
     if (streamable) {
       versions.push(streamable)
@@ -222,52 +109,6 @@ watch(() => playerState.track, (track) => {
       bestOf.value,
     )
   }
-})
-
-/** Parse a date string like "12/25/2024", "2024", "December 2024" into a sortable timestamp. */
-function _parseLeakDate(dateStr) {
-  if (!dateStr) return 0
-  // Try Date.parse first — handles "Jan 2, 2026", "February 10, 2026", etc.
-  const parsed = Date.parse(dateStr)
-  if (!isNaN(parsed)) return parsed
-  // Try MM/DD/YYYY or M/D/YYYY
-  const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (slashMatch) {
-    return new Date(+slashMatch[3], +slashMatch[1] - 1, +slashMatch[2]).getTime()
-  }
-  // Try just year
-  const yearMatch = dateStr.match(/(\d{4})/)
-  if (yearMatch) {
-    return new Date(+yearMatch[1], 0, 1).getTime()
-  }
-  return 0
-}
-
-/** Flat list of recently added versions, sorted by leak_date descending. */
-const recentResults = computed(() => {
-  if (!recents.value) return []
-
-  const q = debouncedQuery.value.trim().toLowerCase()
-  const results = []
-  for (const era of eras.value) {
-    const songs = eraSongs(era)
-    for (const song of songs) {
-      // Apply best-of filter if active
-      if (bestOf.value && !isBestOfSong(song)) continue
-      // Apply search filter if active
-      if (q && !songMatchesQuery(song, q)) continue
-      for (const version of (song.versions || [])) {
-        const leakDate = version.leak_date || version.file_date
-        if (leakDate) {
-          results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })
-        }
-      }
-    }
-  }
-
-  // Sort by date descending (most recent first), limit to 50
-  results.sort((a, b) => b._ts - a._ts)
-  return results.slice(0, 50)
 })
 
 </script>
@@ -375,13 +216,13 @@ const recentResults = computed(() => {
 
     <!-- Normal era browsing -->
     <div v-else class="eras-list" role="list" aria-label="Eras">
-      <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block">
+      <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block" :ref="setEraBlockRef(era.name)">
         <EraCard
           :era="era"
           :expanded="isEraExpanded(era.name)"
           :index="eraIdx"
           :sticky="isEraExpanded(era.name)"
-          @click="toggleEra(era.name)"
+          @click="handleToggleEra(era.name)"
         />
 
         <!-- Expanded songs panel -->

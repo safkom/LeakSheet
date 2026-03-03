@@ -14,7 +14,6 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 from __future__ import annotations
 
 import re
-from contextlib import asynccontextmanager
 
 import httpx
 
@@ -114,30 +113,29 @@ def _is_allowed_domain(url: str, allowed: set[str]) -> bool:
 # App
 # ---------------------------------------------------------------------------
 
-# Global HTTP client for proxies to reuse connection pools
-proxy_client: httpx.AsyncClient | None = None
+# Lazily-initialized HTTP client for proxy endpoints
+_proxy_client: httpx.AsyncClient | None = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global proxy_client
-    proxy_client = httpx.AsyncClient(
-        timeout=15,
-        follow_redirects=True,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-        },
-    )
-    yield
-    await proxy_client.aclose()
+def _get_proxy_client() -> httpx.AsyncClient:
+    """Return shared httpx client, creating it on first use."""
+    global _proxy_client
+    if _proxy_client is None:
+        _proxy_client = httpx.AsyncClient(
+            timeout=15,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+        )
+    return _proxy_client
 
 
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
     version="0.3.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -236,7 +234,7 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
         headers["Referer"] = "https://docs.google.com/"
 
     try:
-        resp = await proxy_client.get(url, headers=headers)
+        resp = await _get_proxy_client().get(url, headers=headers)
         ct = resp.headers.get("content-type", "")
         if resp.status_code == 200 and ct.startswith("image/"):
             return Response(

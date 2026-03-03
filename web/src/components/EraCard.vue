@@ -1,7 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import ColorThief from 'colorthief'
-import { extractAndCacheEraColors, setEraColors } from '../composables/useEraColors'
+import { extractAndCacheEraColors, setEraColors, getColorThief } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 
 const props = defineProps({
@@ -15,12 +14,6 @@ const emit = defineEmits(['click'])
 
 const gradientStyle = ref({})
 const titleColor = ref('#e6edf3')
-// Singleton ColorThief — stateless utility, no need to instantiate per component
-let _colorThief = null
-function getColorThief() {
-  if (!_colorThief) _colorThief = new ColorThief()
-  return _colorThief
-}
 const colorsReady = ref(false)
 const imgRetries = ref(0)
 const MAX_RETRIES = 2
@@ -30,7 +23,7 @@ const artSrc = computed(() => {
   const url = props.era.art_url
   let fullUrl = url.startsWith('//') ? 'https:' + url : url
   if (fullUrl.startsWith('http')) {
-    fullUrl = enhanceGoogleImageUrl(fullUrl, 400)
+    fullUrl = enhanceGoogleImageUrl(fullUrl)
     return `/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
   }
   return url
@@ -379,7 +372,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 /* ── Sticky state (all sizes) ── */
 .era-card.era-sticky {
   position: sticky;
-  top: var(--header-height);
+  top: 0;
   z-index: 10;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   animation: none;

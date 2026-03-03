@@ -79,7 +79,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 
 .section-divider {
   position: sticky;
-  top: calc(var(--header-height) + var(--sticky-era-height, 50px));
+  top: var(--sticky-era-height, 50px);
   z-index: 8;
   display: flex;
   align-items: center;
@@ -91,7 +91,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 
 @media (min-width: 768px) {
   .section-divider {
-    top: calc(var(--header-height) + var(--sticky-era-height, 62px));
+    top: var(--sticky-era-height, 62px);
   }
 }
 

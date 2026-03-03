@@ -1,10 +1,48 @@
 import { reactive, watch } from 'vue'
 import { BADGE_MAP } from './useUtils'
+import type { SongVersion } from './useEraFiltering'
 
 /**
  * Global audio player — shared across all components.
  * Uses HTML5 Audio with backend stream proxy to avoid CORS.
  */
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface QueueItem {
+  id: number
+  version: SongVersion
+  artistName: string
+  eraName: string
+  artUrl: string
+}
+
+interface EraSongContext {
+  eraName: string
+  artistName: string
+  artUrl: string
+  versions: SongVersion[]
+}
+
+export interface PlayerState {
+  track: SongVersion | null
+  artistName: string
+  eraName: string
+  artUrl: string
+  isPlaying: boolean
+  currentTime: number
+  duration: number
+  buffered: number
+  loading: boolean
+  error: string
+  streamUrl: string
+  volume: number
+  queue: QueueItem[]
+  bestOfQueue: boolean
+  _eraSongs: EraSongContext | null
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -14,14 +52,14 @@ import { BADGE_MAP } from './useUtils'
 let _queueIdCounter = 0
 
 /** Restore persisted volume (0-1) from localStorage */
-function _loadVolume() {
+function _loadVolume(): number {
   try {
     const v = parseFloat(localStorage.getItem('leaksheet_volume') || '')
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 1
   } catch { return 1 }
 }
 
-export const playerState = reactive({
+export const playerState: PlayerState = reactive({
   /** Currently queued track (SongVersion object) */
   track: null,
   /** Artist name for display */
@@ -46,12 +84,12 @@ export const playerState = reactive({
   streamUrl: '',
   /** Volume 0-1 */
   volume: _loadVolume(),
-  /** Playback queue (array of { id, version, artistName, eraName, artUrl }) */
+  /** Playback queue */
   queue: [],
   /** Whether the current auto-queue is best-of filtered */
   bestOfQueue: false,
-  /** Currently loaded era songs — used for auto-queueing next song in era */
-  _eraSongs: null as { eraName: string, artistName: string, artUrl: string, versions: any[] } | null,
+  /** Currently loaded era songs — used for auto-advancing to next song */
+  _eraSongs: null,
 })
 
 // Persist volume changes to localStorage
@@ -184,7 +222,7 @@ function _resolveStreamUrl(originalLink) {
  */
 const _STREAM_HOSTS = /^https?:\/\/(?:(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)\/f\/|music\.froste\.lol\/song\/[a-f0-9]+)/i
 
-export function findStreamableLink(links) {
+export function findStreamableLink(links: string[] | null | undefined): string | null {
   if (!links?.length) return null
   for (const link of links) {
     if (_STREAM_HOSTS.test(link)) return link
@@ -195,7 +233,7 @@ export function findStreamableLink(links) {
 /**
  * Check if a SongVersion has any streamable links.
  */
-export function isStreamable(version) {
+export function isStreamable(version: SongVersion | null | undefined): boolean {
   return findStreamableLink(version?.links) !== null
 }
 
@@ -266,7 +304,7 @@ function _updateMediaSession() {
   })
 }
 
-export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
+export function playTrack(version: SongVersion | null, artistName = '', eraName = '', artUrl = ''): void {
   const link = findStreamableLink(version?.links)
 
   playerState.track = version
@@ -308,7 +346,7 @@ export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
   _updateMediaSession()
 }
 
-export function togglePlay() {
+export function togglePlay(): void {
   const audio = _getAudio()
 
   if (!audio.src && playerState.track) {
@@ -332,34 +370,34 @@ export function togglePlay() {
   }
 }
 
-export function addToQueue(version, artistName = '', eraName = '', artUrl = '') {
+export function addToQueue(version: SongVersion, artistName = '', eraName = '', artUrl = ''): void {
   playerState.queue.push({ id: ++_queueIdCounter, version, artistName, eraName, artUrl })
 }
 
-export function removeFromQueue(index) {
+export function removeFromQueue(index: number): void {
   if (index >= 0 && index < playerState.queue.length) {
     playerState.queue.splice(index, 1)
   }
 }
 
-export function clearQueue() {
+export function clearQueue(): void {
   playerState.queue.splice(0, playerState.queue.length)
 }
 
-export function moveInQueue(fromIndex, toIndex) {
+export function moveInQueue(fromIndex: number, toIndex: number): void {
   if (fromIndex < 0 || fromIndex >= playerState.queue.length) return
   if (toIndex < 0 || toIndex >= playerState.queue.length) return
   const [item] = playerState.queue.splice(fromIndex, 1)
   playerState.queue.splice(toIndex, 0, item)
 }
 
-export function playFromQueue(index) {
+export function playFromQueue(index: number): void {
   if (index < 0 || index >= playerState.queue.length) return
   const item = playerState.queue.splice(index, 1)[0]
   playTrack(item.version, item.artistName, item.eraName, item.artUrl)
 }
 
-export function stopTrack() {
+export function stopTrack(): void {
   if (_audio) {
     _audio.pause()
     _audio.src = ''
@@ -398,59 +436,43 @@ export function setVolume(v) {
 // ---------------------------------------------------------------------------
 
 /**
- * Set the era song list for auto-queue.
- * Called by playTrack when starting a song — remaining era songs
- * are silently queued so the next song plays automatically.
- * If bestOf is true, only best/special songs are queued.
+ * Set the era song list for auto-advance.
+ * Called by ArtistView watcher when a track starts playing — the era context
+ * is used so the next song plays automatically when the current one finishes.
+ * If bestOf is true, only best/special songs are auto-advanced.
  */
-export function setEraSongs(versions: any[], artistName: string, eraName: string, artUrl: string, bestOf = false) {
+export function setEraSongs(versions: SongVersion[], artistName: string, eraName: string, artUrl: string, bestOf = false): void {
   playerState._eraSongs = { eraName, artistName, artUrl, versions }
   playerState.bestOfQueue = bestOf
 }
 
-/**
- * Auto-populate the queue from era songs starting after the currently playing track.
- * Only adds streamable songs. Respects bestOf filter.
- */
-function _autoQueueEraSongs() {
-  const era = playerState._eraSongs
-  if (!era || !playerState.track) return
-
-  // Find current track's position in the era
-  const currentIdx = era.versions.findIndex(v => isTrackMatch(v))
-  if (currentIdx === -1) return
-
-  // Queue remaining songs after current
-  const remaining = era.versions.slice(currentIdx + 1)
-  for (const version of remaining) {
-    // Skip non-streamable
-    if (!findStreamableLink(version.links)) continue
-    // If bestOf mode, skip non-best/special
-    if (playerState.bestOfQueue && !_BEST_OF_BADGES.has(version.badge)) continue
-    // Don't re-add if already in queue
-    const alreadyQueued = playerState.queue.some(q =>
-      q.version.name === version.name
-      && q.version.version_tag === version.version_tag
-      && (q.version.links?.[0] || '') === (version.links?.[0] || '')
-    )
-    if (alreadyQueued) continue
-    addToQueue(version, era.artistName, era.eraName, era.artUrl)
-  }
-}
-
-/** Advance to next track: from queue first, then auto-queue from era */
+/** Advance to next track: from queue first, then auto-advance era */
 function _playNext() {
   if (playerState.queue.length > 0) {
     const next = playerState.queue.shift()
     playTrack(next.version, next.artistName, next.eraName, next.artUrl)
     return
   }
-  // Queue was empty — try auto-queueing era songs, then play next
-  _autoQueueEraSongs()
-  if (playerState.queue.length > 0) {
-    const next = playerState.queue.shift()
-    playTrack(next.version, next.artistName, next.eraName, next.artUrl)
+  // Queue empty — auto-advance to next era song directly (don't fill queue)
+  _playNextEraSong()
+}
+
+/** Find and play the next song in the era without populating the queue */
+function _playNextEraSong() {
+  const era = playerState._eraSongs
+  if (!era || !playerState.track) return
+
+  const currentIdx = era.versions.findIndex(v => isTrackMatch(v))
+  if (currentIdx === -1) return
+
+  const remaining = era.versions.slice(currentIdx + 1)
+  for (const version of remaining) {
+    if (!findStreamableLink(version.links)) continue
+    if (playerState.bestOfQueue && !_BEST_OF_BADGES.has(version.badge)) continue
+    playTrack(version, era.artistName, era.eraName, era.artUrl)
+    return
   }
+  // No more songs in era
 }
 
 /** Skip to next track (exposed for UI) */
@@ -468,7 +490,7 @@ export function playNext() {
  * Uses value comparison (not reference equality) so it works after re-parsing.
  * Compares name + version_tag + first link for robust identity.
  */
-export function isTrackMatch(version) {
+export function isTrackMatch(version: SongVersion | null | undefined): boolean {
   if (!version || !playerState.track) return false
   return version.name === playerState.track.name
     && version.version_tag === playerState.track.version_tag
@@ -476,7 +498,7 @@ export function isTrackMatch(version) {
 }
 
 /** Parse "3:14" → 194 seconds */
-function _parseDuration(str) {
+function _parseDuration(str: string | null | undefined): number {
   if (!str || str.includes('?')) return 0
   const parts = str.split(':').map(Number)
   if (parts.some(isNaN)) return 0
@@ -486,7 +508,7 @@ function _parseDuration(str) {
 }
 
 /** Format seconds → "3:14" */
-export function formatTime(seconds) {
+export function formatTime(seconds: number): string {
   if (!seconds || seconds <= 0 || !isFinite(seconds)) return '0:00'
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
@@ -494,18 +516,22 @@ export function formatTime(seconds) {
 }
 
 /**
- * Enhance a Google-served image URL to request a specific size.
- * Handles =sNNN / =wNNN suffixes on googleusercontent URLs.
- * Returns the URL unchanged if it's not a resizable Google image.
+ * Request original full-size Google image (=s0 means "no resize").
+ * Google CDN URLs from sheets come with small default size suffixes.
+ *
+ * Supported domains:
+ *  - lh3-lh6.googleusercontent.com  → =s0 works
+ *  - docs.google.com/sheets-images-rt → =s0 works (=sNNN with N>0 → 302 login)
+ *  - lh7-rt.googleusercontent.com    → cannot be resized (?key= → 403)
  */
-export function enhanceGoogleImageUrl(url, size = 400) {
+export function enhanceGoogleImageUrl(url: string): string {
   if (!url) return url
-  // lh3/lh4/lh5/lh6 googleusercontent — supports =sNNN suffix
-  if (/lh[3-6]\.googleusercontent\.com/.test(url)) {
-    // Replace existing =sNNN or =wNNN, or append
-    return url.replace(/=[swh]\d+(-[swh]\d+)*$/, '') + `=s${size}`
-  }
   // lh7-rt with ?key= — cannot be resized (returns 403)
+  if (/lh7-rt\.googleusercontent\.com/.test(url)) return url
+  // lh3-6 googleusercontent + docs.google.com/sheets-images — =s0 for original
+  if (/lh[3-6]\.googleusercontent\.com|docs\.google\.com\/sheets-images/.test(url)) {
+    return url.replace(/=[swh]\d+(-[swh]\d+)*$/, '') + '=s0'
+  }
   return url
 }
 
@@ -513,7 +539,7 @@ export function enhanceGoogleImageUrl(url, size = 400) {
  * Build proxy URL for an art image.
  * Handles protocol-relative URLs and routes through /api/image-proxy.
  */
-export function artProxyUrl(rawUrl) {
+export function artProxyUrl(rawUrl: string | null | undefined): string | null {
   if (!rawUrl) return null
   const fullUrl = rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl
   if (fullUrl.startsWith('http')) {

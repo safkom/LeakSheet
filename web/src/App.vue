@@ -8,7 +8,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet } from './composables/useApi'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
-import ColorThief from 'colorthief'
 import { extractAndCacheEraColors } from './composables/useEraColors'
 
 const activeArtist = ref(null)
@@ -75,16 +74,15 @@ function goHome() {
 /** Preload era artwork images and extract colors for search badges */
 function _preloadEraImages(artist) {
   if (!artist?.eras) return
-  const ct = new ColorThief()
   for (const era of artist.eras) {
     if (!era.art_url) continue
     const url = era.art_url.startsWith('//') ? 'https:' + era.art_url : era.art_url
     if (!url.startsWith('http')) continue
-    const enhanced = enhanceGoogleImageUrl(url, 400)
+    const enhanced = enhanceGoogleImageUrl(url)
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      extractAndCacheEraColors(era.name, img, ct)
+      extractAndCacheEraColors(era.name, img)
     }
     img.src = `/api/image-proxy?url=${encodeURIComponent(enhanced)}`
   }
@@ -197,7 +195,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Artist detail view -->
-      <ArtistView v-else-if="activeArtist" :artist="activeArtist" key="artist" />
+      <ArtistView v-else-if="activeArtist" :artist="activeArtist" key="artist" @back="goHome" />
     </Transition>
   </main>
 

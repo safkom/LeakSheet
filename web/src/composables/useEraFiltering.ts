@@ -1,0 +1,314 @@
+/**
+ * Era/song filtering composable.
+ *
+ * Extracted from ArtistView to keep components thin.
+ * Handles search, best-of filtering, recents, and debounced queries.
+ */
+import { ref, computed, watch, onUnmounted, type Ref, type ComputedRef } from 'vue'
+
+// ---------------------------------------------------------------------------
+// Types (mirrors backend Pydantic models)
+// ---------------------------------------------------------------------------
+
+export interface SongVersion {
+  name: string
+  version_tag?: string | null
+  badge?: string | null
+  featuring?: string | null
+  producers?: string | null
+  collaboration?: string | null
+  refs?: string | null
+  alt_titles?: string[]
+  notes?: string | null
+  og_filename?: string | null
+  samples?: string[]
+  track_length?: string | null
+  file_date?: string | null
+  leak_date?: string | null
+  available_length?: string | null
+  quality?: string | null
+  links?: string[]
+  date_of_recording?: string | null
+  type?: string | null
+}
+
+export interface Song {
+  base_name: string
+  versions: SongVersion[]
+  badge?: string | null
+  available_length?: string | null
+  quality?: string | null
+  track_length?: string | null
+  leak_date?: string | null
+  file_date?: string | null
+}
+
+export interface Section {
+  name: string
+  songs: Song[]
+}
+
+export interface Era {
+  name: string
+  alt_names?: string[]
+  description?: string | null
+  timeline?: { date: string; event: string }[]
+  stats_raw?: string | null
+  stats?: Record<string, number> | null
+  art_url?: string | null
+  highlighted_producers?: string[]
+  sections?: Section[]
+  songs?: Song[]
+  song_count?: number
+  version_count?: number
+}
+
+export interface Artist {
+  name: string
+  slug: string
+  source_url?: string | null
+  eras: Era[]
+  total_songs?: number
+  total_versions?: number
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const _BEST_OF_BADGES = new Set(['best', 'special'])
+
+// ---------------------------------------------------------------------------
+// Pure helpers (no reactivity)
+// ---------------------------------------------------------------------------
+
+export function isBestOfSong(song: Song): boolean {
+  return _BEST_OF_BADGES.has(song.badge ?? '')
+}
+
+export function songMatchesQuery(song: Song, query: string): boolean {
+  if (song.base_name.toLowerCase().includes(query)) return true
+  return song.versions?.some(v => {
+    if ((v.name || '').toLowerCase().includes(query)) return true
+    if (v.alt_titles?.some(alt => alt.toLowerCase().includes(query))) return true
+    return false
+  }) ?? false
+}
+
+/** Get songs for an era — handles both flat and section-based layouts. */
+export function eraSongs(era: Era): Song[] {
+  if (era.songs) return era.songs
+  if (era.sections) {
+    return era.sections.flatMap(s => s.songs || [])
+  }
+  return []
+}
+
+/** Parse a date string like "12/25/2024", "2024", "December 2024" into a sortable timestamp. */
+function _parseLeakDate(dateStr: string | null | undefined): number {
+  if (!dateStr) return 0
+  const parsed = Date.parse(dateStr)
+  if (!isNaN(parsed)) return parsed
+  const slashMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashMatch) {
+    return new Date(+slashMatch[3], +slashMatch[1] - 1, +slashMatch[2]).getTime()
+  }
+  const yearMatch = dateStr.match(/(\d{4})/)
+  if (yearMatch) {
+    return new Date(+yearMatch[1], 0, 1).getTime()
+  }
+  return 0
+}
+
+// ---------------------------------------------------------------------------
+// Composable
+// ---------------------------------------------------------------------------
+
+export interface SearchResult {
+  song: Song
+  version: SongVersion
+  era: Era
+}
+
+export interface RecentResult extends SearchResult {
+  _ts: number
+}
+
+export function useEraFiltering(eras: ComputedRef<Era[]>) {
+  const searchQuery = ref('')
+  const debouncedQuery = ref('')
+  const bestOf = ref(false)
+  const recents = ref(false)
+  const expandedEra: Ref<string | null> = ref(null)
+
+  // Debounce search input
+  let _debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  watch(searchQuery, (val) => {
+    if (_debounceTimer) clearTimeout(_debounceTimer)
+    if (!val.trim()) {
+      debouncedQuery.value = ''
+      return
+    }
+    _debounceTimer = setTimeout(() => {
+      debouncedQuery.value = val
+    }, 200)
+  })
+
+  onUnmounted(() => {
+    if (_debounceTimer) clearTimeout(_debounceTimer)
+  })
+
+  const isSearching = computed(() => debouncedQuery.value.trim().length > 0)
+
+  // ── Filtered eras ──
+
+  const filteredEras = computed(() => {
+    let result = eras.value
+
+    if (bestOf.value) {
+      result = result.filter(era => eraSongs(era).some(isBestOfSong))
+    }
+
+    const q = debouncedQuery.value.trim().toLowerCase()
+    if (!q) return result
+
+    return result.filter(era => {
+      if (era.name.toLowerCase().includes(q)) return true
+      if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return true
+      return eraSongs(era).some(song => songMatchesQuery(song, q))
+    })
+  })
+
+  // ── Filtered songs within an era ──
+
+  function filteredSongs(era: Era): Song[] {
+    let songs = eraSongs(era)
+    if (bestOf.value) {
+      songs = songs.filter(isBestOfSong)
+    }
+    const q = debouncedQuery.value.trim().toLowerCase()
+    if (!q) return songs
+    if (era.name.toLowerCase().includes(q)) return songs
+    if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return songs
+    return songs.filter(song => songMatchesQuery(song, q))
+  }
+
+  // ── Filtered sections ──
+
+  function filteredSections(era: Era): Section[] {
+    if (!era.sections?.length) return []
+    const q = debouncedQuery.value.trim().toLowerCase()
+    const filtering = bestOf.value || q
+
+    if (!filtering) return era.sections
+
+    return era.sections
+      .map(sec => {
+        let songs = sec.songs || []
+        if (bestOf.value) songs = songs.filter(isBestOfSong)
+        if (q) {
+          const eraNameMatch = era.name.toLowerCase().includes(q) ||
+            era.alt_names?.some(alt => alt.toLowerCase().includes(q))
+          if (!eraNameMatch) songs = songs.filter(song => songMatchesQuery(song, q))
+        }
+        return { ...sec, songs }
+      })
+      .filter(sec => sec.songs.length > 0)
+  }
+
+  // ── Flat search results ──
+
+  const flatSearchResults = computed<SearchResult[]>(() => {
+    const q = debouncedQuery.value.trim().toLowerCase()
+    if (!q) return []
+
+    const results: SearchResult[] = []
+    for (const era of eras.value) {
+      const songs = eraSongs(era)
+      for (const song of songs) {
+        if (bestOf.value && !isBestOfSong(song)) continue
+        if (songMatchesQuery(song, q)) {
+          for (const version of (song.versions || [])) {
+            results.push({ song, version, era })
+          }
+        }
+      }
+    }
+    return results
+  })
+
+  // ── Recents ──
+
+  const recentResults = computed<RecentResult[]>(() => {
+    if (!recents.value) return []
+
+    const q = debouncedQuery.value.trim().toLowerCase()
+    const results: RecentResult[] = []
+    for (const era of eras.value) {
+      const songs = eraSongs(era)
+      for (const song of songs) {
+        if (bestOf.value && !isBestOfSong(song)) continue
+        if (q && !songMatchesQuery(song, q)) continue
+        for (const version of (song.versions || [])) {
+          const leakDate = version.leak_date || version.file_date
+          if (leakDate) {
+            results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })
+          }
+        }
+      }
+    }
+
+    results.sort((a, b) => b._ts - a._ts)
+    return results.slice(0, 50)
+  })
+
+  // ── Era expand/collapse ──
+
+  function toggleEra(eraName: string): void {
+    if (bestOf.value) return
+    expandedEra.value = expandedEra.value === eraName ? null : eraName
+  }
+
+  function isEraExpanded(eraName: string): boolean {
+    if (bestOf.value) return true
+    return expandedEra.value === eraName
+  }
+
+  function toggleBestOf(): void {
+    bestOf.value = !bestOf.value
+    if (!bestOf.value && !recents.value) {
+      expandedEra.value = null
+    }
+  }
+
+  function toggleRecents(): void {
+    recents.value = !recents.value
+    if (!recents.value && !bestOf.value) {
+      expandedEra.value = null
+    }
+  }
+
+  return {
+    // State
+    searchQuery,
+    debouncedQuery,
+    bestOf,
+    recents,
+    expandedEra,
+    isSearching,
+
+    // Computed
+    filteredEras,
+    flatSearchResults,
+    recentResults,
+
+    // Methods
+    filteredSongs,
+    filteredSections,
+    toggleEra,
+    isEraExpanded,
+    toggleBestOf,
+    toggleRecents,
+  }
+}
