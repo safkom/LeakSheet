@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet } from './composables/useApi'
-import { playerState, togglePlay, seekTo } from './composables/usePlayer'
+import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
+import ColorThief from 'colorthief'
+import { extractAndCacheEraColors } from './composables/useEraColors'
 
 const activeArtist = ref(null)
 const loading = ref(false)
@@ -66,16 +68,21 @@ function goHome() {
   activeArtist.value = null
 }
 
-/** Preload era artwork images so they're cached before scrolling */
+/** Preload era artwork images and extract colors for search badges */
 function _preloadEraImages(artist) {
   if (!artist?.eras) return
-  for (const era of artist.eras.slice(0, 10)) {
+  const ct = new ColorThief()
+  for (const era of artist.eras) {
     if (!era.art_url) continue
     const url = era.art_url.startsWith('//') ? 'https:' + era.art_url : era.art_url
-    if (url.startsWith('http')) {
-      const img = new Image()
-      img.src = `/api/image-proxy?url=${encodeURIComponent(url)}`
+    if (!url.startsWith('http')) continue
+    const enhanced = enhanceGoogleImageUrl(url, 400)
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      extractAndCacheEraColors(era.name, img, ct)
     }
+    img.src = `/api/image-proxy?url=${encodeURIComponent(enhanced)}`
   }
 }
 
@@ -116,8 +123,7 @@ function handleKeyboard(e) {
       }
       break
     // Note: ArrowUp/ArrowDown intentionally not intercepted —
-    // they conflict with normal page scrolling. Volume is controlled
-    // via the slider in the player bar instead.
+    // they conflict with normal page scrolling.
   }
 }
 
@@ -176,40 +182,32 @@ onUnmounted(() => {
     </div>
 
     <!-- Loading state -->
-    <div v-else-if="loading" class="loading-view">
-      <div class="loading-status">
-        <div class="loading-spinner-ring">
-          <svg viewBox="0 0 24 24" width="32" height="32" class="loading-spin">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="50 14" />
-          </svg>
-        </div>
-        <p class="loading-title">Parsing tracker&hellip;</p>
-        <p class="loading-url">{{ loadingUrl }}</p>
-      </div>
+    <Transition name="content-fade" mode="out-in">
+      <div v-if="loading" class="loading-view" key="loading">
+        <!-- Skeleton mimicking ArtistView -->
+        <div class="loading-skeleton">
+          <Skeleton class="h-7 w-44 mb-1 rounded-md" />
+          <Skeleton class="h-4 w-20 mb-5 rounded" />
 
-      <!-- Skeleton mimicking ArtistView -->
-      <div class="loading-skeleton">
-        <Skeleton class="h-7 w-44 mb-1 rounded-md" />
-        <Skeleton class="h-4 w-20 mb-5 rounded" />
+          <!-- Search bar skeleton -->
+          <Skeleton class="h-10 w-full mb-5 rounded-lg" />
 
-        <!-- Search bar skeleton -->
-        <Skeleton class="h-10 w-full mb-5 rounded-lg" />
-
-        <!-- Era card skeletons -->
-        <div class="skeleton-eras">
-          <div v-for="i in 6" :key="i" class="skeleton-era-card">
-            <Skeleton class="skeleton-era-art" />
-            <div class="skeleton-era-info">
-              <Skeleton class="h-4 rounded" :style="{ width: [65,80,55,72,60,48][i-1] + '%' }" />
-              <Skeleton class="h-3 w-16 rounded mt-1.5" />
+          <!-- Era card skeletons -->
+          <div class="skeleton-eras">
+            <div v-for="i in 6" :key="i" class="skeleton-era-card">
+              <Skeleton class="skeleton-era-art" />
+              <div class="skeleton-era-info">
+                <Skeleton class="h-5 rounded" :style="{ width: [65,80,55,72,60,48][i-1] + '%' }" />
+                <Skeleton class="h-3 w-24 rounded mt-2" />
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Artist detail view -->
-    <ArtistView v-else :artist="activeArtist" />
+      <!-- Artist detail view -->
+      <ArtistView v-else-if="activeArtist" :artist="activeArtist" key="artist" />
+    </Transition>
   </main>
 
   <PlayerBar v-if="hasPlayer" />
@@ -373,41 +371,14 @@ onUnmounted(() => {
   padding: 48px 20px 40px;
 }
 
-.loading-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 48px;
+/* Content fade transition */
+.content-fade-enter-active,
+.content-fade-leave-active {
+  transition: opacity 0.2s ease;
 }
-
-.loading-spinner-ring {
-  color: var(--accent-color);
-  margin-bottom: 4px;
-}
-
-.loading-spin {
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.loading-url {
-  font-size: 12px;
-  color: var(--text-dim);
-  max-width: 420px;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.content-fade-enter-from,
+.content-fade-leave-to {
+  opacity: 0;
 }
 
 /* Skeleton layout matching ArtistView */
@@ -433,9 +404,9 @@ onUnmounted(() => {
 }
 
 .skeleton-era-art {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
   flex-shrink: 0;
 }
 

@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ColorThief from 'colorthief'
-import { setEraColors } from '../composables/useEraColors'
+import { extractAndCacheEraColors } from '../composables/useEraColors'
+import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 
 const props = defineProps({
   era: Object,
@@ -27,8 +28,9 @@ const MAX_RETRIES = 2
 const artSrc = computed(() => {
   if (!props.era.art_url) return null
   const url = props.era.art_url
-  const fullUrl = url.startsWith('//') ? 'https:' + url : url
+  let fullUrl = url.startsWith('//') ? 'https:' + url : url
   if (fullUrl.startsWith('http')) {
+    fullUrl = enhanceGoogleImageUrl(fullUrl, 400)
     return `/api/image-proxy?url=${encodeURIComponent(fullUrl)}`
   }
   return url
@@ -38,7 +40,6 @@ function extractColors(imgElement) {
   if (!imgElement || colorsReady.value) return
   try {
     const ct = getColorThief()
-    const dom = ct.getColor(imgElement)
     const pal = ct.getPalette(imgElement, 5)
 
     if (pal && pal.length >= 2) {
@@ -55,11 +56,7 @@ function extractColors(imgElement) {
       titleColor.value = bright
 
       // Share colors for search result badges
-      setEraColors(props.era.name, {
-        bg: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.2)`,
-        text: bright,
-        border: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
-      })
+      extractAndCacheEraColors(props.era.name, imgElement, ct)
     }
     colorsReady.value = true
   } catch (e) {
