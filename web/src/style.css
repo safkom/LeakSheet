@@ -61,7 +61,7 @@
   --border-hover: hsl(var(--primary));
 
   /* Layout constants */
-  --player-height: 64px;
+  --player-height: 72px;
   --header-height: 56px;
   --sticky-era-height: 50px;
 

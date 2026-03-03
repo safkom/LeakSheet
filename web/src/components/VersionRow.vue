@@ -221,6 +221,7 @@ const badgeEmoji = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .v-tag {

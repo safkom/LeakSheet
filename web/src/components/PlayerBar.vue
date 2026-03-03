@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import SongDescriptionModal from './SongDescriptionModal.vue'
 import QueuePanel from './QueuePanel.vue'
-import { Slider } from '@/components/ui/slider'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { playerState, togglePlay, stopTrack, seekTo, setVolume, formatTime, artProxyUrl, addToQueue } from '../composables/usePlayer'
+import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue } from '../composables/usePlayer'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
@@ -74,9 +73,6 @@ const bufferedPct = computed(() => {
   return isFinite(b) ? b * 100 : 0
 })
 
-// Volume
-const volumePct = computed(() => Math.round(playerState.volume * 100))
-
 // Seek on progress bar click
 const progressBar = ref(null)
 
@@ -86,12 +82,6 @@ function handleSeek(e) {
   const rect = progressBar.value.getBoundingClientRect()
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   seekTo(ratio * playerState.duration)
-}
-
-function handleVolumeSlider(value) {
-  if (Array.isArray(value) && value.length > 0) {
-    setVolume(value[0] / 100)
-  }
 }
 
 // Description modal
@@ -150,6 +140,22 @@ const hasLink = computed(() => getTrackLink() !== null)
 <template>
   <TooltipProvider :delay-duration="300">
     <div class="player-bar" role="region" aria-label="Audio player">
+      <!-- Progress bar at top — full width thin line -->
+      <div
+        class="progress-bar-top"
+        ref="progressBar"
+        @click="handleSeek"
+        :class="{ disabled: !hasStream }"
+      >
+        <div class="progress-buffered" :style="{ width: bufferedPct + '%' }"></div>
+        <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+        <div
+          v-if="progressPct > 0"
+          class="progress-thumb"
+          :style="{ left: progressPct + '%' }"
+        ></div>
+      </div>
+
       <div class="player-inner">
         <!-- Album art -->
         <div class="player-art" v-if="track">
@@ -167,7 +173,7 @@ const hasLink = computed(() => getTrackLink() !== null)
           </div>
         </div>
 
-        <!-- Track info + progress -->
+        <!-- Track info -->
         <div class="player-track-info">
           <div class="player-track-name">
             <span v-if="loading" class="loading-dot"></span>
@@ -178,28 +184,12 @@ const hasLink = computed(() => getTrackLink() !== null)
             <template v-if="error">
               <span class="player-error">{{ error }}</span>
             </template>
-            <template v-else>{{ displaySub }}</template>
-          </div>
-
-          <!-- Progress bar -->
-          <div class="progress-row">
-            <span class="player-time time-left" v-if="hasStream">{{ currentTimeStr }}</span>
-            <div
-              class="progress-bar"
-              ref="progressBar"
-              @click="handleSeek"
-              :class="{ disabled: !hasStream }"
-            >
-              <div class="progress-buffered" :style="{ width: bufferedPct + '%' }"></div>
-              <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
-              <div
-                v-if="progressPct > 0"
-                class="progress-thumb"
-                :style="{ left: progressPct + '%' }"
-              ></div>
-            </div>
-            <span class="player-time time-right" v-if="hasStream">{{ durationStr }}</span>
-            <span class="player-time time-right" v-else>{{ durationStr }}</span>
+            <template v-else>
+              {{ displaySub }}
+              <span v-if="hasStream" class="player-time-inline">
+                {{ currentTimeStr }} / {{ durationStr }}
+              </span>
+            </template>
           </div>
         </div>
 
@@ -229,23 +219,8 @@ const hasLink = computed(() => getTrackLink() !== null)
           </Tooltip>
         </div>
 
-        <!-- Right side: volume + menu + close -->
+        <!-- Right side: queue + menu + close -->
         <div class="player-right">
-          <!-- Volume -->
-          <div class="volume-wrap" v-if="hasStream">
-            <svg viewBox="0 0 16 16" width="14" height="14" class="volume-icon">
-              <path fill="currentColor" d="M7.56 2.45A.5.5 0 0 1 8 2.9v10.2a.5.5 0 0 1-.82.38L4.25 10.5H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h2.25l2.93-3.03a.5.5 0 0 1 .38-.12z"/>
-              <path v-if="playerState.volume > 0" fill="currentColor" d="M10.3 5.7a.5.5 0 0 1 .7 0 4 4 0 0 1 0 4.6.5.5 0 1 1-.7-.7 3 3 0 0 0 0-3.2.5.5 0 0 1 0-.7z" opacity="0.7"/>
-            </svg>
-            <Slider
-              :model-value="[volumePct]"
-              :max="100"
-              :step="1"
-              class="w-[60px] [&_[data-orientation=horizontal]]:h-1 [&_span[role=slider]]:h-3 [&_span[role=slider]]:w-3 [&_span[role=slider]]:border-[1.5px]"
-              @update:model-value="handleVolumeSlider"
-            />
-          </div>
-
           <!-- Queue toggle -->
           <Tooltip v-if="track">
             <TooltipTrigger as-child>
@@ -261,20 +236,15 @@ const hasLink = computed(() => getTrackLink() !== null)
 
           <!-- More options dropdown -->
           <DropdownMenu v-if="track">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <DropdownMenuTrigger as-child>
-                  <button class="menu-btn" aria-label="More options">
-                    <svg viewBox="0 0 16 16" width="14" height="14">
-                      <circle cx="8" cy="2" r="1.5" fill="currentColor"/>
-                      <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
-                      <circle cx="8" cy="14" r="1.5" fill="currentColor"/>
-                    </svg>
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="top">More options</TooltipContent>
-            </Tooltip>
+            <DropdownMenuTrigger as-child>
+              <button class="menu-btn" aria-label="More options" title="More options">
+                <svg viewBox="0 0 16 16" width="14" height="14">
+                  <circle cx="8" cy="2" r="1.5" fill="currentColor"/>
+                  <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                  <circle cx="8" cy="14" r="1.5" fill="currentColor"/>
+                </svg>
+              </button>
+            </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="top" :side-offset="8" class="min-w-[200px]">
               <DropdownMenuItem :disabled="!hasLink" @select="copyLink">
                 <svg viewBox="0 0 16 16" width="14" height="14" class="mr-2 opacity-60">
@@ -353,29 +323,30 @@ const hasLink = computed(() => getTrackLink() !== null)
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-.progress-bar {
+/* Progress bar at top — full width thin line */
+.progress-bar-top {
   position: relative;
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.08);
+  width: 100%;
+  height: 3px;
+  background: rgba(255,255,255,0.06);
   cursor: pointer;
-  border-radius: 3px;
+  transition: height 0.15s ease;
 }
 
-.progress-bar::before {
+.progress-bar-top::before {
   content: '';
   position: absolute;
-  top: -12px;
-  bottom: -12px;
+  top: -10px;
+  bottom: -10px;
   left: 0;
   right: 0;
 }
 
-.progress-bar:hover {
-  height: 8px;
+.progress-bar-top:hover {
+  height: 5px;
 }
 
-.progress-bar.disabled {
+.progress-bar-top.disabled {
   cursor: default;
   opacity: 0.3;
 }
@@ -402,24 +373,24 @@ const hasLink = computed(() => getTrackLink() !== null)
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--accent-color);
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.progress-bar:hover .progress-thumb {
+.progress-bar-top:hover .progress-thumb {
   opacity: 1;
 }
 
 .player-inner {
-  height: var(--player-height);
+  height: 68px;
   display: flex;
   align-items: center;
   padding: 0 20px;
-  gap: 12px;
+  gap: 14px;
 }
 
 /* Album art */
@@ -458,17 +429,6 @@ const hasLink = computed(() => getTrackLink() !== null)
   gap: 2px;
 }
 
-.progress-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.time-left, .time-right {
-  flex-shrink: 0;
-}
-
 .player-badge {
   flex-shrink: 0;
 }
@@ -492,6 +452,13 @@ const hasLink = computed(() => getTrackLink() !== null)
   overflow: hidden;
   text-overflow: ellipsis;
   opacity: 0.9;
+}
+
+.player-time-inline {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-left: 8px;
 }
 
 .player-error {
@@ -554,25 +521,6 @@ const hasLink = computed(() => getTrackLink() !== null)
   gap: 12px;
 }
 
-.player-time {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Volume */
-.volume-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.volume-icon {
-  color: var(--text-dim);
-  flex-shrink: 0;
-}
-
 /* Touch-target safe buttons (min 44px hit area) */
 .menu-btn,
 .close-btn {
@@ -619,15 +567,13 @@ const hasLink = computed(() => getTrackLink() !== null)
 }
 
 @media (max-width: 640px) {
-  .player-inner { padding: 0 10px; gap: 8px; }
+  .player-inner { height: 60px; padding: 0 10px; gap: 8px; }
   .player-track-name { font-size: 12px; }
-  .ctrl-btn { width: 36px; height: 36px; }
-  .player-right { gap: 8px; }
-  .volume-wrap { display: none; }
+  .ctrl-btn { width: 40px; height: 40px; }
+  .player-right { gap: 4px; }
   .player-art { width: 40px; height: 40px; border-radius: 4px; }
-  .player-time { font-size: 11px; }
-  .progress-bar { height: 8px; }
-  .progress-bar::before { top: -16px; bottom: -16px; }
-  .progress-thumb { opacity: 1; width: 14px; height: 14px; }
+  .player-time-inline { display: none; }
+  .progress-bar-top { height: 4px; }
+  .progress-bar-top .progress-thumb { opacity: 1; width: 14px; height: 14px; }
 }
 </style>

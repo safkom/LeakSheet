@@ -135,9 +135,6 @@ function openDescription() {
             v-if="!hasMultipleVersions && availBadge"
             :variant="availBadge.variant"
           >{{ availBadge.text }}</Badge>
-          <span v-if="hasMultipleVersions" class="version-count">
-            {{ song.versions.length }} versions
-          </span>
           <!-- Expand chevron for multi-version -->
           <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
             <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
@@ -317,6 +314,7 @@ function openDescription() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .badge-slot {
@@ -325,14 +323,6 @@ function openDescription() {
   font-size: 14px;
   flex-shrink: 0;
   text-align: center;
-}
-
-.version-count {
-  color: var(--text-dim);
-  font-size: 11px;
-  font-weight: 400;
-  flex-shrink: 0;
-  margin-left: 4px;
 }
 
 .song-credits {
