@@ -6,6 +6,7 @@ import VersionRow from './VersionRow.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { getEraColors } from '../composables/useEraColors'
+import { playerState, setEraSongs, findStreamableLink } from '../composables/usePlayer'
 
 const props = defineProps({
   artist: Object,
@@ -185,6 +186,43 @@ function eraSongs(era) {
   }
   return []
 }
+
+/**
+ * Auto-queue watcher: when a track starts playing, populate era context
+ * so the next song in the era plays automatically when it finishes.
+ * Respects best-of filter — only queues best/special songs if enabled.
+ */
+watch(() => playerState.track, (track) => {
+  if (!track) return
+  const eraName = playerState.eraName
+  if (!eraName) return
+
+  // Find the era that matches the currently playing track
+  const era = eras.value.find(e => e.name === eraName)
+  if (!era) return
+
+  // Build flat list of first-streamable version per song (play order)
+  const songs = eraSongs(era)
+  const versions = []
+  for (const song of songs) {
+    if (!song.versions?.length) continue
+    // Pick the first streamable version (same as what SongRow plays)
+    const streamable = song.versions.find(v => findStreamableLink(v.links))
+    if (streamable) {
+      versions.push(streamable)
+    }
+  }
+
+  if (versions.length > 0) {
+    setEraSongs(
+      versions,
+      props.artist?.name || playerState.artistName,
+      eraName,
+      playerState.artUrl,
+      bestOf.value,
+    )
+  }
+})
 
 /** Parse a date string like "12/25/2024", "2024", "December 2024" into a sortable timestamp. */
 function _parseLeakDate(dateStr) {

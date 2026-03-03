@@ -1,4 +1,5 @@
 import { reactive, watch } from 'vue'
+import { BADGE_MAP } from './useUtils'
 
 /**
  * Global audio player — shared across all components.
@@ -8,6 +9,17 @@ import { reactive, watch } from 'vue'
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+
+/** Monotonic ID counter for queue items — survives reactive mutations */
+let _queueIdCounter = 0
+
+/** Restore persisted volume (0-1) from localStorage */
+function _loadVolume() {
+  try {
+    const v = parseFloat(localStorage.getItem('leaksheet_volume') || '')
+    return isFinite(v) ? Math.max(0, Math.min(1, v)) : 1
+  } catch { return 1 }
+}
 
 export const playerState = reactive({
   /** Currently queued track (SongVersion object) */
@@ -33,9 +45,18 @@ export const playerState = reactive({
   /** The resolved stream URL currently playing */
   streamUrl: '',
   /** Volume 0-1 */
-  volume: 1,
-  /** Playback queue (array of { version, artistName, eraName, artUrl }) */
+  volume: _loadVolume(),
+  /** Playback queue (array of { id, version, artistName, eraName, artUrl }) */
   queue: [],
+  /** Whether the current auto-queue is best-of filtered */
+  bestOfQueue: false,
+  /** Currently loaded era songs — used for auto-queueing next song in era */
+  _eraSongs: null as { eraName: string, artistName: string, artUrl: string, versions: any[] } | null,
+})
+
+// Persist volume changes to localStorage
+watch(() => playerState.volume, (v) => {
+  try { localStorage.setItem('leaksheet_volume', String(v)) } catch {}
 })
 
 // ---------------------------------------------------------------------------
@@ -93,11 +114,7 @@ function _getAudio() {
     _audio.addEventListener('ended', () => {
       playerState.isPlaying = false
       playerState.currentTime = 0
-      // Auto-advance queue
-      if (playerState.queue.length > 0) {
-        const next = playerState.queue.shift()
-        playTrack(next.version, next.artistName, next.eraName, next.artUrl)
-      }
+      _playNext()
     })
 
     _audio.addEventListener('waiting', () => {
@@ -187,15 +204,7 @@ export function isStreamable(version) {
 // Playback controls
 // ---------------------------------------------------------------------------
 
-/** Badge emoji map for MediaSession titles */
-const _BADGE_EMOJI = {
-  best: '⭐',
-  special: '✨',
-  grail: '🏆',
-  wanted: '🏅',
-  worst: '🗑️',
-  ai: '🤖',
-}
+const _BEST_OF_BADGES = new Set(['best', 'special'])
 
 /**
  * Update the browser MediaSession metadata (iOS lock screen, Android notification, etc.)
@@ -212,8 +221,8 @@ function _updateMediaSession() {
   // Build title with badge emoji and version tag
   let title = track.name || ''
   const badge = track.badge
-  if (badge && _BADGE_EMOJI[badge]) {
-    title = `${_BADGE_EMOJI[badge]} ${title}`
+  if (badge && BADGE_MAP[badge]) {
+    title = `${BADGE_MAP[badge]} ${title}`
   }
   if (track.version_tag) {
     title += ` [${track.version_tag}]`
@@ -248,6 +257,13 @@ function _updateMediaSession() {
     if (details.seekTime != null) seekTo(details.seekTime)
   })
   navigator.mediaSession.setActionHandler('stop', () => stopTrack())
+  navigator.mediaSession.setActionHandler('nexttrack', () => _playNext())
+  navigator.mediaSession.setActionHandler('previoustrack', () => {
+    // If > 3s into the song, restart; otherwise no-op (no history)
+    if (playerState.currentTime > 3) {
+      seekTo(0)
+    }
+  })
 }
 
 export function playTrack(version, artistName = '', eraName = '', artUrl = '') {
@@ -317,7 +333,7 @@ export function togglePlay() {
 }
 
 export function addToQueue(version, artistName = '', eraName = '', artUrl = '') {
-  playerState.queue.push({ version, artistName, eraName, artUrl })
+  playerState.queue.push({ id: ++_queueIdCounter, version, artistName, eraName, artUrl })
 }
 
 export function removeFromQueue(index) {
@@ -357,7 +373,8 @@ export function stopTrack() {
   playerState.error = ''
   playerState.streamUrl = ''
   playerState.artUrl = ''
-  playerState.queue = []
+  playerState._eraSongs = null
+  // Queue is preserved — user can still play queued items
   _updateMediaSession()
 }
 
@@ -373,6 +390,72 @@ export function setVolume(v) {
   if (_audio) {
     _audio.volume = playerState.volume
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Auto-queue: populate queue from era songs
+// ---------------------------------------------------------------------------
+
+/**
+ * Set the era song list for auto-queue.
+ * Called by playTrack when starting a song — remaining era songs
+ * are silently queued so the next song plays automatically.
+ * If bestOf is true, only best/special songs are queued.
+ */
+export function setEraSongs(versions: any[], artistName: string, eraName: string, artUrl: string, bestOf = false) {
+  playerState._eraSongs = { eraName, artistName, artUrl, versions }
+  playerState.bestOfQueue = bestOf
+}
+
+/**
+ * Auto-populate the queue from era songs starting after the currently playing track.
+ * Only adds streamable songs. Respects bestOf filter.
+ */
+function _autoQueueEraSongs() {
+  const era = playerState._eraSongs
+  if (!era || !playerState.track) return
+
+  // Find current track's position in the era
+  const currentIdx = era.versions.findIndex(v => isTrackMatch(v))
+  if (currentIdx === -1) return
+
+  // Queue remaining songs after current
+  const remaining = era.versions.slice(currentIdx + 1)
+  for (const version of remaining) {
+    // Skip non-streamable
+    if (!findStreamableLink(version.links)) continue
+    // If bestOf mode, skip non-best/special
+    if (playerState.bestOfQueue && !_BEST_OF_BADGES.has(version.badge)) continue
+    // Don't re-add if already in queue
+    const alreadyQueued = playerState.queue.some(q =>
+      q.version.name === version.name
+      && q.version.version_tag === version.version_tag
+      && (q.version.links?.[0] || '') === (version.links?.[0] || '')
+    )
+    if (alreadyQueued) continue
+    addToQueue(version, era.artistName, era.eraName, era.artUrl)
+  }
+}
+
+/** Advance to next track: from queue first, then auto-queue from era */
+function _playNext() {
+  if (playerState.queue.length > 0) {
+    const next = playerState.queue.shift()
+    playTrack(next.version, next.artistName, next.eraName, next.artUrl)
+    return
+  }
+  // Queue was empty — try auto-queueing era songs, then play next
+  _autoQueueEraSongs()
+  if (playerState.queue.length > 0) {
+    const next = playerState.queue.shift()
+    playTrack(next.version, next.artistName, next.eraName, next.artUrl)
+  }
+}
+
+/** Skip to next track (exposed for UI) */
+export function playNext() {
+  _playNext()
 }
 
 
@@ -408,6 +491,22 @@ export function formatTime(seconds) {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/**
+ * Enhance a Google-served image URL to request a specific size.
+ * Handles =sNNN / =wNNN suffixes on googleusercontent URLs.
+ * Returns the URL unchanged if it's not a resizable Google image.
+ */
+export function enhanceGoogleImageUrl(url, size = 400) {
+  if (!url) return url
+  // lh3/lh4/lh5/lh6 googleusercontent — supports =sNNN suffix
+  if (/lh[3-6]\.googleusercontent\.com/.test(url)) {
+    // Replace existing =sNNN or =wNNN, or append
+    return url.replace(/=[swh]\d+(-[swh]\d+)*$/, '') + `=s${size}`
+  }
+  // lh7-rt with ?key= — cannot be resized (returns 403)
+  return url
 }
 
 /**

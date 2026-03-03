@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ColorThief from 'colorthief'
-import { extractAndCacheEraColors } from '../composables/useEraColors'
+import { extractAndCacheEraColors, setEraColors } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 
 const props = defineProps({
@@ -107,6 +107,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
     class="era-card"
     :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky }"
     :style="{ ...gradientStyle, '--stagger': animDelay }"
+    :aria-expanded="expanded"
     @click="emit('click')"
   >
     <!-- Single unified layout -->

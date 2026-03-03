@@ -45,7 +45,7 @@ const isEmpty = computed(() => queue.value.length === 0)
         <div v-else class="queue-list">
           <div
             v-for="(item, idx) in queue"
-            :key="idx"
+            :key="item.id"
             class="queue-item"
           >
             <span class="queue-idx">{{ idx + 1 }}</span>

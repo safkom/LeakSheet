@@ -55,6 +55,10 @@ async function handleParse(url) {
         source_url: url,
         total_songs: data.total_songs,
       })
+      // Cap history at 20 entries
+      if (trackerHistory.value.length > 20) {
+        trackerHistory.value.length = 20
+      }
     }
     saveHistory(trackerHistory.value)
   } catch (e) {

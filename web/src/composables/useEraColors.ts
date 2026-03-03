@@ -30,6 +30,7 @@ export function extractAndCacheEraColors(eraName, imgElement, colorThief) {
         bg: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.2)`,
         text: bright,
         border: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
+        accent: bright,
       }
     }
   } catch (e) {

@@ -16,7 +16,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue } from '../composables/usePlayer'
+import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue, playNext } from '../composables/usePlayer'
+import { getEraColors } from '../composables/useEraColors'
+import { BADGE_MAP } from '../composables/useUtils'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
@@ -31,19 +33,10 @@ const artError = ref(false)
 // Reset error state when art URL changes
 watch(() => playerState.artUrl, () => { artError.value = false })
 
-const BADGE_EMOJI_MAP = {
-  best: '⭐',
-  special: '✨',
-  grail: '🏆',
-  wanted: '🏅',
-  worst: '🗑️',
-  ai: '🤖',
-}
-
 const displayBadge = computed(() => {
   const b = track.value?.badge
   if (!b) return ''
-  return BADGE_EMOJI_MAP[b] || ''
+  return BADGE_MAP[b] || ''
 })
 
 const displayName = computed(() => {
@@ -589,16 +582,6 @@ const playerBarStyle = computed(() => {
   .player-time-inline { display: none; }
   .progress-bar-top { height: 4px; }
   .progress-bar-top .progress-thumb { opacity: 1; width: 14px; height: 14px; }
-}
-</style>
-
-<!-- Unscoped override for portal-rendered dropdown menu -->
-<style>
-.player-dropdown {
-  background: hsl(0 0% 12%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
-  backdrop-filter: none !important;
 }
 </style>
 

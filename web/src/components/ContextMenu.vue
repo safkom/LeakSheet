@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { addToQueue } from '../composables/usePlayer'
 
@@ -119,7 +119,7 @@ function queueTrack() {
   emit('close')
 }
 
-const hasLink = getLink() !== null
+const hasLink = computed(() => getLink() !== null)
 </script>
 
 <template>
