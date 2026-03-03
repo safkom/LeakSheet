@@ -1,10 +1,14 @@
 """LeakSheet — FastAPI HTTP layer.
 
 Endpoints:
-  POST /api/sheet       — send a tracker URL, get parsed Artist JSON back
-  GET  /api/image-proxy — proxy images through backend (CORS bypass)
-  GET  /api/stream      — proxy audio from supported file hosts (CORS bypass)
-  POST /api/cache/clear — clear the URL fetch cache
+  POST /sheet       — send a tracker URL, get parsed Artist JSON back
+  GET  /image-proxy — proxy images through backend (CORS bypass)
+  GET  /stream      — proxy audio from supported file hosts (CORS bypass)
+  POST /cache/clear — clear the URL fetch cache
+
+Note: In production (DO App Platform), these are served under /api/* via
+ingress routing.  The /api prefix is stripped by the platform before reaching
+this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 """
 
 from __future__ import annotations
@@ -122,7 +126,7 @@ class SheetRequest(BaseModel):
     force_refresh: bool = Field(False, description="Force a fresh fetch, ignoring cache")
 
 
-@app.post("/api/sheet")
+@app.post("/sheet")
 async def parse_sheet(req: SheetRequest):
     """Fetch and parse a tracker spreadsheet.
 
@@ -160,7 +164,7 @@ async def parse_sheet(req: SheetRequest):
 # POST /api/cache/clear — clear the fetch cache
 # ---------------------------------------------------------------------------
 
-@app.post("/api/cache/clear")
+@app.post("/cache/clear")
 async def clear_fetch_cache():
     """Clear the URL fetch cache."""
     count = clear_cache()
@@ -171,7 +175,7 @@ async def clear_fetch_cache():
 # GET /api/image-proxy — proxy images with CORS headers
 # ---------------------------------------------------------------------------
 
-@app.get("/api/image-proxy")
+@app.get("/image-proxy")
 async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     """Proxy an image through the backend to avoid CORS issues.
 
@@ -223,7 +227,7 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
 # GET /api/stream — proxy audio (CORS bypass) with range request support
 # ---------------------------------------------------------------------------
 
-@app.get("/api/stream")
+@app.get("/stream")
 async def proxy_stream(
     request: Request,
     url: str = Query(..., description="Original file-sharing link"),

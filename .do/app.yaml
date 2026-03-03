@@ -16,7 +16,7 @@ services:
     routes:
       - path: /api
     health_check:
-      http_path: /api/docs
+      http_path: /docs
       initial_delay_seconds: 10
       period_seconds: 30
 
