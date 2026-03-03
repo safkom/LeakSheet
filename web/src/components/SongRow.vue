@@ -65,8 +65,10 @@ const availBadge = computed(() => {
   // Show availability alongside quality if both are meaningful
   const q = (firstVersion.value.quality || '').toLowerCase().trim()
   if (q && q !== 'not available' && q !== 'n/a') {
+    // Skip duplicate when quality and availability convey the same thing
+    if (al === q) return null
     // Quality badge is already shown — show availability only if it adds info
-    if (['full', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
+    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
       return { text: avail, variant: availabilityVariant(avail) }
     }
   }

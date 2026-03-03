@@ -23,7 +23,10 @@ export const badgeVariants = cva(
         rec: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
         na: "border-transparent bg-[hsl(var(--badge-na)/0.15)] text-[hsl(var(--badge-na))]",
         // Availability badge variants
+        ogfile: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
         full: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
+        tagged: "border-transparent bg-[hsl(var(--badge-cd)/0.15)] text-[hsl(var(--badge-cd))]",
+        stem: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
         partial: "border-transparent bg-[hsl(var(--badge-lq)/0.15)] text-[hsl(var(--badge-lq))]",
         snippet: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
         confirmed: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",

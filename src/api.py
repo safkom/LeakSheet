@@ -40,9 +40,10 @@ from src.streaming import resolve_stream_url, stream_audio
 # ---------------------------------------------------------------------------
 
 _MIME_CORRECTIONS: dict[str, str] = {
-    # audio/m4a is not a registered IANA type; Safari needs audio/mp4
+    # audio/m4a, audio/x-m4a are not registered IANA types; Safari needs audio/mp4
     "audio/m4a": "audio/mp4",
     "audio/m4b": "audio/mp4",
+    "audio/x-m4a": "audio/mp4",
     # Encourage explicit types over generic binary
     "application/octet-stream": "audio/mpeg",
     "binary/octet-stream": "audio/mpeg",
@@ -307,12 +308,21 @@ async def proxy_stream(
             headers["Content-Disposition"] = _disposition
         if ct:
             headers["Content-Type"] = ct
-        cl = resp.headers.get("content-length")
-        if cl:
-            headers["Content-Length"] = cl
         cr = resp.headers.get("content-range")
         if cr:
             headers["Content-Range"] = cr
+            # Derive Content-Length from Content-Range — some upstreams
+            # (e.g. pillows.su) return the *total* file size in
+            # Content-Length even for 206 responses, which breaks iOS Safari.
+            cr_match = re.match(r"bytes (\d+)-(\d+)/", cr)
+            if cr_match:
+                headers["Content-Length"] = str(
+                    int(cr_match.group(2)) - int(cr_match.group(1)) + 1
+                )
+        if "Content-Length" not in headers:
+            cl = resp.headers.get("content-length")
+            if cl:
+                headers["Content-Length"] = cl
 
         async def _iter_passthrough():
             try:

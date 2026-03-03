@@ -27,6 +27,7 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
     "⭐️": Badge.BEST,
     "\u2b50": Badge.BEST,       # ⭐ (star)
     "\u2b50\ufe0f": Badge.BEST, # ⭐️ (star + variation selector)
+    "💎": Badge.BEST,             # 💎 (gem stone)
     "✨": Badge.SPECIAL,
     "🗑️": Badge.WORST,
     "🗑": Badge.WORST,
@@ -43,7 +44,7 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
 _DECORATIVE_EMOJI = r"[💿🎵🎶🔥]*"
 
 BADGE_EMOJI_PATTERN = re.compile(
-    rf"^[\s]*{_DECORATIVE_EMOJI}[\s]*(⭐️|⭐|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)[\s]*"
+    rf"^[\s]*{_DECORATIVE_EMOJI}[\s]*(⭐️|⭐|💎|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)[\s]*"
 )
 
 # Regex to extract version tags like [V1], [V2], [Alt.], [Radio Mix], [MASTER], etc.

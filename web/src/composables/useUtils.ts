@@ -31,7 +31,10 @@ export function qualityClass(q) {
 export function availabilityVariant(avail) {
   if (!avail) return 'na'
   const l = avail.toLowerCase()
+  if (l.includes('og file') || l.includes('og files')) return 'ogfile'
   if (l === 'full') return 'full'
+  if (l.includes('tagged')) return 'tagged'
+  if (l.includes('stem')) return 'stem'
   if (l.includes('partial') || l.includes('cut')) return 'partial'
   if (l.includes('snippet')) return 'snippet'
   if (l.includes('confirmed')) return 'confirmed'
@@ -63,6 +66,12 @@ export function effectiveBadge(quality, availableLength) {
     }
     // Both empty/NA — don't show a badge
     return null
+  }
+
+  // Skip duplicate badge when quality and availability convey the same thing
+  // (e.g. both say "OG File")
+  if (qLower === aLower) {
+    return { text: quality, variant: qualityVariant(quality), type: 'quality' }
   }
 
   // Quality is meaningful — show it

@@ -195,10 +195,11 @@ const _IMGUR_RE = /^https?:\/\/(?:www\.)?((?:temp\.)?imgur\.gg)\/f\/([A-Za-z0-9_
 const _FROSTE_RE = /^https?:\/\/music\.froste\.lol\/song\/([a-f0-9]+)/i
 
 function _resolveStreamUrl(originalLink) {
-  // Pillowcase: use their API directly (supports CORS)
+  // Pillowcase: proxy through backend — pillows.su returns broken
+  // Content-Length in 206 responses which iOS Safari rejects.
   let m = _PILLOWS_RE.exec(originalLink)
   if (m) {
-    return { url: `https://api.pillows.su/api/get/${m[2]}`, direct: true }
+    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
   }
 
   // Imgur: proxy through our backend (CORS restricted)

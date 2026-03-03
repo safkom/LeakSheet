@@ -58,7 +58,9 @@ const availBadge = computed(() => {
   if (al === 'n/a' || al === 'not available') return null
   const q = (props.version.quality || '').toLowerCase().trim()
   if (q && q !== 'not available' && q !== 'n/a') {
-    if (['full', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
+    // Skip duplicate when quality and availability convey the same thing
+    if (al === q) return null
+    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
       return { text: avail, variant: availabilityVariant(avail) }
     }
   }
