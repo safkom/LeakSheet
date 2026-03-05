@@ -46,6 +46,52 @@ _MIME_CORRECTIONS: dict[str, str] = {
     "audio/x-m4a": "audio/mp4",
 }
 
+# ---------------------------------------------------------------------------
+# Audio format sniffing — magic-byte detection of actual container format.
+# Some file hosts (e.g. pillows.su) always report "audio/mp4" regardless of
+# the actual format.  Safari strictly validates Content-Type against the
+# actual data; Chrome is lenient.  We peek at the first bytes to fix the type.
+# ---------------------------------------------------------------------------
+
+def _sniff_audio_format(header: bytes) -> str | None:
+    """Detect audio format from magic bytes.  Returns corrected MIME or None."""
+    if not header:
+        return None
+
+    # Ogg container (Vorbis, Opus, FLAC-in-Ogg) — "OggS"
+    if header[:4] == b"OggS":
+        return "audio/ogg"
+    # Partial Ogg (only 1-2 bytes received, e.g. from bytes=0-1 Safari probe)
+    if len(header) >= 1 and header[0:1] == b"O" and (len(header) < 4):
+        return "audio/ogg"
+
+    # FLAC — "fLaC"
+    if header[:4] == b"fLaC":
+        return "audio/flac"
+
+    # WAV — "RIFF....WAVE"
+    if header[:4] == b"RIFF" and (len(header) < 12 or header[8:12] == b"WAVE"):
+        return "audio/wav"
+
+    # MP3 — ID3 tag header
+    if header[:3] == b"ID3":
+        return "audio/mpeg"
+
+    # MP3 — raw sync frame (0xFF 0xEx or 0xFF 0xFx)
+    if len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0:
+        return "audio/mpeg"
+
+    # MP4 / M4A — standard ftyp box at offset 4
+    if len(header) >= 8 and header[4:8] == b"ftyp":
+        return "audio/mp4"
+
+    # Other MP4 boxes at offset 4 (moov, mdat, free, skip, wide)
+    _MP4_BOXES = {b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
+    if len(header) >= 8 and header[4:8] in _MP4_BOXES:
+        return "audio/mp4"
+
+    return None
+
 # Map file extensions to MIME types — used to resolve generic upstream types
 # (application/octet-stream) when the URL contains a recognisable extension.
 _EXT_TO_MIME: dict[str, str] = {
@@ -71,13 +117,37 @@ _MIME_TO_EXT: dict[str, str] = {
 }
 
 
-def _fix_audio_mime(ct: str | None, url: str | None = None) -> str:
+_CD_FILENAME_RE = re.compile(
+    r'filename\*?=(?:UTF-8\'\')?["\']?([^;\n"\']+)', re.IGNORECASE
+)
+
+
+def _ext_from_content_disposition(cd: str) -> str:
+    """Extract file extension from a Content-Disposition header value."""
+    m = _CD_FILENAME_RE.search(cd)
+    if m:
+        from posixpath import splitext
+        _, ext = splitext(m.group(1).strip())
+        return ext.lower()
+    return ""
+
+
+def _fix_audio_mime(
+    ct: str | None,
+    url: str | None = None,
+    content_disposition: str | None = None,
+) -> str:
     """Return a corrected MIME type suitable for browser <audio> playback.
 
-    When *ct* is a generic binary type (application/octet-stream etc.) and
-    *url* is supplied, the final CDN URL's file extension is used to derive
-    the real MIME type.  This is critical for Safari, which strictly validates
-    Content-Type and won't play M4A data served as audio/mpeg.
+    Resolution order for generic binary types (application/octet-stream etc.):
+    1. Content-Disposition filename extension (most reliable — file hosts always
+       include the real filename even when the URL path has no extension, e.g.
+       api.pillows.su/api/get/{id} serves m4a directly with no redirect).
+    2. URL path extension (works when upstream redirects to a CDN URL with ext).
+    3. Fall back to audio/mpeg.
+
+    This is critical for Safari, which strictly validates Content-Type and
+    rejects m4a data served as audio/mpeg with "Source not supported".
     """
     if not ct:
         base = ""
@@ -89,11 +159,15 @@ def _fix_audio_mime(ct: str | None, url: str | None = None) -> str:
     if base in _MIME_CORRECTIONS:
         return _MIME_CORRECTIONS[base]
 
-    # For generic binary types, try to determine format from the URL extension.
-    # pillows.su CDN URLs are e.g. https://cdn.pillows.su/.../file.m4a?sig=...
-    # Returning audio/mpeg for an m4a file causes Safari to fail with
-    # "Source not supported" because it tries to parse AAC data as MP3.
+    # For generic binary types, try to determine the real format.
     if base in ("application/octet-stream", "binary/octet-stream", ""):
+        # 1. Content-Disposition filename (e.g. 'attachment; filename="track.m4a"')
+        if content_disposition:
+            ext = _ext_from_content_disposition(content_disposition)
+            if ext in _EXT_TO_MIME:
+                return _EXT_TO_MIME[ext]
+
+        # 2. URL path extension (works when upstream redirects to CDN URL)
         if url:
             from urllib.parse import urlparse
             from posixpath import splitext
@@ -101,6 +175,7 @@ def _fix_audio_mime(ct: str | None, url: str | None = None) -> str:
             ext = splitext(path)[1].lower()
             if ext in _EXT_TO_MIME:
                 return _EXT_TO_MIME[ext]
+
         # Unknown format — fall back to a safe generic
         return "audio/mpeg"
 
@@ -320,6 +395,13 @@ async def proxy_stream(
     # Forward Range header from client if present
     range_header = request.headers.get("range")
 
+    # Parse range_start early — needed for MIME sniffing decision below.
+    _range_start = 0
+    if range_header:
+        _rs_m = re.match(r"bytes=(\d+)-", range_header)
+        if _rs_m:
+            _range_start = int(_rs_m.group(1))
+
     try:
         resp, client = await stream_audio(stream_url, range_header=range_header)
     except ValueError as e:
@@ -328,8 +410,31 @@ async def proxy_stream(
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
 
     raw_ct = resp.headers.get("content-type")
-    ct = _fix_audio_mime(raw_ct, url=str(resp.url))
+    raw_cd = resp.headers.get("content-disposition")
+    ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
     total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
+
+    # ---------------------------------------------------------------------------
+    # MIME sniffing — some hosts (e.g. pillows.su) always report "audio/mp4"
+    # regardless of actual container format.  Chrome lenient-decodes the bytes;
+    # Safari strictly validates Content-Type against actual data → "Source not
+    # supported" when an Ogg file is served as audio/mp4.
+    #
+    # When the range starts at byte 0 we can see the file header, so we read
+    # the first chunk, detect the real format from magic bytes, and correct ct.
+    # The chunk is prepended back into the stream so no bytes are lost.
+    # ---------------------------------------------------------------------------
+    _stream_iter = resp.aiter_bytes(chunk_size=65536)
+    _prepend_chunk: bytes = b""
+
+    if _range_start == 0:
+        try:
+            _prepend_chunk = await _stream_iter.__anext__()
+        except StopAsyncIteration:
+            _prepend_chunk = b""
+        sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
+        if sniffed:
+            ct = sniffed
 
     # When ?download=true, add Content-Disposition with correct extension
     if download:
@@ -363,7 +468,9 @@ async def proxy_stream(
 
         async def _iter_passthrough():
             try:
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                if _prepend_chunk:
+                    yield _prepend_chunk
+                async for chunk in _stream_iter:
                     yield chunk
             finally:
                 await resp.aclose()
@@ -389,7 +496,9 @@ async def proxy_stream(
 
         async def _iter_full():
             try:
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                if _prepend_chunk:
+                    yield _prepend_chunk
+                async for chunk in _stream_iter:
                     yield chunk
             finally:
                 await resp.aclose()
@@ -415,12 +524,21 @@ async def proxy_stream(
         await resp.aclose(); await client.aclose()
         raise HTTPException(status_code=416, detail="Range start beyond file size")
 
+    # Build a unified source iterator (prepend chunk + rest of stream).
+    # The slice logic below must operate on the FULL byte-offset stream,
+    # so we iterate through _prepend_chunk first then _stream_iter.
+    async def _source_iter():
+        if _prepend_chunk:
+            yield _prepend_chunk
+        async for chunk in _stream_iter:
+            yield chunk
+
     if range_end is None:
         # Unknown total — stream from offset, skip leading bytes
         async def _iter_skip():
             try:
                 skipped = 0
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                async for chunk in _source_iter():
                     if skipped + len(chunk) <= range_start:
                         skipped += len(chunk)
                         continue
@@ -448,7 +566,7 @@ async def proxy_stream(
         try:
             skipped = 0
             sent = 0
-            async for chunk in resp.aiter_bytes(chunk_size=65536):
+            async for chunk in _source_iter():
                 chunk_end = skipped + len(chunk)
                 # Entirely before range_start — skip
                 if chunk_end <= range_start:

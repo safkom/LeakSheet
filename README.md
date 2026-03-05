@@ -1,6 +1,8 @@
 # LeakSheet
+A web application + python parser similar to trackerhub.cx that parses Google Docs spreadsheets and displays artist information with albums and tracks.
 
-Parser + API + web player for Google Spreadsheet-based music tracker documents. These spreadsheets catalog unreleased/leaked music from artists, organized into album/mixtape "eras."
+> ⚠️ **NOTICE**
+> This was **made with Claude Opus 4.6**, so expect bugs and random shit. It was made for fun, and to serve me as a replacement for Trackerhub temporarily.
 
 ## Quick Start
 
@@ -56,7 +58,7 @@ web/
 | Source | Example |
 |--------|---------|
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` |
-| Custom tracker domain | `yetracker.net` (redirects to htmlview) |
+| Custom tracker domain | `sites with imbedded spreadsheets` (redirects to htmlview) |
 | Links file | `Trackers/links.txt` (one URL per line) |
 | Local HTML export | `Trackers/Ye Tracker - Google Drive_files/sheet.html` |
 
@@ -91,15 +93,6 @@ GET  /api/image-proxy?url=...        → Proxy images through backend (CORS bypa
 GET  /api/stream?url=...             → Proxy audio stream from supported hosts
 POST /api/cache/clear                → Clear URL fetch cache
 ```
-
-## Supported Trackers
-
-| Artist | Live URL |
-|--------|----------|
-| Ye | `yetracker.net` |
-| Kendrick Lamar | Google Sheets htmlview |
-| Baby Keem | Google Sheets htmlview |
-| Playboi Carti | Google Sheets htmlview |
 
 ## CLI Tools
 
