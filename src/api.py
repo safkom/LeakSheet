@@ -44,9 +44,19 @@ _MIME_CORRECTIONS: dict[str, str] = {
     "audio/m4a": "audio/mp4",
     "audio/m4b": "audio/mp4",
     "audio/x-m4a": "audio/mp4",
-    # Encourage explicit types over generic binary
-    "application/octet-stream": "audio/mpeg",
-    "binary/octet-stream": "audio/mpeg",
+}
+
+# Map file extensions to MIME types — used to resolve generic upstream types
+# (application/octet-stream) when the URL contains a recognisable extension.
+_EXT_TO_MIME: dict[str, str] = {
+    ".m4a": "audio/mp4",
+    ".m4b": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".wav": "audio/wav",
 }
 
 # Map corrected MIME types to file extensions for Content-Disposition
@@ -61,13 +71,40 @@ _MIME_TO_EXT: dict[str, str] = {
 }
 
 
-def _fix_audio_mime(ct: str | None) -> str:
-    """Return a corrected MIME type suitable for browser <audio> playback."""
+def _fix_audio_mime(ct: str | None, url: str | None = None) -> str:
+    """Return a corrected MIME type suitable for browser <audio> playback.
+
+    When *ct* is a generic binary type (application/octet-stream etc.) and
+    *url* is supplied, the final CDN URL's file extension is used to derive
+    the real MIME type.  This is critical for Safari, which strictly validates
+    Content-Type and won't play M4A data served as audio/mpeg.
+    """
     if not ct:
+        base = ""
+    else:
+        # Strip parameters (e.g. "; charset=utf-8")
+        base = ct.split(";")[0].strip().lower()
+
+    # Apply explicit corrections first (non-standard but unambiguous types)
+    if base in _MIME_CORRECTIONS:
+        return _MIME_CORRECTIONS[base]
+
+    # For generic binary types, try to determine format from the URL extension.
+    # pillows.su CDN URLs are e.g. https://cdn.pillows.su/.../file.m4a?sig=...
+    # Returning audio/mpeg for an m4a file causes Safari to fail with
+    # "Source not supported" because it tries to parse AAC data as MP3.
+    if base in ("application/octet-stream", "binary/octet-stream", ""):
+        if url:
+            from urllib.parse import urlparse
+            from posixpath import splitext
+            path = urlparse(url).path
+            ext = splitext(path)[1].lower()
+            if ext in _EXT_TO_MIME:
+                return _EXT_TO_MIME[ext]
+        # Unknown format — fall back to a safe generic
         return "audio/mpeg"
-    # Strip parameters (e.g. "; charset=utf-8")
-    base = ct.split(";")[0].strip().lower()
-    return _MIME_CORRECTIONS.get(base, base)
+
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +328,7 @@ async def proxy_stream(
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
 
     raw_ct = resp.headers.get("content-type")
-    ct = _fix_audio_mime(raw_ct)
+    ct = _fix_audio_mime(raw_ct, url=str(resp.url))
     total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
 
     # When ?download=true, add Content-Disposition with correct extension
