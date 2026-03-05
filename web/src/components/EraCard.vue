@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onUnmounted } from 'vue'
 import { extractAndCacheEraColors, setEraColors, getColorThief } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 
@@ -17,6 +17,11 @@ const titleColor = ref('#e6edf3')
 const colorsReady = ref(false)
 const imgRetries = ref(0)
 const MAX_RETRIES = 2
+let _retryTimer: ReturnType<typeof setTimeout> | null = null
+
+onUnmounted(() => {
+  if (_retryTimer) clearTimeout(_retryTimer)
+})
 
 const artSrc = computed(() => {
   if (!props.era.art_url) return null
@@ -64,17 +69,13 @@ function extractColors(imgElement) {
 
 function onImgLoad(e) {
   const img = e.target
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(() => extractColors(img), { timeout: 2000 })
-  } else {
-    setTimeout(() => extractColors(img), 100)
-  }
+  extractColors(img)
 }
 
 function onImgError(e) {
   if (e.target && imgRetries.value < MAX_RETRIES) {
     imgRetries.value++
-    setTimeout(() => {
+    _retryTimer = setTimeout(() => {
       if (e.target && artSrc.value) {
         const sep = artSrc.value.includes('?') ? '&' : '?'
         e.target.src = `${artSrc.value}${sep}_r=${imgRetries.value}`

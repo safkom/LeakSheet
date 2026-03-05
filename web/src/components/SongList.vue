@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import SongRow from './SongRow.vue'
 
 const props = defineProps({
@@ -13,7 +14,16 @@ const props = defineProps({
 const expandedSong = ref(null)
 
 function toggleSong(index) {
-  expandedSong.value = expandedSong.value === index ? null : index
+  const prev = expandedSong.value
+  expandedSong.value = prev === index ? null : index
+  // Notify the virtualizer that a row height changed
+  if (virtualizer.value) {
+    // Re-measure the toggled row(s) after DOM update
+    setTimeout(() => {
+      if (prev !== null) virtualizer.value.measureElement(null)
+      virtualizer.value.measure()
+    }, 50)
+  }
 }
 
 /** Build a flat list of { type: 'section' | 'song', ... } items for rendering */
@@ -42,24 +52,78 @@ const displayItems = computed(() => {
 })
 
 const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
+
+// Only virtualize when there are enough items to justify the overhead
+const VIRTUALIZE_THRESHOLD = 40
+const shouldVirtualize = computed(() => displayItems.value.length > VIRTUALIZE_THRESHOLD)
+
+const virtualizer = useWindowVirtualizer(computed(() => ({
+  count: displayItems.value.length,
+  estimateSize: () => 52,
+  overscan: 15,
+  enabled: shouldVirtualize.value,
+})))
+
+const virtualItems = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+function measureRef(el) {
+  if (el) virtualizer.value.measureElement(el)
+}
 </script>
 
 <template>
   <div class="song-list" role="list" :aria-label="eraName ? eraName + ' songs' : 'Song list'">
     <div v-if="!hasSongs" class="no-songs">No songs found</div>
-    <template v-for="item in displayItems" :key="item.key">
-      <div v-if="item.type === 'section'" class="section-divider">
-        <span class="section-name">{{ item.name }}</span>
+
+    <!-- Virtualized rendering for large lists -->
+    <template v-else-if="shouldVirtualize">
+      <div :style="{ height: totalSize + 'px', width: '100%', position: 'relative' }">
+        <div
+          v-for="vRow in virtualItems"
+          :key="displayItems[vRow.index].key"
+          :ref="measureRef"
+          :data-index="vRow.index"
+          :style="{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            transform: `translateY(${vRow.start}px)`,
+          }"
+        >
+          <div v-if="displayItems[vRow.index].type === 'section'" class="section-divider">
+            <span class="section-name">{{ displayItems[vRow.index].name }}</span>
+          </div>
+          <SongRow
+            v-else
+            :song="displayItems[vRow.index].song"
+            :expanded="expandedSong === displayItems[vRow.index].index"
+            :artist-name="artistName"
+            :era-name="eraName"
+            :era-art="eraArt"
+            @toggle="toggleSong(displayItems[vRow.index].index)"
+          />
+        </div>
       </div>
-      <SongRow
-        v-else
-        :song="item.song"
-        :expanded="expandedSong === item.index"
-        :artist-name="artistName"
-        :era-name="eraName"
-        :era-art="eraArt"
-        @toggle="toggleSong(item.index)"
-      />
+    </template>
+
+    <!-- Direct rendering for small lists (no virtualization overhead) -->
+    <template v-else>
+      <template v-for="item in displayItems" :key="item.key">
+        <div v-if="item.type === 'section'" class="section-divider">
+          <span class="section-name">{{ item.name }}</span>
+        </div>
+        <SongRow
+          v-else
+          :song="item.song"
+          :expanded="expandedSong === item.index"
+          :artist-name="artistName"
+          :era-name="eraName"
+          :era-art="eraArt"
+          @toggle="toggleSong(item.index)"
+        />
+      </template>
     </template>
   </div>
 </template>

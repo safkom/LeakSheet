@@ -1,11 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue'
 import VersionRow from './VersionRow.vue'
-import ContextMenu from './ContextMenu.vue'
-import SongDescriptionModal from './SongDescriptionModal.vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
 import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
+import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
   song: Object,
@@ -81,17 +80,20 @@ const isConfirmedOnly = computed(() => {
   return !isStreamable(firstVersion.value)
 })
 
-// Context menu state
-const contextMenu = ref(null)
-
-// Description modal state
-const showDescription = ref(false)
+// Shared overlays (single ContextMenu + Modal at ArtistView level)
+const { showContextMenu, showDescription: showDescriptionModal } = useSharedOverlays()
 
 function handleClick() {
   if (hasMultipleVersions.value) {
     emit('toggle')
   } else if (isConfirmedOnly.value) {
-    showDescription.value = true
+    showDescriptionModal({
+      song: props.song,
+      version: firstVersion.value,
+      artistName: props.artistName,
+      eraName: props.eraName,
+      eraArt: props.eraArt,
+    })
   } else if (firstVersion.value) {
     playTrack(firstVersion.value, props.artistName, props.eraName, props.eraArt)
   }
@@ -99,20 +101,15 @@ function handleClick() {
 
 function handleContextMenu(e) {
   e.preventDefault()
-  contextMenu.value = {
+  showContextMenu({
     x: e.clientX,
     y: e.clientY,
     song: props.song,
     version: firstVersion.value,
-  }
-}
-
-function closeContextMenu() {
-  contextMenu.value = null
-}
-
-function openDescription() {
-  showDescription.value = true
+    artistName: props.artistName,
+    eraName: props.eraName,
+    eraArt: props.eraArt,
+  })
 }
 </script>
 
@@ -189,31 +186,6 @@ function openDescription() {
         </div>
       </div>
     </Transition>
-
-    <!-- Context menu -->
-    <ContextMenu
-      v-if="contextMenu"
-      :x="contextMenu.x"
-      :y="contextMenu.y"
-      :song="contextMenu.song"
-      :version="contextMenu.version"
-      :artist-name="artistName"
-      :era-name="eraName"
-      :era-art="eraArt"
-      @close="closeContextMenu"
-      @show-description="openDescription"
-    />
-
-    <!-- Description modal -->
-    <SongDescriptionModal
-      v-if="showDescription"
-      :song="song"
-      :version="firstVersion"
-      :era-art="eraArt"
-      :era-name="eraName"
-      :artist-name="artistName"
-      @close="showDescription = false"
-    />
   </div>
 </template>
 

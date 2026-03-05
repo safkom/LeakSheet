@@ -60,6 +60,8 @@ async function handleParse(url) {
     }
     saveHistory(trackerHistory.value)
   } catch (e) {
+    // Silently ignore aborted requests (user submitted a new URL)
+    if (e instanceof DOMException && e.name === 'AbortError') return
     error.value = e.message
   } finally {
     loading.value = false

@@ -3,11 +3,14 @@ import { computed, watch, nextTick, ref } from 'vue'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
+import ContextMenu from './ContextMenu.vue'
+import SongDescriptionModal from './SongDescriptionModal.vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { getEraColors } from '../composables/useEraColors'
 import { playerState, setEraSongs, findStreamableLink } from '../composables/usePlayer'
 import { useEraFiltering, eraSongs } from '../composables/useEraFiltering'
+import { provideSharedOverlays } from '../composables/useSharedOverlays'
 import type { Artist } from '../composables/useEraFiltering'
 
 const props = defineProps<{
@@ -19,6 +22,13 @@ const emit = defineEmits<{
 }>()
 
 const eras = computed(() => props.artist?.eras || [])
+
+const {
+  contextMenuState,
+  closeContextMenu,
+  descriptionState,
+  closeDescription,
+} = provideSharedOverlays()
 
 const {
   searchQuery,
@@ -169,7 +179,7 @@ watch(() => playerState.track, (track) => {
       <div v-else class="search-results">
         <div
           v-for="(result, idx) in recentResults"
-          :key="'r' + idx"
+          :key="`r:${result.era.name}:${result.version.name}:${idx}`"
           class="search-result-row"
         >
           <div class="search-result-meta">
@@ -197,7 +207,7 @@ watch(() => playerState.track, (track) => {
       <div v-else class="search-results">
         <div
           v-for="(result, idx) in flatSearchResults"
-          :key="idx"
+          :key="`s:${result.era.name}:${result.version.name}:${idx}`"
           class="search-result-row"
         >
           <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
@@ -239,6 +249,42 @@ watch(() => playerState.track, (track) => {
         </Transition>
       </div>
     </div>
+
+    <!-- Shared context menu (single instance for all rows) -->
+    <ContextMenu
+      v-if="contextMenuState"
+      :x="contextMenuState.x"
+      :y="contextMenuState.y"
+      :song="contextMenuState.song"
+      :version="contextMenuState.version"
+      :artist-name="contextMenuState.artistName"
+      :era-name="contextMenuState.eraName"
+      :era-art="contextMenuState.eraArt"
+      @close="closeContextMenu"
+      @show-description="() => {
+        if (contextMenuState) {
+          descriptionState = {
+            song: contextMenuState.song,
+            version: contextMenuState.version,
+            artistName: contextMenuState.artistName,
+            eraName: contextMenuState.eraName,
+            eraArt: contextMenuState.eraArt,
+          }
+        }
+        closeContextMenu()
+      }"
+    />
+
+    <!-- Shared description modal (single instance for all rows) -->
+    <SongDescriptionModal
+      v-if="descriptionState"
+      :song="descriptionState.song"
+      :version="descriptionState.version"
+      :era-art="descriptionState.eraArt"
+      :era-name="descriptionState.eraName"
+      :artist-name="descriptionState.artistName"
+      @close="closeDescription"
+    />
   </div>
 </template>
 

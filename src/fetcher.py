@@ -13,6 +13,7 @@ Strategy:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -708,7 +709,7 @@ async def async_fetch_and_parse(
                 url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
             )
             name = _resolve_name(html, title)
-            artist = parse_sheet(html, name)
+            artist = await asyncio.to_thread(parse_sheet, html, name)
             if artist.eras:
                 artist.source_url = url
                 return artist
@@ -732,7 +733,7 @@ async def async_fetch_and_parse(
             # If base page has tables, try parsing directly
             if "<table" in base_html.lower():
                 name = _resolve_name(base_html, title)
-                artist = parse_sheet(base_html, name)
+                artist = await asyncio.to_thread(parse_sheet, base_html, name)
                 if artist.eras:
                     artist.source_url = url
                     if use_cache:
@@ -743,33 +744,42 @@ async def async_fetch_and_parse(
             if not gids:
                 gids = ["0"]
 
+            # --- Fetch all GID pages concurrently, then parse to pick best ---
+            async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
+                """Fetch a single GID sheet page. Returns (gid, html) or None."""
+                try:
+                    sheet_url = _build_sheet_html_url(url_norm, gid_val)
+                    if use_cache and cache_ttl > 0:
+                        cached = _get_cached(sheet_url, cache_ttl)
+                        if cached is not None:
+                            return (gid_val, cached[0])
+                        resp = await client.get(sheet_url)
+                        if resp.status_code != 200 or "<table" not in resp.text.lower():
+                            return None
+                        if use_cache:
+                            _set_cache(sheet_url, resp.text, title)
+                        return (gid_val, resp.text)
+                    else:
+                        resp = await client.get(sheet_url)
+                        if resp.status_code != 200 or "<table" not in resp.text.lower():
+                            return None
+                        return (gid_val, resp.text)
+                except (httpx.HTTPError, ValueError, KeyError):
+                    return None
+
+            fetched = await asyncio.gather(*[_fetch_gid(g) for g in gids])
+
             best_artist: Artist | None = None
             best_eras = 0
             best_html = ""
 
-            for try_gid in gids:
+            for result in fetched:
+                if result is None:
+                    continue
+                _, sheet_html = result
                 try:
-                    sheet_url = _build_sheet_html_url(url_norm, try_gid)
-
-                    if use_cache and cache_ttl > 0:
-                        cached = _get_cached(sheet_url, cache_ttl)
-                        if cached is not None:
-                            sheet_html, _ = cached
-                        else:
-                            resp = await client.get(sheet_url)
-                            if resp.status_code != 200 or "<table" not in resp.text.lower():
-                                continue
-                            sheet_html = resp.text
-                            if use_cache:
-                                _set_cache(sheet_url, sheet_html, title)
-                    else:
-                        resp = await client.get(sheet_url)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            continue
-                        sheet_html = resp.text
-
                     name = _resolve_name(sheet_html, title)
-                    candidate = parse_sheet(sheet_html, name)
+                    candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
                     n_eras = len(candidate.eras)
                     n_songs = sum(
                         len(s.songs)
@@ -784,8 +794,7 @@ async def async_fetch_and_parse(
 
                     if n_eras >= 5:
                         break
-
-                except (httpx.HTTPError, ValueError, KeyError):
+                except (ValueError, KeyError):
                     continue
 
             if best_artist and best_eras > 0:
@@ -799,7 +808,7 @@ async def async_fetch_and_parse(
                 url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
             )
             name = _resolve_name(html, title)
-            artist = parse_sheet(html, name)
+            artist = await asyncio.to_thread(parse_sheet, html, name)
             artist.source_url = url
             return artist
 

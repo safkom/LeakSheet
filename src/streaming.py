@@ -54,6 +54,32 @@ _AUDIO_MIMES = {
     "binary/octet-stream",
 }
 
+# ---------------------------------------------------------------------------
+# Shared httpx client — connection pooling across all stream requests.
+# ---------------------------------------------------------------------------
+
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    """Return (and lazily create) a shared async HTTP client for streaming."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+        )
+    return _shared_client
+
+
+async def close_shared_client() -> None:
+    """Close the shared client. Call on application shutdown."""
+    global _shared_client
+    if _shared_client and not _shared_client.is_closed:
+        await _shared_client.aclose()
+        _shared_client = None
+
 def resolve_stream_url(link: str) -> str | None:
     """Convert a file-sharing link to a direct audio stream URL.
 
@@ -121,25 +147,23 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
     last_err: Exception | None = None
     for url in urls_to_try:
         try:
-            async with httpx.AsyncClient(
-                timeout=10,
-                follow_redirects=True,
-                headers={"User-Agent": _STREAM_USER_AGENT},
-            ) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    last_err = ValueError(
-                        f"imgur.gg API returned {resp.status_code} for {url}"
-                    )
-                    continue
-                data = resp.json()
-                cdn_url = data.get("cdnUrl")
-                if not cdn_url:
-                    last_err = ValueError(
-                        f"imgur.gg API response missing cdnUrl: {url}"
-                    )
-                    continue
-                return cdn_url
+            client = _get_shared_client()
+            resp = await client.get(
+                url, headers={"User-Agent": _STREAM_USER_AGENT}
+            )
+            if resp.status_code != 200:
+                last_err = ValueError(
+                    f"imgur.gg API returned {resp.status_code} for {url}"
+                )
+                continue
+            data = resp.json()
+            cdn_url = data.get("cdnUrl")
+            if not cdn_url:
+                last_err = ValueError(
+                    f"imgur.gg API response missing cdnUrl: {url}"
+                )
+                continue
+            return cdn_url
         except httpx.HTTPError as exc:
             last_err = ValueError(f"imgur.gg API request failed: {exc}")
             continue
@@ -160,7 +184,7 @@ def _is_audio_content_type(ct: str) -> bool:
 
 async def stream_audio(
     stream_url: str, *, range_header: str | None = None
-) -> tuple[httpx.Response, httpx.AsyncClient]:
+) -> httpx.Response:
     """Open a streaming connection to the resolved audio URL.
 
     For imgur.gg metadata URLs, first resolves the CDN URL via the API,
@@ -170,7 +194,8 @@ async def stream_audio(
         stream_url: The resolved API URL to stream from.
         range_header: Optional HTTP Range header to forward (e.g. "bytes=0-1024").
 
-    Returns (response, client) tuple. Caller is responsible for closing both.
+    Returns the streaming response. Caller is responsible for closing it
+    with ``await resp.aclose()``.
 
     Raises ValueError if upstream returns non-audio content.
     """
@@ -187,13 +212,9 @@ async def stream_audio(
         song_page = stream_url.removesuffix("/download")
         req_headers["Referer"] = song_page
 
-    client = httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
-        headers=req_headers,
-    )
+    client = _get_shared_client()
 
-    request = client.build_request("GET", stream_url)
+    request = client.build_request("GET", stream_url, headers=req_headers)
     resp = await client.send(request, stream=True)
 
     try:
@@ -205,7 +226,6 @@ async def stream_audio(
             raise ValueError(f"Upstream returned non-audio content: {ct}")
     except Exception:
         await resp.aclose()
-        await client.aclose()
         raise
 
-    return resp, client
+    return resp

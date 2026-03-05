@@ -1,10 +1,9 @@
 <script setup>
-import { computed, ref } from 'vue'
-import ContextMenu from './ContextMenu.vue'
-import SongDescriptionModal from './SongDescriptionModal.vue'
+import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
 import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
+import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
   version: Object,
@@ -18,13 +17,17 @@ const canStream = computed(() => isStreamable(props.version))
 
 const isCurrentTrack = computed(() => isTrackMatch(props.version))
 
-// Context menu state
-const contextMenu = ref(null)
-const showDescription = ref(false)
+// Shared overlays (single ContextMenu + Modal at ArtistView level)
+const { showContextMenu, showDescription: showDescriptionModal } = useSharedOverlays()
 
 function handlePlay() {
   if (!canStream.value) {
-    showDescription.value = true
+    showDescriptionModal({
+      version: props.version,
+      artistName: props.artistName,
+      eraName: props.eraName,
+      eraArt: props.eraArt,
+    })
     return
   }
   playTrack(props.version, props.artistName, props.eraName, props.eraArt)
@@ -32,19 +35,14 @@ function handlePlay() {
 
 function handleContextMenu(e) {
   e.preventDefault()
-  contextMenu.value = {
+  showContextMenu({
     x: e.clientX,
     y: e.clientY,
     version: props.version,
-  }
-}
-
-function closeContextMenu() {
-  contextMenu.value = null
-}
-
-function openDescription() {
-  showDescription.value = true
+    artistName: props.artistName,
+    eraName: props.eraName,
+    eraArt: props.eraArt,
+  })
 }
 
 const badge = computed(() => {
@@ -110,29 +108,6 @@ const badgeEmoji = computed(() => {
       </span>
     </div>
   </button>
-
-  <!-- Context menu -->
-  <ContextMenu
-    v-if="contextMenu"
-    :x="contextMenu.x"
-    :y="contextMenu.y"
-    :version="contextMenu.version"
-    :artist-name="artistName"
-    :era-name="eraName"
-    :era-art="eraArt"
-    @close="closeContextMenu"
-    @show-description="openDescription"
-  />
-
-  <!-- Description modal -->
-  <SongDescriptionModal
-    v-if="showDescription"
-    :version="version"
-    :era-art="eraArt"
-    :era-name="eraName"
-    :artist-name="artistName"
-    @close="showDescription = false"
-  />
 </template>
 
 <style scoped>

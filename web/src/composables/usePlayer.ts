@@ -92,9 +92,13 @@ export const playerState: PlayerState = reactive({
   _eraSongs: null,
 })
 
-// Persist volume changes to localStorage
+// Persist volume changes to localStorage (debounced to avoid write spam)
+let _volTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => playerState.volume, (v) => {
-  try { localStorage.setItem('leaksheet_volume', String(v)) } catch {}
+  if (_volTimer) clearTimeout(_volTimer)
+  _volTimer = setTimeout(() => {
+    try { localStorage.setItem('leaksheet_volume', String(v)) } catch {}
+  }, 300)
 })
 
 // ---------------------------------------------------------------------------
@@ -108,10 +112,13 @@ function _getAudio() {
     _audio = new Audio()
     _audio.preload = 'auto'
 
+    let _lastPosUpdate = 0
     _audio.addEventListener('timeupdate', () => {
       playerState.currentTime = _audio.currentTime
-      // Update MediaSession position state
-      if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+      // Update MediaSession position state (~1Hz, not every timeupdate)
+      const now = performance.now()
+      if (now - _lastPosUpdate > 1000 && 'mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+        _lastPosUpdate = now
         try {
           if (isFinite(_audio.duration) && _audio.duration > 0) {
             navigator.mediaSession.setPositionState({

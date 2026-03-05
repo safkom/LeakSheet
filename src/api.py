@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
 from src.fetcher import (
@@ -31,7 +32,7 @@ from src.fetcher import (
     NoTablesError,
     ParseError,
 )
-from src.streaming import resolve_stream_url, stream_audio
+from src.streaming import close_shared_client, resolve_stream_url, stream_audio
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +252,8 @@ app = FastAPI(
     version="0.3.0",
 )
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -259,6 +262,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await close_shared_client()
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +411,7 @@ async def proxy_stream(
             _range_start = int(_rs_m.group(1))
 
     try:
-        resp, client = await stream_audio(stream_url, range_header=range_header)
+        resp = await stream_audio(stream_url, range_header=range_header)
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
@@ -474,7 +482,6 @@ async def proxy_stream(
                     yield chunk
             finally:
                 await resp.aclose()
-                await client.aclose()
 
         return StreamingResponse(
             _iter_passthrough(),
@@ -502,7 +509,6 @@ async def proxy_stream(
                     yield chunk
             finally:
                 await resp.aclose()
-                await client.aclose()
 
         return StreamingResponse(
             _iter_full(),
@@ -514,14 +520,14 @@ async def proxy_stream(
     # Client requested Range but upstream ignored it — synthesise 206.
     m = re.match(r"bytes=(\d+)-(\d*)", range_header)
     if not m:
-        await resp.aclose(); await client.aclose()
+        await resp.aclose()
         raise HTTPException(status_code=416, detail="Malformed Range header")
 
     range_start = int(m.group(1))
     range_end = int(m.group(2)) if m.group(2) else (total_size - 1 if total_size else None)
 
     if total_size and range_start >= total_size:
-        await resp.aclose(); await client.aclose()
+        await resp.aclose()
         raise HTTPException(status_code=416, detail="Range start beyond file size")
 
     # Build a unified source iterator (prepend chunk + rest of stream).
@@ -550,7 +556,6 @@ async def proxy_stream(
                         yield chunk
             finally:
                 await resp.aclose()
-                await client.aclose()
 
         return StreamingResponse(
             _iter_skip(),
@@ -585,7 +590,6 @@ async def proxy_stream(
                     break
         finally:
             await resp.aclose()
-            await client.aclose()
 
     return StreamingResponse(
         _iter_range(),

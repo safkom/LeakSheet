@@ -86,13 +86,31 @@ export function isBestOfSong(song: Song): boolean {
   return _BEST_OF_BADGES.has(song.badge ?? '')
 }
 
+/**
+ * Pre-built search index — lowercased searchable strings per song.
+ * Built once per artist load, avoids repeated .toLowerCase() on every keystroke.
+ */
+const _searchIndex = new WeakMap<Song, string>()
+
+function _getSongSearchText(song: Song): string {
+  let cached = _searchIndex.get(song)
+  if (cached !== undefined) return cached
+  const parts = [song.base_name.toLowerCase()]
+  for (const v of (song.versions || [])) {
+    if (v.name) parts.push(v.name.toLowerCase())
+    if (v.alt_titles) {
+      for (const alt of v.alt_titles) {
+        parts.push(alt.toLowerCase())
+      }
+    }
+  }
+  cached = parts.join('\0')
+  _searchIndex.set(song, cached)
+  return cached
+}
+
 export function songMatchesQuery(song: Song, query: string): boolean {
-  if (song.base_name.toLowerCase().includes(query)) return true
-  return song.versions?.some(v => {
-    if ((v.name || '').toLowerCase().includes(query)) return true
-    if (v.alt_titles?.some(alt => alt.toLowerCase().includes(query))) return true
-    return false
-  }) ?? false
+  return _getSongSearchText(song).includes(query)
 }
 
 /** Get songs for an era — handles both flat and section-based layouts. */
@@ -180,41 +198,67 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     })
   })
 
-  // ── Filtered songs within an era ──
+  // ── Filtered songs within an era (memoized map) ──
+
+  const _filteredSongsMap = computed(() => {
+    const map = new Map<string, Song[]>()
+    const q = debouncedQuery.value.trim().toLowerCase()
+    for (const era of eras.value) {
+      let songs = eraSongs(era)
+      if (bestOf.value) {
+        songs = songs.filter(isBestOfSong)
+      }
+      if (q) {
+        const eraNameMatch = era.name.toLowerCase().includes(q) ||
+          era.alt_names?.some(alt => alt.toLowerCase().includes(q))
+        if (!eraNameMatch) {
+          songs = songs.filter(song => songMatchesQuery(song, q))
+        }
+      }
+      map.set(era.name, songs)
+    }
+    return map
+  })
 
   function filteredSongs(era: Era): Song[] {
-    let songs = eraSongs(era)
-    if (bestOf.value) {
-      songs = songs.filter(isBestOfSong)
-    }
-    const q = debouncedQuery.value.trim().toLowerCase()
-    if (!q) return songs
-    if (era.name.toLowerCase().includes(q)) return songs
-    if (era.alt_names?.some(alt => alt.toLowerCase().includes(q))) return songs
-    return songs.filter(song => songMatchesQuery(song, q))
+    return _filteredSongsMap.value.get(era.name) ?? eraSongs(era)
   }
 
-  // ── Filtered sections ──
+  // ── Filtered sections (memoized map) ──
 
-  function filteredSections(era: Era): Section[] {
-    if (!era.sections?.length) return []
+  const _filteredSectionsMap = computed(() => {
+    const map = new Map<string, Section[]>()
     const q = debouncedQuery.value.trim().toLowerCase()
     const filtering = bestOf.value || q
 
-    if (!filtering) return era.sections
+    for (const era of eras.value) {
+      if (!era.sections?.length) {
+        map.set(era.name, [])
+        continue
+      }
+      if (!filtering) {
+        map.set(era.name, era.sections)
+        continue
+      }
+      const result = era.sections
+        .map(sec => {
+          let songs = sec.songs || []
+          if (bestOf.value) songs = songs.filter(isBestOfSong)
+          if (q) {
+            const eraNameMatch = era.name.toLowerCase().includes(q) ||
+              era.alt_names?.some(alt => alt.toLowerCase().includes(q))
+            if (!eraNameMatch) songs = songs.filter(song => songMatchesQuery(song, q))
+          }
+          return { ...sec, songs }
+        })
+        .filter(sec => sec.songs.length > 0)
+      map.set(era.name, result)
+    }
+    return map
+  })
 
-    return era.sections
-      .map(sec => {
-        let songs = sec.songs || []
-        if (bestOf.value) songs = songs.filter(isBestOfSong)
-        if (q) {
-          const eraNameMatch = era.name.toLowerCase().includes(q) ||
-            era.alt_names?.some(alt => alt.toLowerCase().includes(q))
-          if (!eraNameMatch) songs = songs.filter(song => songMatchesQuery(song, q))
-        }
-        return { ...sec, songs }
-      })
-      .filter(sec => sec.songs.length > 0)
+  function filteredSections(era: Era): Section[] {
+    return _filteredSectionsMap.value.get(era.name) ?? []
   }
 
   // ── Flat search results ──

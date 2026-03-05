@@ -21,10 +21,21 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+// Module-level abort controller for parseSheet — cancels previous request
+// when a new one starts.
+let _parseAbort: AbortController | null = null
+
 /**
  * POST /api/sheet — parse a tracker URL and return full Artist data.
+ * Automatically cancels any in-flight previous request.
  */
 export function parseSheet(url, { artistName = null, useCache = true, forceRefresh = false } = {}) {
+  // Abort any in-flight request
+  if (_parseAbort) {
+    _parseAbort.abort()
+  }
+  _parseAbort = new AbortController()
+
   return request('/sheet', {
     method: 'POST',
     body: JSON.stringify({
@@ -33,5 +44,6 @@ export function parseSheet(url, { artistName = null, useCache = true, forceRefre
       use_cache: useCache,
       force_refresh: forceRefresh,
     }),
+    signal: _parseAbort.signal,
   })
 }
