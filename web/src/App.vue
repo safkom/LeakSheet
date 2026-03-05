@@ -4,7 +4,6 @@ import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
 import PlayerBar from './components/PlayerBar.vue'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet } from './composables/useApi'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
@@ -40,9 +39,9 @@ async function handleParse(url) {
   error.value = ''
   try {
     const data = await parseSheet(url)
+    // Wait for all era cover images to load silently, then reveal
+    await _waitForImages(data)
     activeArtist.value = data
-    // Preload era artwork images for faster rendering
-    _preloadEraImages(data)
     // Add to history (or update existing) and persist
     const existing = trackerHistory.value.find(h => h.source_url === url)
     if (existing) {
@@ -64,6 +63,7 @@ async function handleParse(url) {
     error.value = e.message
   } finally {
     loading.value = false
+    loadingUrl.value = ''
   }
 }
 
@@ -71,21 +71,32 @@ function goHome() {
   activeArtist.value = null
 }
 
-/** Preload era artwork images and extract colors for search badges */
-function _preloadEraImages(artist) {
-  if (!artist?.eras) return
-  for (const era of artist.eras) {
-    if (!era.art_url) continue
+/** Wait for all era cover images to load, extracting colors as they arrive.
+ * Resolves when every image finishes (or fails) — hard timeout of 6s as a safety net. */
+function _waitForImages(artist) {
+  if (!artist?.eras) return Promise.resolve()
+  const artEras = artist.eras.filter(era => {
+    if (!era.art_url) return false
+    const u = era.art_url.startsWith('//') ? 'https:' + era.art_url : era.art_url
+    return u.startsWith('http')
+  })
+  if (!artEras.length) return Promise.resolve()
+
+  const promises = artEras.map(era => new Promise(resolve => {
     const url = era.art_url.startsWith('//') ? 'https:' + era.art_url : era.art_url
-    if (!url.startsWith('http')) continue
     const enhanced = enhanceGoogleImageUrl(url)
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
       extractAndCacheEraColors(era.name, img)
+      resolve(img)
     }
+    img.onerror = () => resolve(null)
     img.src = `/api/image-proxy?url=${encodeURIComponent(enhanced)}`
-  }
+  }))
+
+  const timeout = new Promise(resolve => setTimeout(resolve, 6000))
+  return Promise.race([Promise.all(promises), timeout])
 }
 
 function loadFromHistory(entry) {
@@ -140,62 +151,45 @@ onUnmounted(() => {
 
 <template>
   <main class="app-main" :class="{ 'has-player': hasPlayer }">
-    <!-- Landing / Home -->
-    <div v-if="!activeArtist && !loading" class="landing">
-      <div class="landing-hero">
-        <h1><span class="hero-text">Leak</span><span class="hero-accent">Sheet</span></h1>
-        <p class="hero-sub">Parse and explore unreleased music trackers</p>
-      </div>
-
-      <TrackerInput :loading="loading" @parse="handleParse" />
-
-      <p v-if="error" class="error-msg">{{ error }}</p>
-
-      <!-- History on landing page -->
-      <div v-if="trackerHistory.length" class="landing-history">
-        <div class="history-header">
-          <h3 class="history-title">Recent Trackers</h3>
-          <button class="history-clear" @click="clearHistory">Clear</button>
-        </div>
-        <Button
-          v-for="entry in trackerHistory"
-          :key="entry.source_url"
-          variant="outline"
-          class="history-card"
-          @click="loadFromHistory(entry)"
-        >
-          <span class="history-card-name">{{ entry.name }}</span>
-          <span class="history-card-meta">{{ entry.total_songs }} songs</span>
-        </Button>
-      </div>
-    </div>
-
-    <!-- Loading state -->
     <Transition name="content-fade" mode="out-in">
-      <div v-if="loading" class="loading-view" key="loading">
-        <!-- Skeleton mimicking ArtistView -->
-        <div class="loading-skeleton">
-          <Skeleton class="h-7 w-44 mb-1 rounded-md" />
-          <Skeleton class="h-4 w-20 mb-5 rounded" />
-
-          <!-- Search bar skeleton -->
-          <Skeleton class="h-10 w-full mb-5 rounded-lg" />
-
-          <!-- Era card skeletons -->
-          <div class="skeleton-eras">
-            <div v-for="i in 6" :key="i" class="skeleton-era-card">
-              <Skeleton class="skeleton-era-art" />
-              <div class="skeleton-era-info">
-                <Skeleton class="h-5 rounded" :style="{ width: [65,80,55,72,60,48][i-1] + '%' }" />
-                <Skeleton class="h-3 w-24 rounded mt-2" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- Artist detail view -->
-      <ArtistView v-else-if="activeArtist" :artist="activeArtist" key="artist" @back="goHome" />
+      <ArtistView v-if="activeArtist" :artist="activeArtist" key="artist" @back="goHome" />
+
+      <!-- Landing / Home (stays visible while loading) -->
+      <div v-else class="landing" key="landing">
+        <div class="landing-hero">
+          <h1><span class="hero-text">Leak</span><span class="hero-accent">Sheet</span></h1>
+          <p class="hero-sub">Parse and explore unreleased music trackers</p>
+        </div>
+
+        <TrackerInput :loading="loading" @parse="handleParse" />
+
+        <p v-if="error" class="error-msg">{{ error }}</p>
+
+        <!-- History on landing page -->
+        <div v-if="trackerHistory.length" class="landing-history">
+          <div class="history-header">
+            <h3 class="history-title">Recent Trackers</h3>
+            <button class="history-clear" @click="clearHistory">Clear</button>
+          </div>
+          <Button
+            v-for="entry in trackerHistory"
+            :key="entry.source_url"
+            variant="outline"
+            class="history-card"
+            :disabled="loading"
+            @click="loadFromHistory(entry)"
+          >
+            <span class="history-card-name">{{ entry.name }}</span>
+            <span class="history-card-right">
+              <span v-if="loadingUrl === entry.source_url" class="history-spinner" />
+              <span v-else class="history-card-meta">{{ entry.total_songs }} songs</span>
+            </span>
+          </Button>
+        </div>
+      </div>
+
     </Transition>
   </main>
 
@@ -304,60 +298,46 @@ onUnmounted(() => {
   text-align: left;
 }
 
-/* Loading view */
-.loading-view {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 48px 20px 40px;
-}
-
 /* Content fade transition */
-.content-fade-enter-active,
-.content-fade-leave-active {
-  transition: opacity 0.2s ease;
+.content-fade-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
-.content-fade-enter-from,
+.content-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.content-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
 .content-fade-leave-to {
   opacity: 0;
+  transform: translateY(-6px);
 }
 
-/* Skeleton layout matching ArtistView */
-.loading-skeleton {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.skeleton-eras {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.skeleton-era-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 14px 16px;
-}
-
-.skeleton-era-art {
-  width: 56px;
-  height: 56px;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-
-.skeleton-era-info {
-  flex: 1;
-  min-width: 0;
-}
 
 .history-card-meta {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.history-card-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.history-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 640px) {
