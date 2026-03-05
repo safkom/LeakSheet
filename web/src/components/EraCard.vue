@@ -17,7 +17,7 @@ const titleColor = ref('#e6edf3')
 const colorsReady = ref(false)
 const imgRetries = ref(0)
 const MAX_RETRIES = 2
-let _retryTimer: ReturnType<typeof setTimeout> | null = null
+let _retryTimer = null
 
 onUnmounted(() => {
   if (_retryTimer) clearTimeout(_retryTimer)

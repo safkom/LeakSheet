@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark background -->
+  <rect width="32" height="32" rx="6" fill="#0f0f0f"/>
+  <!-- Teal water drop (leak) -->
+  <path d="M16 3C16 3 5.5 14 5.5 20.5a10.5 10.5 0 0 0 21 0C26.5 14 16 3 16 3z" fill="#4ecdc4"/>
+  <!-- Eighth note cutout (music/sheet) -->
+  <ellipse cx="12.8" cy="23" rx="3.7" ry="2.6" transform="rotate(-20 12.8 23)" fill="#0f0f0f"/>
+  <rect x="16.2" y="10" width="2" height="13.5" rx="1" fill="#0f0f0f"/>
+  <path d="M18.2 10 Q25 12.5 20 17.5" fill="none" stroke="#0f0f0f" stroke-width="2" stroke-linecap="round"/>
+</svg>
