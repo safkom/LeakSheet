@@ -27,6 +27,7 @@ const {
   contextMenuState,
   closeContextMenu,
   descriptionState,
+  showDescription,
   closeDescription,
 } = provideSharedOverlays()
 
@@ -59,12 +60,10 @@ function handleToggleEra(eraName: string) {
     // Opening a new era — scroll it into view after DOM settles.
     // Use a short delay so the old era's collapse doesn't shift the target.
     nextTick(() => {
-      requestAnimationFrame(() => {
-        const el = eraBlockRefs.value[eraName]
-        if (el) {
-          el.scrollIntoView({ behavior: 'instant', block: 'start' })
-        }
-      })
+      const el = eraBlockRefs.value[eraName]
+      if (el) {
+        el.scrollIntoView({ behavior: 'instant', block: 'start' })
+      }
     })
   }
 }
@@ -120,6 +119,11 @@ watch(() => playerState.track, (track) => {
     )
   }
 })
+
+function handleShowDescription(payload: any): void {
+  showDescription(payload)
+  closeContextMenu()
+}
 
 </script>
 
@@ -183,7 +187,11 @@ watch(() => playerState.track, (track) => {
           class="search-result-row"
         >
           <div class="search-result-meta">
-            <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+            <span
+              v-if="idx === 0 || recentResults[idx - 1].era.name !== result.era.name"
+              class="era-badge-pill"
+              :style="eraColorStyle(result.era)"
+            >{{ result.era.name }}</span>
             <span v-if="result.version.leak_date" class="leak-date-badge">{{ result.version.leak_date }}</span>
           </div>
           <div class="search-result-version">
@@ -210,7 +218,11 @@ watch(() => playerState.track, (track) => {
           :key="`s:${result.era.name}:${result.version.name}:${idx}`"
           class="search-result-row"
         >
-          <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+          <span
+            v-if="idx === 0 || flatSearchResults[idx - 1].era.name !== result.era.name"
+            class="era-badge-pill"
+            :style="eraColorStyle(result.era)"
+          >{{ result.era.name }}</span>
           <div class="search-result-version">
             <VersionRow
               :version="result.version"
@@ -232,6 +244,7 @@ watch(() => playerState.track, (track) => {
           :expanded="isEraExpanded(era.name)"
           :index="eraIdx"
           :sticky="isEraExpanded(era.name)"
+          :best-of="bestOf"
           @click="handleToggleEra(era.name)"
         />
 
@@ -261,18 +274,7 @@ watch(() => playerState.track, (track) => {
       :era-name="contextMenuState.eraName"
       :era-art="contextMenuState.eraArt"
       @close="closeContextMenu"
-      @show-description="() => {
-        if (contextMenuState) {
-          descriptionState = {
-            song: contextMenuState.song,
-            version: contextMenuState.version,
-            artistName: contextMenuState.artistName,
-            eraName: contextMenuState.eraName,
-            eraArt: contextMenuState.eraArt,
-          }
-        }
-        closeContextMenu()
-      }"
+      @show-description="handleShowDescription"
     />
 
     <!-- Shared description modal (single instance for all rows) -->

@@ -18,6 +18,7 @@ const emit = defineEmits(['close', 'show-description'])
 const menuRef = ref(null)
 const adjustedX = ref(props.x)
 const adjustedY = ref(props.y)
+const downloadAbort = ref<AbortController | null>(null)
 
 onMounted(async () => {
   await nextTick()
@@ -42,6 +43,7 @@ onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick)
   document.removeEventListener('contextmenu', handleOutsideClick)
   document.removeEventListener('keydown', handleEscape)
+  downloadAbort.value?.abort()
 })
 
 function handleOutsideClick() {
@@ -90,7 +92,8 @@ function download() {
   const filename = `${v.name || 'track'}.mp3`
   // Use the stream proxy with download flag for proper Content-Disposition
   const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
-  fetch(downloadUrl)
+  downloadAbort.value = new AbortController()
+  fetch(downloadUrl, { signal: downloadAbort.value.signal })
     .then(res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.blob()
@@ -100,12 +103,14 @@ function download() {
       const a = document.createElement('a')
       a.href = blobUrl
       a.download = filename
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
       URL.revokeObjectURL(blobUrl)
       toast.success('Download complete')
     })
-    .catch(() => {
-      toast.error('Download failed')
+    .catch(err => {
+      if (err.name !== 'AbortError') toast.error('Download failed')
     })
   toast('Downloading...')
   emit('close')

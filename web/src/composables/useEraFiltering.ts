@@ -304,7 +304,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     }
 
     results.sort((a, b) => b._ts - a._ts)
-    return results.slice(0, 50)
+    return results
   })
 
   // ── Era expand/collapse ──

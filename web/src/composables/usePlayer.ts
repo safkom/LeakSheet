@@ -105,7 +105,7 @@ watch(() => playerState.volume, (v) => {
 // Audio element (singleton)
 // ---------------------------------------------------------------------------
 
-let _audio = null
+let _audio: HTMLAudioElement | null = null
 
 function _getAudio() {
   if (!_audio) {
@@ -270,7 +270,29 @@ export function isStreamable(version: SongVersion | null | undefined): boolean {
 const _BEST_OF_BADGES = new Set(['best', 'special'])
 
 /**
+ * Register the static MediaSession action handlers that never change between tracks.
+ * Called once at module initialization.
+ */
+function _initStaticMediaSessionHandlers() {
+  if (!('mediaSession' in navigator)) return
+  navigator.mediaSession.setActionHandler('seekbackward', () => {
+    seekTo(Math.max(0, playerState.currentTime - 10))
+  })
+  navigator.mediaSession.setActionHandler('seekforward', () => {
+    seekTo(playerState.currentTime + 10)
+  })
+  navigator.mediaSession.setActionHandler('previoustrack', () => {
+    // If > 3s into the song, restart; otherwise no-op (no history)
+    if (playerState.currentTime > 3) {
+      seekTo(0)
+    }
+  })
+  navigator.mediaSession.setActionHandler('stop', () => stopTrack())
+}
+
+/**
  * Update the browser MediaSession metadata (iOS lock screen, Android notification, etc.)
+ * and re-register only the dynamic action handlers that reference the current track state.
  */
 function _updateMediaSession() {
   if (!('mediaSession' in navigator)) return
@@ -307,27 +329,17 @@ function _updateMediaSession() {
     artwork,
   })
 
-  // Set action handlers
+  // Re-register only the dynamic handlers (vary per track / playback state)
   navigator.mediaSession.setActionHandler('play', () => togglePlay())
   navigator.mediaSession.setActionHandler('pause', () => togglePlay())
-  navigator.mediaSession.setActionHandler('seekbackward', () => {
-    seekTo(Math.max(0, playerState.currentTime - 10))
-  })
-  navigator.mediaSession.setActionHandler('seekforward', () => {
-    seekTo(playerState.currentTime + 10)
-  })
   navigator.mediaSession.setActionHandler('seekto', (details) => {
     if (details.seekTime != null) seekTo(details.seekTime)
   })
-  navigator.mediaSession.setActionHandler('stop', () => stopTrack())
   navigator.mediaSession.setActionHandler('nexttrack', () => _playNext())
-  navigator.mediaSession.setActionHandler('previoustrack', () => {
-    // If > 3s into the song, restart; otherwise no-op (no history)
-    if (playerState.currentTime > 3) {
-      seekTo(0)
-    }
-  })
 }
+
+// Register static MediaSession handlers once when the module is first loaded.
+_initStaticMediaSessionHandlers()
 
 export function playTrack(version: SongVersion | null, artistName = '', eraName = '', artUrl = ''): void {
   const link = findStreamableLink(version?.links)

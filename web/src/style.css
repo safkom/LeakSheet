@@ -150,6 +150,12 @@ body::after {
   background-size: 256px;
 }
 
+/* ── Equalizer bar animation (used by SongRow and VersionRow playing states) ── */
+@keyframes eq-bar {
+  0% { height: 3px; }
+  100% { height: 12px; }
+}
+
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

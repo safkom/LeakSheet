@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useWindowVirtualizer } from '@tanstack/vue-virtual'
 import SongRow from './SongRow.vue'
 
@@ -18,11 +18,8 @@ function toggleSong(index) {
   expandedSong.value = prev === index ? null : index
   // Notify the virtualizer that a row height changed
   if (virtualizer.value) {
-    // Re-measure the toggled row(s) after DOM update
-    setTimeout(() => {
-      if (prev !== null) virtualizer.value.measureElement(null)
-      virtualizer.value.measure()
-    }, 50)
+    // Re-measure after DOM update using nextTick + rAF instead of a fragile setTimeout
+    nextTick(() => { requestAnimationFrame(() => { virtualizer.value?.measure() }) })
   }
 }
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { artProxyUrl } from '../composables/usePlayer'
+import { BADGE_MAP } from '@/composables/useUtils'
 import {
   Dialog,
   DialogScrollContent,
@@ -28,13 +29,10 @@ function handleOpenChange(open) {
 
 const v = computed(() => props.version || props.song?.versions?.[0])
 
-const BADGE_LABELS = {
-  best: { emoji: '⭐', label: 'Best Of' },
-  special: { emoji: '✨', label: 'Special' },
-  worst: { emoji: '🗑️', label: 'Worst Of' },
-  grail: { emoji: '🏆', label: 'Grail' },
-  wanted: { emoji: '🏅', label: 'Wanted' },
-}
+const BADGE_LABEL_TEXT = { best: 'Best Of', special: 'Special', worst: 'Worst Of', grail: 'Grail', wanted: 'Wanted', ai: 'AI Generated' }
+const BADGE_LABELS = Object.fromEntries(
+  Object.entries(BADGE_MAP).map(([k, emoji]) => [k, { emoji, label: BADGE_LABEL_TEXT[k] }])
+)
 
 const badgeInfo = computed(() => {
   const b = v.value?.badge || props.song?.badge

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import VersionRow from './VersionRow.vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
-import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
+import { effectiveBadge, getAvailBadge, BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
@@ -57,21 +57,7 @@ const allAltTitles = computed(() => {
 
 const availBadge = computed(() => {
   if (!firstVersion.value || hasMultipleVersions.value) return null
-  const avail = firstVersion.value.available_length
-  if (!avail) return null
-  const al = avail.toLowerCase().trim()
-  if (al === 'n/a' || al === 'not available') return null
-  // Show availability alongside quality if both are meaningful
-  const q = (firstVersion.value.quality || '').toLowerCase().trim()
-  if (q && q !== 'not available' && q !== 'n/a') {
-    // Skip duplicate when quality and availability convey the same thing
-    if (al === q) return null
-    // Quality badge is already shown — show availability only if it adds info
-    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
-      return { text: avail, variant: availabilityVariant(avail) }
-    }
-  }
-  return null
+  return getAvailBadge(firstVersion.value.quality, firstVersion.value.available_length)
 })
 
 // A single-version song with no streamable links — open description instead of play
@@ -251,11 +237,6 @@ function handleContextMenu(e) {
 .song-row.playing .badge-slot::after {
   height: 6px;
   animation-delay: 0.3s;
-}
-
-@keyframes eq-bar {
-  0% { height: 3px; }
-  100% { height: 12px; }
 }
 
 .expand-chevron {

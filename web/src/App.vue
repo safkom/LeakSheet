@@ -55,7 +55,7 @@ async function handleParse(url) {
       })
       // Cap history at 20 entries
       if (trackerHistory.value.length > 20) {
-        trackerHistory.value.length = 20
+        trackerHistory.value = trackerHistory.value.slice(0, 20)
       }
     }
     saveHistory(trackerHistory.value)
@@ -115,8 +115,8 @@ function clearHistory() {
 // ---------------------------------------------------------------------------
 
 function handleKeyboard(e) {
-  // Don't intercept when typing in input fields
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+  // Don't intercept when typing in input fields or contenteditable elements
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return
 
   switch (e.code) {
     case 'Space':

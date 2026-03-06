@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
-import { effectiveBadge, availabilityVariant, BADGE_MAP } from '../composables/useUtils'
+import { effectiveBadge, getAvailBadge, BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
@@ -50,19 +50,7 @@ const badge = computed(() => {
 })
 
 const availBadge = computed(() => {
-  const avail = props.version.available_length
-  if (!avail) return null
-  const al = avail.toLowerCase().trim()
-  if (al === 'n/a' || al === 'not available') return null
-  const q = (props.version.quality || '').toLowerCase().trim()
-  if (q && q !== 'not available' && q !== 'n/a') {
-    // Skip duplicate when quality and availability convey the same thing
-    if (al === q) return null
-    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
-      return { text: avail, variant: availabilityVariant(avail) }
-    }
-  }
-  return null
+  return getAvailBadge(props.version.quality, props.version.available_length)
 })
 
 const badgeEmoji = computed(() => {
@@ -164,11 +152,6 @@ const badgeEmoji = computed(() => {
 .version-row.playing .v-badge-slot::after {
   height: 5px;
   animation-delay: 0.3s;
-}
-
-@keyframes eq-bar {
-  0% { height: 3px; }
-  100% { height: 10px; }
 }
 
 .v-content {

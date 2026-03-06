@@ -14,6 +14,7 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 from __future__ import annotations
 
 import re
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -263,10 +264,22 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
         await super().__call__(scope, receive, send)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # No explicit startup work needed — _proxy_client is lazily initialised on
+    # first use by _get_proxy_client().
+    yield
+    # Shutdown: close both shared HTTP clients to release connections cleanly.
+    if _proxy_client is not None:
+        await _proxy_client.aclose()
+    await close_shared_client()
+
+
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
     version="0.3.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000)
@@ -279,11 +292,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
-
-
-@app.on_event("shutdown")
-async def _shutdown():
-    await close_shared_client()
 
 
 # ---------------------------------------------------------------------------

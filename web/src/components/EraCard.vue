@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref, onUnmounted } from 'vue'
 import { extractAndCacheEraColors, setEraColors, getColorThief } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
@@ -8,6 +8,7 @@ const props = defineProps({
   expanded: Boolean,
   index: { type: Number, default: 0 },
   sticky: Boolean,
+  bestOf: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['click'])
@@ -99,7 +100,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 <template>
   <button
     class="era-card"
-    :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky }"
+    :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky, 'best-of-active': bestOf }"
     :style="{ ...gradientStyle, '--stagger': animDelay }"
     :aria-expanded="expanded"
     @click="emit('click')"
@@ -451,6 +452,15 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   .era-card.era-sticky .era-expand-indicator {
     right: 16px;
   }
+}
+
+/* Best-of mode: era clicking is disabled */
+.era-card.best-of-active {
+  cursor: default;
+}
+
+.era-card.best-of-active .era-expand-indicator {
+  opacity: 0.7;
 }
 
 /* Reduced motion */

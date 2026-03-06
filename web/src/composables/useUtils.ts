@@ -79,6 +79,31 @@ export function effectiveBadge(quality, availableLength) {
 }
 
 /**
+ * Determine the secondary availability badge to show alongside the quality badge.
+ * Returns { text, variant } when the available_length value adds information
+ * beyond what the quality badge already conveys, otherwise returns null.
+ * @param {string|null} quality
+ * @param {string|null} availableLength
+ * @returns {{ text: string, variant: string }|null}
+ */
+export function getAvailBadge(quality, availableLength) {
+  const avail = availableLength
+  if (!avail) return null
+  const al = avail.toLowerCase().trim()
+  if (al === 'n/a' || al === 'not available') return null
+  const q = (quality || '').toLowerCase().trim()
+  if (q && q !== 'not available' && q !== 'n/a') {
+    // Skip duplicate when quality and availability convey the same thing
+    if (al === q) return null
+    // Quality badge is already shown — show availability only if it adds info
+    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
+      return { text: avail, variant: availabilityVariant(avail) }
+    }
+  }
+  return null
+}
+
+/**
  * Badge emoji map (same as parser Badge enum).
  */
 export const BADGE_MAP = {

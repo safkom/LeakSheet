@@ -116,15 +116,27 @@ function queueTrack() {
   toast.success('Added to queue')
 }
 
-function downloadTrack() {
+async function downloadTrack() {
   if (!track.value?.links?.length) return
   const link = track.value.links[0]
-  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}`
-  const a = document.createElement('a')
-  a.href = downloadUrl
-  a.download = `${track.value.name || 'track'}.mp3`
-  a.click()
-  toast.success('Download started')
+  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
+  try {
+    toast('Downloading...')
+    const res = await fetch(downloadUrl)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objUrl
+    a.download = `${track.value.name || track.value.base_name || 'track'}.mp3`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(objUrl)
+    toast.success('Download complete')
+  } catch {
+    toast.error('Download failed')
+  }
 }
 
 const hasLink = computed(() => getTrackLink() !== null)
