@@ -1,0 +1,1663 @@
+[
+  {
+    "name": "A$AP Rocky",
+    "url": "https://docs.google.com/spreadsheets/d/1rbt_VyQyHEfVRv_XmVBNrwMyF0uMx7FF-1T8-N0wf0E/",
+    "status": "warn",
+    "eras": 52,
+    "songs": 917,
+    "versions": 1111,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 1232,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Discord deleted again. New A$AP Rocky Hub link is below!",
+      "Untitled",
+      "Pre-LONG.LIVE.A$AP",
+      "Pre-AT.LONG.LAST.A$AP",
+      "AT.LONG.LAST.A$AP"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "5 eras with 0 songs: ['Discord deleted again. New A$AP Rocky Hub link is below!', 'Untitled', 'Pre-LONG.LIVE.A$AP', 'Pre-AT.LONG.LAST.A$AP', 'AT.LONG.LAST.A$AP']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 3.14,
+    "is_best": true
+  },
+  {
+    "name": "Baby Keem",
+    "url": "https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/edit#gid=0",
+    "status": "ok",
+    "eras": 6,
+    "songs": 175,
+    "versions": 271,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 316,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.08,
+    "is_best": true
+  },
+  {
+    "name": "Billie Eilish",
+    "url": "https://docs.google.com/spreadsheets/d/1xwS_bEbYRSy1aVs0qE92BMMlXjAipP1pDekP5VPHz-g/edit#gid=1792554832",
+    "status": "ok",
+    "eras": 6,
+    "songs": 112,
+    "versions": 113,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 137,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "6/10/24 - added stems"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.03,
+    "is_best": true
+  },
+  {
+    "name": "Chief Keef",
+    "url": "https://docs.google.com/spreadsheets/d/1oDE9gTnEG7ufPQIOMjLTegfI47qtgNCxngmxxHZL4qA/edit#gid=1792554832",
+    "status": "warn",
+    "eras": 21,
+    "songs": 973,
+    "versions": 1016,
+    "columns_detected": [
+      "available_length",
+      "date_of_recording",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 1064,
+    "skip_pct": 0.09398496240601503,
+    "zero_song_eras": [
+      "Want to contribute? Join our non-profit Tracker Server to help us out, suggest edits, update dead links, or ask questions",
+      "Skip to DRILL",
+      "Skip to FINALLY RICH",
+      "Skip to LEAN",
+      "Skip to REHAB",
+      "*New* Unreleased Guidelines",
+      "Progress Reports",
+      "11/21 - All eras in, just need to fill them",
+      "1/23 - Sent all onlyfiles links to kraken"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "9 eras with 0 songs: ['Want to contribute? Join our non-profit Tracker Server to help us out, suggest edits, update dead links, or ask questions', 'Skip to DRILL', 'Skip to FINALLY RICH', 'Skip to LEAN', 'Skip to REHAB']"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: [\"Row 1044: • Tracks from album teasers that didn't make the album will still be included (FR)\"]"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.28,
+    "is_best": true
+  },
+  {
+    "name": "Denzel Curry",
+    "url": "https://docs.google.com/spreadsheets/d/1Pyi72FNT6KWuQE3g4BmIDCV26HMfKFcE650Duyia43o/edit?gid=788157788#gid=788157788",
+    "status": "ok",
+    "eras": 14,
+    "songs": 171,
+    "versions": 210,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 6,
+    "total_rows": 245,
+    "skip_pct": 2.4489795918367347,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: Please Send A Tickets To The Discord Server For Dead Links & Missing Content!', 'Row 236: Tereyağız | Other Trackers (There are over 300 artists with Trackers just like this!)', 'Row 237: hbesok!']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.05,
+    "is_best": true
+  },
+  {
+    "name": "Doja Cat",
+    "url": "https://docs.google.com/spreadsheets/d/1_NwxP5mGGEj7stY0Dr_hI_Pb4m8LBIyt3Cb-OoTJPtc/edit",
+    "status": "ok",
+    "eras": 10,
+    "songs": 186,
+    "versions": 223,
+    "columns_detected": [
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 5,
+    "total_rows": 238,
+    "skip_pct": 2.100840336134454,
+    "zero_song_eras": [
+      "Scarlet 2 CLAUDE"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 44: Collaborations', 'Row 103: Collaborations', 'Row 137: Collaborations']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 3.59,
+    "is_best": true
+  },
+  {
+    "name": "Don Toliver",
+    "url": "https://docs.google.com/spreadsheets/d/1qsO4SuzzB17d5orqbKWHsaQsRdk0lzTSF9rV2FwQf-Q/edit?gid%3D1535277716%23gid%3D1535277716",
+    "status": "ok",
+    "eras": 16,
+    "songs": 818,
+    "versions": 1051,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 1121,
+    "skip_pct": 0.08920606601248886,
+    "zero_song_eras": [
+      "Joseph Karre if you're reading this fucking die. - Brimcoole",
+      "Space Age Pimping Trilogy"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1098: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 2.97,
+    "is_best": true
+  },
+  {
+    "name": "Eminem",
+    "url": "https://docs.google.com/spreadsheets/d/1x9tTOOqH5WpKOoptdQzABSN_x8oZbMgzIGlGH9w1IKA/edit?pli=1&gid=1792554832#gid=1792554832",
+    "status": "warn",
+    "eras": 49,
+    "songs": 1027,
+    "versions": 1276,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 10,
+    "total_rows": 1382,
+    "skip_pct": 0.723589001447178,
+    "zero_song_eras": [
+      "Join the community on Discord: https://discord.gg/emball",
+      "Pre-Still In The Bassmint / The M&M Solo Tape",
+      "Still In The Bassmint /",
+      "Music To Be Murdered By: Side B",
+      "STANS: The Official Soundtrack",
+      "Types",
+      "Update Notes",
+      "Links all on Pillowcase",
+      "Removed Excessive Ascap/BMI Entries",
+      "Added Best Of & Worst Of Released",
+      "Added Samples",
+      "Re-Added Track Length"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "12 eras with 0 songs: ['Join the community on Discord: https://discord.gg/emball', 'Pre-Still In The Bassmint / The M&M Solo Tape', 'Still In The Bassmint /', 'Music To Be Murdered By: Side B', 'STANS: The Official Soundtrack']"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1373: JAYDAHEATER!', 'Row 1374: Emball', 'Row 1375: John_Banana']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.31,
+    "is_best": true
+  },
+  {
+    "name": "Frank Ocean",
+    "url": "https://docs.google.com/spreadsheets/u/1/d/1SHQW94xZfgCyupSPdhiKh4UwMkl_ibgmzvcD0Gxwvcw/edit?gid=1203501126#gid=1203501126",
+    "status": "skip",
+    "eras": 0,
+    "songs": 0,
+    "versions": 0,
+    "columns_detected": [],
+    "skipped_rows": 0,
+    "total_rows": 0,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": "Access denied: Access denied (403): https://docs.google.com/spreadsheets/u/1/d/1SHQW94xZfgCyupSPdhiKh4UwMkl_ibgmzvcD0Gxwvcw/edit?gid=1203501126#gid=1203501126",
+    "elapsed_s": 5.86,
+    "is_best": true
+  },
+  {
+    "name": "Gucci Mane",
+    "url": "https://docs.google.com/spreadsheets/d/1F-0vYFU1_F3IdZTAN5-H0YWvzhW88vg95AmVxZxoCEM/edit?gid=1792554832#gid=1792554832",
+    "status": "warn",
+    "eras": 15,
+    "songs": 373,
+    "versions": 396,
+    "columns_detected": [
+      "available_length",
+      "date_of_recording",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 420,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "La Flare Entertainment",
+      "Asylum Records",
+      "So Icey Entertainment",
+      "1017 BrickSquad Records"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "4 eras with 0 songs: ['La Flare Entertainment', 'Asylum Records', 'So Icey Entertainment', '1017 BrickSquad Records']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.1,
+    "is_best": true
+  },
+  {
+    "name": "Jay-Z",
+    "url": "https://docs.google.com/spreadsheets/d/18GwItf2M92QimNMAbUCfFsxCkiHlkf8DPJPLWHAcoxQ/edit?gid=1202580443#gid=1202580443",
+    "status": "warn",
+    "eras": 23,
+    "songs": 226,
+    "versions": 281,
+    "columns_detected": [
+      "available_length",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 26,
+    "total_rows": 346,
+    "skip_pct": 7.514450867052023,
+    "zero_song_eras": [
+      "Pre-sonable Doubt",
+      "In My Lifetime, Vol 1",
+      "Vol 2, Hard Knock Life",
+      "Vol. 3... Life and Times of S. Carter",
+      "The Best Of Both Worlds",
+      "The Blueprint 2: The Gift & The Curse",
+      "Unfinished Business"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "Elevated skip rate: 7.5% (26/346)"
+      },
+      {
+        "severity": "warn",
+        "message": "7 eras with 0 songs: ['Pre-sonable Doubt', 'In My Lifetime, Vol 1', 'Vol 2, Hard Knock Life', 'Vol. 3... Life and Times of S. Carter', 'The Best Of Both Worlds']"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 23: Snippets/Unavailable', 'Row 32: Snippets/Unavailable', 'Row 44: Snippets/Unavailable']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.07,
+    "is_best": true
+  },
+  {
+    "name": "Joji / Pink Guy",
+    "url": "https://docs.google.com/spreadsheets/d/1FPlWbXnx94y5FODJ2qniLf0BzViNSAmj6Xdfw1ZNwQ4/edit#gid=766670282",
+    "status": "ok",
+    "eras": 15,
+    "songs": 220,
+    "versions": 285,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 287,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Compilation of Joji's Discography"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.07,
+    "is_best": true
+  },
+  {
+    "name": "Kali Uchis",
+    "url": "https://docs.google.com/spreadsheets/d/1232zeg65iIVLI-wIsMyE7vatZBKY0i0YOCpk0Ml7jxM/edit?gid%3D1323318507%23gid%3D1323318507",
+    "status": "ok",
+    "eras": 10,
+    "songs": 459,
+    "versions": 601,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 2,
+    "total_rows": 635,
+    "skip_pct": 0.31496062992125984,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: [\"Row 1: ⚠️ WANT TO HELP US GET NEW KALI SONGS???? WE'RE CURRENTLY GROUPBUYING 3 KALI X TYLER SONGS!!!!!!!!!!!1 ⚠️\\nCHECK GROUPBUY TABS + JOIN GB SERVER (IF YOU'LL ACTUALLY DONATE)\", 'Row 619: evan']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 3.34,
+    "is_best": true
+  },
+  {
+    "name": "Ken Carson",
+    "url": "https://docs.google.com/spreadsheets/d/1OARID98xCqRaBr8gyQCvI3aD4jKQDGgtedyRaiP_pyo/edit?gid=300172461#gid=300172461",
+    "status": "ok",
+    "eras": 9,
+    "songs": 359,
+    "versions": 409,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 2,
+    "total_rows": 436,
+    "skip_pct": 0.45871559633027525,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 425: A big thank you to everyone using this tracker <3', 'Row 426: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.12,
+    "is_best": true
+  },
+  {
+    "name": "Kendrick Lamar",
+    "url": "https://docs.google.com/spreadsheets/d/1ogXipStHPpqEMgCDvxpWXQ7Yzly3YZx6riP25ChoxNM/edit?gid=1228224808#gid=1228224808",
+    "status": "ok",
+    "eras": 19,
+    "songs": 647,
+    "versions": 863,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 931,
+    "skip_pct": 0.10741138560687433,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: MASS KENDRICK/KEEM GB THAT INCLUDES:\\n- FRIENDS [FINISHED]\\n- I AM SOMEBODY\\n- BADDEST BITCH [FINISHED]\\n- BABY KEEM - PARK [FINISHED]\\nWILL LEAK AT 3K. DONATE & SHARE.']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.21,
+    "is_best": true
+  },
+  {
+    "name": "Lil Nas X",
+    "url": "https://docs.google.com/spreadsheets/d/1_9MGewuG666HA1KSnqjDRZyK18BRAdxRK7yUqxHOGLE/edit#gid=1012482472",
+    "status": "ok",
+    "eras": 8,
+    "songs": 326,
+    "versions": 508,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 17,
+    "total_rows": 552,
+    "skip_pct": 3.0797101449275366,
+    "zero_song_eras": [
+      "PERFORMANCE TRACKS"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 3: THROWAWAYS', 'Row 12: DEMOS', 'Row 17: THROWAWAYS']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.14,
+    "is_best": true
+  },
+  {
+    "name": "Lil Tecca",
+    "url": "https://docs.google.com/spreadsheets/d/15UwihAVwPeS6eIE1FE1J6v7xiBYFkculVrzhMSIcEew/edit?gid=0#gid=0",
+    "status": "ok",
+    "eras": 9,
+    "songs": 618,
+    "versions": 655,
+    "columns_detected": [
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 13,
+    "total_rows": 703,
+    "skip_pct": 1.849217638691323,
+    "zero_song_eras": [
+      "Unreleased Guidelines"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 685: Editors: | zedroz2 on leaked.cx for being such a huge help with adding leaks.', \"Row 686: ColbyJackChedda | The other tracker with all of it's information\", 'Row 687: bxpolar']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.15,
+    "is_best": true
+  },
+  {
+    "name": "Lil Uzi Vert",
+    "url": "https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/edit?gid=1160569231#gid=1160569231",
+    "status": "ok",
+    "eras": 30,
+    "songs": 2046,
+    "versions": 2273,
+    "columns_detected": [
+      "date_of_recording",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 14,
+    "total_rows": 2480,
+    "skip_pct": 0.564516129032258,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 2451: SPREADSHEET DATA', 'Row 2452: AVAILABILITY SUMMARY', 'Row 2454: GUIDE & INFORMATION']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.6,
+    "is_best": true
+  },
+  {
+    "name": "LUCKI",
+    "url": "https://docs.google.com/spreadsheets/d/1zoRNpy7Lvr-JzPqtQLLWRVVDbgKygpBaDf4cC-Lt6k4/edit#gid=306146520",
+    "status": "ok",
+    "eras": 13,
+    "songs": 327,
+    "versions": 347,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 6,
+    "total_rows": 369,
+    "skip_pct": 1.6260162601626018,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: Sending any missing information to an editor.', 'Row 38: Better Days Tracklist', 'Row 50: Non-Better Days Tracklist']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.08,
+    "is_best": true
+  },
+  {
+    "name": "MF DOOM",
+    "url": "https://docs.google.com/spreadsheets/u/1/d/1zEbzMVXFXzuY4wLdPvdQA23lb3RwCSOKqWtHsllXNk8/edit?usp=drivesdk",
+    "status": "ok",
+    "eras": 26,
+    "songs": 185,
+    "versions": 197,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 256,
+    "skip_pct": 0.390625,
+    "zero_song_eras": [
+      "JOIN DOOM HUB FOR LEAKS, INFO, AND MORE: http://discord.gg/S7aHTxa369 (also report if something wrong or missing)"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: Check out our tracker website!']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.99,
+    "is_best": true
+  },
+  {
+    "name": "Nettspend",
+    "url": "https://docs.google.com/spreadsheets/d/1f6iXe23VuJXgIFuW9PrubqOqA5UwVyLk0Jx3qgZhMQg/edit?gid%3D1520634709%23gid%3D1520634709",
+    "status": "ok",
+    "eras": 9,
+    "songs": 234,
+    "versions": 254,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 304,
+    "skip_pct": 0.3289473684210526,
+    "zero_song_eras": [
+      "Pre-BAD ASS F*CKING KID"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 291: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 3.33,
+    "is_best": true
+  },
+  {
+    "name": "Oliver Tree",
+    "url": "https://docs.google.com/spreadsheets/d/1rhvQ9F8VRAj-jOyTLsvhORsVCyvcMRXJuGoDR1-z4jY/edit#gid=411002109",
+    "status": "ok",
+    "eras": 16,
+    "songs": 445,
+    "versions": 601,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 664,
+    "skip_pct": 0.15060240963855423,
+    "zero_song_eras": [
+      "Unknown EP"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 638: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.16,
+    "is_best": true
+  },
+  {
+    "name": "OsamaSon",
+    "url": "https://docs.google.com/spreadsheets/d/1qbJpawdwnw7IUkZ4FfU3oOF17griNjL59X5z6YFiFlY/edit?gid%3D585347098%23gid%3D585347098",
+    "status": "warn",
+    "eras": 19,
+    "songs": 959,
+    "versions": 1021,
+    "columns_detected": [],
+    "skipped_rows": 9,
+    "total_rows": 1114,
+    "skip_pct": 0.807899461400359,
+    "zero_song_eras": [
+      "Flex Musix (FLXTRA)",
+      "Type",
+      "Owner",
+      "Fly (@damn4k)"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "4 eras with 0 songs: ['Flex Musix (FLXTRA)', 'Type', 'Owner', 'Fly (@damn4k)']"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1098: Whole spreadsheet data', 'Row 1101: Categories:', 'Row 1102: ⭐ 99 Best Of\\n✨ 71 Special\\n🏆 18 Grails\\n🥇 4 Wanted']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 1.77,
+    "is_best": true
+  },
+  {
+    "name": "Pharrell Williams",
+    "url": "https://docs.google.com/spreadsheets/d/1guNCg4c5AOuKjNJcxM14wPrU5xgqv7GBXHv1_nDeyss/edit#gid=410927481",
+    "status": "ok",
+    "eras": 18,
+    "songs": 1004,
+    "versions": 1255,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 4,
+    "total_rows": 1306,
+    "skip_pct": 0.3062787136294028,
+    "zero_song_eras": [
+      "ok now it's up lol - 4/25/24"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1294: yoooo', 'Row 1295: ....?!?!?!?!!?!??!?!?!!?', 'Row 1299: if you are looking for stems this aint the place for them']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.25,
+    "is_best": true
+  },
+  {
+    "name": "PinkPantheress",
+    "url": "https://docs.google.com/spreadsheets/d/1Z_c3abjaM10CjGaJ5yjDqaEWB8YnDVuDaAJCp0EJBu8/edit?gid=1151463948#gid=1151463948",
+    "status": "ok",
+    "eras": 14,
+    "songs": 225,
+    "versions": 328,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "type"
+    ],
+    "skipped_rows": 13,
+    "total_rows": 378,
+    "skip_pct": 3.439153439153439,
+    "zero_song_eras": [
+      "PLEASE READ!\nPlease do not upload these to major platforms such as Youtube etc! It catches the labels attention and gets us taken down and possibly any partners such as TrackerHub which would lead to sanctions\n\nPlease be considerate to communites that could get sniped just over engagement and youtube subcribers! Is it really worth it?",
+      "Pre-BIRTHDAY MIXTAPE",
+      "Collaborations"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 4: Collaborations & Features', 'Row 9: Production', 'Row 25: BIRTHDAY MIXTAPE']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.07,
+    "is_best": true
+  },
+  {
+    "name": "Playboi Carti",
+    "url": "https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/edit?gid%3D0%23gid%3D0",
+    "status": "warn",
+    "eras": 33,
+    "songs": 1084,
+    "versions": 1485,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 114,
+    "total_rows": 1727,
+    "skip_pct": 6.601042269832079,
+    "zero_song_eras": [
+      "Collaboration with TrapMoneyBenny",
+      "Ye - DONDA"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "Elevated skip rate: 6.6% (114/1727)"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 3: Full', 'Row 13: Full', 'Row 17: OG Files for Released Songs']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 2.38,
+    "is_best": true
+  },
+  {
+    "name": "Pop Smoke",
+    "url": "https://docs.google.com/spreadsheets/d/1-Kd8molYeR1WpmWR81DqmSCGng3g-AVmZfgd752kh3M/edit#gid=0",
+    "status": "warn",
+    "eras": 13,
+    "songs": 315,
+    "versions": 533,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 578,
+    "skip_pct": 0.17301038062283738,
+    "zero_song_eras": [
+      "Meet The Woo, Vol. 2",
+      "Shoot For The Stars Aim For The Moon",
+      "Shoot For The Stars Aim For The Moon (Deluxe)",
+      "Boogie: Original Motion Picture Soundtrack"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "4 eras with 0 songs: ['Meet The Woo, Vol. 2', 'Shoot For The Stars Aim For The Moon', 'Shoot For The Stars Aim For The Moon (Deluxe)', 'Boogie: Original Motion Picture Soundtrack']"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 569: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.15,
+    "is_best": true
+  },
+  {
+    "name": "Rihanna",
+    "url": "https://docs.google.com/spreadsheets/u/3/d/1HMqjw55sCPUGyI_UBc-JcO881FHzUTX08NvQY9oa61k/htmlview",
+    "status": "ok",
+    "eras": 10,
+    "songs": 190,
+    "versions": 235,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 254,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "All inquries to referredrhyme82 on discord"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.68,
+    "is_best": true
+  },
+  {
+    "name": "Sabrina Carpenter",
+    "url": "https://docs.google.com/spreadsheets/d/1XDdYqcxbozqNE-2Dh8HlQt4KsUiFLdo2NrAzelweFKs/edit?gid=1631842705#gid=1631842705",
+    "status": "ok",
+    "eras": 9,
+    "songs": 239,
+    "versions": 313,
+    "columns_detected": [],
+    "skipped_rows": 0,
+    "total_rows": 327,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Unknown Songs"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.1,
+    "is_best": true
+  },
+  {
+    "name": "Sampha",
+    "url": "https://docs.google.com/spreadsheets/d/1Lyqc9CH9MPsdRb5ISk5NCWO3LMezLFTq7RFAthenOA0/edit?usp=sharing",
+    "status": "ok",
+    "eras": 8,
+    "songs": 64,
+    "versions": 77,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 94,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "(7/20/24) Added JLS v1 with Grail",
+      "(1/21/26) Grailed Show Me, 2014 Debut Album, Unknown Pre/Lahai Tracks"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.91,
+    "is_best": true
+  },
+  {
+    "name": "Selena Gomez",
+    "url": "https://docs.google.com/spreadsheets/d/10NdIn1iVdHxt0XbZmssh7pw7p7bsbFML6hwDIF4hMvU/edit#gid=0",
+    "status": "ok",
+    "eras": 15,
+    "songs": 240,
+    "versions": 333,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 385,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "I Said I Love You First"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.09,
+    "is_best": true
+  },
+  {
+    "name": "Ski Mask the Slump God",
+    "url": "https://docs.google.com/spreadsheets/d/1j7_2JVQ2eyaVA6vEQT89R8XhOXUR8KTJbVgTUm_ZD88/edit",
+    "status": "ok",
+    "eras": 12,
+    "songs": 180,
+    "versions": 235,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 13,
+    "total_rows": 267,
+    "skip_pct": 4.868913857677903,
+    "zero_song_eras": [
+      "IWATHCEDHIMDROWN"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 2: Join the STOKELEY Discord!', 'Row 38: THROWAWAYS', 'Row 59: DEMOS']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 4.92,
+    "is_best": true
+  },
+  {
+    "name": "Tame Impala",
+    "url": "https://docs.google.com/spreadsheets/d/1ZcFPelNGPTl7pR_6o43lAZmwDdqgkDXLp_o4YHrahZA/edit?gid=766670282#gid=766670282",
+    "status": "ok",
+    "eras": 8,
+    "songs": 103,
+    "versions": 135,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 191,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.04,
+    "is_best": true
+  },
+  {
+    "name": "The Weeknd",
+    "url": "https://docs.google.com/spreadsheets/d/1oVbHDhR5vMFr1OCZFE6saCnRdRIcbqmUMqQBJiIKb_Q/edit#gid=766670282",
+    "status": "warn",
+    "eras": 24,
+    "songs": 338,
+    "versions": 596,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 640,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Untitled",
+      "Beauty Behind The Madness",
+      "Untitled",
+      "Untitled",
+      "Added Update Log, added \"Misc\" sheet (31/05/21)",
+      "Added \"For / Pre / Without The Weeknd\" category (25/06/21)"
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "6 eras with 0 songs: ['Untitled', 'Beauty Behind The Madness', 'Untitled', 'Untitled', 'Added Update Log, added \"Misc\" sheet (31/05/21)']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.13,
+    "is_best": true
+  },
+  {
+    "name": "Travis Scott",
+    "url": "https://docs.google.com/spreadsheets/d/1gJqbQrb3dIWF-PLMsKkNUrftpQb8zxsZFDAIpSvT5Fo/edit?gid%3D846204501%23gid%3D846204501",
+    "status": "ok",
+    "eras": 24,
+    "songs": 363,
+    "versions": 401,
+    "columns_detected": [
+      "era",
+      "links",
+      "name",
+      "notes"
+    ],
+    "skipped_rows": 2,
+    "total_rows": 404,
+    "skip_pct": 0.49504950495049505,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: Recent additions (snippets and leaks only). Check the main table for the most up-to-date information and version numbers.', \"Row 3: Tracker | New '🏆 Grails / 🥇Wanted' sheet | Grails and generally wanted songs are now both shown on the same sheet to save time and space when looking for highly desired songs. The concept of only addi\"]"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 4.09,
+    "is_best": true
+  },
+  {
+    "name": "Trippie Redd",
+    "url": "https://docs.google.com/spreadsheets/d/1hZdGFBZmukWGH4IlnH0NJvphwEct2XEMJT_moTFhTvc/edit?gid=1555572772#gid=1555572772",
+    "status": "ok",
+    "eras": 24,
+    "songs": 1263,
+    "versions": 1436,
+    "columns_detected": [],
+    "skipped_rows": 1,
+    "total_rows": 1514,
+    "skip_pct": 0.06605019815059446,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1501: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.41,
+    "is_best": true
+  },
+  {
+    "name": "Ty Dolla $ign",
+    "url": "https://docs.google.com/spreadsheets/d/11Kk3Mi8iiFmXEFV8vzcmTrnjcMkfgImABCavXhC4D48/edit",
+    "status": "ok",
+    "eras": 32,
+    "songs": 1227,
+    "versions": 2439,
+    "columns_detected": [
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 2511,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Kanye West - Yandhi"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 2.74,
+    "is_best": true
+  },
+  {
+    "name": "Usher",
+    "url": "https://docs.google.com/spreadsheets/d/10b5EFPYc5Qhn3A7arsruyeVOYdU4Ab9TuQqELV9joa8/edit?gid=0#gid=0",
+    "status": "ok",
+    "eras": 15,
+    "songs": 427,
+    "versions": 489,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 2,
+    "total_rows": 531,
+    "skip_pct": 0.3766478342749529,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 517: Selenaontop', 'Row 518: Nazgull']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.12,
+    "is_best": true
+  },
+  {
+    "name": "Wu-Tang Clan",
+    "url": "https://docs.google.com/spreadsheets/d/1dA2h1kQffOmUUeCy6YMu8IYdGGqnhnWuabKdK7emyyU/edit?gid=1275210512#gid=1275210512",
+    "status": "ok",
+    "eras": 13,
+    "songs": 178,
+    "versions": 216,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 2,
+    "total_rows": 252,
+    "skip_pct": 0.7936507936507936,
+    "zero_song_eras": [
+      "Highlighted"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 1: \"CTRL + -\" to zoom in/out ::: \"CTRL + F\" to search keywords', \"Row 4: Click the link on the black square for info on era's that aren't on the tracker -> | https://docs.google.com/spreadsheets/d/1dA2h1kQffOmUUeCy6YMu8IYdGGqnhnWuabKdK7emyyU/edit?gid=1275210512#gid=1275210\"]"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.05,
+    "is_best": true
+  },
+  {
+    "name": "XXXTENTACION",
+    "url": "https://docs.google.com/spreadsheets/d/1wKq7lSERmXYutRFxipNbFFc-DUdqhVXWWlFnqkzwRFA/edit?usp=sharing",
+    "status": "ok",
+    "eras": 26,
+    "songs": 457,
+    "versions": 461,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "streaming",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 506,
+    "skip_pct": 0.0,
+    "zero_song_eras": [
+      "Spotify playlist for every XXXTENTACION song on streaming.",
+      "ItWillAllBeOverSoon"
+    ],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 2.31,
+    "is_best": true
+  },
+  {
+    "name": "Yeat",
+    "url": "https://docs.google.com/spreadsheets/d/1FUzAZyTCgFTVxQ--qbCAS2bUk4dsAw6ASxwjURPHbyI",
+    "status": "ok",
+    "eras": 32,
+    "songs": 1447,
+    "versions": 1955,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 2042,
+    "skip_pct": 0.04897159647404505,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 2035: Whole Spreadsheet Data']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 1.71,
+    "is_best": true
+  },
+  {
+    "name": "Young Thug",
+    "url": "https://docs.google.com/spreadsheets/d/12zc2reK5y8XP6SQhv1ujQtiG9VpJy7yDWwDuE-S-wpc/edit?gid=0#gid=0",
+    "status": "ok",
+    "eras": 40,
+    "songs": 1449,
+    "versions": 1956,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 8,
+    "total_rows": 2054,
+    "skip_pct": 0.3894839337877313,
+    "zero_song_eras": [
+      "HiTunes [V3]",
+      "Slime WRLD"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 2036: slothsavedearth', 'Row 2037: Shadow1235', 'Row 2038: Moist']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.48,
+    "is_best": true
+  },
+  {
+    "name": "Yung Lean",
+    "url": "https://docs.google.com/spreadsheets/d/1bAAb6E7_r-9TWlHuKY_re-KZwU2yt_3tbWGTZcKu_Wc/edit?gid=0#gid=0",
+    "status": "ok",
+    "eras": 16,
+    "songs": 83,
+    "versions": 86,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 1,
+    "total_rows": 103,
+    "skip_pct": 0.9708737864077669,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: [\"Row 103: note from temperevelas for all the curious - I'll always keep updating the tracker it just takes me time to not be lazy to do it.\"]"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.02,
+    "is_best": true
+  },
+  {
+    "name": "Daniel Caesar",
+    "url": "https://docs.google.com/spreadsheets/d/1_D-puv6fjwCjrx9x7qAu9oYzUfFzDLrLz1cElaXndso/edit?usp=sharing",
+    "status": "ok",
+    "eras": 16,
+    "songs": 295,
+    "versions": 562,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 4,
+    "total_rows": 588,
+    "skip_pct": 0.6802721088435374,
+    "zero_song_eras": [
+      "The Holy Trinity [V2]"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 583: Current Editors', 'Row 584: aeol | Template provided by Maker and the Kanye Tracker', 'Row 585: ColbyJackChedda | Other Trackers\\n(There are over 100 artists with Trackers just like this!)']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 2.12,
+    "is_best": true
+  },
+  {
+    "name": "Dr. Dre/N.W.A",
+    "url": "https://docs.google.com/spreadsheets/d/10_QK8xP-WCdrfO6RaIkhdDtYUXaM966e6D1xWD__iIo/edit?gid%3D1520634709%23gid%3D1520634709",
+    "status": "ok",
+    "eras": 45,
+    "songs": 83,
+    "versions": 83,
+    "columns_detected": [
+      "era",
+      "name",
+      "notes"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 84,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 2.59,
+    "is_best": true
+  },
+  {
+    "name": "Michael Jackson",
+    "url": "https://docs.google.com/spreadsheets/d/1i59TKrIZ1OvFFPJFuOMw1VXlvyzaVOH0Wb0vVJp9BTw/edit#gid=1792554832",
+    "status": "ok",
+    "eras": 14,
+    "songs": 643,
+    "versions": 785,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 0,
+    "total_rows": 861,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": null,
+    "elapsed_s": 0.18,
+    "is_best": true
+  },
+  {
+    "name": "Playboi Carti [Alt #3]",
+    "url": "https://docs.google.com/spreadsheets/d/1rAU0sktd1GKpqo_AAWBtkXy10Px3BB_dnK9yJoN0umw/edit#gid=0",
+    "status": "skip",
+    "eras": 0,
+    "songs": 0,
+    "versions": 0,
+    "columns_detected": [],
+    "skipped_rows": 0,
+    "total_rows": 0,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": "Access denied: Access denied (403): https://docs.google.com/spreadsheets/d/1rAU0sktd1GKpqo_AAWBtkXy10Px3BB_dnK9yJoN0umw/edit#gid=0",
+    "elapsed_s": 2.1,
+    "is_best": true
+  },
+  {
+    "name": "Playboi Carti [Alt]",
+    "url": "https://docs.google.com/spreadsheets/d/1ivoRJskby8zykhH_szifY4a1HIQCTnVh6c2WfIfMbkM/edit?gid=0#gid=0",
+    "status": "ok",
+    "eras": 29,
+    "songs": 970,
+    "versions": 1372,
+    "columns_detected": [
+      "available_length",
+      "date_of_recording",
+      "era",
+      "leak_date",
+      "links",
+      "name",
+      "notes",
+      "quality",
+      "track_length",
+      "type"
+    ],
+    "skipped_rows": 19,
+    "total_rows": 1565,
+    "skip_pct": 1.2140575079872205,
+    "zero_song_eras": [
+      "Collaboration with TrapMoneyBenny"
+    ],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 104: Features', 'Row 159: Features', 'Row 302: Features']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.38,
+    "is_best": true
+  },
+  {
+    "name": "ScalderM [Alt]",
+    "url": "https://docs.google.com/spreadsheets/d/1a3bjj8uo10RmVWs23ewIC5XZzetCh3rVDjSzSPRip_Y/",
+    "status": "error",
+    "eras": 0,
+    "songs": 0,
+    "versions": 0,
+    "columns_detected": [],
+    "skipped_rows": 0,
+    "total_rows": 0,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": "Network error: HTTP 410: Client error '410 Gone' for url 'https://docs.google.com/spreadsheets/d/1a3bjj8uo10RmVWs23ewIC5XZzetCh3rVDjSzSPRip_Y/htmlview'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/410",
+    "elapsed_s": 1.1,
+    "is_best": true
+  },
+  {
+    "name": "Tyler, the Creator",
+    "url": "https://docs.google.com/spreadsheets/d/10jvvqsnTrPbPqtfkJTn24-xrhfAssFQxuDwWY9CpZow/",
+    "status": "skip",
+    "eras": 0,
+    "songs": 0,
+    "versions": 0,
+    "columns_detected": [],
+    "skipped_rows": 0,
+    "total_rows": 0,
+    "skip_pct": 0.0,
+    "zero_song_eras": [],
+    "issues": [],
+    "error": "Access denied: Access denied (403): https://docs.google.com/spreadsheets/d/10jvvqsnTrPbPqtfkJTn24-xrhfAssFQxuDwWY9CpZow/",
+    "elapsed_s": 1.0,
+    "is_best": true
+  },
+  {
+    "name": "Juice WRLD [Info]",
+    "url": "https://docs.google.com/spreadsheets/d/1DlEBHD-Fnqd5FE3UUIyThdqcBADkpJb0R3paqHbi90w/edit%23gid%3D1705371403",
+    "status": "fail",
+    "eras": 0,
+    "songs": 0,
+    "versions": 0,
+    "columns_detected": [],
+    "skipped_rows": 1,
+    "total_rows": 1,
+    "skip_pct": 100.0,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "error",
+        "message": "No eras parsed"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 1.06,
+    "is_best": true
+  },
+  {
+    "name": "Juice WRLD",
+    "url": "https://docs.google.com/spreadsheets/d/1tD3ytt5wPx4zfcefXi5ATeYhIiDaugWjMS46nZrP568/edit?gid%3D0%23gid%3D0",
+    "status": "ok",
+    "eras": 12,
+    "songs": 1271,
+    "versions": 1575,
+    "columns_detected": [
+      "available_length",
+      "era",
+      "file_date",
+      "leak_date",
+      "name",
+      "notes",
+      "quality",
+      "track_length"
+    ],
+    "skipped_rows": 13,
+    "total_rows": 1629,
+    "skip_pct": 0.798035604665439,
+    "zero_song_eras": [],
+    "issues": [
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 2: Join the Discord to submit anything missing!', \"Row 3: Notice: Please check out Darthh's Tracker for the most accurate information and timeline revolving around Juice WRLD's Discography.\\nThis tracker was developed for those who prefer the accessibility an\", 'Row 37: Features']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 0.92,
+    "is_best": true
+  },
+  {
+    "name": "Homixide Gang",
+    "url": "https://docs.google.com/spreadsheets/d/15eM2g5vJWJIRl1qRYZoGgbKxUXRqIANRKLykqM7ps2M/edit?gid%3D1520634709%23gid%3D1520634709",
+    "status": "warn",
+    "eras": 13,
+    "songs": 233,
+    "versions": 240,
+    "columns_detected": [],
+    "skipped_rows": 24,
+    "total_rows": 287,
+    "skip_pct": 8.362369337979095,
+    "zero_song_eras": [
+      "Collaboration with DC2Trill",
+      "Added Released Tab (07/06/2025)",
+      ""
+    ],
+    "issues": [
+      {
+        "severity": "warn",
+        "message": "Elevated skip rate: 8.4% (24/287)"
+      },
+      {
+        "severity": "info",
+        "message": "Sample unmatched rows: ['Row 7: Snippets & Partials', 'Row 13: Full', 'Row 17: OG Files for Released Songs + Alternate Mixes']"
+      }
+    ],
+    "error": null,
+    "elapsed_s": 1.33,
+    "is_best": true
+  }
+]
