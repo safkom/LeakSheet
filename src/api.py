@@ -246,13 +246,30 @@ def _get_proxy_client() -> httpx.AsyncClient:
     return _proxy_client
 
 
+class _StreamSafeGZipMiddleware(GZipMiddleware):
+    """GZipMiddleware that skips compression for the /stream audio proxy endpoint.
+
+    GZip compression on streaming audio responses removes Content-Length
+    (gzip can't know the compressed size upfront for a streaming body), which
+    causes audio.duration to become Infinity on iOS Safari and makes Range-based
+    seeking completely broken — byte offsets in Range headers refer to the raw
+    audio stream, not the gzip-compressed one.
+    """
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").rstrip("/") == "/stream":
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
     version="0.3.0",
 )
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,
@@ -540,27 +557,30 @@ async def proxy_stream(
             yield chunk
 
     if range_end is None:
-        # Unknown total — stream from offset, skip leading bytes
-        async def _iter_skip():
+        # Unknown total size — cannot synthesise a valid 206 without knowing the
+        # Content-Range end byte. Return the full stream from byte 0 as HTTP 200,
+        # which correctly signals to the browser that Range is not supported for
+        # this response. iOS Safari interprets HTTP 200 to a Range request as
+        # "full file from byte 0"; returning partial data starting at range_start
+        # here would corrupt its byte-offset-to-timestamp mapping.
+        async def _iter_full_unknown():
             try:
-                skipped = 0
                 async for chunk in _source_iter():
-                    if skipped + len(chunk) <= range_start:
-                        skipped += len(chunk)
-                        continue
-                    if skipped < range_start:
-                        offset = range_start - skipped
-                        yield chunk[offset:]
-                        skipped += len(chunk)
-                    else:
-                        yield chunk
+                    yield chunk
             finally:
                 await resp.aclose()
 
+        _unknown_headers: dict[str, str] = {
+            "Accept-Ranges": "bytes",
+            "Content-Type": ct or "application/octet-stream",
+        }
+        if _disposition:
+            _unknown_headers["Content-Disposition"] = _disposition
+
         return StreamingResponse(
-            _iter_skip(),
+            _iter_full_unknown(),
             status_code=200,
-            headers={"Accept-Ranges": "bytes", "Content-Type": ct or "application/octet-stream"},
+            headers=_unknown_headers,
             media_type=ct or "application/octet-stream",
         )
 

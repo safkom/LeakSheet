@@ -120,11 +120,17 @@ function _getAudio() {
       if (now - _lastPosUpdate > 1000 && 'mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
         _lastPosUpdate = now
         try {
-          if (isFinite(_audio.duration) && _audio.duration > 0) {
+          // Fall back to metadata duration when the audio element hasn't
+          // determined a finite duration yet (e.g. stream without Content-Length).
+          const effectiveDuration = isFinite(_audio.duration) && _audio.duration > 0
+            ? _audio.duration
+            : playerState.duration
+          if (effectiveDuration > 0) {
             navigator.mediaSession.setPositionState({
-              duration: _audio.duration,
+              duration: effectiveDuration,
               playbackRate: _audio.playbackRate,
-              position: _audio.currentTime,
+              // Clamp position so iOS never sees position > duration (shows "ended").
+              position: Math.min(_audio.currentTime, effectiveDuration),
             })
           }
         } catch (e) { /* ignore */ }
@@ -134,6 +140,17 @@ function _getAudio() {
     _audio.addEventListener('durationchange', () => {
       if (isFinite(_audio.duration)) {
         playerState.duration = _audio.duration
+        // Push the updated duration to iOS Control Center immediately rather than
+        // waiting up to 1s for the next timeupdate cycle.
+        if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+          try {
+            navigator.mediaSession.setPositionState({
+              duration: _audio.duration,
+              playbackRate: _audio.playbackRate,
+              position: Math.min(_audio.currentTime, _audio.duration),
+            })
+          } catch (e) { /* ignore */ }
+        }
       }
     })
 
