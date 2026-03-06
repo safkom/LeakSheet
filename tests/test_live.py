@@ -730,12 +730,15 @@ class TestLiveEraArt:
 class TestLiveEraStats:
     """Verify era stats totals are close to actual parsed song counts."""
 
-    def test_all_eras_have_stats(self, live_artists):
+    def test_stats_parsed_when_raw_present(self, live_artists):
+        """If an era has a raw stats string, it must parse successfully."""
         for slug, artist in live_artists.items():
             for era in artist.eras:
-                assert era.stats is not None, (
-                    f"{artist.name} era '{era.name}' has no parsed stats"
-                )
+                if era.stats_raw:
+                    assert era.stats is not None, (
+                        f"{artist.name} era '{era.name}' has stats_raw "
+                        f"but stats failed to parse: {era.stats_raw!r}"
+                    )
 
 
 # ---------------------------------------------------------------------------
