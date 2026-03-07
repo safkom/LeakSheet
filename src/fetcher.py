@@ -24,7 +24,7 @@ from urllib.parse import urlparse, urlencode
 import httpx
 
 from src.models import Artist
-from src.parser import parse_sheet
+from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +38,16 @@ CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Regex to extract sheet GIDs from the htmlview page JS
 GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
+
+# Regex to extract (name, gid) pairs from the items.push() JS in htmlview pages.
+# Google Sheets embeds tab metadata as:
+#   items.push({name: "Tab Name", pageUrl: "...", gid: "12345", ...});
+_TAB_ITEMS_PATTERN = re.compile(
+    r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
+)
+
+# Art tab name keywords (after stripping emojis and normalising whitespace)
+_ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", "album arts"})
 
 # Regex to extract spreadsheet ID from Google Sheets URLs
 # Handles both /d/ID and /u/N/d/ID paths (user-scoped URLs)
@@ -205,6 +215,38 @@ def _discover_gids(html: str) -> list[str]:
             seen.add(gid)
             unique.append(gid)
     return unique
+
+
+def _discover_named_tabs(html: str) -> dict[str, str]:
+    """Extract {gid: tab_name} mapping from htmlview page HTML/JS.
+
+    Google Sheets htmlview embeds tab metadata as JS items.push() calls:
+      items.push({name: "Art", pageUrl: "...", gid: "1234", ...});
+    Tab names may contain leading emoji (e.g. "\U0001f5bc\ufe0f Art").
+    """
+    result: dict[str, str] = {}
+    for name, gid in _TAB_ITEMS_PATTERN.findall(html):
+        name = name.strip()
+        if name and gid:
+            result.setdefault(gid, name)
+    return result
+
+
+def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
+    """Return the GID of the Art tab if one is present, else None.
+
+    Strips emoji and normalises whitespace before comparing against the
+    known art-tab keyword set ({"art", "album art", "cover art", ...}).
+    """
+    _EMOJI_RE = re.compile(
+        r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
+    )
+    for gid, name in named_tabs.items():
+        clean = _EMOJI_RE.sub(" ", name).strip().lower()
+        clean = re.sub(r"\s+", " ", clean)
+        if clean in _ART_TAB_NAMES:
+            return gid
+    return None
 
 
 def _infer_artist_from_sheet(html: str) -> str | None:
@@ -467,10 +509,15 @@ def fetch_and_parse(
                     _set_cache(url_norm, base_html, title)
                 return artist
 
-        # Step 2: Discover GIDs
+        # Step 2: Discover GIDs and Art tab
         gids = _discover_gids(base_html)
         if not gids:
             gids = ["0"]
+
+        # Identify the Art tab GID upfront so we can fetch it after
+        # the main parsing is done (it's a single additional request)
+        named_tabs = _discover_named_tabs(base_html)
+        art_gid = _get_art_tab_gid(named_tabs)
 
         # Step 3: Try each GID, pick the one that produces the most eras
         best_artist: Artist | None = None
@@ -523,6 +570,31 @@ def fetch_and_parse(
 
         if best_artist and best_eras > 0:
             best_artist.source_url = url
+            # Fetch Art tab and upgrade era.art_url to high-quality images
+            if art_gid:
+                try:
+                    art_sheet_url = _build_sheet_html_url(url_norm, art_gid)
+                    art_cached = (
+                        _get_cached(art_sheet_url, cache_ttl)
+                        if use_cache and cache_ttl > 0
+                        else None
+                    )
+                    if art_cached:
+                        art_html = art_cached[0]
+                    else:
+                        art_resp = client.get(art_sheet_url)
+                        if art_resp.status_code == 200 and "<table" in art_resp.text.lower():
+                            art_html = art_resp.text
+                            if use_cache:
+                                _set_cache(art_sheet_url, art_html, title)
+                        else:
+                            art_html = ""
+                    if art_html:
+                        art_map = parse_art_tab(art_html)
+                        if art_map:
+                            apply_art_tab_images(best_artist, art_map)
+                except (httpx.HTTPError, ValueError, KeyError):
+                    pass  # Art tab fetch failed — not critical, keep existing art_url
             # Cache the best result under the original URL
             if use_cache and best_html:
                 _set_cache(url_norm, best_html, title)
@@ -744,6 +816,10 @@ async def async_fetch_and_parse(
             if not gids:
                 gids = ["0"]
 
+            # Identify Art tab GID so we can fetch high-quality images after
+            named_tabs = _discover_named_tabs(base_html)
+            art_gid = _get_art_tab_gid(named_tabs)
+
             # --- Fetch all GID pages concurrently, then parse to pick best ---
             async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
                 """Fetch a single GID sheet page. Returns (gid, html) or None."""
@@ -799,6 +875,17 @@ async def async_fetch_and_parse(
 
             if best_artist and best_eras > 0:
                 best_artist.source_url = url
+                # Fetch Art tab concurrently and upgrade era.art_url
+                if art_gid:
+                    try:
+                        art_result = await _fetch_gid(art_gid)
+                        if art_result:
+                            _, art_html = art_result
+                            art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                            if art_map:
+                                apply_art_tab_images(best_artist, art_map)
+                    except Exception:
+                        pass  # Art tab optional — keep existing art_url on failure
                 if use_cache and best_html:
                     _set_cache(url_norm, best_html, title)
                 return best_artist

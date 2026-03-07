@@ -1018,6 +1018,69 @@ def _add_version_to_era(era: Era, version: SongVersion) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Art tab parsing — high-quality era artwork
+# ---------------------------------------------------------------------------
+
+def parse_art_tab(html: str) -> dict[str, str]:
+    """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
+
+    Art tabs in tracker spreadsheets contain full-resolution era artwork.
+    Each row typically has an era name in one cell and an image in another.
+    Returns a dict keyed by the normalised era match key (lowercase, stripped).
+    """
+    rows = extract_table(html)
+    if not rows:
+        return {}
+
+    # Skip header row if it has no images (it's a label row)
+    start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
+
+    result: dict[str, str] = {}
+    for row in rows[start:]:
+        if not row:
+            continue
+
+        # First image found in the row is the era art
+        img_url = next((cell.images[0] for cell in row if cell.images), None)
+        if not img_url:
+            continue
+
+        # First non-empty text cell is the era name
+        era_name = next((cell.text.strip() for cell in row if cell.text.strip()), "")
+        if not era_name:
+            continue
+
+        key = _era_match_key(era_name)
+        if key:
+            result.setdefault(key, img_url)
+
+    return result
+
+
+def apply_art_tab_images(artist: Artist, art_map: dict[str, str]) -> None:
+    """Replace era.art_url with higher-quality Art tab images where available.
+
+    Matches eras by their normalised name key (via _era_match_key) and falls
+    back to alt_names when the primary name doesn't match.  Eras with no
+    match in art_map are left unchanged.
+    """
+    for era in artist.eras:
+        _apply_era_art(era, art_map)
+
+
+def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
+    key = _era_match_key(era.name)
+    if key and key in art_map:
+        era.art_url = art_map[key]
+        return
+    for alt in era.alt_names:
+        alt_key = _era_match_key(alt)
+        if alt_key and alt_key in art_map:
+            era.art_url = art_map[alt_key]
+            return
+
+
+# ---------------------------------------------------------------------------
 # File-level convenience
 # ---------------------------------------------------------------------------
 

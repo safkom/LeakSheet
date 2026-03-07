@@ -80,6 +80,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "available length": "available_length",
     "currently available": "available_length",  # Kid Cudi, Chief Keef
     "available?": "available_length",             # Yung Lean
+    "what's available?": "available_length",      # Travis Scott
     "available": "available_length",
     "song status": "available_length",            # XXXTENTACION
     "status": "available_length",
