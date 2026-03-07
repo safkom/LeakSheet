@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch, nextTick, ref } from 'vue'
+import { toast } from 'vue-sonner'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
@@ -55,16 +56,21 @@ function setEraBlockRef(name: string) {
 
 function handleToggleEra(eraName: string) {
   const wasExpanded = isEraExpanded(eraName)
-  toggleEra(eraName)
+  const toggled = toggleEra(eraName)
+  if (!toggled) {
+    toast.info('Turn off Best Of to expand eras individually')
+    return
+  }
   if (!wasExpanded) {
-    // Opening a new era — scroll it into view after DOM settles.
-    // Use a short delay so the old era's collapse doesn't shift the target.
-    nextTick(() => {
+    // Opening a new era — scroll the era card to the top of the viewport
+    // after a brief delay so any collapsing era has time to begin shrinking.
+    setTimeout(() => {
       const el = eraBlockRefs.value[eraName]
       if (el) {
-        el.scrollIntoView({ behavior: 'instant', block: 'start' })
+        const y = el.getBoundingClientRect().top + window.scrollY - 8
+        window.scrollTo({ top: y, behavior: 'smooth' })
       }
-    })
+    }, 50)
   }
 }
 
@@ -138,7 +144,7 @@ function handleShowDescription(payload: any): void {
       <div class="artist-header-text">
         <h2 class="artist-name">{{ artist.name }}</h2>
         <div class="artist-meta">
-          {{ artist.eras?.length || 0 }} eras
+          {{ (bestOf && !isSearching && !recents) ? filteredEras.length + ' of ' + (artist.eras?.length || 0) + ' eras' : (artist.eras?.length || 0) + ' eras' }}
         </div>
       </div>
     </div>
@@ -165,7 +171,7 @@ function handleShowDescription(payload: any): void {
         <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: bestOf }" @click="toggleBestOf" aria-label="Toggle best of filter" :aria-pressed="bestOf">
           <span class="best-of-star">&#11088;</span>
         </Button>
-        <Button variant="ghost" size="icon" class="best-of-toggle" :class="{ active: recents }" @click="toggleRecents" aria-label="Toggle recently added filter" :aria-pressed="recents">
+        <Button variant="ghost" size="icon" class="recents-toggle" :class="{ active: recents }" @click="toggleRecents" aria-label="Toggle recently added filter" :aria-pressed="recents">
           <svg viewBox="0 0 16 16" width="16" height="16" style="opacity: inherit">
             <path fill="currentColor" d="M1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0zM8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.87V4.75z"/>
           </svg>
@@ -181,29 +187,33 @@ function handleShowDescription(payload: any): void {
         <template v-else>No entries with leak dates found</template>
       </div>
       <div v-else class="search-results">
-        <div
+        <template
           v-for="(result, idx) in recentResults"
           :key="`r:${result.era.name}:${result.version.name}:${idx}`"
-          class="search-result-row"
         >
-          <div class="search-result-meta">
-            <span
-              v-if="idx === 0 || recentResults[idx - 1].era.name !== result.era.name"
-              class="era-badge-pill"
-              :style="eraColorStyle(result.era)"
-            >{{ result.era.name }}</span>
-            <span v-if="result.version.leak_date" class="leak-date-badge">{{ result.version.leak_date }}</span>
+          <!-- Era group header — only shown on first result per era -->
+          <div
+            v-if="idx === 0 || recentResults[idx - 1].era.name !== result.era.name"
+            class="era-group-header"
+          >
+            <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+            <div class="era-group-line"></div>
           </div>
-          <div class="search-result-version">
-            <VersionRow
-              :version="result.version"
-              :artist-name="artist.name"
-              :era-name="result.era.name"
-              :era-art="result.era.art_url"
-              :hide-alt-titles="true"
-            />
+          <div class="search-result-row">
+            <div class="search-result-meta">
+              <span v-if="result.version.leak_date" class="leak-date-badge">{{ result.version.leak_date }}</span>
+            </div>
+            <div class="search-result-version">
+              <VersionRow
+                :version="result.version"
+                :artist-name="artist.name"
+                :era-name="result.era.name"
+                :era-art="result.era.art_url"
+                :hide-alt-titles="true"
+              />
+            </div>
           </div>
-        </div>
+        </template>
       </div>
     </template>
 
@@ -213,31 +223,36 @@ function handleShowDescription(payload: any): void {
         No results for "{{ searchQuery }}"
       </div>
       <div v-else class="search-results">
-        <div
+        <template
           v-for="(result, idx) in flatSearchResults"
           :key="`s:${result.era.name}:${result.version.name}:${idx}`"
-          class="search-result-row"
         >
-          <span
+          <!-- Era group header — only shown on first result per era -->
+          <div
             v-if="idx === 0 || flatSearchResults[idx - 1].era.name !== result.era.name"
-            class="era-badge-pill"
-            :style="eraColorStyle(result.era)"
-          >{{ result.era.name }}</span>
-          <div class="search-result-version">
-            <VersionRow
-              :version="result.version"
-              :artist-name="artist.name"
-              :era-name="result.era.name"
-              :era-art="result.era.art_url"
-              :hide-alt-titles="true"
-            />
+            class="era-group-header"
+          >
+            <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
+            <div class="era-group-line"></div>
           </div>
-        </div>
+          <div class="search-result-row">
+            <div class="search-result-version">
+              <VersionRow
+                :version="result.version"
+                :artist-name="artist.name"
+                :era-name="result.era.name"
+                :era-art="result.era.art_url"
+                :hide-alt-titles="true"
+              />
+            </div>
+          </div>
+        </template>
       </div>
     </template>
 
     <!-- Normal era browsing -->
     <div v-else class="eras-list" role="list" aria-label="Eras">
+      <div v-if="filteredEras.length === 0" class="no-results">No eras with Best Of or Special tracks found</div>
       <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block" :ref="setEraBlockRef(era.name)">
         <EraCard
           :era="era"
@@ -384,23 +399,33 @@ function handleShowDescription(payload: any): void {
   color: var(--text-primary);
 }
 
-.best-of-toggle {
+.best-of-toggle,
+.recents-toggle {
   flex-shrink: 0;
-  opacity: 0.5;
+  opacity: 0.35;
   border: 1px solid transparent;
   min-width: 44px;
   min-height: 44px;
   -webkit-tap-highlight-color: transparent;
 }
 
-.best-of-toggle:hover {
-  opacity: 0.8;
+.best-of-toggle:hover,
+.recents-toggle:hover {
+  opacity: 0.7;
 }
 
 .best-of-toggle.active {
   opacity: 1;
-  background: rgba(255, 215, 0, 0.12);
-  border-color: rgba(255, 215, 0, 0.3);
+  background: rgba(255, 215, 0, 0.20);
+  border-color: rgba(255, 215, 0, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.3);
+}
+
+.recents-toggle.active {
+  opacity: 1;
+  background: rgba(88, 166, 255, 0.20);
+  border-color: rgba(88, 166, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.3);
 }
 
 .best-of-star {
@@ -449,9 +474,26 @@ function handleShowDescription(payload: any): void {
   flex-direction: column;
 }
 
+.era-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 4px;
+}
+
+.era-group-header:first-child {
+  padding-top: 4px;
+}
+
+.era-group-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .search-result-row {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  padding: 8px 0 0;
+  padding: 4px 0;
 }
 
 .search-result-row:last-child {
@@ -471,7 +513,7 @@ function handleShowDescription(payload: any): void {
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-left: 8px;
+  flex-shrink: 0;
 }
 
 .search-result-meta {

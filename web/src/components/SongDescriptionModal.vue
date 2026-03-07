@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { artProxyUrl } from '../composables/usePlayer'
 import { BADGE_MAP } from '@/composables/useUtils'
+import { toast } from 'vue-sonner'
 import {
   Dialog,
   DialogScrollContent,
@@ -20,6 +21,7 @@ const props = defineProps({
 })
 
 const artSrc = computed(() => props.eraArt ? artProxyUrl(props.eraArt) : null)
+const artLoadError = ref(false)
 
 const emit = defineEmits(['close'])
 
@@ -53,6 +55,14 @@ const credits = computed(() => {
   return parts
 })
 
+function copyLink(link) {
+  navigator.clipboard.writeText(link).then(() => {
+    toast.success('Link copied')
+  }).catch(() => {
+    toast.error('Failed to copy')
+  })
+}
+
 const details = computed(() => {
   const items = []
   if (v.value?.version_tag) items.push({ label: 'Version', value: v.value.version_tag })
@@ -72,8 +82,8 @@ const details = computed(() => {
   <Dialog :open="true" @update:open="handleOpenChange">
     <DialogScrollContent class="max-w-[520px] p-0 border-white/10 bg-[hsl(220_24%_12%)] overflow-y-auto rounded-xl">
       <!-- Art Header -->
-      <div v-if="artSrc" class="modal-art-header">
-        <img :src="artSrc" class="modal-art-img" alt="" />
+      <div v-if="artSrc && !artLoadError" class="modal-art-header">
+        <img :src="artSrc" class="modal-art-img" alt="" @error="artLoadError = true" />
         <div class="modal-art-overlay"></div>
         <div class="modal-art-info">
           <Badge v-if="badgeInfo" variant="secondary" class="bg-white/15 text-white border-transparent text-[11px] rounded-[4px]">
@@ -132,6 +142,11 @@ const details = computed(() => {
           <div class="section-label">Links</div>
           <div v-for="(link, i) in v.links" :key="i" class="link-item">
             <a :href="link" target="_blank" rel="noopener">{{ link }}</a>
+            <button class="link-copy-btn" @click.prevent="copyLink(link)" aria-label="Copy link">
+              <svg viewBox="0 0 16 16" width="13" height="13">
+                <path fill="currentColor" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25ZM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -240,7 +255,14 @@ const details = computed(() => {
   white-space: pre-wrap;
 }
 
+.link-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .link-item a {
+  flex: 1;
   font-size: 12px;
   color: var(--accent-color);
   word-break: break-all;
@@ -249,5 +271,20 @@ const details = computed(() => {
 
 .link-item a:hover {
   text-decoration: underline;
+}
+
+.link-copy-btn {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  padding: 2px;
+  border-radius: 4px;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+  margin-top: 2px;
+}
+
+.link-copy-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
 }
 </style>

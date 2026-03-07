@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { toast } from 'vue-sonner'
 import SongDescriptionModal from './SongDescriptionModal.vue'
 import QueuePanel from './QueuePanel.vue'
@@ -116,26 +116,32 @@ function queueTrack() {
   toast.success('Added to queue')
 }
 
+const downloadController = ref(null)
+
+onUnmounted(() => {
+  downloadController.value?.abort()
+})
+
 async function downloadTrack() {
   if (!track.value?.links?.length) return
   const link = track.value.links[0]
   const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
   try {
+    downloadController.value?.abort()
+    downloadController.value = new AbortController()
     toast('Downloading...')
-    const res = await fetch(downloadUrl)
+    const res = await fetch(downloadUrl, { signal: downloadController.value.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
     const objUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = objUrl
     a.download = `${track.value.name || track.value.base_name || 'track'}.mp3`
-    document.body.appendChild(a)
     a.click()
-    document.body.removeChild(a)
     URL.revokeObjectURL(objUrl)
     toast.success('Download complete')
-  } catch {
-    toast.error('Download failed')
+  } catch (e) {
+    if (e?.name !== 'AbortError') toast.error('Download failed')
   }
 }
 

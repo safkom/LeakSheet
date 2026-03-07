@@ -295,6 +295,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
         if (bestOf.value && !isBestOfSong(song)) continue
         if (q && !songMatchesQuery(song, q)) continue
         for (const version of (song.versions || [])) {
+          if (bestOf.value && version.badge !== 'best' && version.badge !== 'special') continue
           const leakDate = version.leak_date || version.file_date
           if (leakDate) {
             results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })
@@ -309,9 +310,10 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
 
   // ── Era expand/collapse ──
 
-  function toggleEra(eraName: string): void {
-    if (bestOf.value) return
+  function toggleEra(eraName: string): boolean {
+    if (bestOf.value) return false
     expandedEra.value = expandedEra.value === eraName ? null : eraName
+    return true
   }
 
   function isEraExpanded(eraName: string): boolean {

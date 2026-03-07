@@ -103,9 +103,7 @@ function download() {
       const a = document.createElement('a')
       a.href = blobUrl
       a.download = filename
-      document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
       URL.revokeObjectURL(blobUrl)
       toast.success('Download complete')
     })
@@ -228,8 +226,10 @@ const hasLink = computed(() => getLink() !== null)
 }
 
 .ctx-item.disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   pointer-events: none;
+  cursor: not-allowed;
+  color: var(--text-dim);
 }
 
 .ctx-item svg {

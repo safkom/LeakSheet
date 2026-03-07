@@ -103,7 +103,7 @@ function handleContextMenu(e) {
   <div class="song-row-wrapper">
     <button
       class="song-row"
-      :class="{ expanded, playing: isCurrentSong }"
+      :class="{ expanded, playing: isCurrentSong, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
       @click="handleClick"
       @contextmenu="handleContextMenu"
     >
@@ -145,7 +145,7 @@ function handleContextMenu(e) {
         </template>
       </div>
 
-      <!-- Right side: duration -->
+      <!-- Right side: duration + confirmed-only indicator -->
       <div class="song-right">
         <span
           v-if="!hasMultipleVersions && firstVersion?.track_length"
@@ -153,6 +153,17 @@ function handleContextMenu(e) {
         >
           {{ firstVersion.track_length }}
         </span>
+        <!-- Info icon: clicking will open description, not play -->
+        <svg
+          v-if="isConfirmedOnly && !hasMultipleVersions"
+          class="confirmed-icon"
+          viewBox="0 0 16 16"
+          width="13"
+          height="13"
+          aria-label="Confirmed — no file available"
+        >
+          <path fill="currentColor" d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM6.5 7.75v3.5a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-1.5 0ZM8 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/>
+        </svg>
       </div>
     </button>
 
@@ -209,6 +220,22 @@ function handleContextMenu(e) {
 .song-row.playing {
   background: rgba(88, 166, 255, 0.05);
   border-color: rgba(88, 166, 255, 0.1);
+}
+
+.song-row.confirmed-only {
+  cursor: default;
+}
+
+.song-row.confirmed-only:hover {
+  border-left-color: transparent;
+  border-left-width: 1px;
+  transform: none;
+}
+
+.confirmed-icon {
+  color: var(--text-dim);
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
 /* Equalizer animation for playing state */

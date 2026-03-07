@@ -359,6 +359,7 @@ export function playTrack(version: SongVersion | null, artistName = '', eraName 
       playerState.streamUrl = ''
       playerState.isPlaying = false
       playerState.loading = false
+      playerState.error = 'Stream host not supported'
       return
     }
 
@@ -369,9 +370,10 @@ export function playTrack(version: SongVersion | null, artistName = '', eraName 
     audio.src = resolved.url
     audio.volume = playerState.volume
     audio.play().catch(() => {
-      // Browser may block autoplay — user sees play button
+      // Browser may block autoplay — tell user to tap play
       playerState.isPlaying = false
       playerState.loading = false
+      playerState.error = 'Tap ▶ to start playback'
     })
   } else {
     // No streamable link — show track info only (no audio)

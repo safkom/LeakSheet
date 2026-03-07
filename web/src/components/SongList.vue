@@ -56,7 +56,21 @@ const shouldVirtualize = computed(() => displayItems.value.length > VIRTUALIZE_T
 
 const virtualizer = useWindowVirtualizer(computed(() => ({
   count: displayItems.value.length,
-  estimateSize: () => 52,
+  estimateSize: (i) => {
+    const item = displayItems.value[i]
+    if (!item || item.type !== 'song') return 52
+    const song = item.song
+    // Rough estimate accounting for alt titles and credits to reduce overlap
+    let h = 44
+    const v = song.versions?.[0]
+    const multiVer = (song.versions?.length || 0) > 1
+    const altCount = multiVer
+      ? new Set((song.versions || []).flatMap(v => v.alt_titles || []).map(a => a.toLowerCase())).size
+      : (v?.alt_titles?.length || 0)
+    if (altCount > 0) h += Math.ceil(altCount / 3) * 22
+    if (!multiVer && v && (v.collaboration || v.featuring || v.producers || v.refs)) h += 26
+    return h
+  },
   overscan: 15,
   enabled: shouldVirtualize.value,
 })))

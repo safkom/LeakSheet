@@ -149,6 +149,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 
     <!-- Expand indicator -->
     <div class="era-expand-indicator">
+      <span v-if="bestOf" class="era-mode-label">★ All shown</span>
       <svg viewBox="0 0 16 16" width="14" height="14" :class="{ rotated: expanded }">
         <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
       </svg>
@@ -460,7 +461,16 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 }
 
 .era-card.best-of-active .era-expand-indicator {
-  opacity: 0.7;
+  opacity: 0.35;
+}
+
+.era-mode-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  margin-right: 4px;
 }
 
 /* Reduced motion */
