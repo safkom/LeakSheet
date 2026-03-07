@@ -1,6 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
-import { useWindowVirtualizer } from '@tanstack/vue-virtual'
+import { ref, computed } from 'vue'
 import SongRow from './SongRow.vue'
 
 const props = defineProps({
@@ -16,11 +15,6 @@ const expandedSong = ref(null)
 function toggleSong(index) {
   const prev = expandedSong.value
   expandedSong.value = prev === index ? null : index
-  // Notify the virtualizer that a row height changed
-  if (virtualizer.value) {
-    // Re-measure after DOM update using nextTick + rAF instead of a fragile setTimeout
-    nextTick(() => { requestAnimationFrame(() => { virtualizer.value?.measure() }) })
-  }
 }
 
 /** Build a flat list of { type: 'section' | 'song', ... } items for rendering */
@@ -49,77 +43,13 @@ const displayItems = computed(() => {
 })
 
 const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
-
-// Only virtualize when there are enough items to justify the overhead
-const VIRTUALIZE_THRESHOLD = 40
-const shouldVirtualize = computed(() => displayItems.value.length > VIRTUALIZE_THRESHOLD)
-
-const virtualizer = useWindowVirtualizer(computed(() => ({
-  count: displayItems.value.length,
-  estimateSize: (i) => {
-    const item = displayItems.value[i]
-    if (!item || item.type !== 'song') return 52
-    const song = item.song
-    // Rough estimate accounting for alt titles and credits to reduce overlap
-    let h = 44
-    const v = song.versions?.[0]
-    const multiVer = (song.versions?.length || 0) > 1
-    const altCount = multiVer
-      ? new Set((song.versions || []).flatMap(v => v.alt_titles || []).map(a => a.toLowerCase())).size
-      : (v?.alt_titles?.length || 0)
-    if (altCount > 0) h += Math.ceil(altCount / 3) * 22
-    if (!multiVer && v && (v.collaboration || v.featuring || v.producers || v.refs)) h += 26
-    return h
-  },
-  overscan: 15,
-  enabled: shouldVirtualize.value,
-})))
-
-const virtualItems = computed(() => virtualizer.value.getVirtualItems())
-const totalSize = computed(() => virtualizer.value.getTotalSize())
-
-function measureRef(el) {
-  if (el) virtualizer.value.measureElement(el)
-}
 </script>
 
 <template>
   <div class="song-list" role="list" :aria-label="eraName ? eraName + ' songs' : 'Song list'">
     <div v-if="!hasSongs" class="no-songs">No songs found</div>
 
-    <!-- Virtualized rendering for large lists -->
-    <template v-else-if="shouldVirtualize">
-      <div :style="{ height: totalSize + 'px', width: '100%', position: 'relative' }">
-        <div
-          v-for="vRow in virtualItems"
-          :key="displayItems[vRow.index].key"
-          :ref="measureRef"
-          :data-index="vRow.index"
-          :style="{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            transform: `translateY(${vRow.start}px)`,
-          }"
-        >
-          <div v-if="displayItems[vRow.index].type === 'section'" class="section-divider">
-            <span class="section-name">{{ displayItems[vRow.index].name }}</span>
-          </div>
-          <SongRow
-            v-else
-            :song="displayItems[vRow.index].song"
-            :expanded="expandedSong === displayItems[vRow.index].index"
-            :artist-name="artistName"
-            :era-name="eraName"
-            :era-art="eraArt"
-            @toggle="toggleSong(displayItems[vRow.index].index)"
-          />
-        </div>
-      </div>
-    </template>
-
-    <!-- Direct rendering for small lists (no virtualization overhead) -->
+    <!-- Direct rendering -->
     <template v-else>
       <template v-for="item in displayItems" :key="item.key">
         <div v-if="item.type === 'section'" class="section-divider">
