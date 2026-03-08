@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
