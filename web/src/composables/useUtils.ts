@@ -70,6 +70,9 @@ export function effectiveBadge(quality: string | null | undefined, availableLeng
   return { text: quality, variant: qualityVariant(quality), type: 'quality' }
 }
 
+// Gate set for getAvailBadge — determines which availability values add meaningful
+// info beyond what the quality badge conveys. Not a canonical enum; availabilityVariant()
+// is the source of truth for classification logic.
 const _AVAILABILITY_VALUES = new Set([
   'og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces',
   'partial', 'snippet', 'confirmed', 'unavailable',
