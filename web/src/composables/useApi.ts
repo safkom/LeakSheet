@@ -17,9 +17,9 @@ function _buildSignal(callerSignal?: AbortSignal): AbortSignal {
   return AbortSignal.any([callerSignal, timeout])
 }
 
-async function request(path: string, options: RequestInit = {}): Promise<unknown> {
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
+    headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) },
     ...options,
     signal: _buildSignal(options.signal as AbortSignal | undefined),
   })
@@ -27,14 +27,14 @@ async function request(path: string, options: RequestInit = {}): Promise<unknown
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail || `${res.status} ${res.statusText}`)
   }
-  return res.json()
+  return res.json() as Promise<T>
 }
 
 // Module-level abort controller for parseSheet — cancels previous request
 // when a new one starts.
 let _parseAbort: AbortController | null = null
 
-interface ParseSheetOptions {
+export interface ParseSheetOptions {
   artistName?: string | null
   useCache?: boolean
   forceRefresh?: boolean
@@ -51,7 +51,7 @@ export function parseSheet(url: string, { artistName = null, useCache = true, fo
   }
   _parseAbort = new AbortController()
 
-  return request('/sheet', {
+  return request<Artist>('/sheet', {
     method: 'POST',
     body: JSON.stringify({
       url,
@@ -60,5 +60,5 @@ export function parseSheet(url: string, { artistName = null, useCache = true, fo
       force_refresh: forceRefresh,
     }),
     signal: _parseAbort.signal,
-  }) as Promise<Artist>
+  })
 }

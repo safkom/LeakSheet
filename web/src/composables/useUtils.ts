@@ -57,9 +57,6 @@ export interface EffectiveBadge {
 /**
  * Determine the best badge to display: prefer available_length
  * over quality when quality is "Not Available".
- * @param {string|null} quality
- * @param {string|null} availableLength
- * @returns {{ text: string, variant: string, type: 'quality'|'availability' }|null}
  */
 export function effectiveBadge(quality: string | null | undefined, availableLength: string | null | undefined): EffectiveBadge | null {
   const qLower = (quality || '').toLowerCase().trim()
@@ -93,9 +90,6 @@ export interface AvailBadge {
  * Determine the secondary availability badge to show alongside the quality badge.
  * Returns { text, variant } when the available_length value adds information
  * beyond what the quality badge already conveys, otherwise returns null.
- * @param {string|null} quality
- * @param {string|null} availableLength
- * @returns {{ text: string, variant: string }|null}
  */
 export function getAvailBadge(quality: string | null | undefined, availableLength: string | null | undefined): AvailBadge | null {
   const avail = availableLength
@@ -134,13 +128,9 @@ export function coloredBadgeStyle(hexColor: string | null | undefined): Record<s
   if (!hexColor) return null
   const clean = hexColor.replace('#', '')
   if (clean.length !== 6) return null
-  try {
-    return {
-      backgroundColor: `${hexColor}26`, // 15% alpha overlay
-      color: hexColor,
-      borderColor: 'transparent',
-    }
-  } catch {
-    return null
+  return {
+    backgroundColor: `${hexColor}26`, // 15% alpha overlay
+    color: hexColor,
+    borderColor: 'transparent',
   }
 }
