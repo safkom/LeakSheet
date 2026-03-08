@@ -5,6 +5,7 @@
  * Handles search, best-of filtering, recents, and debounced queries.
  */
 import { ref, computed, watch, onUnmounted, type Ref, type ComputedRef } from 'vue'
+import { BEST_OF_BADGES } from './useUtils'
 
 // ---------------------------------------------------------------------------
 // Types (mirrors backend Pydantic models)
@@ -73,17 +74,11 @@ export interface Artist {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const _BEST_OF_BADGES = new Set(['best', 'special'])
-
-// ---------------------------------------------------------------------------
 // Pure helpers (no reactivity)
 // ---------------------------------------------------------------------------
 
 export function isBestOfSong(song: Song): boolean {
-  return _BEST_OF_BADGES.has(song.badge ?? '')
+  return BEST_OF_BADGES.has(song.badge ?? '')
 }
 
 /**
@@ -295,7 +290,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
         if (bestOf.value && !isBestOfSong(song)) continue
         if (q && !songMatchesQuery(song, q)) continue
         for (const version of (song.versions || [])) {
-          if (bestOf.value && version.badge !== 'best' && version.badge !== 'special') continue
+          if (bestOf.value && !BEST_OF_BADGES.has(version.badge ?? '')) continue
           const leakDate = version.leak_date || version.file_date
           if (leakDate) {
             results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })

@@ -18,11 +18,6 @@ export function qualityVariant(q: string | null | undefined): string {
   return 'na'
 }
 
-/** @deprecated Use qualityVariant instead */
-export function qualityClass(q: string | null | undefined): string {
-  return 'q-' + qualityVariant(q)
-}
-
 /**
  * Map available_length to badge variant name.
  * @param {string|null} avail - Available length like "Full", "Partial", "Snippet", etc.
@@ -40,12 +35,6 @@ export function availabilityVariant(avail: string | null | undefined): string {
   if (l.includes('confirmed')) return 'confirmed'
   if (l.includes('unavailable')) return 'unavailable'
   return 'na'
-}
-
-/** @deprecated Use availabilityVariant instead */
-export function availabilityClass(avail: string | null | undefined): string {
-  const v = availabilityVariant(avail)
-  return v === 'na' ? 'a-na' : `a-${v}`
 }
 
 export interface EffectiveBadge {
@@ -81,6 +70,11 @@ export function effectiveBadge(quality: string | null | undefined, availableLeng
   return { text: quality, variant: qualityVariant(quality), type: 'quality' }
 }
 
+const _AVAILABILITY_VALUES = new Set([
+  'og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces',
+  'partial', 'snippet', 'confirmed', 'unavailable',
+])
+
 export interface AvailBadge {
   text: string | null | undefined
   variant: string
@@ -101,12 +95,15 @@ export function getAvailBadge(quality: string | null | undefined, availableLengt
     // Skip duplicate when quality and availability convey the same thing
     if (al === q) return null
     // Quality badge is already shown — show availability only if it adds info
-    if (['og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces', 'partial', 'snippet', 'confirmed', 'unavailable'].includes(al)) {
+    if (_AVAILABILITY_VALUES.has(al)) {
       return { text: avail, variant: availabilityVariant(avail) }
     }
   }
   return null
 }
+
+/** Badge keys that qualify a version as "best of" content. */
+export const BEST_OF_BADGES = new Set(['best', 'special'])
 
 /**
  * Badge emoji map (same as parser Badge enum).

@@ -1,5 +1,5 @@
 import { reactive, watch } from 'vue'
-import { BADGE_MAP } from './useUtils'
+import { BADGE_MAP, BEST_OF_BADGES } from './useUtils'
 import type { SongVersion } from './useEraFiltering'
 
 /**
@@ -267,8 +267,6 @@ export function isStreamable(version: SongVersion | null | undefined): boolean {
 // Playback controls
 // ---------------------------------------------------------------------------
 
-const _BEST_OF_BADGES = new Set(['best', 'special'])
-
 /**
  * Register the static MediaSession action handlers that never change between tracks.
  * Called once at module initialization.
@@ -514,7 +512,7 @@ function _playNextEraSong() {
   const remaining = era.versions.slice(currentIdx + 1)
   for (const version of remaining) {
     if (!findStreamableLink(version.links)) continue
-    if (playerState.bestOfQueue && !_BEST_OF_BADGES.has(version.badge)) continue
+    if (playerState.bestOfQueue && !BEST_OF_BADGES.has(version.badge ?? '')) continue
     playTrack(version, era.artistName, era.eraName, era.artUrl)
     return
   }
