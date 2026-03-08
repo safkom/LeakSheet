@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
-import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
-import { effectiveBadge, getAvailBadge, BADGE_MAP } from '../composables/useUtils'
+import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
+import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
@@ -45,6 +45,11 @@ function handleContextMenu(e) {
   })
 }
 
+function handleAddToQueue(e) {
+  e.stopPropagation()
+  addToQueue(props.version, props.artistName, props.eraName, props.eraArt)
+}
+
 const badge = computed(() => {
   return effectiveBadge(props.version.quality, props.version.available_length)
 })
@@ -58,6 +63,9 @@ const badgeEmoji = computed(() => {
   if (!b) return null
   return BADGE_MAP[b] || null
 })
+
+const qualityStyle = computed(() => coloredBadgeStyle(props.version.quality_color))
+const availStyle = computed(() => coloredBadgeStyle(props.version.available_length_color))
 </script>
 
 <template>
@@ -73,8 +81,8 @@ const badgeEmoji = computed(() => {
         <span class="v-badge-slot">{{ badgeEmoji || '' }}</span>
         <span class="v-title">{{ version.name }}</span>
         <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
-        <Badge v-if="badge" :variant="badge.variant">{{ badge.text }}</Badge>
-        <Badge v-if="availBadge" :variant="availBadge.variant">{{ availBadge.text }}</Badge>
+        <Badge v-if="badge" :variant="qualityStyle ? undefined : badge.variant" :style="qualityStyle">{{ badge.text }}</Badge>
+        <Badge v-if="availBadge" :variant="availStyle ? undefined : availBadge.variant" :style="availStyle">{{ availBadge.text }}</Badge>
       </div>
 
       <!-- Credits lines -->
@@ -94,6 +102,17 @@ const badgeEmoji = computed(() => {
       <span v-if="version.track_length" class="v-length">
         {{ version.track_length }}
       </span>
+      <!-- Mobile-only queue button -->
+      <button
+        v-if="canStream"
+        class="mobile-queue-btn"
+        aria-label="Add to queue"
+        @click="handleAddToQueue"
+      >
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+          <path fill="currentColor" d="M0 2.75A.75.75 0 0 1 .75 2h12.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 2.75zm0 5A.75.75 0 0 1 .75 7h7.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 7.75zm0 5a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75zM14 7a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1 0-2h1V8a1 1 0 0 1 1-1z"/>
+        </svg>
+      </button>
     </div>
   </button>
 </template>
@@ -261,6 +280,31 @@ const badgeEmoji = computed(() => {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.mobile-queue-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-queue-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .mobile-queue-btn {
+    display: flex;
+  }
 }
 
 @media (max-width: 640px) {

@@ -11,19 +11,19 @@
     --card-hover: 0 0% 10%;           /* #1a1a1a */
     --popover: 0 0% 5%;               /* #0d0d0d */
     --popover-foreground: 0 0% 91%;
-    --primary: 175 53% 55%;           /* #4ecdc4 teal */
+    --primary: 220 70% 65%;           /* #5894f5 blue — overridden by era accent */
     --primary-foreground: 0 0% 0%;
-    --primary-hover: 175 45% 50%;     /* #45b7af */
+    --primary-hover: 220 60% 58%;     /* #4a82e4 */
     --secondary: 0 0% 5%;             /* #0d0d0d */
     --secondary-foreground: 0 0% 91%;
     --muted: 0 0% 5%;
     --muted-foreground: 0 0% 55%;     /* #8c8c8c */
-    --accent: 175 53% 55%;
+    --accent: 220 70% 65%;
     --accent-foreground: 0 0% 0%;
     --destructive: 0 72% 51%;
     --border: 0 0% 14%;               /* #242424 */
     --input: 0 0% 0%;
-    --ring: 175 53% 55%;
+    --ring: 220 70% 65%;
     --radius: 0.625rem;
 
     /* Extended semantic tokens */

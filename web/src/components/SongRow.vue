@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import VersionRow from './VersionRow.vue'
 import { Badge } from '@/components/ui/badge'
-import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
-import { effectiveBadge, getAvailBadge, BADGE_MAP } from '../composables/useUtils'
+import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
+import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 
 const props = defineProps({
@@ -60,6 +60,16 @@ const availBadge = computed(() => {
   return getAvailBadge(firstVersion.value.quality, firstVersion.value.available_length)
 })
 
+const qualityStyle = computed(() => {
+  if (!firstVersion.value || hasMultipleVersions.value) return null
+  return coloredBadgeStyle(firstVersion.value.quality_color)
+})
+
+const availStyle = computed(() => {
+  if (!firstVersion.value || hasMultipleVersions.value) return null
+  return coloredBadgeStyle(firstVersion.value.available_length_color)
+})
+
 // A single-version song with no streamable links — open description instead of play
 const isConfirmedOnly = computed(() => {
   if (hasMultipleVersions.value || !firstVersion.value) return false
@@ -97,6 +107,12 @@ function handleContextMenu(e) {
     eraArt: props.eraArt,
   })
 }
+
+function handleAddToQueue(e) {
+  e.stopPropagation()
+  if (!firstVersion.value) return
+  addToQueue(firstVersion.value, props.artistName, props.eraName, props.eraArt)
+}
 </script>
 
 <template>
@@ -114,11 +130,13 @@ function handleContextMenu(e) {
           <span class="song-title">{{ song.base_name }}</span>
           <Badge
             v-if="!hasMultipleVersions && badge"
-            :variant="badge.variant"
+            :variant="qualityStyle ? undefined : badge.variant"
+            :style="qualityStyle"
           >{{ badge.text }}</Badge>
           <Badge
             v-if="!hasMultipleVersions && availBadge"
-            :variant="availBadge.variant"
+            :variant="availStyle ? undefined : availBadge.variant"
+            :style="availStyle"
           >{{ availBadge.text }}</Badge>
           <!-- Expand chevron for multi-version -->
           <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
@@ -164,6 +182,17 @@ function handleContextMenu(e) {
         >
           <path fill="currentColor" d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM6.5 7.75v3.5a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-1.5 0ZM8 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/>
         </svg>
+        <!-- Mobile-only queue button: visible when song is streamable and not multi-version -->
+        <button
+          v-if="canStream && !hasMultipleVersions"
+          class="mobile-queue-btn"
+          aria-label="Add to queue"
+          @click="handleAddToQueue"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path fill="currentColor" d="M0 2.75A.75.75 0 0 1 .75 2h12.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 2.75zm0 5A.75.75 0 0 1 .75 7h7.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 7.75zm0 5a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75zM14 7a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1 0-2h1V8a1 1 0 0 1 1-1z"/>
+          </svg>
+        </button>
       </div>
     </button>
 
@@ -385,6 +414,32 @@ function handleContextMenu(e) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Mobile-only queue button: hidden on pointer/hover devices, shown on touch */
+.mobile-queue-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-queue-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .mobile-queue-btn {
+    display: flex;
+  }
 }
 
 /* Versions accordion */

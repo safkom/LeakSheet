@@ -114,3 +114,29 @@ export const BADGE_MAP = {
   wanted: '🏅',
   ai: '🤖',
 }
+
+/**
+ * Compute a CSS style object for a badge with a custom background color.
+ * Returns null if color is falsy.
+ * Text color is automatically chosen for contrast.
+ */
+export function coloredBadgeStyle(hexColor: string | null | undefined): Record<string, string> | null {
+  if (!hexColor) return null
+  const clean = hexColor.replace('#', '')
+  if (clean.length !== 6) return null
+  try {
+    const r = parseInt(clean.slice(0, 2), 16)
+    const g = parseInt(clean.slice(2, 4), 16)
+    const b = parseInt(clean.slice(4, 6), 16)
+    // Perceived luminance
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    const textColor = luminance > 0.45 ? '#0a0a0a' : '#ffffff'
+    return {
+      backgroundColor: `${hexColor}26`, // 15% alpha overlay
+      color: hexColor,
+      borderColor: 'transparent',
+    }
+  } catch {
+    return null
+  }
+}

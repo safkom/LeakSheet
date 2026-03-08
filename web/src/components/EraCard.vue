@@ -17,6 +17,7 @@ const gradientStyle = ref({})
 const titleColor = ref('#e6edf3')
 const colorsReady = ref(false)
 const imgRetries = ref(0)
+const descOpen = ref(false)
 const MAX_RETRIES = 2
 let _retryTimer = null
 
@@ -98,66 +99,92 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 </script>
 
 <template>
-  <button
-    class="era-card"
-    :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky, 'best-of-active': bestOf }"
-    :style="{ ...gradientStyle, '--stagger': animDelay }"
-    :aria-expanded="expanded"
-    @click="emit('click')"
+  <div
+    class="era-card-wrapper"
+    :class="{ expanded, 'has-colors': colorsReady, 'era-sticky': sticky }"
+    :style="{ '--stagger': animDelay }"
   >
-    <!-- Single unified layout -->
-    <div class="era-layout">
-      <!-- Art: responsive sizing via CSS -->
-      <div class="era-art" v-if="artSrc">
-        <img
-          :src="artSrc"
-          alt=""
-          :loading="index < 6 ? 'eager' : 'lazy'"
-          crossorigin="anonymous"
-          @load="onImgLoad"
-          @error="onImgError"
-          class="era-art-img"
-        />
-        <div class="era-art-fallback">
+    <!-- Main clickable card -->
+    <button
+      class="era-card"
+      :class="{ expanded, 'best-of-active': bestOf }"
+      :style="gradientStyle"
+      :aria-expanded="expanded"
+      @click="emit('click')"
+    >
+      <!-- Single unified layout -->
+      <div class="era-layout">
+        <!-- Art: responsive sizing via CSS -->
+        <div class="era-art" v-if="artSrc">
+          <img
+            :src="artSrc"
+            alt=""
+            :loading="index < 6 ? 'eager' : 'lazy'"
+            crossorigin="anonymous"
+            @load="onImgLoad"
+            @error="onImgError"
+            class="era-art-img"
+          />
+          <div class="era-art-fallback">
+            <svg viewBox="0 0 24 24" width="28" height="28">
+              <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="era-art era-art-empty" v-else>
           <svg viewBox="0 0 24 24" width="28" height="28">
             <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
           </svg>
         </div>
-      </div>
-      <div class="era-art era-art-empty" v-else>
-        <svg viewBox="0 0 24 24" width="28" height="28">
-          <path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-        </svg>
-      </div>
 
-      <!-- Info -->
-      <div class="era-info">
-        <h3 class="era-title" :style="{ color: titleColor }">{{ era.name }}</h3>
-        <div v-if="era.alt_names?.length" class="era-alt-names">{{ era.alt_names.join(', ') }}</div>
+        <!-- Info -->
+        <div class="era-info">
+          <h3 class="era-title" :style="{ color: titleColor }">{{ era.name }}</h3>
+          <div v-if="era.alt_names?.length" class="era-alt-names">{{ era.alt_names.join(', ') }}</div>
 
-        <!-- Desktop-only extras -->
-        <p v-if="era.description" class="era-desc">{{ era.description }}</p>
-        <div v-if="era.timeline?.length" class="era-timeline">
-          <div v-for="(evt, i) in era.timeline.slice(0, 4)" :key="i" class="timeline-evt">
-            <span class="timeline-date">{{ evt.date }}</span>
-            <span class="timeline-sep">&mdash;</span>
-            <span class="timeline-text">{{ evt.event }}</span>
+          <!-- Desktop-only timeline -->
+          <div v-if="era.timeline?.length" class="era-timeline">
+            <div v-for="(evt, i) in era.timeline.slice(0, 4)" :key="i" class="timeline-evt">
+              <span class="timeline-date">{{ evt.date }}</span>
+              <span class="timeline-sep">&mdash;</span>
+              <span class="timeline-text">{{ evt.event }}</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </button>
 
-    <!-- Expand indicator -->
-    <div class="era-expand-indicator">
-      <span v-if="bestOf" class="era-mode-label">★ All shown</span>
-      <svg viewBox="0 0 16 16" width="14" height="14" :class="{ rotated: expanded }">
-        <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
-      </svg>
+    <!-- Description row — shown below the main card button if era has a description.
+         Separate element so we can use a proper <button> for the toggle without
+         nesting interactive elements. -->
+    <div v-if="era.description" class="era-desc-row">
+      <button
+        class="era-desc-toggle"
+        :aria-expanded="descOpen"
+        @click.stop="descOpen = !descOpen"
+      >
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+          <path fill="currentColor" d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75zm7.251 10.324l.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574zM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25z"/>
+        </svg>
+        <span>{{ descOpen ? 'Hide description' : 'Description' }}</span>
+        <svg class="desc-chevron" :class="{ 'desc-chevron-open': descOpen }" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
+          <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
+        </svg>
+      </button>
+      <Transition name="desc-expand">
+        <p v-if="descOpen" class="era-desc-content">{{ era.description }}</p>
+      </Transition>
     </div>
-  </button>
+  </div>
 </template>
 
 <style scoped>
+/* ── Wrapper — holds card button + optional description row ── */
+.era-card-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
 .era-card {
   width: 100%;
   position: relative;
@@ -276,31 +303,9 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   white-space: nowrap;
 }
 
-/* Desktop-only content: hidden on mobile */
-.era-desc,
+/* Timeline: hidden on mobile */
 .era-timeline {
   display: none;
-}
-
-/* Expand indicator */
-.era-expand-indicator {
-  position: absolute;
-  bottom: 8px;
-  right: 12px;
-  color: rgba(255, 255, 255, 0.3);
-  transition: color 0.15s;
-}
-
-.era-card:hover .era-expand-indicator {
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.era-expand-indicator svg {
-  transition: transform 0.2s ease;
-}
-
-.era-expand-indicator .rotated {
-  transform: rotate(180deg);
 }
 
 /* ── Desktop (768px+) ── */
@@ -325,17 +330,6 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   .era-alt-names {
     font-size: 12px;
     margin-bottom: 6px;
-  }
-
-  .era-desc {
-    display: -webkit-box;
-    color: rgba(255, 255, 255, 0.65);
-    font-size: 12px;
-    line-height: 1.5;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin-bottom: 8px;
   }
 
   .era-timeline {
@@ -372,8 +366,76 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   }
 }
 
+/* ── Description row ── */
+.era-desc-row {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.era-card.expanded + .era-desc-row {
+  border-color: rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+}
+
+.era-desc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  transition: color 0.15s;
+}
+
+.era-desc-toggle:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.desc-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  opacity: 0.6;
+}
+
+.desc-chevron-open {
+  transform: rotate(180deg);
+}
+
+.era-desc-content {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 0 14px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Smooth expand/collapse transition */
+.desc-expand-enter-active,
+.desc-expand-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.desc-expand-enter-from,
+.desc-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 /* ── Sticky state (all sizes) ── */
-.era-card.era-sticky {
+.era-card-wrapper.era-sticky .era-card {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -381,96 +443,72 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   animation: none;
 }
 
-.era-card.era-sticky .era-layout {
+.era-card-wrapper.era-sticky .era-card .era-layout {
   padding: 8px 16px;
   gap: 10px;
   align-items: center;
 }
 
-.era-card.era-sticky .era-art {
+.era-card-wrapper.era-sticky .era-card .era-art {
   width: 32px;
   height: 32px;
   border-radius: 4px;
 }
 
-.era-card.era-sticky .era-art svg {
+.era-card-wrapper.era-sticky .era-card .era-art svg {
   width: 16px;
   height: 16px;
 }
 
-.era-card.era-sticky .era-title {
+.era-card-wrapper.era-sticky .era-card .era-title {
   font-size: 14px;
   -webkit-line-clamp: 1;
   margin-bottom: 0;
 }
 
-.era-card.era-sticky .era-alt-names,
-.era-card.era-sticky .era-desc,
-.era-card.era-sticky .era-timeline {
+.era-card-wrapper.era-sticky .era-card .era-alt-names,
+.era-card-wrapper.era-sticky .era-card .era-timeline {
   display: none;
 }
 
-.era-card.era-sticky .era-expand-indicator {
-  bottom: 50%;
-  transform: translateY(50%);
+.era-card-wrapper.era-sticky .era-desc-row {
+  display: none;
 }
 
 /* Mobile sticky: remove horizontal borders */
 @media (max-width: 767px) {
-  .era-card.era-sticky {
+  .era-card-wrapper.era-sticky .era-card {
     border-radius: 0;
     border-left: none;
     border-right: none;
-  }
-
-  .era-expand-indicator {
-    bottom: 6px;
-    right: 10px;
   }
 }
 
 /* Desktop sticky: rounded top corners */
 @media (min-width: 768px) {
-  .era-card.era-sticky {
+  .era-card-wrapper.era-sticky .era-card {
     border-radius: 6px 6px 0 0;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
 
-  .era-card.era-sticky .era-layout {
+  .era-card-wrapper.era-sticky .era-card .era-layout {
     padding: 10px 16px;
     gap: 12px;
   }
 
-  .era-card.era-sticky .era-art {
+  .era-card-wrapper.era-sticky .era-card .era-art {
     width: 40px;
     height: 40px;
   }
 
-  .era-card.era-sticky .era-title {
+  .era-card-wrapper.era-sticky .era-card .era-title {
     font-size: 15px;
-  }
-
-  .era-card.era-sticky .era-expand-indicator {
-    right: 16px;
   }
 }
 
 /* Best-of mode: era clicking is disabled */
 .era-card.best-of-active {
   cursor: default;
-}
-
-.era-card.best-of-active .era-expand-indicator {
-  opacity: 0.35;
-}
-
-.era-mode-label {
-  font-size: 9px;
-  color: var(--text-dim);
-  font-weight: 500;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  margin-right: 4px;
 }
 
 /* Reduced motion */

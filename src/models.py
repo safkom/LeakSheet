@@ -94,6 +94,10 @@ class SongVersion(BaseModel):
     available_length: str | None = Field(None, description="Full/Partial/Snippet/etc.")
     quality: str | None = Field(None, description="CD Quality/High Quality/etc.")
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
+    # Spreadsheet cell background colors (hex, e.g. "#4caf50") for quality/availability.
+    # Only set when the tracker uses custom non-neutral cell colors.
+    quality_color: str | None = Field(None, description="Background hex color of the quality cell")
+    available_length_color: str | None = Field(None, description="Background hex color of the available_length cell")
     # Carti-specific fields
     date_of_recording: str | None = Field(None, description="Date of recording (Carti tracker)")
     type: str | None = Field(None, description="Song type (Carti tracker)")

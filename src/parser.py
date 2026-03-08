@@ -36,6 +36,65 @@ from src.models import (
 )
 
 
+
+# ---------------------------------------------------------------------------
+# Stylesheet color extraction
+# ---------------------------------------------------------------------------
+
+# Match CSS class rules like ".s263{...; background-color:#4caf50; ...}"
+_CSS_CLASS_RULE_RE = re.compile(
+    r"\.(s\d+)\s*\{([^}]+)\}",
+    re.DOTALL,
+)
+_BG_COLOR_RE = re.compile(
+    r"background-color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))",
+    re.IGNORECASE,
+)
+# Colors considered "default" / neutral — skip these (won't provide UX value)
+_NEUTRAL_HEX = frozenset({
+    "#ffffff", "#fff", "#000000", "#000",
+    "#fafafa", "#f8f9fa", "#f3f3f3", "#eeeeee",
+    "#cccccc", "#1e1e1e", "#1a1a1a", "#1f1f1f",
+    "#2a2a2a", "#161616", "#0f0f0f", "#0d0d0d",
+})
+
+
+def _extract_class_colors(html: str) -> dict[str, str]:
+    """Parse the <style> section of a Google Sheets HTML export and return
+    a mapping of {css_class_name: hex_background_color} for non-neutral cells.
+
+    Only classes with an explicit, non-neutral background-color are included.
+    """
+    result: dict[str, str] = {}
+    # Find the first <style> block
+    style_match = re.search(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+    if not style_match:
+        return result
+
+    style_text = style_match.group(1)
+    for m in _CSS_CLASS_RULE_RE.finditer(style_text):
+        cls = m.group(1)  # e.g. "s263"
+        decl = m.group(2)
+        bg_match = _BG_COLOR_RE.search(decl)
+        if not bg_match:
+            continue
+        color = bg_match.group(1).strip().lower()
+        # Convert rgb(...) to hex
+        if color.startswith("rgb"):
+            try:
+                nums = re.findall(r"\d+", color)
+                if len(nums) >= 3:
+                    r, g, b = int(nums[0]), int(nums[1]), int(nums[2])
+                    color = f"#{r:02x}{g:02x}{b:02x}"
+            except ValueError:
+                continue
+        if color in _NEUTRAL_HEX:
+            continue
+        result[cls] = color
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Low-level HTML table extraction
 # ---------------------------------------------------------------------------
@@ -126,8 +185,8 @@ class _TableExtractor(HTMLParser):
 
 
 class _Cell:
-    """A single table cell with text content, extracted links, images, and CSS class."""
-    __slots__ = ("text", "links", "images", "css_class")
+    """A single table cell with text content, extracted links, images, CSS class, and bg color."""
+    __slots__ = ("text", "links", "images", "css_class", "bg_color")
 
     def __init__(
         self,
@@ -135,10 +194,13 @@ class _Cell:
         links: list[str] | None = None,
         images: list[str] | None = None,
         css_class: str = "",
+        bg_color: str | None = None,
     ) -> None:
         self.text = text
         self.links = links or []
         self.images = images or []
+        self.css_class = css_class
+        self.bg_color = bg_color
         self.css_class = css_class
 
     def __repr__(self) -> str:
@@ -150,10 +212,21 @@ class _Cell:
         return "".join(parts) + ")"
 
 
-def extract_table(html_content: str) -> list[list[_Cell]]:
-    """Parse HTML and return all table rows as lists of _Cell."""
+def extract_table(html_content: str, color_map: dict[str, str] | None = None) -> list[list[_Cell]]:
+    """Parse HTML and return all table rows as lists of _Cell.
+
+    If *color_map* is provided (from `_extract_class_colors`), each cell's
+    `bg_color` is resolved from its CSS class at construction time.
+    """
     parser = _TableExtractor()
     parser.feed(html_content)
+    if not color_map:
+        return parser.rows
+    # Resolve bg_color for every cell whose class is in color_map
+    for row in parser.rows:
+        for cell in row:
+            if cell.css_class and cell.css_class in color_map:
+                cell.bg_color = color_map[cell.css_class]
     return parser.rows
 
 
@@ -533,7 +606,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     This is the main entry point for parsing a single tracker.
     """
-    rows = extract_table(html_content)
+    # Extract cell background colors from the stylesheet (non-neutral only)
+    color_map = _extract_class_colors(html_content)
+    rows = extract_table(html_content, color_map)
     if not rows:
         return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
 
@@ -939,10 +1014,22 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         parse_song_credits(after_badge)
     )
 
+    # Check for "(unfinished)" or "[unfinished]" in alt_titles or title.
+    # These are status tags, not alternative names — remove from alt_titles
+    # and promote to version_tag (overriding only if no tag was found yet).
+    _unfinished_re = re.compile(r"\[?unfinished\]?", re.IGNORECASE)
+    _found_unfinished = any(_unfinished_re.fullmatch(t.strip()) for t in alt_titles)
+    if _found_unfinished:
+        alt_titles = [t for t in alt_titles if not _unfinished_re.fullmatch(t.strip())]
+
     # Extract version tag from the clean title
     version_tag, _base = extract_version_tag(title)
     # Use base name (tag stripped) to avoid duplication in the UI
     title = _base
+
+    # If found unfinished tag but no explicit version tag, set one
+    if _found_unfinished and not version_tag:
+        version_tag = "Unfinished"
 
     # Build the version object
     notes_idx = col_map.get("notes", 2)
@@ -984,6 +1071,8 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         available_length=_get_cell_text(row, col_map.get("available_length", -1)) or None,
         quality=_get_cell_text(row, col_map.get("quality", -1)) or None,
         links=merged_links,
+        quality_color=_get_cell(row, col_map.get("quality", -1)).bg_color if col_map.get("quality") is not None else None,
+        available_length_color=_get_cell(row, col_map.get("available_length", -1)).bg_color if col_map.get("available_length") is not None else None,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )
@@ -1025,7 +1114,14 @@ def parse_art_tab(html: str) -> dict[str, str]:
     """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
 
     Art tabs in tracker spreadsheets contain full-resolution era artwork.
-    Each row typically has an era name in one cell and an image in another.
+    Each row typically has an era name in one cell and one or more images.
+
+    Multiple images may appear per era (front cover, back cover, promo photo,
+    background art, etc.).  We prefer images whose row contains descriptive
+    text that mentions "cover" — e.g. "Front Cover", "Album Cover", "Cover Art".
+    If no cover-labelled image is found for an era, we fall back to the first
+    available image in the row.
+
     Returns a dict keyed by the normalised era match key (lowercase, stripped).
     """
     rows = extract_table(html)
@@ -1035,12 +1131,17 @@ def parse_art_tab(html: str) -> dict[str, str]:
     # Skip header row if it has no images (it's a label row)
     start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
 
-    result: dict[str, str] = {}
+    # First pass: collect all images per era key, noting which have cover descriptions.
+    # era_info: {era_key: {"cover": url, "first": url}}
+    era_info: dict[str, dict[str, str | None]] = {}
+
+    _COVER_RE = re.compile(r"\bcover\b", re.IGNORECASE)
+
     for row in rows[start:]:
         if not row:
             continue
 
-        # First image found in the row is the era art
+        # First image found in the row is the candidate
         img_url = next((cell.images[0] for cell in row if cell.images), None)
         if not img_url:
             continue
@@ -1051,8 +1152,27 @@ def parse_art_tab(html: str) -> dict[str, str]:
             continue
 
         key = _era_match_key(era_name)
-        if key:
-            result.setdefault(key, img_url)
+        if not key:
+            continue
+
+        if key not in era_info:
+            era_info[key] = {"cover": None, "first": None}
+
+        # Record the first image seen for this era
+        if era_info[key]["first"] is None:
+            era_info[key]["first"] = img_url
+
+        # Check if any cell text in this row mentions "cover"
+        row_text = " ".join(c.text.strip() for c in row if c.text.strip())
+        if era_info[key]["cover"] is None and _COVER_RE.search(row_text):
+            era_info[key]["cover"] = img_url
+
+    # Build final map: prefer cover-labelled image, fall back to first image
+    result: dict[str, str] = {}
+    for key, info in era_info.items():
+        chosen = info["cover"] or info["first"]
+        if chosen:
+            result[key] = chosen
 
     return result
 

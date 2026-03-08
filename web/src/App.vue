@@ -111,6 +111,60 @@ function clearHistory() {
 }
 
 // ---------------------------------------------------------------------------
+// Artist discovery
+// ---------------------------------------------------------------------------
+
+const DISCOVERY_URL = 'https://assets.artistgrid.cx/artists.ndjson'
+
+const discoveryOpen = ref(false)
+const discoveryArtists = ref([])
+const discoverySearch = ref('')
+const discoveryLoading = ref(false)
+const discoveryError = ref('')
+
+async function loadDiscovery() {
+  if (discoveryOpen.value) {
+    discoveryOpen.value = false
+    return
+  }
+  discoveryOpen.value = true
+  if (discoveryArtists.value.length) return
+  discoveryLoading.value = true
+  discoveryError.value = ''
+  try {
+    const res = await fetch(DISCOVERY_URL)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    discoveryArtists.value = text.trim().split('\n')
+      .filter(Boolean)
+      .map(line => { try { return JSON.parse(line) } catch { return null } })
+      .filter(Boolean)
+      .sort((a, b) => {
+        // Best-rated first, then alphabetical
+        if (a.best && !b.best) return -1
+        if (!a.best && b.best) return 1
+        return a.name.localeCompare(b.name)
+      })
+  } catch (e) {
+    discoveryError.value = `Could not load artist list: ${e.message}`
+  } finally {
+    discoveryLoading.value = false
+  }
+}
+
+const filteredDiscovery = computed(() => {
+  const q = discoverySearch.value.trim().toLowerCase()
+  if (!q) return discoveryArtists.value
+  return discoveryArtists.value.filter(a => a.name.toLowerCase().includes(q))
+})
+
+function pickDiscoveryArtist(artist) {
+  discoveryOpen.value = false
+  discoverySearch.value = ''
+  handleParse(artist.url)
+}
+
+// ---------------------------------------------------------------------------
 // Keyboard controls
 // ---------------------------------------------------------------------------
 
@@ -168,6 +222,58 @@ onUnmounted(() => {
         <TrackerInput :loading="loading" @parse="handleParse" />
 
         <p v-if="error" class="error-msg">{{ error }}</p>
+
+        <!-- Artist discovery -->
+        <div class="discovery-row">
+          <button class="discovery-toggle" :class="{ active: discoveryOpen }" @click="loadDiscovery">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 0 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8Z"/>
+            </svg>
+            Browse Artists
+            <svg class="discovery-chevron" :class="{ open: discoveryOpen }" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
+              <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
+            </svg>
+          </button>
+        </div>
+
+        <Transition name="discovery-expand">
+          <div v-if="discoveryOpen" class="discovery-panel">
+            <div v-if="discoveryLoading" class="discovery-loading">
+              <span class="history-spinner" />
+              <span>Loading artists...</span>
+            </div>
+            <p v-else-if="discoveryError" class="error-msg" style="margin: 0">{{ discoveryError }}</p>
+            <template v-else>
+              <input
+                v-model="discoverySearch"
+                class="discovery-search"
+                placeholder="Search artists…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <p v-if="filteredDiscovery.length === 0" class="discovery-empty">No artists found.</p>
+              <div class="discovery-list">
+                <button
+                  v-for="artist in filteredDiscovery"
+                  :key="artist.url"
+                  class="discovery-item"
+                  :disabled="loading"
+                  @click="pickDiscoveryArtist(artist)"
+                >
+                  <span class="discovery-name">{{ artist.name }}</span>
+                  <span class="discovery-meta">
+                    <span v-if="artist.best" class="discovery-best" title="Curated tracker">★</span>
+                    <span
+                      class="discovery-status"
+                      :class="artist.links_work === 1 ? 'status-ok' : artist.links_work === 2 ? 'status-partial' : 'status-unknown'"
+                      :title="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
+                    >●</span>
+                  </span>
+                </button>
+              </div>
+            </template>
+          </div>
+        </Transition>
 
         <!-- History on landing page -->
         <div v-if="trackerHistory.length" class="landing-history">
@@ -247,6 +353,156 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+/* Artist discovery */
+.discovery-row {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.discovery-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.discovery-toggle:hover,
+.discovery-toggle.active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.discovery-chevron {
+  transition: transform 0.2s ease;
+  opacity: 0.6;
+}
+
+.discovery-chevron.open {
+  transform: rotate(180deg);
+}
+
+.discovery-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  padding: 12px;
+}
+
+.discovery-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.discovery-search {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  margin-bottom: 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.discovery-search:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.discovery-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 12px 0;
+}
+
+.discovery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.discovery-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.discovery-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.discovery-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.discovery-name {
+  font-weight: 500;
+}
+
+.discovery-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.discovery-best {
+  color: #e3b341;
+  font-size: 12px;
+}
+
+.discovery-status {
+  font-size: 9px;
+}
+
+.status-ok { color: #3fb950; }
+.status-partial { color: #d29922; }
+.status-unknown { color: rgba(255, 255, 255, 0.2); }
+
+.discovery-expand-enter-active,
+.discovery-expand-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.discovery-expand-enter-from,
+.discovery-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+  -webkit-transform: translateY(-6px);
+}
+
 /* Landing history cards */
 .landing-history {
   margin-top: 40px;
@@ -302,18 +558,22 @@ onUnmounted(() => {
 
 /* Content fade transition */
 .content-fade-enter-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.25s ease, -webkit-transform 0.25s ease, transform 0.25s ease;
+  -webkit-transition: opacity 0.25s ease, -webkit-transform 0.25s ease;
 }
 .content-fade-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition: opacity 0.18s ease, -webkit-transform 0.18s ease, transform 0.18s ease;
+  -webkit-transition: opacity 0.18s ease, -webkit-transform 0.18s ease;
 }
 .content-fade-enter-from {
   opacity: 0;
-  transform: translateY(8px);
+  -webkit-transform: translate3d(0, 8px, 0);
+  transform: translate3d(0, 8px, 0);
 }
 .content-fade-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
+  -webkit-transform: translate3d(0, -6px, 0);
+  transform: translate3d(0, -6px, 0);
 }
 
 
