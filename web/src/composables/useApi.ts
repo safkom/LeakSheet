@@ -9,11 +9,17 @@
 
 const BASE = '/api'
 
+function _buildSignal(callerSignal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(15000)
+  if (!callerSignal) return timeout
+  return AbortSignal.any([callerSignal, timeout])
+}
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
-    signal: AbortSignal.timeout(15000),
     ...options,
+    signal: _buildSignal(options.signal as AbortSignal | undefined),
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)

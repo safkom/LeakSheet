@@ -397,6 +397,7 @@ export function togglePlay(): void {
         audio.src = resolved.url
         audio.volume = playerState.volume
         audio.play().catch((e) => {
+          playerState.isPlaying = false
           playerState.error = e instanceof Error ? e.message : 'Playback failed'
         })
       }
