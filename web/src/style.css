@@ -63,7 +63,7 @@
   /* Layout constants */
   --player-height: 72px;
   --header-height: 56px;
-  --sticky-era-height: 50px;
+  --sticky-era-height: 0px;
 
   /* Radius aliases */
   --radius-sm: 6px;
