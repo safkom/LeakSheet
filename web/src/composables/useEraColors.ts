@@ -69,9 +69,7 @@ function _dequeue(): void {
     const task = _queue.shift()!
     // Run extraction in a rAF to yield to the browser between tasks
     requestAnimationFrame(() => {
-      task()
-      _running--
-      _dequeue()
+      try { task() } finally { _running--; _dequeue() }
     })
   }
 }
