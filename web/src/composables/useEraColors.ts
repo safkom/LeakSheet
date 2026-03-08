@@ -69,7 +69,14 @@ function _dequeue(): void {
     const task = _queue.shift()!
     // Run extraction in a rAF to yield to the browser between tasks
     requestAnimationFrame(() => {
-      try { task() } finally { _running--; _dequeue() }
+      try {
+        task()
+      } catch (e) {
+        console.error('[useEraColors] queue task threw:', e)
+      } finally {
+        _running--
+        _dequeue()
+      }
     })
   }
 }
