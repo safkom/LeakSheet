@@ -24,7 +24,7 @@ from urllib.parse import urlparse, urlencode
 import httpx
 
 from src.models import Artist
-from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet
+from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet, _era_match_key
 
 
 # ---------------------------------------------------------------------------
@@ -745,6 +745,77 @@ async def async_fetch_sheet_html(
             raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
 
 
+async def _verify_art_images_async(
+    artist: "Artist",
+    art_map: dict[str, str],
+    client: httpx.AsyncClient,
+    threshold: int = 10,
+) -> dict[str, str]:
+    """Filter art_map to entries whose image is visually the same as the
+    existing era.art_url, verified via perceptual hash (pHash).
+
+    Entries with no existing era.art_url pass through unchanged (no baseline
+    to compare against). On any download/decode/import error the entry also
+    passes through (fail-open: never block upgrades on transient errors).
+
+    Args:
+        threshold: Maximum Hamming distance to consider images identical.
+            Values 0–6 indicate the same image at different resolutions;
+            16+ indicate different content. Default 10 provides a safe margin.
+    """
+    try:
+        import io
+        import imagehash
+        from PIL import Image
+    except ImportError:
+        return art_map  # optional deps not installed — skip verification
+
+    # Build {era_key: existing_url} for keys that appear in art_map
+    existing_by_key: dict[str, str] = {}
+    for era in artist.eras:
+        if not era.art_url:
+            continue
+        key = _era_match_key(era.name)
+        if key and key in art_map:
+            existing_by_key[key] = era.art_url
+        for alt in era.alt_names:
+            ak = _era_match_key(alt)
+            if ak and ak in art_map and ak not in existing_by_key:
+                existing_by_key[ak] = era.art_url
+
+    if not existing_by_key:
+        return art_map  # no existing art to compare against
+
+    def _phash(content: bytes) -> "imagehash.ImageHash":
+        return imagehash.phash(Image.open(io.BytesIO(content)).convert("RGB"))
+
+    async def _same_image(era_key: str, existing_url: str) -> tuple[str, bool]:
+        try:
+            r1, r2 = await asyncio.gather(
+                client.get(existing_url, timeout=15),
+                client.get(art_map[era_key], timeout=15),
+            )
+            if r1.status_code != 200 or r2.status_code != 200:
+                return era_key, True  # can't fetch — pass through
+            h1, h2 = await asyncio.gather(
+                asyncio.to_thread(_phash, r1.content),
+                asyncio.to_thread(_phash, r2.content),
+            )
+            return era_key, (h1 - h2) <= threshold
+        except Exception:
+            return era_key, True  # fail-open on any error
+
+    results = await asyncio.gather(*[
+        _same_image(k, v) for k, v in existing_by_key.items()
+    ])
+
+    filtered = dict(art_map)
+    for era_key, is_same in results:
+        if not is_same:
+            filtered.pop(era_key, None)
+    return filtered
+
+
 async def async_fetch_and_parse(
     url: str,
     *,
@@ -883,7 +954,11 @@ async def async_fetch_and_parse(
                             _, art_html = art_result
                             art_map = await asyncio.to_thread(parse_art_tab, art_html)
                             if art_map:
-                                apply_art_tab_images(best_artist, art_map)
+                                art_map = await _verify_art_images_async(
+                                    best_artist, art_map, client
+                                )
+                                if art_map:
+                                    apply_art_tab_images(best_artist, art_map)
                     except Exception:
                         pass  # Art tab optional — keep existing art_url on failure
                 if use_cache and best_html:
