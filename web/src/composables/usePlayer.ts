@@ -396,7 +396,9 @@ export function togglePlay(): void {
       if (resolved) {
         audio.src = resolved.url
         audio.volume = playerState.volume
-        audio.play().catch(() => {})
+        audio.play().catch((e) => {
+          playerState.error = e instanceof Error ? e.message : 'Playback failed'
+        })
       }
     }
     return
@@ -405,7 +407,9 @@ export function togglePlay(): void {
   if (playerState.isPlaying) {
     audio.pause()
   } else {
-    audio.play().catch(() => {})
+    audio.play().catch((e) => {
+      playerState.error = e instanceof Error ? e.message : 'Playback failed'
+    })
   }
 }
 

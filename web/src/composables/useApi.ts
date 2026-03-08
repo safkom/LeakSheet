@@ -12,11 +12,12 @@ const BASE = '/api'
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
+    signal: AbortSignal.timeout(15000),
     ...options,
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `HTTP ${res.status}`)
+    const body = await res.json().catch(() => null)
+    throw new Error(body?.detail || `${res.status} ${res.statusText}`)
   }
   return res.json()
 }
