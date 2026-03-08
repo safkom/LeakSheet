@@ -409,6 +409,8 @@ export function togglePlay(): void {
     audio.pause()
   } else {
     audio.play().catch((e) => {
+      playerState.isPlaying = false
+      playerState.loading = false
       playerState.error = e instanceof Error ? e.message : 'Playback failed'
     })
   }
