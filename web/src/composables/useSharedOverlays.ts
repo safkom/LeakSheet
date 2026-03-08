@@ -6,6 +6,7 @@
  */
 
 import { ref, provide, inject, type InjectionKey } from 'vue'
+import type { Song, SongVersion } from './useEraFiltering'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,16 +15,16 @@ import { ref, provide, inject, type InjectionKey } from 'vue'
 export interface ContextMenuState {
   x: number
   y: number
-  song?: any
-  version?: any
+  song?: Song
+  version?: SongVersion
   artistName?: string
   eraName?: string
   eraArt?: string
 }
 
 export interface DescriptionModalState {
-  song?: any
-  version?: any
+  song?: Song
+  version?: SongVersion
   artistName?: string
   eraName?: string
   eraArt?: string

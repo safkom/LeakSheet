@@ -218,7 +218,7 @@ const _PILLOWS_RE = /^https?:\/\/(?:www\.)?(pillows\.su|pillowcase\.su)\/f\/([A-
 const _IMGUR_RE = /^https?:\/\/(?:www\.)?((?:temp\.)?imgur\.gg)\/f\/([A-Za-z0-9_-]+)/i
 const _FROSTE_RE = /^https?:\/\/music\.froste\.lol\/song\/([a-f0-9]+)/i
 
-function _resolveStreamUrl(originalLink) {
+function _resolveStreamUrl(originalLink: string): { url: string; direct: boolean } | null {
   // Pillowcase: proxy through backend — pillows.su returns broken
   // Content-Length in 206 responses which iOS Safari rejects.
   let m = _PILLOWS_RE.exec(originalLink)

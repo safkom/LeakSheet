@@ -7,6 +7,8 @@
  * POST /api/cache/clear → clear fetch cache
  */
 
+import type { Artist } from './useEraFiltering'
+
 const BASE = '/api'
 
 function _buildSignal(callerSignal?: AbortSignal): AbortSignal {
@@ -15,9 +17,9 @@ function _buildSignal(callerSignal?: AbortSignal): AbortSignal {
   return AbortSignal.any([callerSignal, timeout])
 }
 
-async function request(path, options = {}) {
+async function request(path: string, options: RequestInit = {}): Promise<unknown> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
     ...options,
     signal: _buildSignal(options.signal as AbortSignal | undefined),
   })
@@ -32,11 +34,17 @@ async function request(path, options = {}) {
 // when a new one starts.
 let _parseAbort: AbortController | null = null
 
+interface ParseSheetOptions {
+  artistName?: string | null
+  useCache?: boolean
+  forceRefresh?: boolean
+}
+
 /**
  * POST /api/sheet — parse a tracker URL and return full Artist data.
  * Automatically cancels any in-flight previous request.
  */
-export function parseSheet(url, { artistName = null, useCache = true, forceRefresh = false } = {}) {
+export function parseSheet(url: string, { artistName = null, useCache = true, forceRefresh = false }: ParseSheetOptions = {}): Promise<Artist> {
   // Abort any in-flight request
   if (_parseAbort) {
     _parseAbort.abort()
@@ -52,5 +60,5 @@ export function parseSheet(url, { artistName = null, useCache = true, forceRefre
       force_refresh: forceRefresh,
     }),
     signal: _parseAbort.signal,
-  })
+  }) as Promise<Artist>
 }

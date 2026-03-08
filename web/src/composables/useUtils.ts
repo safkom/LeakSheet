@@ -7,7 +7,7 @@
  * @param {string|null} q - Quality string like "CD Quality", "OG File", etc.
  * @returns {string} Badge variant name (matches badge/index.ts variants)
  */
-export function qualityVariant(q) {
+export function qualityVariant(q: string | null | undefined): string {
   if (!q) return 'na'
   const l = q.toLowerCase()
   if (l.includes('og') || l.includes('lossless')) return 'og'
@@ -19,7 +19,7 @@ export function qualityVariant(q) {
 }
 
 /** @deprecated Use qualityVariant instead */
-export function qualityClass(q) {
+export function qualityClass(q: string | null | undefined): string {
   return 'q-' + qualityVariant(q)
 }
 
@@ -28,7 +28,7 @@ export function qualityClass(q) {
  * @param {string|null} avail - Available length like "Full", "Partial", "Snippet", etc.
  * @returns {string} Badge variant name
  */
-export function availabilityVariant(avail) {
+export function availabilityVariant(avail: string | null | undefined): string {
   if (!avail) return 'na'
   const l = avail.toLowerCase()
   if (l.includes('og file') || l.includes('og files')) return 'ogfile'
@@ -43,9 +43,15 @@ export function availabilityVariant(avail) {
 }
 
 /** @deprecated Use availabilityVariant instead */
-export function availabilityClass(avail) {
+export function availabilityClass(avail: string | null | undefined): string {
   const v = availabilityVariant(avail)
   return v === 'na' ? 'a-na' : `a-${v}`
+}
+
+export interface EffectiveBadge {
+  text: string | null | undefined
+  variant: string
+  type: 'quality' | 'availability'
 }
 
 /**
@@ -55,7 +61,7 @@ export function availabilityClass(avail) {
  * @param {string|null} availableLength
  * @returns {{ text: string, variant: string, type: 'quality'|'availability' }|null}
  */
-export function effectiveBadge(quality, availableLength) {
+export function effectiveBadge(quality: string | null | undefined, availableLength: string | null | undefined): EffectiveBadge | null {
   const qLower = (quality || '').toLowerCase().trim()
   const aLower = (availableLength || '').toLowerCase().trim()
 
@@ -78,6 +84,11 @@ export function effectiveBadge(quality, availableLength) {
   return { text: quality, variant: qualityVariant(quality), type: 'quality' }
 }
 
+export interface AvailBadge {
+  text: string | null | undefined
+  variant: string
+}
+
 /**
  * Determine the secondary availability badge to show alongside the quality badge.
  * Returns { text, variant } when the available_length value adds information
@@ -86,7 +97,7 @@ export function effectiveBadge(quality, availableLength) {
  * @param {string|null} availableLength
  * @returns {{ text: string, variant: string }|null}
  */
-export function getAvailBadge(quality, availableLength) {
+export function getAvailBadge(quality: string | null | undefined, availableLength: string | null | undefined): AvailBadge | null {
   const avail = availableLength
   if (!avail) return null
   const al = avail.toLowerCase().trim()
@@ -130,7 +141,6 @@ export function coloredBadgeStyle(hexColor: string | null | undefined): Record<s
     const b = parseInt(clean.slice(4, 6), 16)
     // Perceived luminance
     const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    const textColor = luminance > 0.45 ? '#0a0a0a' : '#ffffff'
     return {
       backgroundColor: `${hexColor}26`, // 15% alpha overlay
       color: hexColor,
