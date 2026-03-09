@@ -49,6 +49,15 @@ _TAB_ITEMS_PATTERN = re.compile(
 # Art tab name keywords (after stripping emojis and normalising whitespace)
 _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", "album arts"})
 
+# Tab names that identify the main unreleased/leaks tracker sheet.
+# When discovered, this tab is tried first before any other GIDs so that
+# trackers with a "Recent" landing tab (e.g. Travis Scott 2.0) don't fool
+# the fetcher into treating the small Recent sheet as the primary data.
+_UNRELEASED_TAB_NAMES = frozenset({
+    "unreleased", "leaks", "leaked", "unreleased songs",
+    "leaked songs", "all unreleased",
+})
+
 # Regex to extract spreadsheet ID from Google Sheets URLs
 # Handles both /d/ID and /u/N/d/ID paths (user-scoped URLs)
 SHEET_ID_PATTERN = re.compile(
@@ -157,6 +166,14 @@ def _infer_artist_name(title: str) -> str:
         if name.endswith(suffix):
             name = name[: -len(suffix)].strip()
 
+    # Step 1b: Strip "Tracker 2.0" / "Tracker v3" style version suffixes
+    # (e.g. "Travis Scott Tracker 2.0" → "Travis Scott Tracker" → "Travis Scott")
+    name = re.sub(r"\s+Tracker\s+[\d.v]+\s*$", "", name, flags=re.IGNORECASE).strip()
+    # Re-apply suffix stripping after version removal
+    for suffix in TITLE_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)].strip()
+
     # Step 2: Strip trailing parenthetical metadata like "(reup 12.29.25)"
     # that prevents suffix stripping on the first pass
     paren_match = re.search(r"\s*\([^)]*\)\s*$", name)
@@ -230,6 +247,24 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
         if name and gid:
             result.setdefault(gid, name)
     return result
+
+
+def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
+    """Return the GID of the main unreleased/leaks tab if one exists.
+
+    Strips emoji and normalises whitespace before comparing against
+    _UNRELEASED_TAB_NAMES. Used to prefer the primary tracker sheet over
+    landing/recent tabs like Travis Scott's "Recent" sheet.
+    """
+    _EMOJI_RE = re.compile(
+        r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
+    )
+    for gid, name in named_tabs.items():
+        clean = _EMOJI_RE.sub(" ", name).strip().lower()
+        clean = re.sub(r"\s+", " ", clean)
+        if clean in _UNRELEASED_TAB_NAMES:
+            return gid
+    return None
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
@@ -515,9 +550,15 @@ def fetch_and_parse(
             gids = ["0"]
 
         # Identify the Art tab GID upfront so we can fetch it after
-        # the main parsing is done (it's a single additional request)
+        # the main parsing is done (it's a single additional request).
+        # Also detect the main "Unreleased" tab and move it to the front
+        # so trackers with a landing/recent tab (e.g. Travis Scott 2.0)
+        # don't get stuck on the wrong sheet.
         named_tabs = _discover_named_tabs(base_html)
         art_gid = _get_art_tab_gid(named_tabs)
+        unreleased_gid = _get_unreleased_tab_gid(named_tabs)
+        if unreleased_gid and unreleased_gid in gids:
+            gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
 
         # Step 3: Try each GID, pick the one that produces the most eras
         best_artist: Artist | None = None

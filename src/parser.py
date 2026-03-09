@@ -429,6 +429,73 @@ def _is_empty_row(row: list[_Cell]) -> bool:
     return all(not c.text.strip() for c in row)
 
 
+def _era_names_are_related(name_a: str, name_b: str) -> bool:
+    """Check if two era name strings likely refer to the same era.
+
+    Used to decide whether a 0-song stub era (built from a name-column header
+    row) should be merged into an adjacent songs-bearing era with a similar
+    but abbreviated name.  Handles:
+      - "Birds In The Trap Sing McKnight" ↔ "Birds"  (prefix match)
+      - "Utopia [Phase 1]"               ↔ "Utopia [P1]"  (same first word)
+    """
+    key_a = _era_match_key(name_a)
+    key_b = _era_match_key(name_b)
+    if not key_a or not key_b:
+        return False
+    if key_a == key_b:
+        return True
+    # One is a strict prefix of the other (e.g. "birds " in "birds in the trap...")
+    if key_a.startswith(key_b + " ") or key_b.startswith(key_a + " "):
+        return True
+    # Same first significant word (e.g. "utopia" in "utopia [phase 1]" ↔ "utopia [p1]")
+    words_a = key_a.split()
+    words_b = key_b.split()
+    first_a = words_a[0] if words_a else ""
+    first_b = words_b[0] if words_b else ""
+    return bool(first_a and first_b and first_a == first_b and len(first_a) > 3)
+
+
+def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
+    """Merge 0-song stub eras into adjacent songs-bearing eras, transferring metadata.
+
+    Some trackers (e.g. Travis Scott 2.0) place era metadata (name, description,
+    year range) in stand-alone name-column rows.  The actual songs use abbreviated
+    era names so the stub era ends up with 0 songs.  This step merges the stub's
+    metadata into the following songs-bearing era when their names are related,
+    preferring the longer/fuller era name from the stub.
+    """
+    if not eras:
+        return eras
+    result: list[Era] = []
+    i = 0
+    while i < len(eras):
+        era = eras[i]
+        era_songs = sum(len(s.songs) for s in era.sections)
+        if era_songs == 0 and i + 1 < len(eras):
+            next_era = eras[i + 1]
+            next_songs = sum(len(s.songs) for s in next_era.sections)
+            if next_songs > 0 and _era_names_are_related(era.name, next_era.name):
+                # Transfer metadata: only fill in fields the songs era is missing
+                if era.description and not next_era.description:
+                    next_era.description = era.description
+                if era.art_url and not next_era.art_url:
+                    next_era.art_url = era.art_url
+                if era.timeline and not next_era.timeline:
+                    next_era.timeline = era.timeline
+                if era.stats_raw and not next_era.stats_raw:
+                    next_era.stats_raw = era.stats_raw
+                    next_era.stats = era.stats
+                # Prefer the longer/fuller name from the header stub
+                if era.name and len(era.name) > len(next_era.name):
+                    next_era.name = era.name
+                # Skip this empty stub
+                i += 1
+                continue
+        result.append(era)
+        i += 1
+    return result
+
+
 # Keywords that identify the tracker footer section (global stats, changelogs, guidelines).
 # Once we hit one of these, we stop parsing songs.
 _FOOTER_KEYWORDS = {
@@ -498,6 +565,10 @@ def _era_match_key(full_era_name: str) -> str:
     key = key.strip()
     # Strip version tags like [V1], [V2], [V3]
     key = VERSION_TAG_PATTERN.sub("", key).strip()
+    # Strip trailing asterisk used by some trackers (e.g. Travis Scott) to
+    # denote the "features/collabs within this era" sub-section.  We want
+    # "Rodeo*" to resolve to the same "Rodeo" era as non-asterisk rows.
+    key = key.rstrip("*").strip()
     # Normalize Unicode diacritics (ë→e, á→a, etc.)
     key = _normalize_unicode(key)
     return key.lower()
@@ -907,22 +978,46 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         # era_col is empty but name_col has text, with very few filled cells.
         # In Yung Lean, "Before Unknown Death" appears in the name column
         # as an era header. In other trackers, this is a section label.
+        # Travis Scott tracker: era header rows have the era name on line 1
+        # and a year-range on line 2 (via a <br> tag), e.g.:
+        #   "The Graduates\n(2007 - 2009)"
+        # Sub-section rows ("Other Media", "Production", etc.) only have a
+        # single-line label with no embedded newline.
         name_col_idx = col_map.get("name", 1)
         name_val = _get_cell_text(row, name_col_idx)
         if name_val:
+            # Split multi-line name cells (e.g. "The Graduates\n(2007 - 2009)")
+            # and use only the first line as the era display name.
+            name_first_line = name_val.split("\n")[0].strip()
+            # A \n means a <br>-separated second line (year range) — reliable
+            # signal that this row is a stats-less era header, not a section.
+            has_multiline_name = "\n" in name_val
             non_empty = sum(1 for c in row if c.text.strip())
             if non_empty <= 3:
-                if current_era is not None:
-                    # Check if subsequent rows use this value as their era key.
-                    # Simple heuristic: if the name_val appears later in the
-                    # era column, treat it as a new era. Otherwise, section.
-                    # For now, add as section — auto-era creation from the
-                    # era column will handle it if needed.
-                    current_era.sections.append(Section(name=name_val))
+                if has_multiline_name and _looks_like_era_name(name_first_line):
+                    # Stats-less era header with multi-line name (Travis style).
+                    # Create a new era and capture the description.
+                    notes_idx = col_map.get("notes", 2)
+                    desc_text = _get_cell_text(row, notes_idx)
+                    new_era = Era(
+                        name=name_first_line,
+                        description=desc_text or None,
+                        sections=[Section()],
+                    )
+                    eras.append(new_era)
+                    # Register full name_val so _era_match_key strips the
+                    # parenthetical year and matches e.g. "The Graduates"
+                    _register_era_keys(new_era, name_val, era_by_key)
+                    current_era = new_era
+                elif current_era is not None:
+                    # Single-line section label (e.g. "Other Media",
+                    # "OG / Uncut Files") — add as a named section to the
+                    # current era and let later song rows auto-create if needed.
+                    current_era.sections.append(Section(name=name_first_line))
                 else:
                     # No current era — create one from the name column.
                     # This handles Yung Lean style trackers.
-                    new_era = Era(name=name_val, sections=[Section()])
+                    new_era = Era(name=name_first_line, sections=[Section()])
                     eras.append(new_era)
                     _register_era_keys(new_era, name_val, era_by_key)
                     current_era = new_era
@@ -937,6 +1032,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     # Step 3: detect and parse global stats row
     tracker_stats = _find_global_stats(rows)
+
+    # Step 3b: merge 0-song stub eras (from name-column era headers) into
+    # their adjacent songs-bearing eras.  Handles trackers like Travis Scott
+    # 2.0 where full era names in header rows differ from abbreviated era
+    # names used in song rows (e.g. "Birds In The Trap Sing McKnight" vs "Birds").
+    eras = _merge_empty_stub_eras(eras)
 
     # Step 4: build parse metadata
     metadata = ParseMetadata(
