@@ -12,6 +12,10 @@ direct audio stream URLs.  Supported hosts:
 
   music.froste.lol
     https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/file
+
+  krakenfiles.com
+    https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  krakencloud.net CDN URL
+    Requires Referer: https://krakenfiles.com/ when streaming from CDN.
 """
 
 from __future__ import annotations
@@ -37,6 +41,18 @@ _IMGUR_PATTERN = re.compile(
 # music.froste.lol
 _FROSTE_PATTERN = re.compile(
     r"https?://music\.froste\.lol/song/([a-f0-9]+)",
+)
+
+# krakenfiles.com
+_KRAKEN_PATTERN = re.compile(
+    r"https?://(?:www\.)?krakenfiles\.com/view/([A-Za-z0-9_-]+)/file\.html",
+)
+
+# krakencloud.net CDN audio URLs (used internally for validation only)
+_KRAKEN_CDN_AUDIO_PATTERN = re.compile(
+    r"https://[a-z0-9]+\.krakencloud\.net/uploads/[^\s\"'<>]+"
+    r"/music\.(?:m4a|mp3|ogg|flac|wav|aac)",
+    re.IGNORECASE,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,7 +120,58 @@ def resolve_stream_url(link: str) -> str | None:
         song_hash = m.group(1)
         return f"https://music.froste.lol/song/{song_hash}/file"
 
+    m = _KRAKEN_PATTERN.match(link)
+    if m:
+        # Return view URL unchanged — resolved to CDN URL lazily in stream_audio()
+        return link
+
     return None
+
+
+# ---------------------------------------------------------------------------
+# krakenfiles.com CDN URL resolution
+# ---------------------------------------------------------------------------
+
+def is_kraken_view_url(url: str) -> bool:
+    """Return True if *url* is a krakenfiles.com view page URL."""
+    return bool(_KRAKEN_PATTERN.match(url))
+
+
+async def resolve_kraken_cdn_url(view_url: str) -> str:
+    """Fetch krakenfiles.com view page and return the CDN audio stream URL.
+
+    The audio URL is embedded directly in the page HTML and always follows
+    the pattern: https://{cdn}.krakencloud.net/uploads/{date}/{id}/music.{ext}
+
+    Args:
+        view_url: e.g. ``https://krakenfiles.com/view/WS7wzkrklJ/file.html``
+
+    Returns:
+        Direct CDN audio URL (krakencloud.net).
+
+    Raises ValueError if the page cannot be fetched or no audio URL is found.
+    """
+    client = _get_shared_client()
+    try:
+        resp = await client.get(
+            view_url,
+            headers={
+                "User-Agent": _STREAM_USER_AGENT,
+                "Referer": "https://krakenfiles.com/",
+            },
+        )
+        if resp.status_code != 200:
+            raise ValueError(
+                f"krakenfiles.com returned {resp.status_code} for {view_url}"
+            )
+        html = resp.text
+    except httpx.HTTPError as exc:
+        raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
+
+    m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
+    if not m:
+        raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
+    return m.group(0)
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +270,10 @@ async def stream_audio(
     if is_imgur_api_url(stream_url):
         stream_url = await resolve_imgur_cdn_url(stream_url)
 
+    # krakenfiles.com: fetch view page to extract CDN URL
+    if is_kraken_view_url(stream_url):
+        stream_url = await resolve_kraken_cdn_url(stream_url)
+
     req_headers = {"User-Agent": _STREAM_USER_AGENT}
     if range_header:
         req_headers["Range"] = range_header
@@ -211,6 +282,10 @@ async def stream_audio(
     if "music.froste.lol/song/" in stream_url:
         song_page = stream_url.removesuffix("/download")
         req_headers["Referer"] = song_page
+
+    # krakencloud.net requires Referer: https://krakenfiles.com/
+    if "krakencloud.net" in stream_url:
+        req_headers["Referer"] = "https://krakenfiles.com/"
 
     client = _get_shared_client()
 

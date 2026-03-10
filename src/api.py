@@ -204,6 +204,7 @@ _STREAM_ALLOWED_DOMAINS = {
     "imgur.gg",
     "temp.imgur.gg",
     "music.froste.lol",
+    "krakenfiles.com",
 }
 
 

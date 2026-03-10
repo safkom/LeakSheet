@@ -511,8 +511,16 @@ def fetch_and_parse(
             name = _resolve_artist_name(html, title)
             artist = parse_sheet(html, name)
             if artist.eras:
-                artist.source_url = url
-                return artist
+                # Before returning, check if this page reveals a better
+                # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
+                # The GID-specific HTML embeds all tab names via items.push() JS,
+                # so no extra request is needed.
+                named_tabs = _discover_named_tabs(html)
+                unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
+                if not unreleased_tab_gid or unreleased_tab_gid == gid:
+                    artist.source_url = url
+                    return artist
+                # A better "Unreleased" tab exists — fall through to full discovery
             # GID produced 0 eras — fall through to GID discovery below
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
@@ -895,8 +903,16 @@ async def async_fetch_and_parse(
             name = _resolve_name(html, title)
             artist = await asyncio.to_thread(parse_sheet, html, name)
             if artist.eras:
-                artist.source_url = url
-                return artist
+                # Before returning, check if this page reveals a better
+                # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
+                # The GID-specific HTML embeds all tab names via items.push() JS,
+                # so no extra request is needed.
+                named_tabs = _discover_named_tabs(html)
+                unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
+                if not unreleased_tab_gid or unreleased_tab_gid == gid:
+                    artist.source_url = url
+                    return artist
+                # A better "Unreleased" tab exists — fall through to full discovery
             # GID produced 0 eras — fall through to GID discovery below
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
@@ -928,9 +944,14 @@ async def async_fetch_and_parse(
             if not gids:
                 gids = ["0"]
 
-            # Identify Art tab GID so we can fetch high-quality images after
+            # Identify Art tab GID and prioritize the "Unreleased" tab (mirrors
+            # the sync version) so trackers with a landing/recent tab don't get
+            # stuck on the wrong sheet.
             named_tabs = _discover_named_tabs(base_html)
             art_gid = _get_art_tab_gid(named_tabs)
+            unreleased_gid = _get_unreleased_tab_gid(named_tabs)
+            if unreleased_gid and unreleased_gid in gids:
+                gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
 
             # --- Fetch all GID pages concurrently, then parse to pick best ---
             async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
