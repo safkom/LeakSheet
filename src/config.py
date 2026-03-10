@@ -98,6 +98,15 @@ COLUMN_ALIASES: dict[str, str] = {
     "downloads": "links",
     "download": "links",
     "og link(s)": "links",        # XXXTENTACION (secondary links)
+    "main link": "links",         # Juice WRLD
+    "alternate links": "alt_links",  # Juice WRLD
+    "alternate link": "alt_links",
+    "alt links": "alt_links",
+    "alt link": "alt_links",
+    "mirror links": "alt_links",
+    "mirror link": "alt_links",
+    "mirrors": "alt_links",
+    "mirror": "alt_links",
 
     # Streaming (treated as availability info or skipped)
     "streaming": "streaming",

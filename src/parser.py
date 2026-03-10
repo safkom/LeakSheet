@@ -1142,10 +1142,12 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     samples = extract_samples(notes_text) if notes_text else []
 
     links_idx = col_map.get("links")
+    alt_links_idx = col_map.get("alt_links")
     link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
-    # Collect links from both the dedicated links cell and the notes cell,
+    alt_link_cell = _get_cell(row, alt_links_idx) if alt_links_idx is not None else _Cell()
+    # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
     # merging them while preserving order and removing duplicates.
-    all_links = _extract_links_from_cell(link_cell)
+    all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell)
     note_links = _extract_links_from_cell(notes_cell)
     seen: set[str] = set()
     merged_links: list[str] = []
