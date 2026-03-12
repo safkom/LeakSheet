@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { artProxyUrl } from '../composables/usePlayer'
-import { BADGE_MAP } from '@/composables/useUtils'
+import { BADGE_MAP, qualityVariant, availabilityVariant, coloredBadgeStyle } from '@/composables/useUtils'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -66,8 +66,14 @@ function copyLink(link) {
 const details = computed(() => {
   const items = []
   if (v.value?.version_tag) items.push({ label: 'Version', value: v.value.version_tag })
-  if (v.value?.quality) items.push({ label: 'Quality', value: v.value.quality })
-  if (v.value?.available_length) items.push({ label: 'Available', value: v.value.available_length })
+  if (v.value?.quality) {
+    const style = v.value.quality_color ? coloredBadgeStyle(v.value.quality_color) : undefined
+    items.push({ label: 'Quality', value: v.value.quality, badgeVariant: style ? undefined : qualityVariant(v.value.quality), badgeStyle: style })
+  }
+  if (v.value?.available_length) {
+    const style = v.value.available_length_color ? coloredBadgeStyle(v.value.available_length_color) : undefined
+    items.push({ label: 'Available', value: v.value.available_length, badgeVariant: style ? undefined : availabilityVariant(v.value.available_length), badgeStyle: style })
+  }
   if (v.value?.track_length) items.push({ label: 'Duration', value: v.value.track_length })
   if (v.value?.file_date) items.push({ label: 'File Date', value: v.value.file_date })
   if (v.value?.leak_date) items.push({ label: 'Leak Date', value: v.value.leak_date })
@@ -114,7 +120,8 @@ const details = computed(() => {
           <div class="detail-grid">
             <template v-for="d in details" :key="d.label">
               <span class="detail-label">{{ d.label }}</span>
-              <span class="detail-value">{{ d.value }}</span>
+              <Badge v-if="d.badgeVariant || d.badgeStyle" :variant="d.badgeVariant" :style="d.badgeStyle" class="self-center">{{ d.value }}</Badge>
+              <span v-else class="detail-value">{{ d.value }}</span>
             </template>
           </div>
         </div>
