@@ -43,20 +43,18 @@ async function handleParse(url) {
     await _waitForImages(data)
     activeArtist.value = data
     // Add to history (or update existing) and persist
-    const existing = trackerHistory.value.find(h => h.source_url === url)
-    if (existing) {
-      existing.name = data.name
-      existing.total_songs = data.total_songs
-    } else {
-      trackerHistory.value.unshift({
-        name: data.name,
-        source_url: url,
-        total_songs: data.total_songs,
-      })
-      // Cap history at 20 entries
-      if (trackerHistory.value.length > 20) {
-        trackerHistory.value = trackerHistory.value.slice(0, 20)
-      }
+    const existingIndex = trackerHistory.value.findIndex(h => h.source_url === url)
+    if (existingIndex !== -1) {
+      trackerHistory.value.splice(existingIndex, 1)
+    }
+    trackerHistory.value.unshift({
+      name: data.name,
+      source_url: url,
+      total_songs: data.total_songs,
+    })
+    // Cap history at 20 entries
+    if (trackerHistory.value.length > 20) {
+      trackerHistory.value = trackerHistory.value.slice(0, 20)
     }
     saveHistory(trackerHistory.value)
   } catch (e) {

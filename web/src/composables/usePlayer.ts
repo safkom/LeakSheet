@@ -217,6 +217,7 @@ function _getAudio() {
 const _PILLOWS_RE = /^https?:\/\/(?:www\.)?(pillows\.su|pillowcase\.su)\/f\/([A-Za-z0-9_-]+)/i
 const _IMGUR_RE = /^https?:\/\/(?:www\.)?((?:temp\.)?imgur\.gg)\/f\/([A-Za-z0-9_-]+)/i
 const _FROSTE_RE = /^https?:\/\/music\.froste\.lol\/song\/([a-f0-9]+)/i
+const _KRAKEN_RE = /^https?:\/\/(?:www\.)?krakenfiles\.com\/view\/[A-Za-z0-9_-]+\/file\.html/i
 
 function _resolveStreamUrl(originalLink: string): { url: string; direct: boolean } | null {
   // Pillowcase: proxy through backend — pillows.su returns broken
@@ -238,6 +239,12 @@ function _resolveStreamUrl(originalLink: string): { url: string; direct: boolean
     return { url: `https://music.froste.lol/song/${m[1]}/file`, direct: true }
   }
 
+  // krakenfiles.com: proxy through backend (CORS restricted, requires page scraping)
+  m = _KRAKEN_RE.exec(originalLink)
+  if (m) {
+    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
+  }
+
   return null
 }
 
@@ -245,7 +252,7 @@ function _resolveStreamUrl(originalLink: string): { url: string; direct: boolean
  * Find the first streamable link from a version's links array.
  * Returns the original link or null.
  */
-const _STREAM_HOSTS = /^https?:\/\/(?:(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)\/f\/|music\.froste\.lol\/song\/[a-f0-9]+)/i
+const _STREAM_HOSTS = /^https?:\/\/(?:(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)\/f\/|music\.froste\.lol\/song\/[a-f0-9]+|(?:www\.)?krakenfiles\.com\/view\/[A-Za-z0-9_-]+\/file\.html)/i
 
 export function findStreamableLink(links: string[] | null | undefined): string | null {
   if (!links?.length) return null
