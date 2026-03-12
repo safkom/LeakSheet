@@ -145,7 +145,7 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
   border-color: rgba(88, 166, 255, 0.1);
 }
 
-/* Equalizer animation for playing state */
+/* Equalizer animation for playing state — @keyframes eq-bar defined globally in style.css */
 .version-row.playing .v-badge-slot {
   display: flex;
   align-items: center;

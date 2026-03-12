@@ -267,7 +267,7 @@ function handleAddToQueue(e) {
   opacity: 0.6;
 }
 
-/* Equalizer animation for playing state */
+/* Equalizer animation for playing state — @keyframes eq-bar defined globally in style.css */
 .song-row.playing .badge-slot {
   display: flex;
   align-items: center;

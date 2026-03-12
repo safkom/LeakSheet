@@ -3,6 +3,11 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { addToQueue } from '../composables/usePlayer'
 
+// Module-level controller so the download fetch survives component unmounting.
+// (ContextMenu closes immediately after Download is clicked, which would abort
+// a component-ref-based controller via onUnmounted.)
+let _activeDownloadController: AbortController | null = null
+
 const props = defineProps({
   x: Number,
   y: Number,
@@ -18,7 +23,6 @@ const emit = defineEmits(['close', 'show-description'])
 const menuRef = ref(null)
 const adjustedX = ref(props.x)
 const adjustedY = ref(props.y)
-const downloadAbort = ref<AbortController | null>(null)
 
 onMounted(async () => {
   await nextTick()
@@ -43,7 +47,6 @@ onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick)
   document.removeEventListener('contextmenu', handleOutsideClick)
   document.removeEventListener('keydown', handleEscape)
-  downloadAbort.value?.abort()
 })
 
 function handleOutsideClick() {
@@ -85,26 +88,43 @@ function openOriginalUrl() {
   emit('close')
 }
 
+const _MIME_TO_EXT: Record<string, string> = {
+  'audio/mp4': '.m4a',
+  'audio/mpeg': '.mp3',
+  'audio/ogg': '.ogg',
+  'audio/wav': '.wav',
+  'audio/flac': '.flac',
+  'audio/aac': '.aac',
+  'audio/x-m4a': '.m4a',
+}
+
 function download() {
   const v = props.version || props.song?.versions?.[0]
   if (!v?.links?.length) return
   const link = v.links[0]
-  const filename = `${v.name || 'track'}.mp3`
+  const baseName = v.name || 'track'
   // Use the stream proxy with download flag for proper Content-Disposition
   const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
-  downloadAbort.value = new AbortController()
-  fetch(downloadUrl, { signal: downloadAbort.value.signal })
+  // Abort any previous in-flight download before starting a new one
+  _activeDownloadController?.abort()
+  _activeDownloadController = new AbortController()
+  const ctrl = _activeDownloadController
+  fetch(downloadUrl, { signal: ctrl.signal })
     .then(res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.blob()
+      // Derive extension from Content-Type so FLAC/OGG/WAV files get the right name
+      const ct = res.headers.get('content-type')?.split(';')[0].trim() || ''
+      const ext = _MIME_TO_EXT[ct] || '.mp3'
+      return res.blob().then(blob => ({ blob, ext }))
     })
-    .then(blob => {
+    .then(({ blob, ext }) => {
       const blobUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = blobUrl
-      a.download = filename
+      a.download = `${baseName}${ext}`
       a.click()
       URL.revokeObjectURL(blobUrl)
+      if (_activeDownloadController === ctrl) _activeDownloadController = null
       toast.success('Download complete')
     })
     .catch(err => {

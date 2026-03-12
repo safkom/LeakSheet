@@ -468,14 +468,14 @@ export function stopTrack(): void {
   _updateMediaSession()
 }
 
-export function seekTo(seconds) {
+export function seekTo(seconds: number) {
   const audio = _getAudio()
   if (audio.src && isFinite(seconds)) {
     audio.currentTime = Math.max(0, Math.min(seconds, audio.duration || Infinity))
   }
 }
 
-export function setVolume(v) {
+export function setVolume(v: number) {
   playerState.volume = Math.max(0, Math.min(1, v))
   if (_audio) {
     _audio.volume = playerState.volume

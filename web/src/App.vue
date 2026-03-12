@@ -13,6 +13,7 @@ const activeArtist = ref(null)
 const loading = ref(false)
 const loadingUrl = ref('')
 const error = ref('')
+const lastUrl = ref('')
 // Multi-artist: track loaded tracker history (persisted in localStorage)
 const STORAGE_KEY = 'leaksheet_recent_trackers'
 
@@ -36,6 +37,7 @@ const hasPlayer = computed(() => playerState.track !== null)
 async function handleParse(url) {
   loading.value = true
   loadingUrl.value = url
+  lastUrl.value = url
   error.value = ''
   try {
     const data = await parseSheet(url)
@@ -60,7 +62,12 @@ async function handleParse(url) {
   } catch (e) {
     // Silently ignore aborted requests (user submitted a new URL)
     if (e instanceof DOMException && e.name === 'AbortError') return
-    error.value = e.message
+    // TimeoutError means the request took too long — offer a retry
+    if (e?.name === 'TimeoutError' || e?.message?.includes('timeout') || e?.message?.includes('timed out')) {
+      error.value = 'Request timed out — check your connection and try again'
+    } else {
+      error.value = e.message
+    }
   } finally {
     loading.value = false
     loadingUrl.value = ''
@@ -219,7 +226,10 @@ onUnmounted(() => {
 
         <TrackerInput :loading="loading" @parse="handleParse" />
 
-        <p v-if="error" class="error-msg">{{ error }}</p>
+        <p v-if="error" class="error-msg">
+          {{ error }}
+          <button v-if="lastUrl" class="retry-btn" @click="handleParse(lastUrl)">Retry</button>
+        </p>
 
         <!-- Artist discovery -->
         <div class="discovery-row">
@@ -349,6 +359,26 @@ onUnmounted(() => {
   text-align: center;
   margin-top: 12px;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.retry-btn {
+  font-size: 12px;
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 4px;
+  padding: 2px 10px;
+  transition: background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.retry-btn:hover {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.7);
 }
 
 /* Artist discovery */

@@ -116,7 +116,17 @@ function queueTrack() {
   toast.success('Added to queue')
 }
 
-const downloadController = ref(null)
+const _MIME_TO_EXT: Record<string, string> = {
+  'audio/mp4': '.m4a',
+  'audio/mpeg': '.mp3',
+  'audio/ogg': '.ogg',
+  'audio/wav': '.wav',
+  'audio/flac': '.flac',
+  'audio/aac': '.aac',
+  'audio/x-m4a': '.m4a',
+}
+
+const downloadController = ref<AbortController | null>(null)
 
 onUnmounted(() => {
   downloadController.value?.abort()
@@ -132,11 +142,14 @@ async function downloadTrack() {
     toast('Downloading...')
     const res = await fetch(downloadUrl, { signal: downloadController.value.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    // Derive extension from Content-Type so FLAC/OGG/WAV files get the right name
+    const ct = res.headers.get('content-type')?.split(';')[0].trim() || ''
+    const ext = _MIME_TO_EXT[ct] || '.mp3'
     const blob = await res.blob()
     const objUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = objUrl
-    a.download = `${track.value.name || track.value.base_name || 'track'}.mp3`
+    a.download = `${track.value.name || track.value.base_name || 'track'}${ext}`
     a.click()
     URL.revokeObjectURL(objUrl)
     toast.success('Download complete')

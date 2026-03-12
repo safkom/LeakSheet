@@ -13,10 +13,13 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import asynccontextmanager
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -189,15 +192,26 @@ def _fix_audio_mime(
 # ---------------------------------------------------------------------------
 
 _IMAGE_ALLOWED_DOMAINS = {
+    # Exact hostnames allowed for image proxy
+    "lh3.googleusercontent.com",
+    "lh4.googleusercontent.com",
+    "lh5.googleusercontent.com",
+    "lh6.googleusercontent.com",
+    "lh7-rt.googleusercontent.com",
+    "ggpht.com",
+    "gstatic.com",
+}
+
+# Subdomains of these are also allowed (e.g. lh3.googleusercontent.com)
+_IMAGE_ALLOWED_PARENT_DOMAINS = {
     "googleusercontent.com",
     "ggpht.com",
-    "google.com",
     "gstatic.com",
-    "lh3.googleusercontent.com",
-    "lh7-rt.googleusercontent.com",
+    "google.com",
 }
 
 _STREAM_ALLOWED_DOMAINS = {
+    # Exact hostnames allowed for stream proxy
     "pillows.su",
     "pillowcase.su",
     "api.pillows.su",
@@ -205,14 +219,15 @@ _STREAM_ALLOWED_DOMAINS = {
     "temp.imgur.gg",
     "music.froste.lol",
     "krakenfiles.com",
+    "cdn.krakenfiles.com",
 }
 
 
-def _is_allowed_domain(url: str, allowed: set[str]) -> bool:
-    """Check if the URL's hostname matches any of the allowed domains.
+def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
+    """Check if the URL's hostname is in the explicit allow-list.
 
-    Handles both exact matches (e.g. "api.pillows.su") and suffix matches
-    (e.g. "lh3.googleusercontent.com" matches "googleusercontent.com").
+    Exact match first. If parent_domains is provided, also accepts any hostname
+    that is a direct or nested subdomain of one of those parent domains.
     """
     from urllib.parse import urlparse
     try:
@@ -220,7 +235,11 @@ def _is_allowed_domain(url: str, allowed: set[str]) -> bool:
         if not hostname:
             return False
         hostname = hostname.lower()
-        return any(hostname == d or hostname.endswith("." + d) for d in allowed)
+        if hostname in allowed:
+            return True
+        if parent_domains:
+            return any(hostname == d or hostname.endswith("." + d) for d in parent_domains)
+        return False
     except Exception:
         return False
 
@@ -234,9 +253,9 @@ _proxy_client: httpx.AsyncClient | None = None
 
 
 def _get_proxy_client() -> httpx.AsyncClient:
-    """Return shared httpx client, creating it on first use."""
+    """Return shared httpx client, creating (or re-creating) as needed."""
     global _proxy_client
-    if _proxy_client is None:
+    if _proxy_client is None or _proxy_client.is_closed:
         _proxy_client = httpx.AsyncClient(
             timeout=15,
             follow_redirects=True,
@@ -291,7 +310,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition"],
 )
 
 
@@ -369,7 +388,7 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
-    if not _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS):
+    if not _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
         raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
 
     # Conditional headers — send browser-like headers for Google domains
@@ -439,8 +458,10 @@ async def proxy_stream(
     try:
         resp = await stream_audio(stream_url, range_header=range_header)
     except ValueError as e:
+        logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
+        logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
 
     raw_ct = resp.headers.get("content-type")
