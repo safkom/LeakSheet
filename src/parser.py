@@ -424,6 +424,40 @@ def _is_section_separator(row: list[_Cell]) -> bool:
     return False
 
 
+def _is_section_label_version(
+    version: "SongVersion", row: list[_Cell], era_col: int
+) -> bool:
+    """Return True if this parsed version is structurally a section/sub-era label.
+
+    Some trackers place sub-era labels (e.g. "Full", "Pre-VMA",
+    "Watch The Throne – EP", "Before Rick Rubin") as rows that have the era
+    name in the era column and only the label text in the name column, with
+    nothing else filled in.  These look like songs to _parse_song_row but
+    should become named sections inside the current era.
+
+    Detection is structural (no keyword list needed):
+    - No song-specific data: no links, no quality/date metadata, no credits
+    - Only the era cell + the label cell are non-empty in the row
+    """
+    if version.links:
+        return False
+    if version.quality or version.track_length or version.file_date:
+        return False
+    if version.leak_date or version.available_length:
+        return False
+    if version.featuring or version.producers or version.collaboration:
+        return False
+    # Substantive notes → real song entry (e.g. "Unknown date, rumoured leak")
+    if version.notes and len(version.notes.strip()) > 20:
+        return False
+    # Count non-era cells with text; a section label row has only one (the label)
+    non_era_filled = sum(
+        1 for i, c in enumerate(row)
+        if i != era_col and c.text.strip()
+    )
+    return non_era_filled <= 1
+
+
 def _is_empty_row(row: list[_Cell]) -> bool:
     """Check if all cells in a row are empty."""
     return all(not c.text.strip() for c in row)
@@ -886,8 +920,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 current_era = matched_era
                 version = _parse_song_row(row, col_map)
                 if version:
-                    _add_version_to_era(current_era, version)
-                    song_rows += 1
+                    if _is_section_label_version(version, row, era_col):
+                        current_era.sections.append(Section(name=version.name))
+                    else:
+                        _add_version_to_era(current_era, version)
+                        song_rows += 1
                 continue
 
             # No matching era found in era_by_key (exact or fuzzy).
@@ -937,7 +974,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             name_idx = col_map.get("name", 1)
                             timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                             timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                            new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
+                            # Scan for cover art
+                            _art_url_ac = None
+                            for _cc in row:
+                                if _cc.images and not _art_url_ac:
+                                    _art_url_ac = _cc.images[0]
+                                    break
+                            new_era = Era(name=row_era, timeline=timeline, art_url=_art_url_ac, sections=[Section()])
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key)
                             current_era = new_era
@@ -968,7 +1011,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     name_idx = col_map.get("name", 1)
                     timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                     timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                    new_era = Era(name=row_era, timeline=timeline, sections=[Section()])
+                    # Scan for cover art
+                    _art_url_nc = None
+                    for _cc in row:
+                        if _cc.images and not _art_url_nc:
+                            _art_url_nc = _cc.images[0]
+                            break
+                    new_era = Era(name=row_era, timeline=timeline, art_url=_art_url_nc, sections=[Section()])
                     eras.append(new_era)
                     _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
@@ -996,11 +1045,23 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             if non_empty <= 3:
                 if has_multiline_name and _looks_like_era_name(name_first_line):
                     # Stats-less era header with multi-line name (Travis style).
-                    # Create a new era and capture the description.
+                    # Create a new era, capture description, and scan for art image.
                     notes_idx = col_map.get("notes", 2)
                     desc_text = _get_cell_text(row, notes_idx)
+                    # Scan cells for cover art (same logic as _is_era_header path)
+                    _era_art_url = None
+                    _name_cell_ml = _get_cell(row, name_col_idx)
+                    if _name_cell_ml.images and name_first_line:
+                        _era_art_url = _name_cell_ml.images[0]
+                    for _ci, _cc in enumerate(row):
+                        if _ci == name_col_idx:
+                            continue
+                        if _cc.images and not _era_art_url:
+                            _era_art_url = _cc.images[0]
+                            break
                     new_era = Era(
                         name=name_first_line,
+                        art_url=_era_art_url,
                         description=desc_text or None,
                         sections=[Section()],
                     )

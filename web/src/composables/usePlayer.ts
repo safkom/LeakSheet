@@ -233,10 +233,11 @@ function _resolveStreamUrl(originalLink: string): { url: string; direct: boolean
     return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
   }
 
-  // music.froste.lol: direct (supports CORS + Range natively)
+  // music.froste.lol: proxy through backend — server returns application/octet-stream
+  // for FLAC files; the backend sniffs magic bytes and corrects the MIME type.
   m = _FROSTE_RE.exec(originalLink)
   if (m) {
-    return { url: `https://music.froste.lol/song/${m[1]}/file`, direct: true }
+    return { url: `/api/stream?url=${encodeURIComponent(originalLink)}`, direct: false }
   }
 
   // krakenfiles.com: proxy through backend (CORS restricted, requires page scraping)

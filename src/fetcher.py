@@ -55,7 +55,8 @@ _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", 
 # the fetcher into treating the small Recent sheet as the primary data.
 _UNRELEASED_TAB_NAMES = frozenset({
     "unreleased", "leaks", "leaked", "unreleased songs",
-    "leaked songs", "all unreleased",
+    "leaked songs", "all unreleased", "all unreleased songs",
+    "all leaks", "main", "tracker",
 })
 
 # Regex to extract spreadsheet ID from Google Sheets URLs
@@ -610,8 +611,12 @@ def fetch_and_parse(
                     best_artist = candidate
                     best_html = sheet_html
 
-                # If we found a good result (>5 eras), stop trying
-                if n_eras >= 5:
+                # Unreleased tab wins as long as it has at least 1 era —
+                # prevents Recents/landing tabs from outcompeting it on era count.
+                if try_gid == unreleased_gid and n_eras >= 1:
+                    break
+                # Otherwise stop once we have a solid result (≥5 eras)
+                elif n_eras >= 5:
                     break
 
             except (httpx.HTTPError, ValueError, KeyError):
@@ -985,7 +990,7 @@ async def async_fetch_and_parse(
             for result in fetched:
                 if result is None:
                     continue
-                _, sheet_html = result
+                result_gid, sheet_html = result
                 try:
                     name = _resolve_name(sheet_html, title)
                     candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
@@ -1001,7 +1006,11 @@ async def async_fetch_and_parse(
                         best_artist = candidate
                         best_html = sheet_html
 
-                    if n_eras >= 5:
+                    # Unreleased tab wins as long as it has at least 1 era —
+                    # prevents Recents/landing tabs from outcompeting it on era count.
+                    if result_gid == unreleased_gid and n_eras >= 1:
+                        break
+                    elif n_eras >= 5:
                         break
                 except (ValueError, KeyError):
                     continue
