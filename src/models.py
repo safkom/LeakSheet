@@ -569,8 +569,8 @@ _OG_FILENAME_PATTERN = re.compile(
 #   "Samples Rufus & Chaka Khan's 'Ain't Nobody'"
 #   'Samples "Ain\'t Nobody" by Rufus & Chaka Khan'
 _SAMPLES_PATTERN = re.compile(
-    r"""Samples\s+[""\u201c](.+?)[""\u201d](?:\s+by\s+(.+?))?(?:\.|,|\n|$)"""
-    r"""|Samples\s+(.+?)(?:'s\s+)?["'\u2018\u2019](.+?)["'\u2018\u2019]""",
+    r"""Samples\s+(?:[^""\u201c]+?\s+)?[""\u201c](.+?)[""\u201d](?:\s+by\s+(.+?))?(?:\.|,|\n|$)"""
+    r"""|Samples\s+(.+?)'s\s+["'\u2018\u2019](.+?)["'\u2018\u2019]""",
     re.IGNORECASE,
 )
 
@@ -598,6 +598,10 @@ def extract_samples(notes: str) -> list[str]:
             song = m.group(1).strip()
             artist = m.group(2).strip() if m.group(2) else None
             if artist:
+                # Strip trailing noise like "and X", "vs.", "feat. Y"
+                artist = re.sub(r'\s+and\s+.+$', '', artist, flags=re.IGNORECASE).strip()
+                artist = re.sub(r'\s+vs\.?\s*.*$', '', artist, flags=re.IGNORECASE).strip()
+                artist = re.sub(r'\s+feat\.?\s+.+$', '', artist, flags=re.IGNORECASE).strip()
                 results.append(f'"{song}" by {artist}')
             else:
                 results.append(f'"{song}"')

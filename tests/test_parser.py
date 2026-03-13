@@ -1034,3 +1034,24 @@ def test_tmb_collab_stub_merged():
         and sum(len(s.songs) for s in e.sections) == 0
     ]
     assert zero_song_collabs == [], f"Unmerged stubs: {[e.name for e in zero_song_collabs]}"
+
+
+# ---------------------------------------------------------------------------
+# Sample parsing accuracy tests
+# ---------------------------------------------------------------------------
+
+def test_sample_pattern2_requires_apostrophe_s():
+    """Pattern 2 should not fire for 'Samples the songs "X" by Y' format."""
+    from src.models import extract_samples
+    result = extract_samples(
+        'Samples the songs "The Infamous Prelude" by Mobb Deep and "Melodies of Love" by Joe Sample.'
+    )
+    assert '"The Infamous Prelude" by Mobb Deep' in result, f"Got: {result}"
+
+def test_sample_artist_not_truncated_by_vs():
+    """Artist field should not include trailing 'and X vs' noise."""
+    from src.models import extract_samples
+    result = extract_samples(
+        'Samples "The World is a Ghetto" by George Benson and the Common vs. Kanye freestyle battle.'
+    )
+    assert result == ['"The World is a Ghetto" by George Benson'], f"Got: {result}"
