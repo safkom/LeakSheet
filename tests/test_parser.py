@@ -1062,6 +1062,8 @@ def test_carti_tracker_hub_not_a_section():
     from src.parser import parse_file
     from src.config import discover_trackers
     trackers = dict(discover_trackers())
+    if "Playboi Carti" not in trackers:
+        pytest.skip("Playboi Carti tracker not available")
     result = parse_file(str(trackers["Playboi Carti"]), "Playboi Carti")
     for era in result.eras:
         for sec in era.sections:

@@ -307,7 +307,6 @@ SECTION_SEPARATORS = {
 # Name-column values that signal the start of tracker footer/hub content.
 _NAME_FOOTER_KEYWORDS: frozenset[str] = frozenset({
     "carti tracker hub",
-    "tracker hub",
 })
 
 
