@@ -1055,3 +1055,19 @@ def test_sample_artist_not_truncated_by_vs():
         'Samples "The World is a Ghetto" by George Benson and the Common vs. Kanye freestyle battle.'
     )
     assert result == ['"The World is a Ghetto" by George Benson'], f"Got: {result}"
+
+
+def test_carti_tracker_hub_not_a_section():
+    """CARTI TRACKER HUB should not appear as a section or song."""
+    from src.parser import parse_file
+    from src.config import discover_trackers
+    trackers = dict(discover_trackers())
+    result = parse_file(str(trackers["Playboi Carti"]), "Playboi Carti")
+    for era in result.eras:
+        for sec in era.sections:
+            assert "carti tracker hub" not in sec.name.lower(), \
+                f"Found tracker hub section in era '{era.name}'"
+            for song in sec.songs:
+                for v in song.versions:
+                    assert "carti tracker hub" not in v.name.lower(), \
+                        f"Found tracker hub as song in era '{era.name}'"

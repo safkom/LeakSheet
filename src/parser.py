@@ -304,6 +304,12 @@ SECTION_SEPARATORS = {
     "guest features",
 }
 
+# Name-column values that signal the start of tracker footer/hub content.
+_NAME_FOOTER_KEYWORDS: frozenset[str] = frozenset({
+    "carti tracker hub",
+    "tracker hub",
+})
+
 
 def _is_era_header(row: list[_Cell]) -> bool:
     """Check if a row is an era header (contains stats pattern in first cell)."""
@@ -923,6 +929,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 _register_era_keys(current_era, era_name, era_by_key)
                 if needs_backfill:
                     _needs_name_backfill.add(id(current_era))
+            continue
+
+        # Check name column for footer signals (e.g. "CARTI TRACKER HUB").
+        name_col_text = _get_cell_text(row, col_map.get("name", 1)).strip().lower()
+        if name_col_text in _NAME_FOOTER_KEYWORDS:
+            in_footer = True
+            footer_rows += 1
             continue
 
         # Footer detection: flag instead of break.
