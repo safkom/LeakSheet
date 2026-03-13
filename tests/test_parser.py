@@ -992,10 +992,26 @@ class TestEraTimelineAndDescription:
 # ---------------------------------------------------------------------------
 
 def test_notes_column_section_label():
-    """Section labels in the Notes column (not Name) should be added to current era."""
+    """Section labels in the Notes column (not Name) should be parsed, not dropped."""
     from src.parser import parse_file
     from src.config import discover_trackers
     trackers = dict(discover_trackers())
     result = parse_file(str(trackers["Playboi Carti"]), "Playboi Carti")
-    # WLR Higher Bitrate Files and Festival Remixes should NOT be in unmatched
-    assert result.parse_metadata.skipped_rows == 0, f"Unmatched: {result.parse_metadata.unmatched_rows}"
+    # The labels should not be dropped as unmatched rows
+    assert result.parse_metadata.skipped_rows == 0, (
+        f"Unmatched: {result.parse_metadata.unmatched_rows}"
+    )
+    # Collect all section names and group labels across all eras
+    all_labels = {
+        label
+        for era in result.eras
+        for sec in era.sections
+        for label in (sec.name, sec.group)
+        if label
+    }
+    assert "WLR Higher Bitrate Files" in all_labels, (
+        f"'WLR Higher Bitrate Files' not found in section labels/groups: {sorted(all_labels)}"
+    )
+    assert "Festival Remixes" in all_labels, (
+        f"'Festival Remixes' not found in section labels/groups: {sorted(all_labels)}"
+    )
