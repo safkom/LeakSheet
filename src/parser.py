@@ -463,6 +463,20 @@ def _is_empty_row(row: list[_Cell]) -> bool:
     return all(not c.text.strip() for c in row)
 
 
+def _is_collab_stub_match(stub_name: str, other_name: str) -> bool:
+    """Return True if stub_name is 'Collaboration with X' and other_name ends with 'Collab'.
+
+    Handles the pattern where an era header uses the full collaboration name
+    ('Collaboration with TrapMoneyBenny') but song rows use an abbreviated form
+    ('TMB Collab').
+    """
+    if not stub_name.lower().startswith("collaboration with "):
+        return False
+    if not other_name.lower().rstrip().endswith("collab"):
+        return False
+    return True
+
+
 def _era_names_are_related(name_a: str, name_b: str) -> bool:
     """Check if two era name strings likely refer to the same era.
 
@@ -508,7 +522,10 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
         if era_songs == 0 and i + 1 < len(eras):
             next_era = eras[i + 1]
             next_songs = sum(len(s.songs) for s in next_era.sections)
-            if next_songs > 0 and _era_names_are_related(era.name, next_era.name):
+            if next_songs > 0 and (
+                _era_names_are_related(era.name, next_era.name)
+                or _is_collab_stub_match(era.name, next_era.name)
+            ):
                 # Transfer metadata: only fill in fields the songs era is missing
                 if era.description and not next_era.description:
                     next_era.description = era.description

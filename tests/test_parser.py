@@ -1015,3 +1015,22 @@ def test_notes_column_section_label():
     assert "Festival Remixes" in all_labels, (
         f"'Festival Remixes' not found in section labels/groups: {sorted(all_labels)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Collab stub era merging tests
+# ---------------------------------------------------------------------------
+
+def test_tmb_collab_stub_merged():
+    """'Collaboration with TrapMoneyBenny' (0-song stub) must merge into 'TMB Collab'."""
+    from src.parser import parse_file
+    from src.config import discover_trackers
+    trackers = dict(discover_trackers())
+    result = parse_file(str(trackers["Playboi Carti"]), "Playboi Carti")
+    # No 0-song eras named "Collaboration with X" should remain
+    zero_song_collabs = [
+        e for e in result.eras
+        if e.name.startswith("Collaboration with ")
+        and sum(len(s.songs) for s in e.sections) == 0
+    ]
+    assert zero_song_collabs == [], f"Unmerged stubs: {[e.name for e in zero_song_collabs]}"
