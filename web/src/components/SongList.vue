@@ -17,7 +17,7 @@ function toggleSong(index) {
   expandedSong.value = prev === index ? null : index
 }
 
-/** Build a flat list of { type: 'section' | 'song', ... } items for rendering */
+/** Build a flat list of { type: 'group' | 'section' | 'song', ... } items for rendering */
 const displayItems = computed(() => {
   // If sections are provided and have named sections, render with dividers
   if (props.sections?.length) {
@@ -25,9 +25,17 @@ const displayItems = computed(() => {
     if (hasNamedSections) {
       const items = []
       let songIdx = 0
+      let prevGroup = undefined
       for (const section of props.sections) {
+        // Emit a group header when the group changes (null → value or value → value)
+        if (section.group !== prevGroup) {
+          if (section.group) {
+            items.push({ type: 'group', name: section.group, key: 'grp-' + section.group })
+          }
+          prevGroup = section.group
+        }
         if (section.name && section.name.trim()) {
-          items.push({ type: 'section', name: section.name, key: 'sec-' + section.name })
+          items.push({ type: 'section', name: section.name, key: `sec-${section.group ?? ''}-${section.name}` })
         }
         for (const song of (section.songs || [])) {
           items.push({ type: 'song', song, index: songIdx, key: song.base_name + songIdx })
@@ -52,7 +60,10 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
     <!-- Direct rendering -->
     <template v-else>
       <template v-for="item in displayItems" :key="item.key">
-        <div v-if="item.type === 'section'" class="section-divider">
+        <div v-if="item.type === 'group'" class="group-divider">
+          <span class="group-name">{{ item.name }}</span>
+        </div>
+        <div v-else-if="item.type === 'section'" class="section-divider">
           <span class="section-name">{{ item.name }}</span>
         </div>
         <SongRow
@@ -82,6 +93,29 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
   text-align: center;
 }
 
+.group-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 8px 4px;
+  margin-top: 4px;
+}
+
+.group-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.group-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
 .section-divider {
   position: sticky;
   top: var(--sticky-era-height, 50px);
@@ -89,8 +123,8 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 8px 6px;
-  margin-top: 8px;
+  padding: 8px 8px 4px 20px;
+  margin-top: 4px;
   background: var(--bg-secondary);
 }
 
@@ -104,15 +138,16 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
   content: '';
   flex: 1;
   height: 1px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .section-name {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--accent-color);
   white-space: nowrap;
+  opacity: 0.8;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, nextTick, ref } from 'vue'
+import { computed, watch, nextTick, ref, onUnmounted } from 'vue'
 import { toast } from 'vue-sonner'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
@@ -131,6 +131,38 @@ function handleShowDescription(payload: any): void {
   closeContextMenu()
 }
 
+// Recents: paginated loading via IntersectionObserver to avoid rendering all entries at once.
+const RECENTS_PAGE = 60
+const recentsLimit = ref(RECENTS_PAGE)
+const recentsSentinel = ref<HTMLElement | null>(null)
+let recentsObserver: IntersectionObserver | null = null
+
+const visibleRecentResults = computed(() =>
+  recentResults.value.slice(0, recentsLimit.value)
+)
+
+function _setupRecentsObserver() {
+  recentsObserver?.disconnect()
+  if (!recentsSentinel.value) return
+  recentsObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) {
+      recentsLimit.value += RECENTS_PAGE
+    }
+  }, { rootMargin: '300px' })
+  recentsObserver.observe(recentsSentinel.value)
+}
+
+watch(recents, (val) => {
+  if (val) {
+    recentsLimit.value = RECENTS_PAGE
+    nextTick(_setupRecentsObserver)
+  } else {
+    recentsObserver?.disconnect()
+  }
+})
+
+onUnmounted(() => recentsObserver?.disconnect())
+
 </script>
 
 <template>
@@ -188,12 +220,12 @@ function handleShowDescription(payload: any): void {
       </div>
       <div v-else class="search-results">
         <template
-          v-for="(result, idx) in recentResults"
+          v-for="(result, idx) in visibleRecentResults"
           :key="`r:${result.era.name}:${result.version.name}:${idx}`"
         >
           <!-- Era group header — only shown on first result per era -->
           <div
-            v-if="idx === 0 || recentResults[idx - 1].era.name !== result.era.name"
+            v-if="idx === 0 || visibleRecentResults[idx - 1].era.name !== result.era.name"
             class="era-group-header"
           >
             <span class="era-badge-pill" :style="eraColorStyle(result.era)">{{ result.era.name }}</span>
@@ -214,6 +246,13 @@ function handleShowDescription(payload: any): void {
             </div>
           </div>
         </template>
+        <!-- Sentinel: triggers loading more results when scrolled into view -->
+        <div
+          v-if="recentsLimit < recentResults.length"
+          ref="recentsSentinel"
+          class="recents-sentinel"
+          aria-hidden="true"
+        ></div>
       </div>
     </template>
 
@@ -472,6 +511,10 @@ function handleShowDescription(payload: any): void {
 .search-results {
   display: flex;
   flex-direction: column;
+}
+
+.recents-sentinel {
+  height: 1px;
 }
 
 .era-group-header {

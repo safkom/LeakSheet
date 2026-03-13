@@ -309,5 +309,8 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
 
 @media (max-width: 640px) {
   .version-row { font-size: 11px; gap: 6px; }
+  /* Prevent long quality badges from squeezing the title to zero width */
+  .v-title { min-width: 60px; }
+  .v-title-line :deep(.inline-flex) { flex-shrink: 1; }
 }
 </style>

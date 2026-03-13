@@ -46,6 +46,7 @@ export interface Song {
 
 export interface Section {
   name: string
+  group?: string | null
   songs: Song[]
 }
 
@@ -201,7 +202,12 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     for (const era of eras.value) {
       let songs = eraSongs(era)
       if (bestOf.value) {
-        songs = songs.filter(isBestOfSong)
+        songs = songs
+          .map(song => {
+            const bestVersions = (song.versions || []).filter(v => BEST_OF_BADGES.has(v.badge ?? ''))
+            return bestVersions.length ? { ...song, versions: bestVersions } : null
+          })
+          .filter((s): s is Song => s !== null)
       }
       if (q) {
         const eraNameMatch = era.name.toLowerCase().includes(q) ||
@@ -238,7 +244,16 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
       const result = era.sections
         .map(sec => {
           let songs = sec.songs || []
-          if (bestOf.value) songs = songs.filter(isBestOfSong)
+          if (bestOf.value) {
+            // Filter to only songs that have at least one best-of version,
+            // then narrow each song's versions to only its best-of ones.
+            songs = songs
+              .map(song => {
+                const bestVersions = (song.versions || []).filter(v => BEST_OF_BADGES.has(v.badge ?? ''))
+                return bestVersions.length ? { ...song, versions: bestVersions } : null
+              })
+              .filter((s): s is Song => s !== null)
+          }
           if (q) {
             const eraNameMatch = era.name.toLowerCase().includes(q) ||
               era.alt_names?.some(alt => alt.toLowerCase().includes(q))
@@ -266,9 +281,9 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     for (const era of eras.value) {
       const songs = eraSongs(era)
       for (const song of songs) {
-        if (bestOf.value && !isBestOfSong(song)) continue
         if (songMatchesQuery(song, q)) {
           for (const version of (song.versions || [])) {
+            if (bestOf.value && !BEST_OF_BADGES.has(version.badge ?? '')) continue
             results.push({ song, version, era })
           }
         }

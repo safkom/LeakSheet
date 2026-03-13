@@ -215,6 +215,7 @@ class TrackerStats(BaseModel):
 class Section(BaseModel):
     """A named sub-section within an era (e.g. 'Early Sessions', 'July 2020')."""
     name: str = Field("", description="Section name, empty for default section")
+    group: str | None = Field(None, description="Parent group label (e.g. 'Die Lit 2', 'Kanye West - Donda')")
     songs: list[Song] = Field(default_factory=list)
 
 
@@ -252,7 +253,7 @@ class Era(BaseModel):
     def dict(self, **kwargs):
         d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["sections"] = [
-            {"name": sec.name, "songs": [s.dict(**kwargs) for s in sec.songs]}
+            {"name": sec.name, "group": sec.group, "songs": [s.dict(**kwargs) for s in sec.songs]}
             for sec in self.sections
         ]
         d["songs"] = [s.dict(**kwargs) for s in self.songs]

@@ -474,6 +474,9 @@ function handleAddToQueue(e) {
   .song-row { padding: 8px 4px; }
   .song-title-line { font-size: 13px; }
   .versions-panel { padding-left: 12px; }
+  /* Prevent long quality badges from squeezing the title to zero width */
+  .song-title { min-width: 60px; }
+  .song-title-line :deep(.inline-flex) { flex-shrink: 1; }
 }
 
 

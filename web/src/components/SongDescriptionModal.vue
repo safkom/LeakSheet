@@ -1,12 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { artProxyUrl } from '../composables/usePlayer'
+import { computed } from 'vue'
 import { BADGE_MAP, qualityVariant, availabilityVariant, coloredBadgeStyle } from '@/composables/useUtils'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
   DialogScrollContent,
-  DialogHeader,
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
@@ -19,9 +17,6 @@ const props = defineProps({
   eraName: String,
   artistName: String,
 })
-
-const artSrc = computed(() => props.eraArt ? artProxyUrl(props.eraArt) : null)
-const artLoadError = ref(false)
 
 const emit = defineEmits(['close'])
 
@@ -87,26 +82,23 @@ const details = computed(() => {
 <template>
   <Dialog :open="true" @update:open="handleOpenChange">
     <DialogScrollContent class="max-w-[520px] p-0 border-white/10 bg-[hsl(220_24%_12%)] overflow-y-auto rounded-xl">
-      <!-- Art Header -->
-      <div v-if="artSrc && !artLoadError" class="modal-art-header">
-        <img :src="artSrc" class="modal-art-img" alt="" @error="artLoadError = true" />
-        <div class="modal-art-overlay"></div>
-        <div class="modal-art-info">
-          <Badge v-if="badgeInfo" variant="secondary" class="bg-white/15 text-white border-transparent text-[11px] rounded-[4px]">
-            {{ badgeInfo.emoji }} {{ badgeInfo.label }}
-          </Badge>
-          <span v-if="eraName" class="text-xs text-white/70 font-medium">{{ eraName }}</span>
+      <!-- Accessible title (visually hidden fallback) -->
+      <DialogTitle class="sr-only">{{ displayName }}</DialogTitle>
+      <DialogDescription class="sr-only">{{ eraName }}</DialogDescription>
+
+      <!-- Header -->
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <span v-if="badgeInfo" class="modal-badge-emoji" aria-hidden="true">{{ badgeInfo.emoji }}</span>
+          <h2 class="modal-title">{{ displayName }}</h2>
+        </div>
+        <div v-if="eraName || badgeInfo" class="modal-meta-row">
+          <span v-if="eraName" class="modal-era-pill">{{ eraName }}</span>
+          <span v-if="badgeInfo" class="modal-badge-label">{{ badgeInfo.label }}</span>
         </div>
       </div>
 
-      <div class="p-6">
-        <DialogHeader class="mb-5 !text-left">
-          <DialogTitle class="!text-lg !font-bold !leading-tight">{{ displayName }}</DialogTitle>
-          <DialogDescription :class="artSrc ? 'sr-only' : 'text-sm text-muted-foreground'">
-            {{ eraName || displayName }}
-          </DialogDescription>
-        </DialogHeader>
-
+      <div class="p-5">
         <!-- Credits -->
         <div v-if="credits.length" class="modal-section">
           <div v-for="c in credits" :key="c.label" class="credit-line">
@@ -162,33 +154,54 @@ const details = computed(() => {
 </template>
 
 <style scoped>
-.modal-art-header {
-  position: relative;
-  height: 140px;
-  overflow: hidden;
+.modal-header {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.modal-art-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: brightness(0.5);
+.modal-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.modal-art-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, #1a1e26 0%, transparent 70%);
+.modal-badge-emoji {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
-.modal-art-info {
-  position: absolute;
-  bottom: 12px;
-  left: 16px;
-  right: 16px;
+.modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.modal-meta-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-era-pill {
+  font-size: 12px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 2px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.1px;
+}
+
+.modal-badge-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
 .modal-section {
@@ -220,7 +233,7 @@ const details = computed(() => {
 .detail-grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 16px;
+  gap: 5px 16px;
   font-size: 13px;
 }
 
@@ -235,10 +248,10 @@ const details = computed(() => {
 
 .section-label {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   margin-bottom: 6px;
 }
 

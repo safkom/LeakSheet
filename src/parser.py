@@ -530,6 +530,48 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     return result
 
 
+def _consolidate_group_labels(era: Era) -> None:
+    """Convert 0-song non-standard sections into group labels for following sections.
+
+    Some trackers use a nested structure where an era has a top-level label
+    (e.g. 'Die Lit 2', 'Kanye West - Donda') that acts as a group header for
+    the standard sub-sections (Surfaced, Features, OG Files, etc.) beneath it.
+    The parser creates these as flat sections with 0 songs.  This function:
+      1. Identifies 0-song non-standard sections as group labels.
+      2. Propagates the group name to all following sections until the next label.
+      3. Removes those group-label placeholder sections from the list.
+      4. Removes empty standard sections (e.g. 'Unsurfaced' with 0 songs).
+      5. Removes unnamed sections with 0 songs (default section placeholders).
+    """
+    sections = era.sections
+    if len(sections) <= 1:
+        return
+
+    current_group: str | None = None
+    result: list[Section] = []
+
+    for sec in sections:
+        sec_name_lower = sec.name.lower().strip()
+
+        if not sec.name and not sec.songs:
+            # Unnamed empty placeholder — skip.
+            continue
+
+        if sec.name and not sec.songs:
+            if sec_name_lower not in SECTION_SEPARATORS:
+                # Non-standard named section with 0 songs → group label.
+                current_group = sec.name
+                continue  # Folded into group attribute; not kept as a section.
+            else:
+                # Standard section (Surfaced, Unavailable, etc.) with 0 songs → drop.
+                continue
+
+        sec.group = current_group
+        result.append(sec)
+
+    era.sections = result
+
+
 # Keywords that identify the tracker footer section (global stats, changelogs, guidelines).
 # Once we hit one of these, we stop parsing songs.
 _FOOTER_KEYWORDS = {
@@ -1099,6 +1141,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # 2.0 where full era names in header rows differ from abbreviated era
     # names used in song rows (e.g. "Birds In The Trap Sing McKnight" vs "Birds").
     eras = _merge_empty_stub_eras(eras)
+
+    # Step 3c: consolidate group labels within each era's sections
+    for era in eras:
+        _consolidate_group_labels(era)
 
     # Step 4: build parse metadata
     metadata = ParseMetadata(
