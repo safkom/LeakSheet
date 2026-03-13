@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Input } from '@/components/ui/input'

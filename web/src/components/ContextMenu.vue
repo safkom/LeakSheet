@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { addToQueue } from '../composables/usePlayer'

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { toast } from 'vue-sonner'
 import SongDescriptionModal from './SongDescriptionModal.vue'

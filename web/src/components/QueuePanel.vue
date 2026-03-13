@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { playerState, removeFromQueue, clearQueue, moveInQueue, playFromQueue } from '../composables/usePlayer'
