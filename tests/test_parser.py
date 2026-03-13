@@ -985,3 +985,17 @@ class TestEraTimelineAndDescription:
         for artist in [ye, keem, kendrick, carti]:
             for era in artist.eras:
                 assert isinstance(era.timeline, list)
+
+
+# ---------------------------------------------------------------------------
+# Notes-column section label tests
+# ---------------------------------------------------------------------------
+
+def test_notes_column_section_label():
+    """Section labels in the Notes column (not Name) should be added to current era."""
+    from src.parser import parse_file
+    from src.config import discover_trackers
+    trackers = dict(discover_trackers())
+    result = parse_file(str(trackers["Playboi Carti"]), "Playboi Carti")
+    # WLR Higher Bitrate Files and Festival Remixes should NOT be in unmatched
+    assert result.parse_metadata.skipped_rows == 0, f"Unmatched: {result.parse_metadata.unmatched_rows}"

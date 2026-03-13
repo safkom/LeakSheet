@@ -1126,6 +1126,17 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     current_era = new_era
                 continue
 
+        # Fallback: check if any non-era cell has short single-line text
+        # that could be a section label (e.g. Carti's "WLR Higher Bitrate Files"
+        # in the Notes column with empty Era and Name).
+        if current_era is not None and not row_era and not name_val:
+            non_empty_cells = [c for c in row if c.text.strip()]
+            if len(non_empty_cells) == 1:
+                label_text = non_empty_cells[0].text.strip()
+                if "\n" not in label_text and len(label_text) < 60:
+                    current_era.sections.append(Section(name=label_text))
+                    continue
+
         # Unmatched row — track it for diagnostics
         skipped_rows += 1
         if len(unmatched_rows) < 50:
