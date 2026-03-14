@@ -175,6 +175,17 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
 
   const isSearching = computed(() => debouncedQuery.value.trim().length > 0)
 
+  /** Filter a song list to only songs that have at least one best-of version,
+   *  narrowing each song's versions to just the best-of ones. */
+  function _filterToBestOf(songs: Song[]): Song[] {
+    return songs
+      .map(song => {
+        const bestVersions = (song.versions || []).filter(v => BEST_OF_BADGES.has(v.badge ?? ''))
+        return bestVersions.length ? { ...song, versions: bestVersions } : null
+      })
+      .filter((s): s is Song => s !== null)
+  }
+
   // ── Filtered eras ──
 
   const filteredEras = computed(() => {
@@ -201,14 +212,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     const q = debouncedQuery.value.trim().toLowerCase()
     for (const era of eras.value) {
       let songs = eraSongs(era)
-      if (bestOf.value) {
-        songs = songs
-          .map(song => {
-            const bestVersions = (song.versions || []).filter(v => BEST_OF_BADGES.has(v.badge ?? ''))
-            return bestVersions.length ? { ...song, versions: bestVersions } : null
-          })
-          .filter((s): s is Song => s !== null)
-      }
+      if (bestOf.value) songs = _filterToBestOf(songs)
       if (q) {
         const eraNameMatch = era.name.toLowerCase().includes(q) ||
           era.alt_names?.some(alt => alt.toLowerCase().includes(q))
@@ -244,16 +248,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
       const result = era.sections
         .map(sec => {
           let songs = sec.songs || []
-          if (bestOf.value) {
-            // Filter to only songs that have at least one best-of version,
-            // then narrow each song's versions to only its best-of ones.
-            songs = songs
-              .map(song => {
-                const bestVersions = (song.versions || []).filter(v => BEST_OF_BADGES.has(v.badge ?? ''))
-                return bestVersions.length ? { ...song, versions: bestVersions } : null
-              })
-              .filter((s): s is Song => s !== null)
-          }
+          if (bestOf.value) songs = _filterToBestOf(songs)
           if (q) {
             const eraNameMatch = era.name.toLowerCase().includes(q) ||
               era.alt_names?.some(alt => alt.toLowerCase().includes(q))

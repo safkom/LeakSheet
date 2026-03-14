@@ -311,6 +311,7 @@ onUnmounted(() => recentsObserver?.disconnect())
               :artist-name="artist.name"
               :era-name="era.name"
               :era-art="era.art_url"
+              :empty-message="bestOf ? 'No Best Of or Special tracks in this era' : 'No songs in this era'"
             />
           </div>
         </Transition>

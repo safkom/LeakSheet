@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import SongDescriptionModal from './SongDescriptionModal.vue'
 import QueuePanel from './QueuePanel.vue'
@@ -19,6 +19,7 @@ import {
 import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue, playNext } from '../composables/usePlayer'
 import { getEraColors } from '../composables/useEraColors'
 import { BADGE_MAP } from '../composables/useUtils'
+import { useDownload } from '../composables/useDownload'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
@@ -116,46 +117,13 @@ function queueTrack() {
   toast.success('Added to queue')
 }
 
-const _MIME_TO_EXT: Record<string, string> = {
-  'audio/mp4': '.m4a',
-  'audio/mpeg': '.mp3',
-  'audio/ogg': '.ogg',
-  'audio/wav': '.wav',
-  'audio/flac': '.flac',
-  'audio/aac': '.aac',
-  'audio/x-m4a': '.m4a',
-}
-
-const downloadController = ref<AbortController | null>(null)
-
-onUnmounted(() => {
-  downloadController.value?.abort()
-})
+const { download: _download } = useDownload()
 
 async function downloadTrack() {
   if (!track.value?.links?.length) return
   const link = track.value.links[0]
-  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
-  try {
-    downloadController.value?.abort()
-    downloadController.value = new AbortController()
-    toast('Downloading...')
-    const res = await fetch(downloadUrl, { signal: downloadController.value.signal })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    // Derive extension from Content-Type so FLAC/OGG/WAV files get the right name
-    const ct = res.headers.get('content-type')?.split(';')[0].trim() || ''
-    const ext = _MIME_TO_EXT[ct] || '.mp3'
-    const blob = await res.blob()
-    const objUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = objUrl
-    a.download = `${track.value.name || track.value.base_name || 'track'}${ext}`
-    a.click()
-    URL.revokeObjectURL(objUrl)
-    toast.success('Download complete')
-  } catch (e) {
-    if (e?.name !== 'AbortError') toast.error('Download failed')
-  }
+  const filename = track.value.name || track.value.base_name || 'track'
+  await _download(link, filename)
 }
 
 const hasLink = computed(() => getTrackLink() !== null)

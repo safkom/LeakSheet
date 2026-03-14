@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, type PropType } from 'vue'
 import VersionRow from './VersionRow.vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
 import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
+import type { Song } from '../composables/useEraFiltering'
 
 const props = defineProps({
-  song: Object,
+  song: { type: Object as PropType<Song>, required: true },
   expanded: Boolean,
   artistName: String,
   eraName: String,
@@ -26,6 +27,8 @@ const canStream = computed(() => {
 const isCurrentSong = computed(() => {
   return props.song.versions?.some(v => isTrackMatch(v)) ?? false
 })
+
+const isCurrentLoading = computed(() => isCurrentSong.value && playerState.loading)
 
 const badgeEmoji = computed(() => {
   const b = props.song.badge
@@ -119,7 +122,7 @@ function handleAddToQueue(e) {
   <div class="song-row-wrapper">
     <button
       class="song-row"
-      :class="{ expanded, playing: isCurrentSong, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
+      :class="{ expanded, playing: isCurrentSong && !isCurrentLoading, loading: isCurrentLoading, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
       @click="handleClick"
       @contextmenu="handleContextMenu"
     >
@@ -293,6 +296,24 @@ function handleAddToQueue(e) {
 .song-row.playing .badge-slot::after {
   height: 6px;
   animation-delay: 0.3s;
+}
+
+/* Single pulsing bar for buffering/loading state */
+.song-row.loading .badge-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.song-row.loading .badge-slot::before {
+  content: '';
+  display: block;
+  width: 2.5px;
+  height: 10px;
+  border-radius: 1px;
+  background: hsl(var(--primary));
+  animation: eq-bar 0.6s ease-in-out infinite alternate;
+  opacity: 0.6;
 }
 
 .expand-chevron {

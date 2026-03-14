@@ -189,13 +189,13 @@ function _getAudio() {
 
     _audio.addEventListener('error', () => {
       const code = _audio.error?.code
-      const msgs = {
-        1: 'Playback aborted',
-        2: 'Network error',
-        3: 'Decode error',
-        4: 'Source not supported',
+      const msgs: Record<number, string> = {
+        1: '', // MEDIA_ERR_ABORTED — user-initiated, stay silent
+        2: 'Network error — check your connection',
+        3: 'Decode error — try a different version',
+        4: 'Stream format not supported',
       }
-      playerState.error = msgs[code] || 'Playback error'
+      playerState.error = (code && msgs[code] !== undefined ? msgs[code] : null) ?? 'Playback failed — try a different version'
       playerState.isPlaying = false
       playerState.loading = false
     })

@@ -20,9 +20,12 @@ direct audio stream URLs.  Supported hosts:
 
 from __future__ import annotations
 
+import logging
 import re
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -107,24 +110,32 @@ def resolve_stream_url(link: str) -> str | None:
     if m:
         file_id = m.group(2)
         # Both pillows.su and pillowcase.su use api.pillows.su
-        return f"https://api.pillows.su/api/get/{file_id}"
+        resolved = f"https://api.pillows.su/api/get/{file_id}"
+        logger.debug("Resolved pillows.su link %s → %s", link, resolved)
+        return resolved
 
     m = _IMGUR_PATTERN.match(link)
     if m:
         file_id = m.group(2)
         # Always use temp.imgur.gg — imgur.gg API returns 404
-        return f"https://temp.imgur.gg/api/file/{file_id}"
+        resolved = f"https://temp.imgur.gg/api/file/{file_id}"
+        logger.debug("Resolved imgur.gg link %s → metadata API %s", link, resolved)
+        return resolved
 
     m = _FROSTE_PATTERN.match(link)
     if m:
         song_hash = m.group(1)
-        return f"https://music.froste.lol/song/{song_hash}/file"
+        resolved = f"https://music.froste.lol/song/{song_hash}/file"
+        logger.debug("Resolved froste.lol link %s → %s", link, resolved)
+        return resolved
 
     m = _KRAKEN_PATTERN.match(link)
     if m:
         # Return view URL unchanged — resolved to CDN URL lazily in stream_audio()
+        logger.debug("Resolved krakenfiles.com link %s (CDN resolved lazily)", link)
         return link
 
+    logger.warning("No stream host matched for link: %s", link)
     return None
 
 
@@ -295,9 +306,11 @@ async def stream_audio(
     try:
         ct = resp.headers.get("content-type", "")
         if resp.status_code not in (200, 206):
+            logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
             raise ValueError(f"Upstream returned {resp.status_code}")
 
         if ct and not _is_audio_content_type(ct):
+            logger.warning("Upstream %s returned non-audio content-type: %s", stream_url, ct)
             raise ValueError(f"Upstream returned non-audio content: {ct}")
     except Exception:
         await resp.aclose()

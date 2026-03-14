@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type PropType } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
 import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
+import type { SongVersion } from '../composables/useEraFiltering'
 
 const props = defineProps({
-  version: Object,
+  version: { type: Object as PropType<SongVersion>, required: true },
   artistName: String,
   eraName: String,
   eraArt: String,
@@ -16,6 +17,7 @@ const props = defineProps({
 const canStream = computed(() => isStreamable(props.version))
 
 const isCurrentTrack = computed(() => isTrackMatch(props.version))
+const isCurrentLoading = computed(() => isCurrentTrack.value && playerState.loading)
 
 // Shared overlays (single ContextMenu + Modal at ArtistView level)
 const { showContextMenu, showDescription: showDescriptionModal } = useSharedOverlays()
@@ -71,7 +73,7 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
 <template>
   <button
     class="version-row"
-    :class="{ playing: isCurrentTrack }"
+    :class="{ playing: isCurrentTrack && !isCurrentLoading, loading: isCurrentLoading }"
     @click="handlePlay"
     @contextmenu="handleContextMenu"
   >
@@ -171,6 +173,24 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
 .version-row.playing .v-badge-slot::after {
   height: 5px;
   animation-delay: 0.3s;
+}
+
+/* Single pulsing bar for buffering/loading state */
+.version-row.loading .v-badge-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.version-row.loading .v-badge-slot::before {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: hsl(var(--primary));
+  animation: eq-bar 0.6s ease-in-out infinite alternate;
+  opacity: 0.6;
 }
 
 .v-content {

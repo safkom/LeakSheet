@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { addToQueue } from '../composables/usePlayer'
+import { MIME_TO_EXT } from '../composables/useDownload'
 
 // Module-level controller so the download fetch survives component unmounting.
 // (ContextMenu closes immediately after Download is clicked, which would abort
@@ -88,16 +89,6 @@ function openOriginalUrl() {
   emit('close')
 }
 
-const _MIME_TO_EXT: Record<string, string> = {
-  'audio/mp4': '.m4a',
-  'audio/mpeg': '.mp3',
-  'audio/ogg': '.ogg',
-  'audio/wav': '.wav',
-  'audio/flac': '.flac',
-  'audio/aac': '.aac',
-  'audio/x-m4a': '.m4a',
-}
-
 function download() {
   const v = props.version || props.song?.versions?.[0]
   if (!v?.links?.length) return
@@ -114,7 +105,7 @@ function download() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       // Derive extension from Content-Type so FLAC/OGG/WAV files get the right name
       const ct = res.headers.get('content-type')?.split(';')[0].trim() || ''
-      const ext = _MIME_TO_EXT[ct] || '.mp3'
+      const ext = MIME_TO_EXT[ct] || '.mp3'
       return res.blob().then(blob => ({ blob, ext }))
     })
     .then(({ blob, ext }) => {
@@ -127,8 +118,13 @@ function download() {
       if (_activeDownloadController === ctrl) _activeDownloadController = null
       toast.success('Download complete')
     })
-    .catch(err => {
-      if (err.name !== 'AbortError') toast.error('Download failed')
+    .catch((err: Error) => {
+      if (err.name === 'AbortError') return
+      if (err.name === 'TimeoutError') {
+        toast.error('Download timed out — check your connection')
+      } else {
+        toast.error('Download failed — try right-clicking for other versions')
+      }
     })
   toast('Downloading...')
   emit('close')

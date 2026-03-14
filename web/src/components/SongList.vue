@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, type PropType } from 'vue'
 import SongRow from './SongRow.vue'
+import type { Song, Section } from '../composables/useEraFiltering'
 
 const props = defineProps({
-  songs: Array,
-  sections: Array,
+  songs: Array as PropType<Song[]>,
+  sections: Array as PropType<Section[]>,
   artistName: String,
   eraName: String,
   eraArt: String,
+  emptyMessage: { type: String, default: 'No songs found' },
 })
 
 const expandedSong = ref(null)
@@ -55,7 +57,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 
 <template>
   <div class="song-list" role="list" :aria-label="eraName ? eraName + ' songs' : 'Song list'">
-    <div v-if="!hasSongs" class="no-songs">No songs found</div>
+    <div v-if="!hasSongs" class="no-songs">{{ emptyMessage }}</div>
 
     <!-- Direct rendering -->
     <template v-else>

@@ -355,7 +355,7 @@ async def parse_sheet(req: SheetRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
-    data = artist.dict()
+    data = artist.model_dump()
     return data
 
 

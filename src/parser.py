@@ -6,11 +6,14 @@ structured Artist/Era/Song/SongVersion objects.
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+logger = logging.getLogger(__name__)
 
 from src.config import COLUMN_ALIASES
 from src.models import (
@@ -35,6 +38,18 @@ from src.models import (
     slugify,
 )
 
+
+# ---------------------------------------------------------------------------
+# Parser tuning constants
+# ---------------------------------------------------------------------------
+
+# Maximum number of rows to scan when looking for the header row.
+# Some trackers have instruction/title rows before the actual column headers.
+_MAX_HEADER_SCAN_ROWS = 11
+
+# Cap on unmatched rows recorded for diagnostics — prevents unbounded list growth
+# on trackers that have many footers, annotations, or oddly structured rows.
+_MAX_UNMATCHED_ROWS = 50
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +785,121 @@ def _get_cell(row: list[_Cell], idx: int) -> _Cell:
     return _Cell()
 
 
+def _detect_header_row(rows: list[list[_Cell]]) -> tuple[int, dict[str, int]]:
+    """Scan rows to find the header row and return its index and column map.
+
+    Some trackers have a title/instruction row before the actual column
+    headers (e.g. "Avicii Leaks by Azyy" in row 0, actual headers in row 2).
+    Searches up to ``_MAX_HEADER_SCAN_ROWS`` rows for one that yields at least
+    2 canonical column detections.
+
+    Returns:
+        ``(header_row_idx, col_map)`` — the index of the header row and the
+        detected column mapping.
+    """
+    col_map = detect_columns(rows[0])
+    if len(col_map) >= 2:
+        return 0, col_map
+    for try_idx in range(1, min(_MAX_HEADER_SCAN_ROWS, len(rows))):
+        candidate_map = detect_columns(rows[try_idx])
+        if len(candidate_map) >= 2:
+            return try_idx, candidate_map
+    return 0, col_map
+
+
+def _parse_era_header_row(
+    row: list[_Cell], col_map: dict[str, int]
+) -> tuple[Era, bool]:
+    """Extract era data from a recognised era-header row.
+
+    Args:
+        row: The table row classified as an era header.
+        col_map: Column index mapping produced by ``detect_columns()``.
+
+    Returns:
+        ``(era, needs_backfill)`` where *era* is the constructed :class:`Era`
+        and *needs_backfill* is ``True`` when the name cell contained only an
+        image with no usable text (the real name must be filled in from the
+        first subsequent song row).
+    """
+    era_name_col = col_map.get("name", 1)
+    notes_col = col_map.get("notes", 2)
+
+    era_name_full = _get_cell_text(row, era_name_col)
+    timeline_raw = _get_cell_text(row, notes_col)
+    era_stats_raw = _get_cell_text(row, 0)
+
+    # Extract era art, highlighted producers, and description from trailing cells.
+    art_url = None
+    highlighted_producers: list[str] = []
+    desc_candidates: list[str] = []
+
+    # Check name cell for images.
+    # If the cell also has usable text, the image is album art.
+    # If the cell has NO text (image-based era name like Carti's
+    # Narcissist logo), the image is the era name — not art.
+    name_cell = _get_cell(row, era_name_col)
+    name_text = name_cell.text.strip()
+    name_has_usable_text = bool(
+        name_text
+        and not (name_text.startswith("(") and name_text.endswith(")"))
+    )
+    if name_cell.images and name_has_usable_text:
+        art_url = name_cell.images[0]
+
+    for i, cell in enumerate(row):
+        if i <= notes_col:
+            continue  # skip stats, name, timeline columns
+        if cell.images and not art_url:
+            art_url = cell.images[0]
+        text = cell.text.strip()
+        if text:
+            if "Highlighted" in text and "Producer" in text:
+                highlighted_producers = parse_highlighted_producers(text)
+            else:
+                desc_candidates.append(text)
+
+    era_desc = max(desc_candidates, key=len) if desc_candidates else None
+    timeline = parse_timeline(timeline_raw) if timeline_raw else []
+    era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
+
+    # Split main name from alt names (newline-separated, alts in parens)
+    name_lines = era_name_full.split("\n") if era_name_full else [""]
+    era_name = name_lines[0].strip()
+    alt_names: list[str] = []
+    for _line in name_lines[1:]:
+        _line = _line.strip()
+        if _line.startswith("(") and _line.endswith(")"):
+            _line = _line[1:-1].strip()
+        if _line:
+            alt_names.append(_line)
+
+    # Detect image-based era names: the name cell has an image but no usable
+    # text (empty, or purely parenthetical like "(Mollyworld, Balaclava Era)").
+    # The real name will be backfilled from the first song row's era column.
+    needs_backfill = False
+    if not era_name or (era_name.startswith("(") and era_name.endswith(")")):
+        if era_name.startswith("(") and era_name.endswith(")"):
+            inner = era_name[1:-1].strip()
+            if inner and inner not in alt_names:
+                alt_names.insert(0, inner)
+            era_name = ""
+        needs_backfill = True
+
+    era = Era(
+        name=era_name,
+        alt_names=alt_names,
+        description=era_desc if era_desc else None,
+        timeline=timeline,
+        stats_raw=era_stats_raw if era_stats_raw else None,
+        stats=era_stats,
+        art_url=art_url,
+        highlighted_producers=highlighted_producers,
+        sections=[Section()],  # default unnamed section
+    )
+    return era, needs_backfill
+
+
 def parse_sheet(html_content: str, artist_name: str) -> Artist:
     """Parse a Google Sheets HTML export into an Artist model.
 
@@ -782,19 +912,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
 
     # Step 1: detect column layout from header row.
-    # Some trackers have a title/instruction row before the actual column
-    # headers (e.g. "Avicii Leaks by Azyy" in row 0, actual headers in
-    # row 2).  If rows[0] produces no column detections, search subsequent
-    # rows (up to 10) for a row that yields at least 2 canonical columns.
-    header_row_idx = 0
-    col_map = detect_columns(rows[0])
-    if len(col_map) < 2:
-        for try_idx in range(1, min(11, len(rows))):
-            candidate_map = detect_columns(rows[try_idx])
-            if len(candidate_map) >= 2:
-                col_map = candidate_map
-                header_row_idx = try_idx
-                break
+    header_row_idx, col_map = _detect_header_row(rows)
 
     # Step 2: walk rows, classify and extract
     eras: list[Era] = []
@@ -839,95 +957,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         # it's a new era, not leftover footer.
         if _is_era_header(row):
             in_footer = False
-            era_name_col = col_map.get("name", 1)
-            notes_col = col_map.get("notes", 2)
-
-            era_name_full = _get_cell_text(row, era_name_col)
-            timeline_raw = _get_cell_text(row, notes_col)
-            era_stats_raw = _get_cell_text(row, 0)
-
-            # Extract era art, highlighted producers, and description
-            # from cells beyond the timeline column.
-            art_url = None
-            highlighted_producers: list[str] = []
-            desc_candidates: list[str] = []
-
-            # Check name cell for images.
-            # If the cell also has usable text, the image is album art.
-            # If the cell has NO text (image-based era name like Carti's
-            # Narcissist logo), the image is the era name — not art.
-            name_cell = _get_cell(row, era_name_col)
-            name_text = name_cell.text.strip()
-            name_has_usable_text = bool(
-                name_text
-                and not (name_text.startswith("(") and name_text.endswith(")"))
-            )
-            if name_cell.images and name_has_usable_text:
-                art_url = name_cell.images[0]
-
-            for i, cell in enumerate(row):
-                if i <= notes_col:
-                    continue  # skip stats, name, timeline columns
-                if cell.images and not art_url:
-                    art_url = cell.images[0]
-                text = cell.text.strip()
-                if text:
-                    if "Highlighted" in text and "Producer" in text:
-                        highlighted_producers = parse_highlighted_producers(text)
-                    else:
-                        desc_candidates.append(text)
-
-            era_desc = max(desc_candidates, key=len) if desc_candidates else None
-
-            # Parse timeline events from the timeline cell
-            timeline = parse_timeline(timeline_raw) if timeline_raw else []
-
-            # Parse structured stats from raw text
-            era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
-
-            # Split main name from alt names (newline-separated, alts in parens)
-            name_lines = era_name_full.split("\n") if era_name_full else [""]
-            era_name = name_lines[0].strip()
-            alt_names: list[str] = []
-            for _line in name_lines[1:]:
-                _line = _line.strip()
-                if _line.startswith("(") and _line.endswith(")"):
-                    _line = _line[1:-1].strip()
-                if _line:
-                    alt_names.append(_line)
-
-            # Detect image-based era names: the name cell has an image
-            # but no usable text (empty, or purely parenthetical like
-            # "(Mollyworld, Balaclava Era)").  In that case the real era
-            # name will be backfilled from the first song row's era column.
-            needs_backfill = False
-            if not era_name or (era_name.startswith("(") and era_name.endswith(")")):
-                # Move parenthetical first-line to alt_names
-                if era_name.startswith("(") and era_name.endswith(")"):
-                    inner = era_name[1:-1].strip()
-                    if inner and inner not in alt_names:
-                        alt_names.insert(0, inner)
-                    era_name = ""
-                needs_backfill = True
-
-            if era_name or needs_backfill:
-                era_key = _era_match_key(era_name) if era_name else ""
-
-                current_era = Era(
-                    name=era_name,
-                    alt_names=alt_names,
-                    description=era_desc if era_desc else None,
-                    timeline=timeline,
-                    stats_raw=era_stats_raw if era_stats_raw else None,
-                    stats=era_stats,
-                    art_url=art_url,
-                    highlighted_producers=highlighted_producers,
-                    sections=[Section()],  # default unnamed section
-                )
-                eras.append(current_era)
-                _register_era_keys(current_era, era_name, era_by_key)
-                if needs_backfill:
-                    _needs_name_backfill.add(id(current_era))
+            current_era, needs_backfill = _parse_era_header_row(row, col_map)
+            eras.append(current_era)
+            _register_era_keys(current_era, current_era.name, era_by_key)
+            if needs_backfill:
+                _needs_name_backfill.add(id(current_era))
             continue
 
         # Check name column for footer signals (e.g. "CARTI TRACKER HUB").
@@ -986,6 +1020,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 matched_era = _fuzzy_era_match(row_era_norm, era_by_key)
                 if matched_era is not None:
                     fuzzy_matched_rows += 1
+                    logger.debug(
+                        "Fuzzy era match: %r → %r", row_era_norm, matched_era.name
+                    )
 
             if matched_era is not None:
                 current_era = matched_era
@@ -1062,7 +1099,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if not _looks_like_era_name(row_era):
                     # Skip non-era rows (announcements, footers, etc.)
                     skipped_rows += 1
-                    if len(unmatched_rows) < 50:
+                    if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
                         row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
                         if row_text:
                             unmatched_rows.append(f"Row {row_idx}: {row_text}")
@@ -1168,7 +1205,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
         # Unmatched row — track it for diagnostics
         skipped_rows += 1
-        if len(unmatched_rows) < 50:
+        if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
             row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
             if row_text:
                 unmatched_rows.append(f"Row {row_idx}: {row_text}")
@@ -1195,6 +1232,23 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         footer_rows=footer_rows,
         fuzzy_matched_rows=fuzzy_matched_rows,
     )
+
+    logger.debug(
+        "Parsed %r: %d eras, %d song rows, %d skipped, %d fuzzy-matched era rows",
+        artist_name,
+        len(eras),
+        song_rows,
+        skipped_rows,
+        fuzzy_matched_rows,
+    )
+    if unmatched_rows:
+        logger.warning(
+            "Parser found %d unmatched rows in %r (showing first %d): %s",
+            len(unmatched_rows),
+            artist_name,
+            min(5, len(unmatched_rows)),
+            " | ".join(unmatched_rows[:5]),
+        )
 
     return Artist(
         name=artist_name,

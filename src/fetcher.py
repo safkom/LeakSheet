@@ -16,12 +16,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from pathlib import Path
 from urllib.parse import urlparse, urlencode
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from src.models import Artist
 from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet, _era_match_key
@@ -82,6 +85,15 @@ TITLE_SUFFIXES = [
     " Leak Tracker",
     " Leaks Tracker",
 ]
+
+# Emoji pattern for stripping decorative emoji from tab names
+_EMOJI_RE = re.compile(
+    r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
+)
+
+# Minimum era count required before accepting a GID as the primary tracker tab.
+# Prevents small "Recent" or landing tabs from being chosen over the main sheet.
+_MIN_ERAS_FOR_VALID_GID = 5
 
 # Prefixes to strip from inferred artist names (e.g. "Updated Lil Uzi Vert")
 TITLE_PREFIXES = [
@@ -257,9 +269,6 @@ def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
     _UNRELEASED_TAB_NAMES. Used to prefer the primary tracker sheet over
     landing/recent tabs like Travis Scott's "Recent" sheet.
     """
-    _EMOJI_RE = re.compile(
-        r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
-    )
     for gid, name in named_tabs.items():
         clean = _EMOJI_RE.sub(" ", name).strip().lower()
         clean = re.sub(r"\s+", " ", clean)
@@ -274,9 +283,6 @@ def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
     Strips emoji and normalises whitespace before comparing against the
     known art-tab keyword set ({"art", "album art", "cover art", ...}).
     """
-    _EMOJI_RE = re.compile(
-        r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
-    )
     for gid, name in named_tabs.items():
         clean = _EMOJI_RE.sub(" ", name).strip().lower()
         clean = re.sub(r"\s+", " ", clean)
@@ -352,6 +358,46 @@ def clear_cache() -> int:
         f.unlink()
         count += 1
     return count
+
+
+# ---------------------------------------------------------------------------
+# Shared parse helpers (used by both sync and async paths)
+# ---------------------------------------------------------------------------
+
+def _resolve_artist_name(html: str, title: str, artist_name_override: str | None) -> str:
+    """Determine the artist name from page HTML and title, with an optional override.
+
+    Priority:
+    1. ``artist_name_override`` if provided.
+    2. Name scraped directly from the sheet (first non-header name-column value).
+    3. Name inferred from the page ``<title>`` after stripping common suffixes.
+    """
+    name = artist_name_override
+    if not name:
+        name = _infer_artist_name(title)
+        sheet_artist = _infer_artist_from_sheet(html)
+        if sheet_artist and sheet_artist.lower() != name.lower():
+            name = sheet_artist
+    return name
+
+
+def _prioritize_gids(
+    base_html: str, gids: list[str]
+) -> tuple[list[str], str | None, str | None]:
+    """Reorder GIDs so the main tracker tab is tried first.
+
+    Returns (reordered_gids, art_gid, unreleased_gid).
+    Moves the identified "Unreleased" tab GID to the front when found,
+    so trackers with a landing/recent tab (e.g. Travis Scott 2.0) don't
+    get stuck on the wrong sheet.
+    """
+    named_tabs = _discover_named_tabs(base_html)
+    art_gid = _get_art_tab_gid(named_tabs)
+    unreleased_gid = _get_unreleased_tab_gid(named_tabs)
+    if unreleased_gid and unreleased_gid in gids:
+        logger.debug("Unreleased tab detected (gid=%s) — trying first", unreleased_gid)
+        gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
+    return gids, art_gid, unreleased_gid
 
 
 # ---------------------------------------------------------------------------
@@ -494,22 +540,13 @@ def fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
 
-    def _resolve_artist_name(html: str, title: str) -> str:
-        name = artist_name
-        if not name:
-            name = _infer_artist_name(title)
-            sheet_artist = _infer_artist_from_sheet(html)
-            if sheet_artist and sheet_artist.lower() != name.lower():
-                name = sheet_artist
-        return name
-
     # If a specific GID was requested, try it first.
     # If it produces 0 eras, fall through to GID discovery.
     if gid:
         try:
             html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
                                             cache_ttl=cache_ttl, use_cache=use_cache)
-            name = _resolve_artist_name(html, title)
+            name = _resolve_artist_name(html, title, artist_name)
             artist = parse_sheet(html, name)
             if artist.eras:
                 # Before returning, check if this page reveals a better
@@ -545,7 +582,7 @@ def fetch_and_parse(
 
         # If the base page already has tables, try parsing directly
         if "<table" in base_html.lower():
-            name = _resolve_artist_name(base_html, title)
+            name = _resolve_artist_name(base_html, title, artist_name)
             artist = parse_sheet(base_html, name)
             if artist.eras:
                 artist.source_url = url
@@ -553,21 +590,12 @@ def fetch_and_parse(
                     _set_cache(url_norm, base_html, title)
                 return artist
 
-        # Step 2: Discover GIDs and Art tab
+        # Step 2: Discover GIDs and prioritize tracker tab
         gids = _discover_gids(base_html)
         if not gids:
             gids = ["0"]
 
-        # Identify the Art tab GID upfront so we can fetch it after
-        # the main parsing is done (it's a single additional request).
-        # Also detect the main "Unreleased" tab and move it to the front
-        # so trackers with a landing/recent tab (e.g. Travis Scott 2.0)
-        # don't get stuck on the wrong sheet.
-        named_tabs = _discover_named_tabs(base_html)
-        art_gid = _get_art_tab_gid(named_tabs)
-        unreleased_gid = _get_unreleased_tab_gid(named_tabs)
-        if unreleased_gid and unreleased_gid in gids:
-            gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
+        gids, art_gid, unreleased_gid = _prioritize_gids(base_html, gids)
 
         # Step 3: Try each GID, pick the one that produces the most eras
         best_artist: Artist | None = None
@@ -577,6 +605,7 @@ def fetch_and_parse(
         for try_gid in gids:
             try:
                 sheet_url = _build_sheet_html_url(url_norm, try_gid)
+                logger.debug("Trying GID %s (%s)", try_gid, sheet_url)
 
                 # Check cache for this specific GID URL
                 if use_cache and cache_ttl > 0:
@@ -596,7 +625,7 @@ def fetch_and_parse(
                         continue
                     sheet_html = resp.text
 
-                name = _resolve_artist_name(sheet_html, title)
+                name = _resolve_artist_name(sheet_html, title, artist_name)
                 candidate = parse_sheet(sheet_html, name)
 
                 n_eras = len(candidate.eras)
@@ -606,6 +635,7 @@ def fetch_and_parse(
                     for section in era.sections
                 )
 
+                logger.debug("GID %s → %d eras, %d songs", try_gid, n_eras, n_songs)
                 if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
                     best_eras = n_eras
                     best_artist = candidate
@@ -614,12 +644,14 @@ def fetch_and_parse(
                 # Unreleased tab wins as long as it has at least 1 era —
                 # prevents Recents/landing tabs from outcompeting it on era count.
                 if try_gid == unreleased_gid and n_eras >= 1:
+                    logger.debug("Selected unreleased GID %s (%d eras)", try_gid, n_eras)
                     break
                 # Otherwise stop once we have a solid result (≥5 eras)
-                elif n_eras >= 5:
+                elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
                     break
 
             except (httpx.HTTPError, ValueError, KeyError):
+                logger.debug("GID %s fetch/parse failed, trying next", try_gid)
                 continue
 
         if best_artist and best_eras > 0:
@@ -889,15 +921,6 @@ async def async_fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
 
-    def _resolve_name(html: str, title: str) -> str:
-        name = artist_name
-        if not name:
-            name = _infer_artist_name(title)
-            sheet_artist = _infer_artist_from_sheet(html)
-            if sheet_artist and sheet_artist.lower() != name.lower():
-                name = sheet_artist
-        return name
-
     # If a specific GID was requested, try it first.
     # If it produces 0 eras, fall through to GID discovery.
     if gid:
@@ -905,7 +928,7 @@ async def async_fetch_and_parse(
             html, title = await async_fetch_sheet_html(
                 url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
             )
-            name = _resolve_name(html, title)
+            name = _resolve_artist_name(html, title, artist_name)
             artist = await asyncio.to_thread(parse_sheet, html, name)
             if artist.eras:
                 # Before returning, check if this page reveals a better
@@ -937,7 +960,7 @@ async def async_fetch_and_parse(
 
             # If base page has tables, try parsing directly
             if "<table" in base_html.lower():
-                name = _resolve_name(base_html, title)
+                name = _resolve_artist_name(base_html, title, artist_name)
                 artist = await asyncio.to_thread(parse_sheet, base_html, name)
                 if artist.eras:
                     artist.source_url = url
@@ -949,14 +972,8 @@ async def async_fetch_and_parse(
             if not gids:
                 gids = ["0"]
 
-            # Identify Art tab GID and prioritize the "Unreleased" tab (mirrors
-            # the sync version) so trackers with a landing/recent tab don't get
-            # stuck on the wrong sheet.
-            named_tabs = _discover_named_tabs(base_html)
-            art_gid = _get_art_tab_gid(named_tabs)
-            unreleased_gid = _get_unreleased_tab_gid(named_tabs)
-            if unreleased_gid and unreleased_gid in gids:
-                gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
+            # Prioritize the "Unreleased" tab and identify Art tab GID
+            gids, art_gid, unreleased_gid = _prioritize_gids(base_html, gids)
 
             # --- Fetch all GID pages concurrently, then parse to pick best ---
             async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
@@ -992,7 +1009,7 @@ async def async_fetch_and_parse(
                     continue
                 result_gid, sheet_html = result
                 try:
-                    name = _resolve_name(sheet_html, title)
+                    name = _resolve_artist_name(sheet_html, title, artist_name)
                     candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
                     n_eras = len(candidate.eras)
                     n_songs = sum(
@@ -1001,6 +1018,7 @@ async def async_fetch_and_parse(
                         for s in era.sections
                     )
 
+                    logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
                     if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
                         best_eras = n_eras
                         best_artist = candidate
@@ -1009,8 +1027,9 @@ async def async_fetch_and_parse(
                     # Unreleased tab wins as long as it has at least 1 era —
                     # prevents Recents/landing tabs from outcompeting it on era count.
                     if result_gid == unreleased_gid and n_eras >= 1:
+                        logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
                         break
-                    elif n_eras >= 5:
+                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
                         break
                 except (ValueError, KeyError):
                     continue
@@ -1040,7 +1059,7 @@ async def async_fetch_and_parse(
             html, title = await async_fetch_sheet_html(
                 url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
             )
-            name = _resolve_name(html, title)
+            name = _resolve_artist_name(html, title, artist_name)
             artist = await asyncio.to_thread(parse_sheet, html, name)
             artist.source_url = url
             return artist
