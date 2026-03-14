@@ -5,7 +5,7 @@ import ArtistView from './components/ArtistView.vue'
 import PlayerBar from './components/PlayerBar.vue'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
-import { parseSheet } from './composables/useApi'
+import { parseSheet, USER_ABORT } from './composables/useApi'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
 import { extractAndCacheEraColors } from './composables/useEraColors'
 
@@ -60,8 +60,11 @@ async function handleParse(url) {
     }
     saveHistory(trackerHistory.value)
   } catch (e) {
-    // Silently ignore aborted requests (user submitted a new URL)
-    if (e instanceof DOMException && e.name === 'AbortError') return
+    // Silently ignore user-initiated cancellations (user submitted a new URL).
+    // We check object identity against our sentinel so that timeouts or other
+    // AbortError variants always surface as an error message instead of
+    // disappearing silently.
+    if (e === USER_ABORT) return
     // TimeoutError means the request took too long — offer a retry
     if (e?.name === 'TimeoutError' || e?.message?.includes('timeout') || e?.message?.includes('timed out')) {
       error.value = 'Request timed out — check your connection and try again'
