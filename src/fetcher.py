@@ -349,6 +349,36 @@ def _set_cache(url: str, html: str, title: str) -> None:
     )
 
 
+def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist | None:
+    """Return cached Artist from parsed JSON if fresh, else None."""
+    key = _cache_key(url)
+    parsed_file = CACHE_DIR / f"{key}.parsed.json"
+    meta_file = CACHE_DIR / f"{key}.meta.json"
+    if parsed_file.exists() and meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            if time.time() - meta.get("timestamp", 0) < cache_ttl:
+                data = json.loads(parsed_file.read_text(encoding="utf-8"))
+                return Artist.parse_obj(data)
+        except (json.JSONDecodeError, OSError, Exception):
+            pass
+    return None
+
+
+def _set_cached_parsed(url: str, artist: Artist) -> None:
+    """Write parsed Artist JSON to cache."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    key = _cache_key(url)
+    try:
+        data = artist.dict()
+        (CACHE_DIR / f"{key}.parsed.json").write_text(
+            json.dumps(data, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except (OSError, TypeError) as e:
+        logger.warning("Failed to cache parsed result: %s", e)
+
+
 def clear_cache() -> int:
     """Remove all cached files. Returns number of files deleted."""
     if not CACHE_DIR.exists():
@@ -540,6 +570,13 @@ def fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
 
+    # Check parsed result cache first (skip entire parse pipeline)
+    if use_cache and cache_ttl > 0:
+        cached_artist = _get_cached_parsed(url_norm, cache_ttl)
+        if cached_artist is not None:
+            cached_artist.source_url = url
+            return cached_artist
+
     # If a specific GID was requested, try it first.
     # If it produces 0 eras, fall through to GID discovery.
     if gid:
@@ -557,6 +594,8 @@ def fetch_and_parse(
                 unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                 if not unreleased_tab_gid or unreleased_tab_gid == gid:
                     artist.source_url = url
+                    if use_cache:
+                        _set_cached_parsed(url_norm, artist)
                     return artist
                 # A better "Unreleased" tab exists — fall through to full discovery
             # GID produced 0 eras — fall through to GID discovery below
@@ -588,6 +627,7 @@ def fetch_and_parse(
                 artist.source_url = url
                 if use_cache:
                     _set_cache(url_norm, base_html, title)
+                    _set_cached_parsed(url_norm, artist)
                 return artist
 
         # Step 2: Discover GIDs and prioritize tracker tab
@@ -684,6 +724,8 @@ def fetch_and_parse(
             # Cache the best result under the original URL
             if use_cache and best_html:
                 _set_cache(url_norm, best_html, title)
+            if use_cache:
+                _set_cached_parsed(url_norm, best_artist)
             return best_artist
 
         # Nothing worked — return whatever the first GID gave us
@@ -692,6 +734,8 @@ def fetch_and_parse(
         name = _resolve_artist_name(html, title)
         artist = parse_sheet(html, name)
         artist.source_url = url
+        if use_cache:
+            _set_cached_parsed(url_norm, artist)
         return artist
 
     except httpx.TimeoutException as e:
@@ -921,6 +965,13 @@ async def async_fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
 
+    # Check parsed result cache first (skip entire parse pipeline)
+    if use_cache and cache_ttl > 0:
+        cached_artist = _get_cached_parsed(url_norm, cache_ttl)
+        if cached_artist is not None:
+            cached_artist.source_url = url
+            return cached_artist
+
     # If a specific GID was requested, try it first.
     # If it produces 0 eras, fall through to GID discovery.
     if gid:
@@ -939,6 +990,8 @@ async def async_fetch_and_parse(
                 unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                 if not unreleased_tab_gid or unreleased_tab_gid == gid:
                     artist.source_url = url
+                    if use_cache:
+                        _set_cached_parsed(url_norm, artist)
                     return artist
                 # A better "Unreleased" tab exists — fall through to full discovery
             # GID produced 0 eras — fall through to GID discovery below
@@ -1053,6 +1106,7 @@ async def async_fetch_and_parse(
                         pass  # Art tab optional — keep existing art_url on failure
                 if use_cache and best_html:
                     _set_cache(url_norm, best_html, title)
+                _set_cached_parsed(url_norm, best_artist)
                 return best_artist
 
             # Fallback
@@ -1062,6 +1116,7 @@ async def async_fetch_and_parse(
             name = _resolve_artist_name(html, title, artist_name)
             artist = await asyncio.to_thread(parse_sheet, html, name)
             artist.source_url = url
+            _set_cached_parsed(url_norm, artist)
             return artist
 
         except httpx.TimeoutException as e:

@@ -150,7 +150,7 @@ class TestEraMatchKey:
         assert _era_match_key("Before Baby Keem(as Hykeem Carter)") == "before baby keem"
 
     def test_no_parens(self):
-        assert _era_match_key("THC: The High Chronical$") == "thc: the high chronical$"
+        assert _era_match_key("THC: The High Chronical$") == "thc the high chronical$"
 
     def test_parens_with_space(self):
         key = _era_match_key("Whole Lotta Red (Deluxe)")
@@ -165,7 +165,7 @@ class TestEraMatchKey:
 
     def test_purely_parenthetical(self):
         """Image-based era names may leave only parenthetical alt-names as text."""
-        assert _era_match_key("(Mollyworld, Balaclava Era)") == "mollyworld, balaclava era"
+        assert _era_match_key("(Mollyworld, Balaclava Era)") == "mollyworld balaclava era"
 
     def test_empty_name(self):
         assert _era_match_key("") == ""
