@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, type PropType } from 'vue'
-import { Badge } from '@/components/ui/badge'
+import BadgeRow from './BadgeRow.vue'
+import CreditTags from './CreditTags.vue'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
-import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
+import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 import type { SongVersion } from '../composables/useEraFiltering'
 
@@ -52,22 +53,11 @@ function handleAddToQueue(e) {
   addToQueue(props.version, props.artistName, props.eraName, props.eraArt)
 }
 
-const badge = computed(() => {
-  return effectiveBadge(props.version.quality, props.version.available_length)
-})
-
-const availBadge = computed(() => {
-  return getAvailBadge(props.version.quality, props.version.available_length)
-})
-
 const badgeEmoji = computed(() => {
   const b = props.version.badge
   if (!b) return null
   return BADGE_MAP[b] || null
 })
-
-const qualityStyle = computed(() => coloredBadgeStyle(props.version.quality_color))
-const availStyle = computed(() => coloredBadgeStyle(props.version.available_length_color))
 </script>
 
 <template>
@@ -83,17 +73,11 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
         <span class="v-badge-slot">{{ badgeEmoji || '' }}</span>
         <span class="v-title">{{ version.name }}</span>
         <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
-        <Badge v-if="badge" :variant="qualityStyle ? undefined : badge.variant" :style="qualityStyle">{{ badge.text }}</Badge>
-        <Badge v-if="availBadge" :variant="availStyle ? undefined : availBadge.variant" :style="availStyle">{{ availBadge.text }}</Badge>
+        <BadgeRow :version="version" />
       </div>
 
       <!-- Credits lines -->
-      <div v-if="version.collaboration || version.featuring || version.producers || version.refs" class="v-credits">
-        <span v-if="version.collaboration" class="v-credit v-credit-collab">with {{ version.collaboration }}</span>
-        <span v-if="version.featuring" class="v-credit v-credit-feat">feat. {{ version.featuring }}</span>
-        <span v-if="version.producers" class="v-credit v-credit-prod">prod. {{ version.producers }}</span>
-        <span v-if="version.refs" class="v-credit v-credit-ref">ref. {{ version.refs }}</span>
-      </div>
+      <CreditTags :version="version" />
 
       <div v-if="!hideAltTitles && version.alt_titles?.length" class="v-alt-titles">
         <span v-for="(alt, i) in version.alt_titles" :key="i" class="v-alt-item">{{ alt }}</span>
@@ -128,7 +112,7 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
   padding: 8px 8px;
   min-height: 44px;
   border-radius: var(--radius-md);
-  transition: all 0.2s ease;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   font-size: 13px;
   border: 1px solid transparent;
   -webkit-tap-highlight-color: transparent;
@@ -139,7 +123,7 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
   border-color: rgba(255, 255, 255, 0.03);
   border-left-color: hsl(var(--primary) / 0.3);
   border-left-width: 2px;
-  transform: translateX(2px);
+  transform: translateX(1px);
 }
 
 .version-row.playing {
@@ -227,42 +211,6 @@ const availStyle = computed(() => coloredBadgeStyle(props.version.available_leng
   color: var(--text-dim);
   font-size: 11px;
   flex-shrink: 0;
-}
-
-.v-credits {
-  font-size: 11px;
-  line-height: 1.4;
-  text-align: left;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.v-credit {
-  white-space: nowrap;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.v-credit-collab {
-  color: var(--text-primary);
-}
-
-.v-credit-feat {
-  color: var(--text-primary);
-}
-
-.v-credit-prod {
-  color: var(--text-secondary);
-}
-
-.v-credit-ref {
-  color: var(--text-dim);
-  font-style: italic;
 }
 
 .v-alt-titles {

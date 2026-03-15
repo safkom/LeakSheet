@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, defineAsyncComponent } from 'vue'
 import { toast } from 'vue-sonner'
-import SongDescriptionModal from './SongDescriptionModal.vue'
-import QueuePanel from './QueuePanel.vue'
+const SongDescriptionModal = defineAsyncComponent(() => import('./SongDescriptionModal.vue'))
+const QueuePanel = defineAsyncComponent(() => import('./QueuePanel.vue'))
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,12 +40,8 @@ const displayBadge = computed(() => {
   return BADGE_MAP[b] || ''
 })
 
-const displayName = computed(() => {
-  if (!track.value) return ''
-  const parts = [track.value.name]
-  if (track.value.version_tag) parts.push(`[${track.value.version_tag}]`)
-  return parts.join(' ')
-})
+const displayName = computed(() => track.value?.name || '')
+const displayTag = computed(() => track.value?.version_tag ? `[${track.value.version_tag}]` : '')
 
 const displaySub = computed(() => {
   return playerState.eraName || ''
@@ -185,6 +181,7 @@ const playerBarStyle = computed(() => {
             <span v-if="loading" class="loading-dot"></span>
             <span v-if="displayBadge" class="player-badge">{{ displayBadge }}</span>
             {{ displayName }}
+            <span v-if="displayTag" class="player-version-tag">{{ displayTag }}</span>
           </div>
           <div class="player-track-sub">
             <template v-if="error">
@@ -323,7 +320,7 @@ const playerBarStyle = computed(() => {
   left: 0;
   right: 0;
   background: var(--bg-player);
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid color-mix(in srgb, var(--player-accent, var(--border-color)) 25%, var(--border-color));
   z-index: 200;
   backdrop-filter: blur(12px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -349,7 +346,7 @@ const playerBarStyle = computed(() => {
 }
 
 .progress-bar-top:hover {
-  height: 5px;
+  height: 6px;
 }
 
 .progress-bar-top.disabled {
@@ -371,7 +368,7 @@ const playerBarStyle = computed(() => {
   top: 0;
   left: 0;
   height: 100%;
-  background: var(--player-accent, var(--accent-color));
+  background: linear-gradient(90deg, var(--player-accent, var(--accent-color)), color-mix(in srgb, var(--player-accent, var(--accent-color)), white 20%));
   transition: width 0.1s linear;
 }
 
@@ -449,6 +446,11 @@ const playerBarStyle = computed(() => {
   align-items: center;
   gap: 4px;
   color: var(--text-primary);
+}
+
+.player-version-tag {
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .player-track-sub {

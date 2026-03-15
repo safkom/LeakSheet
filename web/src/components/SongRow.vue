@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, type PropType } from 'vue'
 import VersionRow from './VersionRow.vue'
-import { Badge } from '@/components/ui/badge'
+import BadgeRow from './BadgeRow.vue'
+import CreditTags from './CreditTags.vue'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
-import { effectiveBadge, getAvailBadge, BADGE_MAP, coloredBadgeStyle } from '../composables/useUtils'
+import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
 import type { Song } from '../composables/useEraFiltering'
 
@@ -36,11 +37,6 @@ const badgeEmoji = computed(() => {
   return BADGE_MAP[b] || null
 })
 
-const badge = computed(() => {
-  if (!firstVersion.value || hasMultipleVersions.value) return null
-  return effectiveBadge(firstVersion.value.quality, firstVersion.value.available_length)
-})
-
 /** Collect all unique alt titles across all versions for multi-version songs */
 const allAltTitles = computed(() => {
   if (!hasMultipleVersions.value) return []
@@ -56,21 +52,6 @@ const allAltTitles = computed(() => {
     }
   }
   return titles
-})
-
-const availBadge = computed(() => {
-  if (!firstVersion.value || hasMultipleVersions.value) return null
-  return getAvailBadge(firstVersion.value.quality, firstVersion.value.available_length)
-})
-
-const qualityStyle = computed(() => {
-  if (!firstVersion.value || hasMultipleVersions.value) return null
-  return coloredBadgeStyle(firstVersion.value.quality_color)
-})
-
-const availStyle = computed(() => {
-  if (!firstVersion.value || hasMultipleVersions.value) return null
-  return coloredBadgeStyle(firstVersion.value.available_length_color)
 })
 
 // A single-version song with no streamable links — open description instead of play
@@ -131,16 +112,7 @@ function handleAddToQueue(e) {
         <div class="song-title-line">
           <span class="badge-slot">{{ badgeEmoji || '' }}</span>
           <span class="song-title">{{ song.base_name }}</span>
-          <Badge
-            v-if="!hasMultipleVersions && badge"
-            :variant="qualityStyle ? undefined : badge.variant"
-            :style="qualityStyle"
-          >{{ badge.text }}</Badge>
-          <Badge
-            v-if="!hasMultipleVersions && availBadge"
-            :variant="availStyle ? undefined : availBadge.variant"
-            :style="availStyle"
-          >{{ availBadge.text }}</Badge>
+          <BadgeRow v-if="!hasMultipleVersions && firstVersion" :version="firstVersion" />
           <!-- Expand chevron for multi-version -->
           <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
             <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
@@ -154,12 +126,7 @@ function handleAddToQueue(e) {
 
         <!-- Credits lines -->
         <template v-if="!hasMultipleVersions && firstVersion">
-          <div v-if="firstVersion.collaboration || firstVersion.featuring || firstVersion.producers || firstVersion.refs" class="song-credits">
-            <span v-if="firstVersion.collaboration" class="credit-item credit-collab">with {{ firstVersion.collaboration }}</span>
-            <span v-if="firstVersion.featuring" class="credit-item credit-feat">feat. {{ firstVersion.featuring }}</span>
-            <span v-if="firstVersion.producers" class="credit-item credit-prod">prod. {{ firstVersion.producers }}</span>
-            <span v-if="firstVersion.refs" class="credit-item credit-ref">ref. {{ firstVersion.refs }}</span>
-          </div>
+          <CreditTags :version="firstVersion" />
           <div v-if="firstVersion.alt_titles?.length" class="song-alt-titles">
             <span v-for="(alt, i) in firstVersion.alt_titles" :key="i" class="alt-title">{{ alt }}</span>
           </div>
@@ -235,18 +202,17 @@ function handleAddToQueue(e) {
   padding: 12px 10px;
   min-height: 44px;
   border-radius: var(--radius-md);
-  transition: all 0.2s ease;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid transparent;
   -webkit-tap-highlight-color: transparent;
 }
 
 .song-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.025);
   border-color: rgba(255, 255, 255, 0.05);
   border-left-color: hsl(var(--primary) / 0.4);
   border-left-width: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateX(2px);
+  transform: translateX(1px);
 }
 
 .song-row.playing {
@@ -355,42 +321,6 @@ function handleAddToQueue(e) {
   font-size: 14px;
   flex-shrink: 0;
   text-align: center;
-}
-
-.song-credits {
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: left;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.credit-item {
-  white-space: nowrap;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.credit-collab {
-  color: var(--text-primary);
-}
-
-.credit-feat {
-  color: var(--text-primary);
-}
-
-.credit-prod {
-  color: var(--text-secondary);
-}
-
-.credit-ref {
-  color: var(--text-dim);
-  font-style: italic;
 }
 
 .song-alt-titles {

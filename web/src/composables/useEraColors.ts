@@ -3,10 +3,13 @@
  * Populated by EraCard after ColorThief extraction, consumed by ArtistView for search badges
  * and PlayerBar for dynamic accent coloring.
  *
- * Color extraction is serialized via a concurrency-limited queue (max 2)
+ * Color extraction is serialized via a concurrency-limited queue (max 4)
  * to avoid frame drops from 20+ simultaneous canvas getImageData() calls.
+ *
+ * Extracted colors are persisted to localStorage so repeat visits skip
+ * ColorThief entirely.
  */
-import { shallowRef, triggerRef } from 'vue'
+import { shallowRef } from 'vue'
 import ColorThief from 'colorthief'
 
 // ---------------------------------------------------------------------------
@@ -36,16 +39,49 @@ export function getColorThief(): ColorThief {
 }
 
 // ---------------------------------------------------------------------------
-// Color cache — plain Map (not reactive) + shallowRef version counter
-// to avoid cascading Vue re-renders during initial load.
+// localStorage persistence — cache colors across sessions
 // ---------------------------------------------------------------------------
 
-const _cache = new Map<string, EraColors>()
+const _LS_KEY = 'leaksheet-era-colors'
+const _LS_MAX_ENTRIES = 200
+
+function _loadFromStorage(): Map<string, EraColors> {
+  try {
+    const raw = localStorage.getItem(_LS_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw) as Record<string, EraColors>
+    return new Map(Object.entries(parsed))
+  } catch {
+    return new Map()
+  }
+}
+
+function _saveToStorage(cache: Map<string, EraColors>): void {
+  try {
+    // Cap entries to prevent unbounded growth
+    const entries = [...cache.entries()]
+    const trimmed = entries.length > _LS_MAX_ENTRIES
+      ? entries.slice(entries.length - _LS_MAX_ENTRIES)
+      : entries
+    localStorage.setItem(_LS_KEY, JSON.stringify(Object.fromEntries(trimmed)))
+  } catch {
+    // localStorage full or unavailable — ignore
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Color cache — plain Map (not reactive) + shallowRef version counter
+// to avoid cascading Vue re-renders during initial load.
+// Initialized from localStorage on module load.
+// ---------------------------------------------------------------------------
+
+const _cache = _loadFromStorage()
 const _version = shallowRef(0)
 
 export function setEraColors(eraName: string, colors: EraColors): void {
   _cache.set(eraName, colors)
   _version.value++
+  _saveToStorage(_cache)
 }
 
 export function getEraColors(eraName: string): EraColors | null {
@@ -56,10 +92,11 @@ export function getEraColors(eraName: string): EraColors | null {
 }
 
 // ---------------------------------------------------------------------------
-// Concurrency-limited extraction queue — max 2 at a time
+// Concurrency-limited extraction queue — max 4 at a time
+// (bottleneck is image network fetch, not CPU)
 // ---------------------------------------------------------------------------
 
-const _MAX_CONCURRENT = 2
+const _MAX_CONCURRENT = 4
 let _running = 0
 const _queue: Array<() => void> = []
 
@@ -107,7 +144,7 @@ function _doExtract(eraName: string, imgElement: HTMLImageElement): void {
         accent: bright,
       })
     }
-  } catch (e) {
+  } catch {
     // ColorThief can fail on certain images — ignore
   }
 }

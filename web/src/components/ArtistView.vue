@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, watch, nextTick, ref, onUnmounted } from 'vue'
+import { computed, watch, nextTick, ref, onUnmounted, defineAsyncComponent } from 'vue'
 import { toast } from 'vue-sonner'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
-import ContextMenu from './ContextMenu.vue'
-import SongDescriptionModal from './SongDescriptionModal.vue'
+const ContextMenu = defineAsyncComponent(() => import('./ContextMenu.vue'))
+const SongDescriptionModal = defineAsyncComponent(() => import('./SongDescriptionModal.vue'))
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { getEraColors } from '../composables/useEraColors'
@@ -91,40 +91,42 @@ function eraColorStyle(era) {
 }
 
 /**
- * Auto-advance watcher: when a track starts playing, populate era context
- * so the next song in the era plays automatically when it finishes.
- * Respects best-of filter — only advances to best/special songs if enabled.
+ * Auto-advance watcher: when the playing era or best-of filter changes,
+ * populate era context so the next song plays automatically.
+ * Only rebuilds the song list when the era name or bestOf changes,
+ * not on every track change within the same era.
  */
-watch(() => playerState.track, (track) => {
-  if (!track) return
-  const eraName = playerState.eraName
-  if (!eraName) return
+watch(
+  () => [playerState.eraName, bestOf.value] as const,
+  ([eraName, _bestOf]) => {
+    if (!eraName || !playerState.track) return
 
-  // Find the era that matches the currently playing track
-  const era = eras.value.find(e => e.name === eraName)
-  if (!era) return
+    // Find the era that matches the currently playing track
+    const era = eras.value.find(e => e.name === eraName)
+    if (!era) return
 
-  // Build flat list of first-streamable version per song (play order)
-  const songs = eraSongs(era)
-  const versions = []
-  for (const song of songs) {
-    if (!song.versions?.length) continue
-    const streamable = song.versions.find(v => findStreamableLink(v.links))
-    if (streamable) {
-      versions.push(streamable)
+    // Build flat list of first-streamable version per song (play order)
+    const songs = eraSongs(era)
+    const versions = []
+    for (const song of songs) {
+      if (!song.versions?.length) continue
+      const streamable = song.versions.find(v => findStreamableLink(v.links))
+      if (streamable) {
+        versions.push(streamable)
+      }
     }
-  }
 
-  if (versions.length > 0) {
-    setEraSongs(
-      versions,
-      props.artist?.name || playerState.artistName,
-      eraName,
-      playerState.artUrl,
-      bestOf.value,
-    )
-  }
-})
+    if (versions.length > 0) {
+      setEraSongs(
+        versions,
+        props.artist?.name || playerState.artistName,
+        eraName,
+        playerState.artUrl,
+        _bestOf,
+      )
+    }
+  },
+)
 
 function handleShowDescription(payload: any): void {
   showDescription(payload)

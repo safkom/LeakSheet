@@ -29,6 +29,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
 from src.fetcher import (
+    AccessDeniedError,
     async_fetch_and_parse,
     clear_cache,
     InvalidURLError,
@@ -344,6 +345,8 @@ async def parse_sheet(req: SheetRequest):
         )
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL: {e}")
+    except AccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=f"Access denied: {e}")
     except NetworkError as e:
         raise HTTPException(status_code=502, detail=f"Network error: {e}")
     except NoTablesError as e:

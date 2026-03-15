@@ -10,6 +10,17 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue'],
+          'vendor-ui': ['reka-ui', 'class-variance-authority', 'clsx', 'vaul-vue'],
+          'vendor-media': ['colorthief'],
+        },
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     proxy: {

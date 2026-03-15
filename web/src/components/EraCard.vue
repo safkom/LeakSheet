@@ -193,9 +193,10 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   border-radius: 12px;
   padding: 0;
   text-align: left;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
   cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
   /* Stagger entry animation */
   animation: era-enter 0.35s ease both;
   animation-delay: var(--stagger, 0ms);
@@ -234,9 +235,9 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 
 /* Art — responsive sizing */
 .era-art {
-  width: 56px;
-  height: 56px;
-  border-radius: 6px;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
@@ -286,6 +287,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   font-size: 16px;
   font-weight: 700;
   line-height: 1.2;
+  letter-spacing: -0.3px;
   transition: color 0.3s;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -296,7 +298,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 
 .era-alt-names {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.6);
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -317,9 +319,10 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   }
 
   .era-art {
-    width: 80px;
-    height: 80px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    width: 88px;
+    height: 88px;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   }
 
   .era-title {
@@ -359,7 +362,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   }
 
   .timeline-text {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.45);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
