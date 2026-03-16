@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from 'vue'
+import { computed, ref, onUnmounted, type PropType } from 'vue'
 import { extractAndCacheEraColors, setEraColors, getColorThief } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
+import type { Era } from '../composables/useEraFiltering'
 
 const props = defineProps({
-  era: Object,
+  era: { type: Object as PropType<Era>, required: true },
   expanded: Boolean,
   index: { type: Number, default: 0 },
   sticky: Boolean,

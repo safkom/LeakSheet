@@ -52,4 +52,11 @@ defineProps({
   color: var(--text-dim);
   font-style: italic;
 }
+
+@media (max-width: 640px) {
+  .credit-tag {
+    white-space: normal;
+    max-width: 100%;
+  }
+}
 </style>

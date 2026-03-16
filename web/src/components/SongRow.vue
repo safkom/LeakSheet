@@ -423,11 +423,16 @@ function handleAddToQueue(e) {
 
 @media (max-width: 640px) {
   .song-row { padding: 8px 4px; }
-  .song-title-line { font-size: 13px; }
+  .song-title-line {
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .song-title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
   .versions-panel { padding-left: 12px; }
-  /* Prevent long quality badges from squeezing the title to zero width */
-  .song-title { min-width: 60px; }
-  .song-title-line :deep(.inline-flex) { flex-shrink: 1; }
 }
 
 

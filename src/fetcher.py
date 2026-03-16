@@ -333,8 +333,8 @@ def _get_cached(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> tuple[str, st
             meta = json.loads(meta_file.read_text())
             if time.time() - meta.get("timestamp", 0) < cache_ttl:
                 return cache_file.read_text(encoding="utf-8"), meta.get("title", "")
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Cache read failed for %s: %s", url[:80], e)
     return None
 
 
@@ -360,8 +360,8 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
             if time.time() - meta.get("timestamp", 0) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.parse_obj(data)
-        except (json.JSONDecodeError, OSError, Exception):
-            pass
+        except (json.JSONDecodeError, OSError, Exception) as e:
+            logger.warning("Parsed cache read failed for %s: %s", url[:80], e)
     return None
 
 

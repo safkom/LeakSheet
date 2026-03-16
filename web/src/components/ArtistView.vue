@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { getEraColors } from '../composables/useEraColors'
 import { playerState, setEraSongs, findStreamableLink } from '../composables/usePlayer'
 import { useEraFiltering, eraSongs } from '../composables/useEraFiltering'
-import { provideSharedOverlays } from '../composables/useSharedOverlays'
+import { provideSharedOverlays, type DescriptionModalState } from '../composables/useSharedOverlays'
 import type { Artist } from '../composables/useEraFiltering'
 
 const props = defineProps<{
@@ -128,7 +128,7 @@ watch(
   },
 )
 
-function handleShowDescription(payload: any): void {
+function handleShowDescription(payload: DescriptionModalState): void {
   showDescription(payload)
   closeContextMenu()
 }
@@ -155,11 +155,10 @@ function _setupRecentsObserver() {
 }
 
 watch(recents, (val) => {
+  recentsObserver?.disconnect()
   if (val) {
     recentsLimit.value = RECENTS_PAGE
     nextTick(_setupRecentsObserver)
-  } else {
-    recentsObserver?.disconnect()
   }
 })
 

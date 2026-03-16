@@ -152,4 +152,10 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
   white-space: nowrap;
   opacity: 0.8;
 }
+
+@media (max-width: 640px) {
+  .section-name {
+    white-space: normal;
+  }
+}
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, type PropType } from 'vue'
 import { BADGE_MAP, qualityVariant, availabilityVariant, coloredBadgeStyle } from '@/composables/useUtils'
 import { toast } from 'vue-sonner'
 import {
@@ -9,10 +9,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import type { Song, SongVersion } from '@/composables/useEraFiltering'
 
 const props = defineProps({
-  song: Object,
-  version: Object,
+  song: { type: Object as PropType<Song>, required: true },
+  version: { type: Object as PropType<SongVersion> },
   eraArt: String,
   eraName: String,
   artistName: String,
@@ -20,7 +21,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 
-function handleOpenChange(open) {
+function handleOpenChange(open: boolean) {
   if (!open) emit('close')
 }
 

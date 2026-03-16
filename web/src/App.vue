@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
-import PlayerBar from './components/PlayerBar.vue'
+const PlayerBar = defineAsyncComponent(() => import('./components/PlayerBar.vue'))
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet, USER_ABORT } from './composables/useApi'
@@ -34,7 +34,7 @@ const trackerHistory = ref(loadStoredHistory())
 
 const hasPlayer = computed(() => playerState.track !== null)
 
-async function handleParse(url) {
+async function handleParse(url: string) {
   loading.value = true
   loadingUrl.value = url
   lastUrl.value = url
@@ -69,7 +69,7 @@ async function handleParse(url) {
     if (e?.name === 'TimeoutError' || e?.message?.includes('timeout') || e?.message?.includes('timed out')) {
       error.value = 'Request timed out — check your connection and try again'
     } else {
-      error.value = e.message
+      error.value = e instanceof Error ? e.message : String(e)
     }
   } finally {
     loading.value = false
@@ -278,6 +278,8 @@ onUnmounted(() => {
                       class="discovery-status"
                       :class="artist.links_work === 1 ? 'status-ok' : artist.links_work === 2 ? 'status-partial' : 'status-unknown'"
                       :title="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
+                      :aria-label="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
+                      role="img"
                     >●</span>
                   </span>
                 </button>

@@ -78,10 +78,14 @@ function _saveToStorage(cache: Map<string, EraColors>): void {
 const _cache = _loadFromStorage()
 const _version = shallowRef(0)
 
+let _saveTimer: ReturnType<typeof setTimeout> | null = null
+
 export function setEraColors(eraName: string, colors: EraColors): void {
   _cache.set(eraName, colors)
   _version.value++
-  _saveToStorage(_cache)
+  // Debounce localStorage writes — many eras extract in rapid succession
+  if (_saveTimer) clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => _saveToStorage(_cache), 500)
 }
 
 export function getEraColors(eraName: string): EraColors | null {

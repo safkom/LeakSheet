@@ -178,7 +178,7 @@ const playerBarStyle = computed(() => {
         <!-- Track info -->
         <div class="player-track-info">
           <div class="player-track-name">
-            <span v-if="loading" class="loading-dot"></span>
+            <span v-if="loading" class="loading-dot" aria-label="Loading"></span>
             <span v-if="displayBadge" class="player-badge">{{ displayBadge }}</span>
             {{ displayName }}
             <span v-if="displayTag" class="player-version-tag">{{ displayTag }}</span>
@@ -582,6 +582,15 @@ const playerBarStyle = computed(() => {
   .player-art { width: 40px; height: 40px; border-radius: 4px; }
   .player-time-inline { display: none; }
   .progress-bar-top { height: 4px; }
+  /* Expand touch target without changing visual height */
+  .progress-bar-top::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: 0;
+    right: 0;
+    bottom: -10px;
+  }
   .progress-bar-top .progress-thumb { opacity: 1; width: 14px; height: 14px; }
 }
 </style>

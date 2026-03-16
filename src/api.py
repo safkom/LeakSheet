@@ -241,7 +241,8 @@ def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | N
         if parent_domains:
             return any(hostname == d or hostname.endswith("." + d) for d in parent_domains)
         return False
-    except Exception:
+    except Exception as e:
+        logger.debug("URL domain check failed for %s: %s", url[:80], e)
         return False
 
 
@@ -356,7 +357,8 @@ async def parse_sheet(req: SheetRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+        logger.exception("Unhandled error during sheet parse: %s", e)
+        raise HTTPException(status_code=500, detail="Internal error")
 
     data = artist.model_dump()
     return data
@@ -422,7 +424,8 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Image proxy error: {e}")
+        logger.exception("Image proxy error: %s", e)
+        raise HTTPException(status_code=502, detail="Image proxy error")
 
 
 # ---------------------------------------------------------------------------
@@ -464,8 +467,8 @@ async def proxy_stream(
         logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
-        logger.warning("Stream error for %s: %s", stream_url, e)
-        raise HTTPException(status_code=502, detail=f"Upstream error: {e}")
+        logger.exception("Stream error for %s: %s", stream_url, e)
+        raise HTTPException(status_code=502, detail="Upstream error")
 
     raw_ct = resp.headers.get("content-type")
     raw_cd = resp.headers.get("content-disposition")
