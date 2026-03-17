@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type PropType } from 'vue'
-import { BADGE_MAP, qualityVariant, availabilityVariant, coloredBadgeStyle } from '@/composables/useUtils'
+import { BADGE_MAP, qualityVariant, availabilityVariant } from '@/composables/useUtils'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -63,12 +63,10 @@ const details = computed(() => {
   const items = []
   if (v.value?.version_tag) items.push({ label: 'Version', value: v.value.version_tag })
   if (v.value?.quality) {
-    const style = v.value.quality_color ? coloredBadgeStyle(v.value.quality_color) : undefined
-    items.push({ label: 'Quality', value: v.value.quality, badgeVariant: style ? undefined : qualityVariant(v.value.quality), badgeStyle: style })
+    items.push({ label: 'Quality', value: v.value.quality, badgeVariant: qualityVariant(v.value.quality) })
   }
   if (v.value?.available_length) {
-    const style = v.value.available_length_color ? coloredBadgeStyle(v.value.available_length_color) : undefined
-    items.push({ label: 'Available', value: v.value.available_length, badgeVariant: style ? undefined : availabilityVariant(v.value.available_length), badgeStyle: style })
+    items.push({ label: 'Available', value: v.value.available_length, badgeVariant: availabilityVariant(v.value.available_length) })
   }
   if (v.value?.track_length) items.push({ label: 'Duration', value: v.value.track_length })
   if (v.value?.file_date) items.push({ label: 'File Date', value: v.value.file_date })
@@ -77,6 +75,17 @@ const details = computed(() => {
   if (v.value?.type) items.push({ label: 'Type', value: v.value.type })
   if (v.value?.og_filename) items.push({ label: 'OG Filename', value: v.value.og_filename })
   return items
+})
+
+/** Strip duplicate OG filename lines from notes since it's already shown in the details grid. */
+const cleanedNotes = computed(() => {
+  const raw = v.value?.notes
+  if (!raw) return ''
+  return raw
+    .split('\n')
+    .filter(line => !/^og\s*filename\s*:/i.test(line.trim()))
+    .join('\n')
+    .trim()
 })
 </script>
 
@@ -113,7 +122,7 @@ const details = computed(() => {
           <div class="detail-grid">
             <template v-for="d in details" :key="d.label">
               <span class="detail-label">{{ d.label }}</span>
-              <Badge v-if="d.badgeVariant || d.badgeStyle" :variant="d.badgeVariant" :style="d.badgeStyle" class="self-center">{{ d.value }}</Badge>
+              <Badge v-if="d.badgeVariant" :variant="d.badgeVariant" class="self-center justify-self-start">{{ d.value }}</Badge>
               <span v-else class="detail-value">{{ d.value }}</span>
             </template>
           </div>
@@ -132,9 +141,9 @@ const details = computed(() => {
         </div>
 
         <!-- Notes -->
-        <div v-if="v?.notes" class="modal-section">
+        <div v-if="cleanedNotes" class="modal-section">
           <div class="section-label">Notes</div>
-          <p class="notes-text">{{ v.notes }}</p>
+          <p class="notes-text">{{ cleanedNotes }}</p>
         </div>
 
         <!-- Links -->
@@ -245,6 +254,9 @@ const details = computed(() => {
 
 .detail-value {
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  min-width: 0;
 }
 
 .section-label {

@@ -4,7 +4,7 @@ import { cva } from "class-variance-authority"
 export { default as Badge } from "./Badge.vue"
 
 export const badgeVariants = cva(
-  "inline-flex gap-1 items-center border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-[6px] whitespace-nowrap",
+  "inline-flex gap-1 items-center border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-[6px] whitespace-nowrap",
   {
     variants: {
       variant: {
@@ -16,21 +16,21 @@ export const badgeVariants = cva(
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
         // Quality badge variants (using CSS variable tokens)
-        og: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
-        hq: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
-        cd: "border-transparent bg-[hsl(var(--badge-cd)/0.15)] text-[hsl(var(--badge-cd))]",
-        lq: "border-transparent bg-[hsl(var(--badge-lq)/0.15)] text-[hsl(var(--badge-lq))]",
-        rec: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
-        na: "border-transparent bg-[hsl(var(--badge-na)/0.15)] text-[hsl(var(--badge-na))]",
+        og: "border-transparent bg-[hsl(var(--badge-og)/0.25)] text-[hsl(var(--badge-og))]",
+        hq: "border-transparent bg-[hsl(var(--badge-hq)/0.25)] text-[hsl(var(--badge-hq))]",
+        cd: "border-transparent bg-[hsl(var(--badge-cd)/0.25)] text-[hsl(var(--badge-cd))]",
+        lq: "border-transparent bg-[hsl(var(--badge-lq)/0.25)] text-[hsl(var(--badge-lq))]",
+        rec: "border-transparent bg-[hsl(var(--badge-rec)/0.25)] text-[hsl(var(--badge-rec))]",
+        na: "border-transparent bg-[hsl(var(--badge-na)/0.25)] text-[hsl(var(--badge-na))]",
         // Availability badge variants
-        ogfile: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
-        full: "border-transparent bg-[hsl(var(--badge-og)/0.15)] text-[hsl(var(--badge-og))]",
-        tagged: "border-transparent bg-[hsl(var(--badge-cd)/0.15)] text-[hsl(var(--badge-cd))]",
-        stem: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
-        partial: "border-transparent bg-[hsl(var(--badge-lq)/0.15)] text-[hsl(var(--badge-lq))]",
-        snippet: "border-transparent bg-[hsl(var(--badge-rec)/0.15)] text-[hsl(var(--badge-rec))]",
-        confirmed: "border-transparent bg-[hsl(var(--badge-hq)/0.15)] text-[hsl(var(--badge-hq))]",
-        unavailable: "border-transparent bg-[hsl(var(--badge-na)/0.15)] text-[hsl(var(--badge-na))]",
+        ogfile: "border-transparent bg-[hsl(var(--badge-og)/0.30)] text-[hsl(var(--badge-og))]",
+        full: "border-transparent bg-[hsl(var(--badge-cd)/0.25)] text-[hsl(var(--badge-cd))]",
+        tagged: "border-transparent bg-[hsl(260,70%,65%)/0.25] text-[hsl(260,70%,75%)]",
+        stem: "border-transparent bg-[hsl(var(--badge-hq)/0.25)] text-[hsl(var(--badge-hq))]",
+        partial: "border-transparent bg-[hsl(var(--badge-lq)/0.25)] text-[hsl(var(--badge-lq))]",
+        snippet: "border-transparent bg-[hsl(var(--badge-rec)/0.25)] text-[hsl(var(--badge-rec))]",
+        confirmed: "border-transparent bg-[hsl(var(--badge-hq)/0.25)] text-[hsl(var(--badge-hq))]",
+        unavailable: "border-transparent bg-[hsl(var(--badge-na)/0.25)] text-[hsl(var(--badge-na))]",
       },
     },
     defaultVariants: {

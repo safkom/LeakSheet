@@ -11,8 +11,45 @@ export const MIME_TO_EXT: Record<string, string> = {
   'audio/x-m4a': '.m4a',
 }
 
+// Regex patterns for supported hosts
+const _PILLOWS_RE = /^https?:\/\/(?:www\.)?(pillows\.su|pillowcase\.su)\/f\/([A-Za-z0-9_-]+)/i
+const _IMGUR_RE = /^https?:\/\/(?:www\.)?((?:temp\.)?imgur\.gg)\/f\/([A-Za-z0-9_-]+)/i
+const _FROSTE_RE = /^https?:\/\/music\.froste\.lol\/song\/([a-f0-9]+)/i
+
 /**
- * Core download logic — fetch via stream proxy, save as blob.
+ * Resolve original file-sharing link to its native download URL.
+ *
+ * - pillows.su / pillowcase.su → https://api.pillows.su/api/download/{id}
+ * - music.froste.lol → https://music.froste.lol/song/{id}/download
+ * - imgur.gg — uses direct CDN link (the original link itself serves the file)
+ * - krakenfiles — no separate download endpoint, falls back to stream proxy
+ */
+function resolveDownloadUrl(link: string): string {
+  let m = _PILLOWS_RE.exec(link)
+  if (m) {
+    const id = m[2]
+    return `https://api.pillows.su/api/download/${id}`
+  }
+
+  m = _FROSTE_RE.exec(link)
+  if (m) {
+    const id = m[1]
+    return `https://music.froste.lol/song/${id}/download`
+  }
+
+  // imgur.gg: the link itself is CDN-served; use it directly
+  m = _IMGUR_RE.exec(link)
+  if (m) {
+    return link
+  }
+
+  // Fallback: use stream proxy
+  return link
+}
+
+/**
+ * Core download logic — uses the correct download endpoint per host,
+ * proxied through the backend for CORS.
  * Standalone function (not a composable) so it can be called from
  * contexts that don't have a Vue lifecycle (e.g. module-level controllers).
  */
@@ -21,27 +58,55 @@ export async function downloadFile(
   filename: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const downloadUrl = `/api/stream?url=${encodeURIComponent(link)}&download=true`
-  toast('Downloading...')
+  const actualDownloadUrl = resolveDownloadUrl(link)
+  const downloadUrl = `/api/stream?url=${encodeURIComponent(actualDownloadUrl)}&download=true`
+
+  const toastId = toast.loading(`Downloading ${filename}...`)
   try {
     const res = await fetch(downloadUrl, { signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const ct = res.headers.get('content-type')?.split(';')[0].trim() || ''
     const ext = MIME_TO_EXT[ct] || '.mp3'
-    const blob = await res.blob()
+
+    // Stream with progress if Content-Length is available
+    const total = parseInt(res.headers.get('content-length') || '0', 10)
+    let blob: Blob
+
+    if (total > 0 && res.body) {
+      const reader = res.body.getReader()
+      const chunks: Uint8Array[] = []
+      let received = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        received += value.length
+        const pct = Math.round((received / total) * 100)
+        toast.loading(`Downloading ${filename}... ${pct}%`, { id: toastId })
+      }
+
+      blob = new Blob(chunks, { type: ct || 'application/octet-stream' })
+    } else {
+      blob = await res.blob()
+    }
+
     const objUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = objUrl
     a.download = `${filename}${ext}`
     a.click()
     URL.revokeObjectURL(objUrl)
-    toast.success('Download complete')
+    toast.success('Download complete', { id: toastId })
   } catch (e: unknown) {
-    if (e instanceof Error && e.name === 'AbortError') return
+    if (e instanceof Error && e.name === 'AbortError') {
+      toast.dismiss(toastId)
+      return
+    }
     if (e instanceof Error && e.name === 'TimeoutError') {
-      toast.error('Download timed out — check your connection')
+      toast.error('Download timed out — check your connection', { id: toastId })
     } else {
-      toast.error('Download failed — try right-clicking for other versions')
+      toast.error('Download failed — try right-clicking for other versions', { id: toastId })
     }
   }
 }

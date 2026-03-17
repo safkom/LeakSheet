@@ -10,7 +10,8 @@
 export function qualityVariant(q: string | null | undefined): string {
   if (!q) return 'na'
   const l = q.toLowerCase()
-  if (l.includes('og') || l.includes('lossless')) return 'og'
+  if (l.includes('lossless')) return 'hq'
+  if (l.includes('og')) return 'og'
   if (l.includes('cd')) return 'cd'
   if (l.includes('high')) return 'hq'
   if (l.includes('low')) return 'lq'
@@ -129,7 +130,7 @@ export function coloredBadgeStyle(hexColor: string | null | undefined): Record<s
   const clean = hexColor.replace('#', '')
   if (clean.length !== 6) return null
   return {
-    backgroundColor: `${hexColor}26`, // 15% alpha overlay
+    backgroundColor: `${hexColor}40`, // 25% alpha overlay
     color: hexColor,
     borderColor: 'transparent',
   }

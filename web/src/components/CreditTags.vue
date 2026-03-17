@@ -26,6 +26,7 @@ defineProps({
   align-items: center;
   gap: 6px;
   margin-top: 4px;
+  padding-left: var(--metadata-indent, 0px);
 }
 
 .credit-tag {

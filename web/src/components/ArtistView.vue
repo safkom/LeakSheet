@@ -176,9 +176,6 @@ onUnmounted(() => recentsObserver?.disconnect())
       </button>
       <div class="artist-header-text">
         <h2 class="artist-name">{{ artist.name }}</h2>
-        <div class="artist-meta">
-          {{ (bestOf && !isSearching && !recents) ? filteredEras.length + ' of ' + (artist.eras?.length || 0) + ' eras' : (artist.eras?.length || 0) + ' eras' }}
-        </div>
       </div>
     </div>
 
@@ -304,16 +301,18 @@ onUnmounted(() => recentsObserver?.disconnect())
         />
 
         <!-- Expanded songs panel -->
-        <Transition name="slide">
-          <div v-if="isEraExpanded(era.name)" class="era-songs-panel">
-            <SongList
-              :sections="eraSections(era)"
-              :songs="filteredSongs(era)"
-              :artist-name="artist.name"
-              :era-name="era.name"
-              :era-art="era.art_url"
-              :empty-message="bestOf ? 'No Best Of or Special tracks in this era' : 'No songs in this era'"
-            />
+        <Transition name="era-expand">
+          <div v-if="isEraExpanded(era.name)" class="era-songs-wrap">
+            <div class="era-songs-panel">
+              <SongList
+                :sections="eraSections(era)"
+                :songs="filteredSongs(era)"
+                :artist-name="artist.name"
+                :era-name="era.name"
+                :era-art="era.art_url"
+                :empty-message="bestOf ? 'No Best Of or Special tracks in this era' : 'No songs in this era'"
+              />
+            </div>
           </div>
         </Transition>
       </div>
@@ -385,12 +384,6 @@ onUnmounted(() => recentsObserver?.disconnect())
   font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.5px;
-}
-
-.artist-meta {
-  color: var(--text-secondary);
-  font-size: 13px;
-  margin-top: 4px;
 }
 
 /* Search */
@@ -493,19 +486,30 @@ onUnmounted(() => recentsObserver?.disconnect())
   border-top: 2px solid var(--accent-color);
   border-radius: 0 0 12px 12px;
   padding: 0 16px 16px;
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* Transition */
-.slide-enter-active,
-.slide-leave-active {
-  transition: opacity 0.25s ease;
+/* Era expand/collapse — grid-row technique for smooth height animation */
+.era-songs-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
 }
-.slide-enter-from,
-.slide-leave-to {
+
+.era-expand-enter-active,
+.era-expand-leave-active {
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+
+.era-expand-enter-from,
+.era-expand-leave-to {
+  grid-template-rows: 0fr;
   opacity: 0;
 }
-.slide-enter-to,
-.slide-leave-from {
+
+.era-expand-enter-to,
+.era-expand-leave-from {
+  grid-template-rows: 1fr;
   opacity: 1;
 }
 

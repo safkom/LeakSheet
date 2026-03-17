@@ -40,7 +40,7 @@ async function handlePaste() {
         v-model="url"
         type="text"
         variant="ghost"
-        class="flex-1 px-3 py-2.5 text-sm"
+        class="flex-1 px-3 py-2.5 text-base"
         placeholder="Paste a tracker URL..."
         :disabled="loading"
       />
@@ -91,8 +91,12 @@ async function handlePaste() {
 
 .input-wrapper:focus-within {
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 3px var(--accent-dim), 0 4px 12px rgba(0, 0, 0, 0.3);
-  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px var(--accent-dim), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.input-wrapper :deep(input:focus) {
+  outline: none;
+  box-shadow: none;
 }
 
 .input-icon {

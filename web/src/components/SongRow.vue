@@ -6,6 +6,7 @@ import CreditTags from './CreditTags.vue'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
+import { useLongPress } from '../composables/useLongPress'
 import type { Song } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -97,6 +98,19 @@ function handleAddToQueue(e) {
   if (!firstVersion.value) return
   addToQueue(firstVersion.value, props.artistName, props.eraName, props.eraArt)
 }
+
+// Long-press for mobile context menu
+const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
+  showContextMenu({
+    x,
+    y,
+    song: props.song,
+    version: firstVersion.value,
+    artistName: props.artistName,
+    eraName: props.eraName,
+    eraArt: props.eraArt,
+  })
+})
 </script>
 
 <template>
@@ -106,11 +120,13 @@ function handleAddToQueue(e) {
       :class="{ expanded, playing: isCurrentSong && !isCurrentLoading, loading: isCurrentLoading, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
       @click="handleClick"
       @contextmenu="handleContextMenu"
+      @touchstart.passive="onTouchStart"
+      @touchend="onTouchEnd"
     >
       <div class="song-content">
         <!-- Title line -->
         <div class="song-title-line">
-          <span class="badge-slot">{{ badgeEmoji || '' }}</span>
+          <span class="badge-slot" :data-emoji="badgeEmoji || ''">{{ (isCurrentSong || isCurrentLoading) ? '' : (badgeEmoji || '') }}</span>
           <span class="song-title">{{ song.base_name }}</span>
           <BadgeRow v-if="!hasMultipleVersions && firstVersion" :version="firstVersion" />
           <!-- Expand chevron for multi-version -->
@@ -297,6 +313,7 @@ function handleAddToQueue(e) {
 .song-content {
   flex: 1;
   min-width: 0;
+  --metadata-indent: 24px;
 }
 
 .song-title-line {
@@ -422,9 +439,9 @@ function handleAddToQueue(e) {
 }
 
 @media (max-width: 640px) {
-  .song-row { padding: 8px 4px; }
+  .song-row { padding: 10px 8px; }
   .song-title-line {
-    font-size: 13px;
+    font-size: 14px;
     flex-wrap: wrap;
   }
   .song-title {
@@ -432,6 +449,7 @@ function handleAddToQueue(e) {
     overflow: visible;
     text-overflow: unset;
   }
+  .track-length { font-size: 13px; }
   .versions-panel { padding-left: 12px; }
 }
 

@@ -31,12 +31,12 @@
     --player: 0 0% 3%;               /* #080808 */
 
     /* Badge color tokens (HSL triplets) */
-    --badge-og: 175 53% 55%;          /* #4ecdc4 teal */
-    --badge-hq: 214 100% 67%;         /* #58a6ff blue */
-    --badge-cd: 263 90% 71%;           /* #a371f7 purple */
-    --badge-lq: 25 86% 59%;           /* #f0883e orange */
-    --badge-rec: 270 100% 83%;        /* #d2a8ff light purple */
-    --badge-na: 0 0% 35%;             /* #595959 gray */
+    --badge-og: 40 90% 55%;            /* gold/amber — OG quality */
+    --badge-hq: 200 85% 60%;          /* light blue — Lossless / HQ */
+    --badge-cd: 130 50% 50%;          /* green — CD Quality */
+    --badge-lq: 25 86% 59%;           /* orange — Low Quality */
+    --badge-rec: 270 100% 83%;        /* light purple — Recording */
+    --badge-na: 0 0% 45%;             /* gray — N/A */
   }
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type PropType } from 'vue'
 import { Badge } from '@/components/ui/badge'
-import { effectiveBadge, getAvailBadge, coloredBadgeStyle } from '../composables/useUtils'
+import { effectiveBadge, getAvailBadge } from '../composables/useUtils'
 import type { SongVersion } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -15,20 +15,34 @@ const badge = computed(() => {
 const availBadge = computed(() => {
   return getAvailBadge(props.version.quality, props.version.available_length)
 })
-
-const qualityStyle = computed(() => coloredBadgeStyle(props.version.quality_color))
-const availStyle = computed(() => coloredBadgeStyle(props.version.available_length_color))
 </script>
 
 <template>
-  <Badge
-    v-if="badge"
-    :variant="qualityStyle ? undefined : badge.variant"
-    :style="qualityStyle"
-  >{{ badge.text }}</Badge>
-  <Badge
-    v-if="availBadge"
-    :variant="availStyle ? undefined : availBadge.variant"
-    :style="availStyle"
-  >{{ availBadge.text }}</Badge>
+  <span v-if="badge || availBadge" class="badge-row">
+    <Badge
+      v-if="badge"
+      :variant="badge.variant"
+    >{{ badge.text }}</Badge>
+    <Badge
+      v-if="availBadge"
+      :variant="availBadge.variant"
+    >{{ availBadge.text }}</Badge>
+  </span>
 </template>
+
+<style scoped>
+.badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .badge-row {
+    margin-left: 8px;
+  }
+}
+</style>

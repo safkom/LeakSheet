@@ -33,9 +33,13 @@ onMounted(async () => {
     const vw = window.innerWidth
     const vh = window.innerHeight
 
-    // Keep menu within viewport
+    // Account for player bar at bottom (~80px)
+    const playerBar = document.querySelector('.player-bar')
+    const bottomInset = playerBar ? playerBar.getBoundingClientRect().height : 0
+
+    // Keep menu within viewport (above player bar)
     if (rect.right > vw) adjustedX.value = vw - rect.width - 8
-    if (rect.bottom > vh) adjustedY.value = vh - rect.height - 8
+    if (rect.bottom > vh - bottomInset) adjustedY.value = vh - bottomInset - rect.height - 8
     if (adjustedX.value < 0) adjustedX.value = 8
     if (adjustedY.value < 0) adjustedY.value = 8
   }

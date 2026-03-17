@@ -125,7 +125,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 8px 4px 20px;
+  padding: 8px 8px 4px 34px;
   margin-top: 4px;
   background: var(--bg-secondary);
 }
@@ -154,6 +154,10 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 }
 
 @media (max-width: 640px) {
+  .section-divider {
+    padding-left: 32px;
+  }
+
   .section-name {
     white-space: normal;
   }

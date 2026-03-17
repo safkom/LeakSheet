@@ -166,10 +166,15 @@ const filteredDiscovery = computed(() => {
   return discoveryArtists.value.filter(a => a.name.toLowerCase().includes(q))
 })
 
+const discoveryLoadingUrl = ref('')
+
 function pickDiscoveryArtist(artist) {
-  discoveryOpen.value = false
+  discoveryLoadingUrl.value = artist.url
   discoverySearch.value = ''
-  handleParse(artist.url)
+  handleParse(artist.url).finally(() => {
+    discoveryLoadingUrl.value = ''
+    discoveryOpen.value = false
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +243,7 @@ onUnmounted(() => {
         <div class="discovery-row">
           <button class="discovery-toggle" :class="{ active: discoveryOpen }" @click="loadDiscovery">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path fill="currentColor" d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 0 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8Z"/>
+              <path fill="currentColor" d="M1.5 2.75a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 0 1.5H2.25a.75.75 0 0 1-.75-.75zm0 5a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 0 1.5H2.25a.75.75 0 0 1-.75-.75zm0 5a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 0 1.5H2.25a.75.75 0 0 1-.75-.75z"/>
             </svg>
             Browse Artists
             <svg class="discovery-chevron" :class="{ open: discoveryOpen }" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
@@ -268,19 +273,23 @@ onUnmounted(() => {
                   v-for="artist in filteredDiscovery"
                   :key="artist.url"
                   class="discovery-item"
+                  :class="{ 'discovery-item-loading': discoveryLoadingUrl === artist.url }"
                   :disabled="loading"
                   @click="pickDiscoveryArtist(artist)"
                 >
                   <span class="discovery-name">{{ artist.name }}</span>
                   <span class="discovery-meta">
-                    <span v-if="artist.best" class="discovery-best" title="Curated tracker">★</span>
-                    <span
-                      class="discovery-status"
-                      :class="artist.links_work === 1 ? 'status-ok' : artist.links_work === 2 ? 'status-partial' : 'status-unknown'"
-                      :title="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
-                      :aria-label="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
-                      role="img"
-                    >●</span>
+                    <span v-if="discoveryLoadingUrl === artist.url" class="history-spinner" />
+                    <template v-else>
+                      <span v-if="artist.best" class="discovery-best" title="Curated tracker">★</span>
+                      <span
+                        class="discovery-status"
+                        :class="artist.links_work === 1 ? 'status-ok' : artist.links_work === 2 ? 'status-partial' : 'status-unknown'"
+                        :title="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
+                        :aria-label="artist.links_work === 1 ? 'All links working' : artist.links_work === 2 ? 'Some links working' : 'Link status unknown'"
+                        role="img"
+                      >●</span>
+                    </template>
                   </span>
                 </button>
               </div>
@@ -498,6 +507,11 @@ onUnmounted(() => {
 .discovery-item:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.discovery-item-loading {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .discovery-name {

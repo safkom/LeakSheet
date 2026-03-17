@@ -5,6 +5,7 @@ import CreditTags from './CreditTags.vue'
 import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
+import { useLongPress } from '../composables/useLongPress'
 import type { SongVersion } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -53,6 +54,18 @@ function handleAddToQueue(e) {
   addToQueue(props.version, props.artistName, props.eraName, props.eraArt)
 }
 
+// Long-press for mobile context menu
+const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
+  showContextMenu({
+    x,
+    y,
+    version: props.version,
+    artistName: props.artistName,
+    eraName: props.eraName,
+    eraArt: props.eraArt,
+  })
+})
+
 const badgeEmoji = computed(() => {
   const b = props.version.badge
   if (!b) return null
@@ -66,11 +79,13 @@ const badgeEmoji = computed(() => {
     :class="{ playing: isCurrentTrack && !isCurrentLoading, loading: isCurrentLoading }"
     @click="handlePlay"
     @contextmenu="handleContextMenu"
+    @touchstart.passive="onTouchStart"
+    @touchend="onTouchEnd"
   >
     <div class="v-content">
       <!-- Title line -->
       <div class="v-title-line">
-        <span class="v-badge-slot">{{ badgeEmoji || '' }}</span>
+        <span class="v-badge-slot">{{ (isCurrentTrack || isCurrentLoading) ? '' : (badgeEmoji || '') }}</span>
         <span class="v-title">{{ version.name }}</span>
         <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
         <BadgeRow :version="version" />
@@ -180,6 +195,7 @@ const badgeEmoji = computed(() => {
 .v-content {
   flex: 1;
   min-width: 0;
+  --metadata-indent: 22px;
 }
 
 .v-title-line {
@@ -276,7 +292,9 @@ const badgeEmoji = computed(() => {
 }
 
 @media (max-width: 640px) {
-  .version-row { font-size: 11px; gap: 6px; }
+  .version-row { font-size: 13px; gap: 6px; padding: 10px 8px; }
+  .v-title-line { font-size: 13px; }
+  .v-length { font-size: 12px; }
   /* Prevent long quality badges from squeezing the title to zero width */
   .v-title { min-width: 60px; }
   .v-title-line :deep(.inline-flex) { flex-shrink: 1; }

@@ -173,7 +173,9 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
         </svg>
       </button>
       <Transition name="desc-expand">
-        <p v-if="descOpen" class="era-desc-content">{{ era.description }}</p>
+        <div v-if="descOpen" class="era-desc-wrap">
+          <p class="era-desc-content">{{ era.description }}</p>
+        </div>
       </Transition>
     </div>
   </div>
@@ -426,16 +428,32 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
   white-space: pre-wrap;
 }
 
-/* Smooth expand/collapse transition */
+/* Smooth expand/collapse transition — grid technique */
+.era-desc-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.era-desc-wrap .era-desc-content {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .desc-expand-enter-active,
 .desc-expand-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: grid-template-rows 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
 }
 
 .desc-expand-enter-from,
 .desc-expand-leave-to {
+  grid-template-rows: 0fr;
   opacity: 0;
-  transform: translateY(-4px);
+}
+
+.desc-expand-enter-to,
+.desc-expand-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
 }
 
 /* ── Sticky state (all sizes) ── */
@@ -477,6 +495,16 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 
 .era-card-wrapper.era-sticky .era-desc-row {
   display: none;
+}
+
+/* Mobile sizing boost */
+@media (max-width: 767px) {
+  .era-layout { padding: 12px 14px; gap: 12px; }
+  .era-art { width: 56px; height: 56px; }
+  .era-title { font-size: 15px; }
+  .era-alt-names { font-size: 11px; }
+  .era-desc-content { font-size: 13px; }
+  .era-desc-toggle { font-size: 12px; padding: 8px 14px; }
 }
 
 /* Mobile sticky: remove horizontal borders */
