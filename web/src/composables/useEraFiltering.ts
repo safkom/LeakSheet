@@ -153,6 +153,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
   const debouncedQuery = ref('')
   const bestOf = ref(false)
   const recents = ref(false)
+  const noSnippets = ref(false)
   const expandedEra: Ref<string | null> = ref(null)
 
   // Debounce search input
@@ -186,6 +187,20 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
       .filter((s): s is Song => s !== null)
   }
 
+  function _isSnippet(v: SongVersion): boolean {
+    return (v.available_length ?? '').toLowerCase().includes('snippet')
+  }
+
+  /** Filter a song list to remove snippet-only songs; narrows each song's versions too. */
+  function _filterNoSnippets(songs: Song[]): Song[] {
+    return songs
+      .map(song => {
+        const nonSnippet = (song.versions || []).filter(v => !_isSnippet(v))
+        return nonSnippet.length ? { ...song, versions: nonSnippet } : null
+      })
+      .filter((s): s is Song => s !== null)
+  }
+
   // ── Filtered eras ──
 
   const filteredEras = computed(() => {
@@ -213,6 +228,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     for (const era of eras.value) {
       let songs = eraSongs(era)
       if (bestOf.value) songs = _filterToBestOf(songs)
+      if (noSnippets.value) songs = _filterNoSnippets(songs)
       if (q) {
         const eraNameMatch = era.name.toLowerCase().includes(q) ||
           era.alt_names?.some(alt => alt.toLowerCase().includes(q))
@@ -249,6 +265,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
         .map(sec => {
           let songs = sec.songs || []
           if (bestOf.value) songs = _filterToBestOf(songs)
+          if (noSnippets.value) songs = _filterNoSnippets(songs)
           if (q) {
             const eraNameMatch = era.name.toLowerCase().includes(q) ||
               era.alt_names?.some(alt => alt.toLowerCase().includes(q))
@@ -279,6 +296,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
         if (songMatchesQuery(song, q)) {
           for (const version of (song.versions || [])) {
             if (bestOf.value && !BEST_OF_BADGES.has(version.badge ?? '')) continue
+            if (noSnippets.value && _isSnippet(version)) continue
             results.push({ song, version, era })
           }
         }
@@ -301,6 +319,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
         if (q && !songMatchesQuery(song, q)) continue
         for (const version of (song.versions || [])) {
           if (bestOf.value && !BEST_OF_BADGES.has(version.badge ?? '')) continue
+          if (noSnippets.value && _isSnippet(version)) continue
           const leakDate = version.leak_date || version.file_date
           if (leakDate) {
             results.push({ song, version, era, _ts: _parseLeakDate(leakDate) })
@@ -340,12 +359,17 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     }
   }
 
+  function toggleNoSnippets(): void {
+    noSnippets.value = !noSnippets.value
+  }
+
   return {
     // State
     searchQuery,
     debouncedQuery,
     bestOf,
     recents,
+    noSnippets,
     expandedEra,
     isSearching,
 
@@ -361,5 +385,6 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     isEraExpanded,
     toggleBestOf,
     toggleRecents,
+    toggleNoSnippets,
   }
 }

@@ -36,6 +36,7 @@ const {
   searchQuery,
   bestOf,
   recents,
+  noSnippets,
   isSearching,
   filteredEras,
   flatSearchResults,
@@ -46,6 +47,7 @@ const {
   isEraExpanded,
   toggleBestOf,
   toggleRecents,
+  toggleNoSnippets,
 } = useEraFiltering(eras)
 
 const eraBlockRefs = ref<Record<string, HTMLElement | null>>({})
@@ -205,6 +207,9 @@ onUnmounted(() => recentsObserver?.disconnect())
           <svg viewBox="0 0 16 16" width="16" height="16" style="opacity: inherit">
             <path fill="currentColor" d="M1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0zM8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.5 4.75a.75.75 0 0 0-1.5 0v3.5a.75.75 0 0 0 .37.65l2.5 1.5a.75.75 0 1 0 .76-1.3L8.5 7.87V4.75z"/>
           </svg>
+        </Button>
+        <Button variant="ghost" size="icon" class="no-snippets-toggle" :class="{ active: noSnippets }" @click="toggleNoSnippets" aria-label="Hide snippets" :aria-pressed="noSnippets">
+          <span class="no-snippets-icon">✂️</span>
         </Button>
       </div>
     </div>
@@ -434,7 +439,8 @@ onUnmounted(() => recentsObserver?.disconnect())
 }
 
 .best-of-toggle,
-.recents-toggle {
+.recents-toggle,
+.no-snippets-toggle {
   flex-shrink: 0;
   opacity: 0.35;
   border: 1px solid transparent;
@@ -444,7 +450,8 @@ onUnmounted(() => recentsObserver?.disconnect())
 }
 
 .best-of-toggle:hover,
-.recents-toggle:hover {
+.recents-toggle:hover,
+.no-snippets-toggle:hover {
   opacity: 0.7;
 }
 
@@ -460,6 +467,18 @@ onUnmounted(() => recentsObserver?.disconnect())
   background: rgba(88, 166, 255, 0.20);
   border-color: rgba(88, 166, 255, 0.45);
   box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.3);
+}
+
+.no-snippets-toggle.active {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.20);
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+}
+
+.no-snippets-icon {
+  font-size: 15px;
+  line-height: 1;
 }
 
 .best-of-star {
