@@ -33,6 +33,10 @@ const isCurrentSong = computed(() => {
 const isCurrentLoading = computed(() => isCurrentSong.value && playerState.loading)
 
 const badgeEmoji = computed(() => {
+  // Scan all versions to pick highest-priority badge: 'best' > 'special' > others
+  const versions = props.song.versions || []
+  if (versions.some(v => v.badge === 'best')) return BADGE_MAP['best'] || null
+  if (versions.some(v => v.badge === 'special')) return BADGE_MAP['special'] || null
   const b = props.song.badge
   if (!b) return null
   return BADGE_MAP[b] || null
@@ -127,12 +131,14 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
         <!-- Title line -->
         <div class="song-title-line">
           <span class="badge-slot" :data-emoji="badgeEmoji || ''">{{ (isCurrentSong || isCurrentLoading) ? '' : (badgeEmoji || '') }}</span>
-          <span class="song-title">{{ song.base_name }}</span>
-          <BadgeRow v-if="!hasMultipleVersions && firstVersion" :version="firstVersion" />
-          <!-- Expand chevron for multi-version -->
-          <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
-            <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
-          </svg>
+          <div class="song-title-inner">
+            <span class="song-title">{{ song.base_name }}</span>
+            <BadgeRow v-if="!hasMultipleVersions && firstVersion" :version="firstVersion" />
+            <!-- Expand chevron for multi-version -->
+            <svg v-if="hasMultipleVersions" viewBox="0 0 16 16" width="12" height="12" class="expand-chevron" :class="{ rotated: expanded }">
+              <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
+            </svg>
+          </div>
         </div>
 
         <!-- Alt titles for multi-version songs (shown on parent, not per-version) -->
@@ -221,6 +227,7 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid transparent;
   -webkit-tap-highlight-color: transparent;
+  text-align: left;
 }
 
 .song-row:hover {
@@ -318,11 +325,20 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
 
 .song-title-line {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   font-size: 14px;
   font-weight: 500;
   line-height: 1.4;
+}
+
+.song-title-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
 }
 
 .song-title {
@@ -330,6 +346,7 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex-shrink: 1;
 }
 
 .badge-slot {
@@ -350,6 +367,7 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  padding-left: var(--metadata-indent, 0px);
 }
 
 .alt-title {
@@ -440,10 +458,7 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
 
 @media (max-width: 640px) {
   .song-row { padding: 10px 8px; }
-  .song-title-line {
-    font-size: 14px;
-    flex-wrap: wrap;
-  }
+  .song-title-line { font-size: 14px; }
   .song-title {
     white-space: normal;
     overflow: visible;

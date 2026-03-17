@@ -10,12 +10,13 @@
 export function qualityVariant(q: string | null | undefined): string {
   if (!q) return 'na'
   const l = q.toLowerCase()
-  if (l.includes('lossless')) return 'hq'
+  if (l.includes('lossless')) return 'lossless'
   if (l.includes('og')) return 'og'
   if (l.includes('cd')) return 'cd'
   if (l.includes('high')) return 'hq'
   if (l.includes('low')) return 'lq'
   if (l.includes('recording')) return 'rec'
+  if (l.includes('beat')) return 'beatonly'
   return 'na'
 }
 
@@ -31,6 +32,7 @@ export function availabilityVariant(avail: string | null | undefined): string {
   if (l === 'full') return 'full'
   if (l.includes('tagged')) return 'tagged'
   if (l.includes('stem')) return 'stem'
+  if (l.includes('beat')) return 'beatonly'
   if (l.includes('partial') || l.includes('cut')) return 'partial'
   if (l.includes('snippet')) return 'snippet'
   if (l.includes('confirmed')) return 'confirmed'
@@ -76,7 +78,7 @@ export function effectiveBadge(quality: string | null | undefined, availableLeng
 // is the source of truth for classification logic.
 const _AVAILABILITY_VALUES = new Set([
   'og file', 'og files', 'full', 'tagged', 'stem', 'stem bounce', 'stem bounces',
-  'partial', 'snippet', 'confirmed', 'unavailable',
+  'beat only', 'partial', 'snippet', 'confirmed', 'unavailable',
 ])
 
 export interface AvailBadge {

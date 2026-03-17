@@ -31,12 +31,20 @@
     --player: 0 0% 3%;               /* #080808 */
 
     /* Badge color tokens (HSL triplets) */
-    --badge-og: 40 90% 55%;            /* gold/amber — OG quality */
-    --badge-hq: 200 85% 60%;          /* light blue — Lossless / HQ */
-    --badge-cd: 130 50% 50%;          /* green — CD Quality */
-    --badge-lq: 25 86% 59%;           /* orange — Low Quality */
-    --badge-rec: 270 100% 83%;        /* light purple — Recording */
-    --badge-na: 0 0% 45%;             /* gray — N/A */
+    --badge-og: 40 90% 55%;           /* gold/amber — OG quality */
+    --badge-lossless: 200 85% 68%;    /* light blue — Lossless */
+    --badge-hq: 50 92% 58%;           /* yellow — High Quality */
+    --badge-cd: 130 55% 52%;          /* green — CD Quality */
+    --badge-lq: 0 75% 62%;            /* red — Low Quality */
+    --badge-na: 0 0% 80%;             /* white/light — Not Available */
+    --badge-ogfile: 140 60% 50%;      /* green — OG File availability */
+    --badge-full: 215 75% 65%;        /* blue — Full */
+    --badge-tagged: 150 60% 44%;      /* dark green — Tagged */
+    --badge-partial: 50 92% 58%;      /* yellow — Partial */
+    --badge-snippet: 0 75% 62%;       /* red — Snippet */
+    --badge-confirmed: 0 0% 55%;      /* gray — Confirmed */
+    --badge-beatonly: 275 55% 68%;    /* purple — Beat Only */
+    --badge-stem: 270 55% 78%;        /* light purple — Stem */
   }
 }
 

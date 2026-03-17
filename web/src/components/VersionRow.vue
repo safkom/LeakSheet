@@ -86,9 +86,11 @@ const badgeEmoji = computed(() => {
       <!-- Title line -->
       <div class="v-title-line">
         <span class="v-badge-slot">{{ (isCurrentTrack || isCurrentLoading) ? '' : (badgeEmoji || '') }}</span>
-        <span class="v-title">{{ version.name }}</span>
-        <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
-        <BadgeRow :version="version" />
+        <div class="v-title-inner">
+          <span class="v-title">{{ version.name }}</span>
+          <span v-if="version.version_tag" class="v-tag">[{{ version.version_tag }}]</span>
+          <BadgeRow :version="version" />
+        </div>
       </div>
 
       <!-- Credits lines -->
@@ -200,12 +202,21 @@ const badgeEmoji = computed(() => {
 
 .v-title-line {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   font-size: 13px;
   font-weight: 400;
   color: var(--text-secondary);
   line-height: 1.4;
+}
+
+.v-title-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
 }
 
 .v-badge-slot {
@@ -221,6 +232,7 @@ const badgeEmoji = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex-shrink: 1;
 }
 
 .v-tag {
@@ -238,6 +250,7 @@ const badgeEmoji = computed(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  padding-left: var(--metadata-indent, 0px);
 }
 
 .v-alt-item {
@@ -295,8 +308,6 @@ const badgeEmoji = computed(() => {
   .version-row { font-size: 13px; gap: 6px; padding: 10px 8px; }
   .v-title-line { font-size: 13px; }
   .v-length { font-size: 12px; }
-  /* Prevent long quality badges from squeezing the title to zero width */
   .v-title { min-width: 60px; }
-  .v-title-line :deep(.inline-flex) { flex-shrink: 1; }
 }
 </style>

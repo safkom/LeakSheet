@@ -559,10 +559,6 @@ onUnmounted(() => recentsObserver?.disconnect())
   border-radius: 4px;
   border: 1px solid;
   white-space: nowrap;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
 }
 
 .search-result-meta {
@@ -585,6 +581,6 @@ onUnmounted(() => recentsObserver?.disconnect())
 @media (max-width: 640px) {
   .artist-view { padding: 16px 12px; }
   .artist-name { font-size: 22px; }
-  .era-badge-pill { max-width: 140px; font-size: 8px; padding: 2px 6px; }
+  .era-badge-pill { font-size: 8px; padding: 2px 6px; }
 }
 </style>

@@ -35,14 +35,7 @@ const availBadge = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: 10px;
-  min-width: 0;
+  flex-shrink: 0;
   flex-wrap: wrap;
-}
-
-@media (max-width: 640px) {
-  .badge-row {
-    margin-left: 8px;
-  }
 }
 </style>
