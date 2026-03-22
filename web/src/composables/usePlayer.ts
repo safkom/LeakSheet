@@ -41,6 +41,8 @@ export interface PlayerState {
   volume: number
   queue: QueueItem[]
   bestOfQueue: boolean
+  /** Playing original quality file (download URL instead of compressed stream) */
+  originalQuality: boolean
   _eraSongs: EraSongContext | null
 }
 
@@ -88,6 +90,8 @@ export const playerState: PlayerState = reactive({
   queue: [],
   /** Whether the current auto-queue is best-of filtered */
   bestOfQueue: false,
+  /** Playing original quality file */
+  originalQuality: false,
   /** Currently loaded era songs — used for auto-advancing to next song */
   _eraSongs: null,
 })
@@ -270,6 +274,26 @@ export function isStreamable(version: SongVersion | null | undefined): boolean {
   return findStreamableLink(version?.links) !== null
 }
 
+/**
+ * Resolve original-quality (download) URL for a file-sharing link.
+ * These endpoints serve the uncompressed original file.
+ */
+function _resolveOriginalUrl(originalLink: string): string | null {
+  let m = _PILLOWS_RE.exec(originalLink)
+  if (m) return `https://api.pillows.su/api/download/${m[2]}`
+
+  m = _FROSTE_RE.exec(originalLink)
+  if (m) return `https://music.froste.lol/song/${m[1]}/download`
+
+  m = _IMGUR_RE.exec(originalLink)
+  if (m) return originalLink // imgur CDN already serves original
+
+  m = _KRAKEN_RE.exec(originalLink)
+  if (m) return originalLink // krakenfiles CDN already serves original
+
+  return null
+}
+
 
 // ---------------------------------------------------------------------------
 // Playback controls
@@ -420,6 +444,103 @@ export function togglePlay(): void {
       playerState.error = e instanceof Error ? e.message : 'Playback failed'
     })
   }
+}
+
+/**
+ * Switch to original quality playback (uses download URL directly, no proxy).
+ * Falls back to proxied download URL if direct playback fails.
+ */
+export function playOriginalQuality(): void {
+  if (!playerState.track) return
+  const link = findStreamableLink(playerState.track.links)
+  if (!link) return
+
+  const downloadUrl = _resolveOriginalUrl(link)
+  if (!downloadUrl) {
+    playerState.error = 'No original quality URL for this provider'
+    return
+  }
+
+  const audio = _getAudio()
+  const currentTime = playerState.currentTime
+  const wasPlaying = playerState.isPlaying
+
+  playerState.loading = true
+  playerState.originalQuality = true
+  playerState.error = ''
+
+  // Try direct playback first (no proxy)
+  audio.src = downloadUrl
+  audio.volume = playerState.volume
+
+  // Restore position once enough data is buffered
+  const onCanPlay = () => {
+    audio.removeEventListener('canplay', onCanPlay)
+    if (currentTime > 0) audio.currentTime = currentTime
+    if (wasPlaying) {
+      audio.play().catch(() => {
+        playerState.isPlaying = false
+        playerState.loading = false
+      })
+    }
+  }
+  audio.addEventListener('canplay', onCanPlay)
+
+  // Fallback to proxied download URL on error
+  const onError = () => {
+    audio.removeEventListener('error', onError)
+    audio.removeEventListener('canplay', onCanPlay)
+    const proxied = `/api/stream?url=${encodeURIComponent(downloadUrl)}`
+    playerState.streamUrl = proxied
+    audio.src = proxied
+    audio.volume = playerState.volume
+    if (currentTime > 0) {
+      audio.addEventListener('canplay', function restoreTime() {
+        audio.removeEventListener('canplay', restoreTime)
+        audio.currentTime = currentTime
+        if (wasPlaying) audio.play().catch(() => {})
+      })
+    } else if (wasPlaying) {
+      audio.play().catch(() => {
+        playerState.isPlaying = false
+        playerState.loading = false
+      })
+    }
+  }
+  audio.addEventListener('error', onError, { once: true })
+}
+
+/**
+ * Switch back to compressed/proxied stream playback.
+ */
+export function playCompressedStream(): void {
+  if (!playerState.track) return
+  const link = findStreamableLink(playerState.track.links)
+  if (!link) return
+
+  const resolved = _resolveStreamUrl(link)
+  if (!resolved) return
+
+  const audio = _getAudio()
+  const currentTime = playerState.currentTime
+  const wasPlaying = playerState.isPlaying
+
+  playerState.loading = true
+  playerState.originalQuality = false
+  playerState.streamUrl = resolved.url
+  playerState.error = ''
+
+  audio.src = resolved.url
+  audio.volume = playerState.volume
+
+  audio.addEventListener('canplay', function restore() {
+    audio.removeEventListener('canplay', restore)
+    if (currentTime > 0) audio.currentTime = currentTime
+    if (wasPlaying) audio.play().catch(() => {
+      playerState.isPlaying = false
+      playerState.loading = false
+    })
+  })
 }
 
 export function addToQueue(version: SongVersion, artistName = '', eraName = '', artUrl = ''): void {

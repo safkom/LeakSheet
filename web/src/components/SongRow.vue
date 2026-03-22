@@ -3,10 +3,9 @@ import { computed, ref, type PropType } from 'vue'
 import VersionRow from './VersionRow.vue'
 import BadgeRow from './BadgeRow.vue'
 import CreditTags from './CreditTags.vue'
-import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
+import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
-import { useLongPress } from '../composables/useLongPress'
 import type { Song } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -97,24 +96,19 @@ function handleContextMenu(e) {
   })
 }
 
-function handleAddToQueue(e) {
+function handleMobileMenu(e: MouseEvent) {
   e.stopPropagation()
-  if (!firstVersion.value) return
-  addToQueue(firstVersion.value, props.artistName, props.eraName, props.eraArt)
-}
-
-// Long-press for mobile context menu
-const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   showContextMenu({
-    x,
-    y,
+    x: rect.left,
+    y: rect.bottom + 4,
     song: props.song,
     version: firstVersion.value,
     artistName: props.artistName,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
-})
+}
 </script>
 
 <template>
@@ -124,8 +118,6 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
       :class="{ expanded, playing: isCurrentSong && !isCurrentLoading, loading: isCurrentLoading, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
       @click="handleClick"
       @contextmenu="handleContextMenu"
-      @touchstart.passive="onTouchStart"
-      @touchend="onTouchEnd"
     >
       <div class="song-content">
         <!-- Title line -->
@@ -174,15 +166,14 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
         >
           <path fill="currentColor" d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM6.5 7.75v3.5a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-1.5 0ZM8 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/>
         </svg>
-        <!-- Mobile-only queue button: visible when song is streamable and not multi-version -->
+        <!-- Mobile-only three-dot menu button -->
         <button
-          v-if="canStream && !hasMultipleVersions"
-          class="mobile-queue-btn"
-          aria-label="Add to queue"
-          @click="handleAddToQueue"
+          class="mobile-menu-btn"
+          aria-label="Options"
+          @click.stop="handleMobileMenu"
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <path fill="currentColor" d="M0 2.75A.75.75 0 0 1 .75 2h12.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 2.75zm0 5A.75.75 0 0 1 .75 7h7.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 7.75zm0 5a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75zM14 7a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1 0-2h1V8a1 1 0 0 1 1-1z"/>
+            <path fill="currentColor" d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>
           </svg>
         </button>
       </div>
@@ -402,8 +393,8 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
   white-space: nowrap;
 }
 
-/* Mobile-only queue button: hidden on pointer/hover devices, shown on touch */
-.mobile-queue-btn {
+/* Mobile-only three-dot menu button: hidden on hover devices, shown on touch */
+.mobile-menu-btn {
   display: none;
   align-items: center;
   justify-content: center;
@@ -417,13 +408,13 @@ const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
   -webkit-tap-highlight-color: transparent;
 }
 
-.mobile-queue-btn:active {
+.mobile-menu-btn:active {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.9);
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .mobile-queue-btn {
+  .mobile-menu-btn {
     display: flex;
   }
 }

@@ -16,10 +16,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue, playNext } from '../composables/usePlayer'
+import { playerState, togglePlay, stopTrack, seekTo, formatTime, artProxyUrl, addToQueue, playNext, playOriginalQuality, playCompressedStream } from '../composables/usePlayer'
 import { getEraColors } from '../composables/useEraColors'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useDownload } from '../composables/useDownload'
+import { fetchMetadata, formatMetadataSummary, isLargeFile, estimateFileSize, type FileMetadata } from '../composables/useMetadata'
 
 const track = computed(() => playerState.track)
 const playing = computed(() => playerState.isPlaying)
@@ -124,6 +125,41 @@ async function downloadTrack() {
 
 const hasLink = computed(() => getTrackLink() !== null)
 
+// Metadata for currently playing track
+const trackMetadata = ref<FileMetadata | null>(null)
+
+watch(() => playerState.track, async (t) => {
+  trackMetadata.value = null
+  if (!t?.links?.[0]) return
+  trackMetadata.value = await fetchMetadata(t.links[0])
+}, { immediate: true })
+
+const formatIndicator = computed(() => {
+  if (!trackMetadata.value) return null
+  return formatMetadataSummary(trackMetadata.value)
+})
+
+const isOriginalQuality = computed(() => playerState.originalQuality)
+
+function toggleOriginalQuality() {
+  if (isOriginalQuality.value) {
+    playCompressedStream()
+    toast.info('Switched to compressed stream')
+  } else {
+    if (trackMetadata.value && isLargeFile(trackMetadata.value)) {
+      const dur = playerState.duration || 0
+      const sizeStr = dur > 0 ? estimateFileSize(trackMetadata.value, dur) : null
+      const msg = sizeStr
+        ? `Playing original file (${sizeStr}) — uses more data`
+        : 'Playing original file — may use more data'
+      toast.warning(msg)
+    } else {
+      toast.info('Playing original quality')
+    }
+    playOriginalQuality()
+  }
+}
+
 // Dynamic accent color from era
 const playerAccentColor = computed(() => {
   const eraName = playerState.eraName
@@ -192,6 +228,9 @@ const playerBarStyle = computed(() => {
               <span v-if="hasStream" class="player-time-inline">
                 {{ currentTimeStr }} / {{ durationStr }}
               </span>
+              <span v-if="formatIndicator" class="player-format-indicator">
+                {{ formatIndicator }}
+              </span>
             </template>
           </div>
         </div>
@@ -222,8 +261,25 @@ const playerBarStyle = computed(() => {
           </Tooltip>
         </div>
 
-        <!-- Right side: queue + menu + close -->
+        <!-- Right side: OG toggle + queue + menu + close -->
         <div class="player-right">
+          <!-- Original quality toggle -->
+          <Tooltip v-if="track && hasLink">
+            <TooltipTrigger as-child>
+              <button
+                class="menu-btn og-toggle-btn"
+                :class="{ active: isOriginalQuality }"
+                @click="toggleOriginalQuality"
+                aria-label="Toggle original quality"
+              >
+                <span class="og-label">OG</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {{ isOriginalQuality ? 'Switch to compressed stream' : 'Play original quality' }}
+            </TooltipContent>
+          </Tooltip>
+
           <!-- Queue toggle -->
           <Tooltip v-if="track">
             <TooltipTrigger as-child>
@@ -273,6 +329,7 @@ const playerBarStyle = computed(() => {
                   <path fill="currentColor" d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1z"/>
                 </svg>
                 Open Original URL
+                <span v-if="formatIndicator" class="ml-auto text-[10px] opacity-50">{{ formatIndicator }}</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem :disabled="!hasLink" @select="downloadTrack">
@@ -574,13 +631,42 @@ const playerBarStyle = computed(() => {
   pointer-events: none;
 }
 
+.player-format-indicator {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 8px;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.og-toggle-btn {
+  position: relative;
+}
+
+.og-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.og-toggle-btn.active {
+  color: var(--player-accent, var(--accent-color));
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.og-toggle-btn.active .og-label {
+  text-shadow: 0 0 8px currentColor;
+}
+
 @media (max-width: 640px) {
   .player-inner { height: 60px; padding: 0 10px; gap: 8px; }
   .player-track-name { font-size: 12px; }
   .ctrl-btn { width: 40px; height: 40px; }
   .player-right { gap: 4px; }
   .player-art { width: 40px; height: 40px; border-radius: 4px; }
-  .player-time-inline { display: none; }
+  .player-time-inline, .player-format-indicator { display: none; }
   .progress-bar-top { height: 4px; }
   /* Expand touch target without changing visual height */
   .progress-bar-top::before {

@@ -5,7 +5,7 @@
  * Eliminates hundreds of unnecessary component instances.
  */
 
-import { ref, provide, inject, type InjectionKey } from 'vue'
+import { ref, provide, inject, nextTick, type InjectionKey } from 'vue'
 import type { Song, SongVersion } from './useEraFiltering'
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,11 @@ export function provideSharedOverlays(): SharedOverlays {
   const contextMenuState = ref<ContextMenuState | null>(null)
   const descriptionState = ref<DescriptionModalState | null>(null)
 
-  function showContextMenu(state: ContextMenuState) {
+  async function showContextMenu(state: ContextMenuState) {
+    // Close old menu first so its document listeners are removed
+    // before the new menu mounts and registers its own listeners.
+    contextMenuState.value = null
+    await nextTick()
     contextMenuState.value = state
   }
 

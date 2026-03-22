@@ -37,7 +37,13 @@ from src.fetcher import (
     NoTablesError,
     ParseError,
 )
-from src.streaming import close_shared_client, resolve_stream_url, stream_audio
+from src.streaming import (
+    close_shared_client,
+    resolve_metadata_url,
+    resolve_stream_url,
+    stream_audio,
+    _get_shared_client,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +432,145 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     except Exception as e:
         logger.exception("Image proxy error: %s", e)
         raise HTTPException(status_code=502, detail="Image proxy error")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/metadata — fetch audio file metadata from provider APIs
+# ---------------------------------------------------------------------------
+
+_METADATA_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+
+
+# Known fields in pillows.su metadata — longer multi-word keys first to avoid
+# partial matches (e.g. "CODEC PROFILE" before "CODEC").
+_PILLOWS_FIELDS = [
+    "FILE FORMAT INFO", "COMMON INFO",
+    "CODEC PROFILE", "CODEC", "CONTAINER",
+    "DURATION", "BITRATE", "SAMPLE RATE", "BITS PER SAMPLE",
+    "LOSSLESS", "NUMBER OF CHANNELS",
+    "CREATION TIME", "MODIFICATION TIME",
+    "TRACK GAIN", "ALBUM GAIN",
+    "ALBUM ARTIST", "ARTIST", "ALBUM", "TITLE", "TRACK",
+    "GENRE", "DATE", "YEAR", "COMMENT",
+]
+_PILLOWS_SPLIT_RE = re.compile(
+    r"(" + "|".join(re.escape(f) for f in _PILLOWS_FIELDS) + r"):\s*"
+)
+
+
+def _parse_pillows_metadata(text: str) -> dict:
+    """Parse pillows.su metadata text format into normalized dict.
+
+    The response can be either newline-separated or a single continuous
+    string with no delimiters — use regex to split on known field names.
+    """
+    result: dict = {"provider": "pillows"}
+    parts = _PILLOWS_SPLIT_RE.split(text.strip())
+    # parts is [preamble, KEY1, VAL1, KEY2, VAL2, ...]
+    pairs: dict[str, str] = {}
+    for i in range(1, len(parts) - 1, 2):
+        key = parts[i].strip().upper()
+        val = parts[i + 1].strip()
+        if val and val.lower() not in ("unknown", "null", "[object object]"):
+            pairs[key] = val
+
+    if "CONTAINER" in pairs:
+        result["container"] = pairs["CONTAINER"]
+    if "CODEC" in pairs:
+        result["codec"] = pairs["CODEC"]
+    if "CODEC PROFILE" in pairs:
+        result["codec_profile"] = pairs["CODEC PROFILE"]
+    if "BITRATE" in pairs:
+        result["bitrate"] = pairs["BITRATE"]
+    if "SAMPLE RATE" in pairs:
+        result["sample_rate"] = pairs["SAMPLE RATE"]
+    if "BITS PER SAMPLE" in pairs:
+        result["bits_per_sample"] = pairs["BITS PER SAMPLE"]
+    if "LOSSLESS" in pairs:
+        result["lossless"] = pairs["LOSSLESS"].lower() == "true"
+    if "NUMBER OF CHANNELS" in pairs:
+        v = pairs["NUMBER OF CHANNELS"]
+        result["channels"] = int(v) if v.isdigit() else v
+    if "DURATION" in pairs:
+        result["duration"] = pairs["DURATION"]
+    if "ARTIST" in pairs:
+        result["artist"] = pairs["ARTIST"]
+    if "TITLE" in pairs:
+        result["title"] = pairs["TITLE"]
+    return result
+
+
+def _parse_froste_metadata(data: dict) -> dict:
+    """Normalize froste.lol analyze-quality JSON."""
+    result: dict = {"provider": "froste"}
+    if "estimatedBitrate" in data:
+        result["estimated_bitrate"] = data["estimatedBitrate"]
+        result["bitrate"] = f"{data['estimatedBitrate']}kbps"
+    if "frequencyCutoff" in data:
+        result["frequency_cutoff"] = round(data["frequencyCutoff"], 1)
+    if "qualityMismatch" in data:
+        result["quality_mismatch"] = data["qualityMismatch"]
+    return result
+
+
+def _parse_imgur_metadata(data: dict) -> dict:
+    """Extract useful fields from imgur.gg file API response."""
+    result: dict = {"provider": "imgur"}
+    if data.get("size"):
+        result["file_size"] = data["size"]
+    if data.get("mimeType"):
+        result["mime_type"] = data["mimeType"]
+    if data.get("name"):
+        result["filename"] = data["name"]
+    return result
+
+
+@app.get("/metadata")
+async def proxy_metadata(
+    url: str = Query(..., description="Original file-sharing link"),
+):
+    """Fetch audio file metadata from provider APIs."""
+    meta_info = resolve_metadata_url(url)
+    if not meta_info:
+        raise HTTPException(status_code=404, detail="No metadata API for this provider")
+
+    meta_url = meta_info["url"]
+    provider = meta_info["provider"]
+
+    headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
+    if provider == "pillows":
+        headers["Referer"] = "https://pillows.su/"
+    elif provider == "froste":
+        headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
+
+    try:
+        client = _get_shared_client()
+        resp = await client.get(meta_url, headers=headers)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Provider returned {resp.status_code}",
+            )
+
+        if provider == "pillows":
+            result = _parse_pillows_metadata(resp.text)
+        elif provider == "froste":
+            result = _parse_froste_metadata(resp.json())
+        elif provider == "imgur":
+            result = _parse_imgur_metadata(resp.json())
+        else:
+            result = {"provider": provider}
+
+        return Response(
+            content=__import__("json").dumps(result),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Metadata proxy error: %s", e)
+        raise HTTPException(status_code=502, detail="Metadata fetch failed")
 
 
 # ---------------------------------------------------------------------------

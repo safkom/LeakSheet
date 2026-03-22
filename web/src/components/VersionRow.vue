@@ -2,10 +2,9 @@
 import { computed, type PropType } from 'vue'
 import BadgeRow from './BadgeRow.vue'
 import CreditTags from './CreditTags.vue'
-import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
+import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
-import { useLongPress } from '../composables/useLongPress'
 import type { SongVersion } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -49,22 +48,18 @@ function handleContextMenu(e) {
   })
 }
 
-function handleAddToQueue(e) {
+function handleMobileMenu(e: MouseEvent) {
   e.stopPropagation()
-  addToQueue(props.version, props.artistName, props.eraName, props.eraArt)
-}
-
-// Long-press for mobile context menu
-const { onTouchStart, onTouchEnd } = useLongPress((x, y) => {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   showContextMenu({
-    x,
-    y,
+    x: rect.left,
+    y: rect.bottom + 4,
     version: props.version,
     artistName: props.artistName,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
-})
+}
 
 const badgeEmoji = computed(() => {
   const b = props.version.badge
@@ -79,8 +74,6 @@ const badgeEmoji = computed(() => {
     :class="{ playing: isCurrentTrack && !isCurrentLoading, loading: isCurrentLoading }"
     @click="handlePlay"
     @contextmenu="handleContextMenu"
-    @touchstart.passive="onTouchStart"
-    @touchend="onTouchEnd"
   >
     <div class="v-content">
       <!-- Title line -->
@@ -105,15 +98,14 @@ const badgeEmoji = computed(() => {
       <span v-if="version.track_length" class="v-length">
         {{ version.track_length }}
       </span>
-      <!-- Mobile-only queue button -->
+      <!-- Mobile-only three-dot menu button -->
       <button
-        v-if="canStream"
-        class="mobile-queue-btn"
-        aria-label="Add to queue"
-        @click="handleAddToQueue"
+        class="mobile-menu-btn"
+        aria-label="Options"
+        @click.stop="handleMobileMenu"
       >
         <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-          <path fill="currentColor" d="M0 2.75A.75.75 0 0 1 .75 2h12.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 2.75zm0 5A.75.75 0 0 1 .75 7h7.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 7.75zm0 5a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75zM14 7a1 1 0 0 1 1 1v1h1a1 1 0 0 1 0 2h-1v1a1 1 0 0 1-2 0v-1h-1a1 1 0 0 1 0-2h1V8a1 1 0 0 1 1-1z"/>
+          <path fill="currentColor" d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>
         </svg>
       </button>
     </div>
@@ -279,7 +271,7 @@ const badgeEmoji = computed(() => {
   white-space: nowrap;
 }
 
-.mobile-queue-btn {
+.mobile-menu-btn {
   display: none;
   align-items: center;
   justify-content: center;
@@ -293,13 +285,13 @@ const badgeEmoji = computed(() => {
   -webkit-tap-highlight-color: transparent;
 }
 
-.mobile-queue-btn:active {
+.mobile-menu-btn:active {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.9);
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .mobile-queue-btn {
+  .mobile-menu-btn {
     display: flex;
   }
 }

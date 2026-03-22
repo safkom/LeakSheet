@@ -99,6 +99,39 @@ async def close_shared_client() -> None:
         await _shared_client.aclose()
         _shared_client = None
 
+def resolve_metadata_url(link: str) -> dict[str, str] | None:
+    """Convert a file-sharing link to its provider metadata API URL.
+
+    Returns ``{"url": "...", "provider": "pillows"|"froste"|"imgur"}``
+    or ``None`` if the host has no metadata API.
+    """
+    m = _PILLOWS_PATTERN.match(link)
+    if m:
+        file_id = m.group(2)
+        return {
+            "url": f"https://api.pillows.su/api/metadata/{file_id}.txt",
+            "provider": "pillows",
+        }
+
+    m = _FROSTE_PATTERN.match(link)
+    if m:
+        song_hash = m.group(1)
+        return {
+            "url": f"https://music.froste.lol/song/{song_hash}/analyze-quality",
+            "provider": "froste",
+        }
+
+    m = _IMGUR_PATTERN.match(link)
+    if m:
+        file_id = m.group(2)
+        return {
+            "url": f"https://temp.imgur.gg/api/file/{file_id}",
+            "provider": "imgur",
+        }
+
+    return None
+
+
 def resolve_stream_url(link: str) -> str | None:
     """Convert a file-sharing link to a direct audio stream URL.
 

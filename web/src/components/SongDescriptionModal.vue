@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, type PropType } from 'vue'
+import { computed, ref, watch, type PropType } from 'vue'
 import { BADGE_MAP, qualityVariant, availabilityVariant } from '@/composables/useUtils'
+import { fetchMetadata, metadataBadgeVariant, type FileMetadata } from '@/composables/useMetadata'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -87,6 +88,41 @@ const cleanedNotes = computed(() => {
     .join('\n')
     .trim()
 })
+
+// Fetch provider metadata
+const fileMetadata = ref<FileMetadata | null>(null)
+const metadataLoading = ref(false)
+
+const metadataLink = computed(() => v.value?.links?.[0] || null)
+
+watch(metadataLink, async (link) => {
+  if (!link) { fileMetadata.value = null; return }
+  metadataLoading.value = true
+  fileMetadata.value = await fetchMetadata(link)
+  metadataLoading.value = false
+}, { immediate: true })
+
+const metadataFields = computed(() => {
+  const m = fileMetadata.value
+  if (!m) return []
+  const fields: Array<{ label: string; value: string; variant: string }> = []
+  if (m.container) fields.push({ label: 'Container', value: m.container, variant: 'secondary' })
+  if (m.codec) fields.push({ label: 'Codec', value: m.codec, variant: 'secondary' })
+  if (m.codec_profile) fields.push({ label: 'Profile', value: m.codec_profile, variant: 'secondary' })
+  if (m.bitrate) fields.push({ label: 'Bitrate', value: m.bitrate, variant: metadataBadgeVariant('bitrate', m.bitrate) })
+  if (m.sample_rate) fields.push({ label: 'Sample Rate', value: m.sample_rate, variant: 'secondary' })
+  if (m.bits_per_sample) fields.push({ label: 'Bit Depth', value: m.bits_per_sample, variant: 'secondary' })
+  if (m.lossless !== undefined && m.lossless !== null) {
+    fields.push({ label: 'Lossless', value: m.lossless ? 'Yes' : 'No', variant: metadataBadgeVariant('lossless', m.lossless) })
+  }
+  if (m.channels) fields.push({ label: 'Channels', value: String(m.channels), variant: 'secondary' })
+  if (m.estimated_bitrate) fields.push({ label: 'Est. Bitrate', value: `${m.estimated_bitrate} kbps`, variant: metadataBadgeVariant('estimated_bitrate', m.estimated_bitrate) })
+  if (m.frequency_cutoff) fields.push({ label: 'Freq. Cutoff', value: `${Math.round(m.frequency_cutoff)} Hz`, variant: 'secondary' })
+  if (m.quality_mismatch !== undefined && m.quality_mismatch !== null) {
+    fields.push({ label: 'Quality Match', value: m.quality_mismatch ? 'Mismatch' : 'OK', variant: metadataBadgeVariant('quality_mismatch', m.quality_mismatch) })
+  }
+  return fields
+})
 </script>
 
 <template>
@@ -124,6 +160,18 @@ const cleanedNotes = computed(() => {
               <span class="detail-label">{{ d.label }}</span>
               <Badge v-if="d.badgeVariant" :variant="d.badgeVariant" class="self-center justify-self-start">{{ d.value }}</Badge>
               <span v-else class="detail-value">{{ d.value }}</span>
+            </template>
+          </div>
+        </div>
+
+        <!-- File Info (fetched from provider) -->
+        <div v-if="metadataFields.length || metadataLoading" class="modal-section">
+          <div class="section-label">File Info</div>
+          <div v-if="metadataLoading" class="metadata-loading">Fetching...</div>
+          <div v-else class="detail-grid">
+            <template v-for="f in metadataFields" :key="f.label">
+              <span class="detail-label">{{ f.label }}</span>
+              <Badge :variant="f.variant" class="self-center justify-self-start">{{ f.value }}</Badge>
             </template>
           </div>
         </div>
@@ -319,5 +367,11 @@ const cleanedNotes = computed(() => {
 .link-copy-btn:hover {
   opacity: 1;
   color: var(--text-primary);
+}
+
+.metadata-loading {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
 }
 </style>

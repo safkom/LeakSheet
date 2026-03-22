@@ -170,9 +170,9 @@ const discoveryLoadingUrl = ref('')
 
 function pickDiscoveryArtist(artist) {
   discoveryLoadingUrl.value = artist.url
-  discoverySearch.value = ''
   handleParse(artist.url).finally(() => {
     discoveryLoadingUrl.value = ''
+    discoverySearch.value = ''
     discoveryOpen.value = false
   })
 }
