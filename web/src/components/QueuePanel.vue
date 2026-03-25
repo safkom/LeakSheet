@@ -322,4 +322,11 @@ const isEmpty = computed(() => queue.value.length === 0)
     opacity: 1;
   }
 }
+
+/* Touch devices: show actions on devices without hover capability */
+@media (hover: none) {
+  .queue-item-actions {
+    opacity: 1;
+  }
+}
 </style>
