@@ -68,6 +68,16 @@
   --border-color: hsl(var(--border));
   --border-hover: hsl(var(--primary));
 
+  /* Error color */
+  --color-error: #f85149;
+
+  /* Z-index scale */
+  --z-sticky: 10;
+  --z-player: 200;
+  --z-queue: 210;
+  --z-popover: 1000;
+  --z-noise: 9999;
+
   /* Layout constants */
   --player-height: 72px;
   --header-height: 56px;
@@ -167,7 +177,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 9999;
+  z-index: var(--z-noise);
   opacity: 0.025;
   contain: strict;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");

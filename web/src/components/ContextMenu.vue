@@ -209,7 +209,7 @@ const isLarge = computed(() => {
 <style scoped>
 .context-menu {
   position: fixed;
-  z-index: 10000;
+  z-index: var(--z-popover);
   min-width: 200px;
   background: hsl(var(--popover));
   border: 1px solid rgba(255, 255, 255, 0.1);

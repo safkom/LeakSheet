@@ -460,7 +460,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 .era-card-wrapper.era-sticky .era-card {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-sticky);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   animation: none;
 }

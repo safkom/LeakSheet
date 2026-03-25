@@ -378,7 +378,7 @@ const playerBarStyle = computed(() => {
   right: 0;
   background: var(--bg-player);
   border-top: 1px solid color-mix(in srgb, var(--player-accent, var(--border-color)) 25%, var(--border-color));
-  z-index: 200;
+  z-index: var(--z-player);
   backdrop-filter: blur(12px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -527,7 +527,7 @@ const playerBarStyle = computed(() => {
 }
 
 .player-error {
-  color: #f85149;
+  color: var(--color-error);
 }
 
 .player-controls {

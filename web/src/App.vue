@@ -369,7 +369,7 @@ onUnmounted(() => {
 }
 
 .error-msg {
-  color: #f85149;
+  color: var(--color-error);
   text-align: center;
   margin-top: 12px;
   font-size: 13px;
@@ -382,7 +382,7 @@ onUnmounted(() => {
 
 .retry-btn {
   font-size: 12px;
-  color: #f85149;
+  color: var(--color-error);
   border: 1px solid rgba(248, 81, 73, 0.4);
   border-radius: 4px;
   padding: 2px 10px;
@@ -578,7 +578,7 @@ onUnmounted(() => {
 }
 
 .history-clear:hover {
-  color: #f85149;
+  color: var(--color-error);
   background: rgba(248, 81, 73, 0.1);
 }
 

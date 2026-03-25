@@ -121,7 +121,7 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
 .section-divider {
   position: sticky;
   top: var(--sticky-era-height, 50px);
-  z-index: 8;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   gap: 10px;

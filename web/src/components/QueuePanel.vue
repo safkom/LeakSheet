@@ -108,7 +108,7 @@ const isEmpty = computed(() => queue.value.length === 0)
 .queue-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 190;
+  z-index: var(--z-queue);
   background: rgba(0, 0, 0, 0.4);
   animation: fade-in 0.15s ease;
 }
@@ -174,7 +174,7 @@ const isEmpty = computed(() => queue.value.length === 0)
 }
 
 .clear-btn:hover {
-  color: #f85149 !important;
+  color: var(--color-error) !important;
 }
 
 .queue-close {
@@ -304,7 +304,7 @@ const isEmpty = computed(() => queue.value.length === 0)
 }
 
 .queue-remove:hover {
-  color: #f85149;
+  color: var(--color-error);
 }
 
 /* Mobile: full-width bottom sheet */
