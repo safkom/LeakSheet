@@ -1384,6 +1384,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # "OG / Uncut Files") — add as a named section to the
                     # current era and let later song rows auto-create if needed.
                     current_era.sections.append(Section(name=name_first_line))
+                    # Register the section name as an era alias so song rows
+                    # that reference this label in their era column route here
+                    # via exact match instead of fuzzy-matching to an unrelated
+                    # era (e.g. "Drake vs. Kendrick Lamar" fuzzy-matching to
+                    # "The Kendrick Lamar EP" due to shared words).
+                    _register_era_keys(current_era, name_first_line, era_by_key)
                 else:
                     # No current era — create one from the name column.
                     # This handles Yung Lean style trackers.
