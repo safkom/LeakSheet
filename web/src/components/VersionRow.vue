@@ -189,7 +189,7 @@ const badgeEmoji = computed(() => {
 .v-content {
   flex: 1;
   min-width: 0;
-  --metadata-indent: 22px;
+  --metadata-indent: 24px;
 }
 
 .v-title-line {
