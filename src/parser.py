@@ -307,8 +307,9 @@ ERA_STATS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Section separators — rows with a single category label.
-# These become named sections within the current era rather than eras.
+# Row values that indicate a section divider (not a song or era name).
+# These strings appear as standalone cell values in the spreadsheet to
+# separate song groups (e.g. "surfaced" = officially released material).
 SECTION_SEPARATORS = {
     "surfaced", "unsurfaced", "unavailable",
     "og files for released songs & alternate versions",
@@ -1283,12 +1284,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                             timeline = parse_timeline(timeline_raw) if timeline_raw else []
                             # Scan for cover art
-                            _art_url_ac = None
-                            for _cc in row:
-                                if _cc.images and not _art_url_ac:
-                                    _art_url_ac = _cc.images[0]
+                            _era_art_url_candidate = None
+                            for cell in row:
+                                if cell.images and not _era_art_url_candidate:
+                                    _era_art_url_candidate = cell.images[0]
                                     break
-                            new_era = Era(name=row_era, timeline=timeline, art_url=_art_url_ac, sections=[Section()])
+                            new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key)
                             current_era = new_era
@@ -1320,12 +1321,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                     timeline = parse_timeline(timeline_raw) if timeline_raw else []
                     # Scan for cover art
-                    _art_url_nc = None
-                    for _cc in row:
-                        if _cc.images and not _art_url_nc:
-                            _art_url_nc = _cc.images[0]
+                    _era_art_url_candidate = None
+                    for cell in row:
+                        if cell.images and not _era_art_url_candidate:
+                            _era_art_url_candidate = cell.images[0]
                             break
-                    new_era = Era(name=row_era, timeline=timeline, art_url=_art_url_nc, sections=[Section()])
+                    new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
                     eras.append(new_era)
                     _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
@@ -1361,11 +1362,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     _name_cell_ml = _get_cell(row, name_col_idx)
                     if _name_cell_ml.images and name_first_line:
                         _era_art_url = _name_cell_ml.images[0]
-                    for _ci, _cc in enumerate(row):
-                        if _ci == name_col_idx:
+                    for col_idx, cell in enumerate(row):
+                        if col_idx == name_col_idx:
                             continue
-                        if _cc.images and not _era_art_url:
-                            _era_art_url = _cc.images[0]
+                        if cell.images and not _era_art_url:
+                            _era_art_url = cell.images[0]
                             break
                     new_era = Era(
                         name=name_first_line,
