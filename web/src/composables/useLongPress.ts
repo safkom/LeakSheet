@@ -8,7 +8,15 @@ const LONG_PRESS_MS = 500
  */
 export function useLongPress(onLongPress: (x: number, y: number) => void) {
   let _timer: ReturnType<typeof setTimeout> | null = null
+  let _onMove: ((e: TouchEvent) => void) | null = null
   const _fired = ref(false)
+
+  function _removeMove() {
+    if (_onMove) {
+      document.removeEventListener('touchmove', _onMove)
+      _onMove = null
+    }
+  }
 
   function onTouchStart(e: TouchEvent) {
     _fired.value = false
@@ -18,20 +26,19 @@ export function useLongPress(onLongPress: (x: number, y: number) => void) {
 
     _timer = setTimeout(() => {
       _fired.value = true
+      _removeMove()
       onLongPress(startX, startY)
       // Haptic feedback if available
       if (navigator.vibrate) navigator.vibrate(30)
     }, LONG_PRESS_MS)
 
-    // Cancel on move (scroll)
-    const onMove = (me: TouchEvent) => {
+    _onMove = (me: TouchEvent) => {
       const t = me.touches[0]
       if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
         cancel()
-        document.removeEventListener('touchmove', onMove)
       }
     }
-    document.addEventListener('touchmove', onMove, { passive: true })
+    document.addEventListener('touchmove', _onMove, { passive: true })
   }
 
   function onTouchEnd(e: Event) {
@@ -46,6 +53,7 @@ export function useLongPress(onLongPress: (x: number, y: number) => void) {
       clearTimeout(_timer)
       _timer = null
     }
+    _removeMove()
   }
 
   onUnmounted(cancel)
