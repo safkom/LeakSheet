@@ -158,7 +158,11 @@ function _getAudio() {
       }
     })
 
+    let _lastBufferedUpdate = 0
     _audio.addEventListener('progress', () => {
+      const now = performance.now()
+      if (now - _lastBufferedUpdate < 500) return  // max 2Hz
+      _lastBufferedUpdate = now
       if (_audio.buffered.length > 0) {
         const end = _audio.buffered.end(_audio.buffered.length - 1)
         playerState.buffered = playerState.duration > 0
