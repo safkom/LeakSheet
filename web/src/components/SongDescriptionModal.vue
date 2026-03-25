@@ -202,7 +202,7 @@ const metadataFields = computed(() => {
         <!-- Links -->
         <div v-if="v?.links?.length" class="modal-section">
           <div class="section-label">Links</div>
-          <div v-for="(link, i) in v.links" :key="'link_' + i" class="link-item">
+          <div v-for="(link, i) in v.links" :key="'link_' + i + '_' + link" class="link-item">
             <a :href="link" target="_blank" rel="noopener">{{ link }}</a>
             <button class="link-copy-btn" @click.prevent="copyLink(link)" aria-label="Copy link">
               <svg viewBox="0 0 16 16" width="13" height="13">
