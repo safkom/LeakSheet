@@ -552,7 +552,10 @@ export function playCompressedStream(): void {
   })
 }
 
+const MAX_QUEUE_SIZE = 200
+
 export function addToQueue(version: SongVersion, artistName = '', eraName = '', artUrl = ''): void {
+  if (playerState.queue.length >= MAX_QUEUE_SIZE) return
   playerState.queue.push({ id: ++_queueIdCounter, version, artistName, eraName, artUrl })
 }
 
