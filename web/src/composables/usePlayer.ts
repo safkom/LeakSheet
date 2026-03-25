@@ -464,6 +464,7 @@ export function playOriginalQuality(): void {
   const audio = _getAudio()
   const currentTime = playerState.currentTime
   const wasPlaying = playerState.isPlaying
+  const trackAtStart = playerState.track
 
   playerState.loading = true
   playerState.originalQuality = true
@@ -476,6 +477,7 @@ export function playOriginalQuality(): void {
   // Restore position once enough data is buffered
   const onCanPlay = () => {
     audio.removeEventListener('canplay', onCanPlay)
+    if (playerState.track !== trackAtStart) return
     if (currentTime > 0) audio.currentTime = currentTime
     if (wasPlaying) {
       audio.play().catch(() => {
@@ -497,6 +499,7 @@ export function playOriginalQuality(): void {
     if (currentTime > 0) {
       audio.addEventListener('canplay', function restoreTime() {
         audio.removeEventListener('canplay', restoreTime)
+        if (playerState.track !== trackAtStart) return
         audio.currentTime = currentTime
         if (wasPlaying) audio.play().catch(() => {})
       })
@@ -524,6 +527,7 @@ export function playCompressedStream(): void {
   const audio = _getAudio()
   const currentTime = playerState.currentTime
   const wasPlaying = playerState.isPlaying
+  const trackAtStart = playerState.track
 
   playerState.loading = true
   playerState.originalQuality = false
@@ -535,6 +539,7 @@ export function playCompressedStream(): void {
 
   audio.addEventListener('canplay', function restore() {
     audio.removeEventListener('canplay', restore)
+    if (playerState.track !== trackAtStart) return
     if (currentTime > 0) audio.currentTime = currentTime
     if (wasPlaying) audio.play().catch(() => {
       playerState.isPlaying = false
