@@ -98,8 +98,13 @@ const metadataLink = computed(() => v.value?.links?.[0] || null)
 watch(metadataLink, async (link) => {
   if (!link) { fileMetadata.value = null; return }
   metadataLoading.value = true
-  fileMetadata.value = await fetchMetadata(link)
-  metadataLoading.value = false
+  try {
+    fileMetadata.value = await fetchMetadata(link)
+  } catch {
+    fileMetadata.value = null
+  } finally {
+    metadataLoading.value = false
+  }
 }, { immediate: true })
 
 const metadataFields = computed(() => {
