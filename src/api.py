@@ -13,6 +13,7 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -562,7 +563,7 @@ async def proxy_metadata(
             result = {"provider": provider}
 
         return Response(
-            content=__import__("json").dumps(result),
+            content=json.dumps(result),
             media_type="application/json",
             headers={"Cache-Control": "public, max-age=3600"},
         )

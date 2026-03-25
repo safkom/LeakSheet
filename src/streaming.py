@@ -267,7 +267,12 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     f"imgur.gg API returned {resp.status_code} for {url}"
                 )
                 continue
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                logger.warning("imgur API returned non-JSON response (status %s): %s", resp.status_code, exc)
+                last_err = ValueError(f"imgur API non-JSON response: {exc}")
+                continue
             cdn_url = data.get("cdnUrl")
             if not cdn_url:
                 last_err = ValueError(
