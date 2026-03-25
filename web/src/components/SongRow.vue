@@ -135,14 +135,14 @@ function handleMobileMenu(e: MouseEvent) {
 
         <!-- Alt titles for multi-version songs (shown on parent, not per-version) -->
         <div v-if="hasMultipleVersions && allAltTitles.length" class="song-alt-titles">
-          <span v-for="(alt, i) in allAltTitles" :key="i" class="alt-title"><span class="alt-title-inner">{{ alt }}</span></span>
+          <span v-for="(alt, i) in allAltTitles" :key="'alt_' + i + '_' + alt" class="alt-title"><span class="alt-title-inner">{{ alt }}</span></span>
         </div>
 
         <!-- Credits lines -->
         <template v-if="!hasMultipleVersions && firstVersion">
           <CreditTags :version="firstVersion" />
           <div v-if="firstVersion.alt_titles?.length" class="song-alt-titles">
-            <span v-for="(alt, i) in firstVersion.alt_titles" :key="i" class="alt-title">{{ alt }}</span>
+            <span v-for="(alt, i) in firstVersion.alt_titles" :key="'falt_' + i + '_' + alt" class="alt-title">{{ alt }}</span>
           </div>
         </template>
       </div>
@@ -185,7 +185,7 @@ function handleMobileMenu(e: MouseEvent) {
         <div class="versions-panel-inner">
           <VersionRow
             v-for="(v, i) in song.versions"
-            :key="i"
+            :key="v.name + '_' + i"
             :version="v"
             :artist-name="artistName"
             :era-name="eraName"

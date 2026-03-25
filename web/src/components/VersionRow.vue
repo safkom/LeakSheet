@@ -90,7 +90,7 @@ const badgeEmoji = computed(() => {
       <CreditTags :version="version" />
 
       <div v-if="!hideAltTitles && version.alt_titles?.length" class="v-alt-titles">
-        <span v-for="(alt, i) in version.alt_titles" :key="i" class="v-alt-item">{{ alt }}</span>
+        <span v-for="(alt, i) in version.alt_titles" :key="'alt_' + i + '_' + alt" class="v-alt-item">{{ alt }}</span>
       </div>
     </div>
 

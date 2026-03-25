@@ -179,13 +179,13 @@ const metadataFields = computed(() => {
         <!-- Alt Titles -->
         <div v-if="v?.alt_titles?.length" class="modal-section">
           <div class="section-label">Alternative Titles</div>
-          <div v-for="(alt, i) in v.alt_titles" :key="i" class="alt-title">{{ alt }}</div>
+          <div v-for="(alt, i) in v.alt_titles" :key="'alt_' + i + '_' + alt" class="alt-title">{{ alt }}</div>
         </div>
 
         <!-- Samples -->
         <div v-if="v?.samples?.length" class="modal-section">
           <div class="section-label">Samples</div>
-          <div v-for="(s, i) in v.samples" :key="i" class="sample-item">{{ s }}</div>
+          <div v-for="(s, i) in v.samples" :key="'sample_' + i + '_' + s" class="sample-item">{{ s }}</div>
         </div>
 
         <!-- Notes -->
@@ -197,7 +197,7 @@ const metadataFields = computed(() => {
         <!-- Links -->
         <div v-if="v?.links?.length" class="modal-section">
           <div class="section-label">Links</div>
-          <div v-for="(link, i) in v.links" :key="i" class="link-item">
+          <div v-for="(link, i) in v.links" :key="'link_' + i" class="link-item">
             <a :href="link" target="_blank" rel="noopener">{{ link }}</a>
             <button class="link-copy-btn" @click.prevent="copyLink(link)" aria-label="Copy link">
               <svg viewBox="0 0 16 16" width="13" height="13">
