@@ -3,13 +3,16 @@ import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue
 import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
 const PlayerBar = defineAsyncComponent(() => import('./components/PlayerBar.vue'))
+const FavouritesPanel = defineAsyncComponent(() => import('./components/FavouritesPanel.vue'))
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet, USER_ABORT } from './composables/useApi'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
 import { extractAndCacheEraColors } from './composables/useEraColors'
+import { favourites } from './composables/useFavourites'
 
 const activeArtist = ref(null)
+const showFavouritesPanel = ref(false)
 const loading = ref(false)
 const loadingUrl = ref('')
 const error = ref('')
@@ -239,7 +242,7 @@ onUnmounted(() => {
           <button v-if="lastUrl" class="retry-btn" @click="handleParse(lastUrl)">Retry</button>
         </p>
 
-        <!-- Artist discovery -->
+        <!-- Artist discovery + Favourites -->
         <div class="discovery-row">
           <button class="discovery-toggle" :class="{ active: discoveryOpen }" @click="loadDiscovery">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -249,6 +252,21 @@ onUnmounted(() => {
             <svg class="discovery-chevron" :class="{ open: discoveryOpen }" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
               <path fill="currentColor" d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z"/>
             </svg>
+          </button>
+          <!-- Favourites button — shown when there are saved songs -->
+          <button
+            v-if="favourites.length > 0"
+            class="favourites-panel-btn"
+            :class="{ active: showFavouritesPanel }"
+            aria-label="Open favourites"
+            @click="showFavouritesPanel = !showFavouritesPanel"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path v-if="showFavouritesPanel" fill="currentColor" d="M7.655 14.916 3 10.449a4.004 4.004 0 0 1 0-5.797 4.006 4.006 0 0 1 5.83.32 4.007 4.007 0 0 1 5.83-.32 4.005 4.005 0 0 1 0 5.797l-4.655 4.467a.75.75 0 0 1-1.35 0z"/>
+              <path v-else fill="currentColor" d="m8 14.25.345.666a.75.75 0 0 1-.69 0l-.008-.004-.018-.01a7.152 7.152 0 0 1-.31-.17 22.055 22.055 0 0 1-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.066 22.066 0 0 1-3.744 2.584l-.018.01-.006.003h-.002ZM4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.58 20.58 0 0 0 8 13.393a20.58 20.58 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5Z"/>
+            </svg>
+            Favourites
+            <span class="fav-count-badge">{{ favourites.length }}</span>
           </button>
         </div>
 
@@ -323,6 +341,7 @@ onUnmounted(() => {
     </Transition>
   </main>
 
+  <FavouritesPanel v-if="showFavouritesPanel" @close="showFavouritesPanel = false" />
   <PlayerBar v-if="hasPlayer" />
   <Toaster position="bottom-center" :offset="hasPlayer ? 80 : 16" />
 </template>
@@ -395,11 +414,13 @@ onUnmounted(() => {
   border-color: rgba(248, 81, 73, 0.7);
 }
 
-/* Artist discovery */
+/* Artist discovery + Favourites row */
 .discovery-row {
   margin-top: 20px;
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .discovery-toggle {
@@ -422,6 +443,39 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.2);
   color: rgba(255, 255, 255, 0.85);
+}
+
+.favourites-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  background: rgba(232, 64, 87, 0.08);
+  border: 1px solid rgba(232, 64, 87, 0.25);
+  border-radius: 8px;
+  color: rgba(232, 64, 87, 0.7);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.favourites-panel-btn:hover,
+.favourites-panel-btn.active {
+  background: rgba(232, 64, 87, 0.15);
+  border-color: rgba(232, 64, 87, 0.5);
+  color: var(--favourite-color, #e84057);
+}
+
+.fav-count-badge {
+  background: rgba(232, 64, 87, 0.2);
+  color: var(--favourite-color, #e84057);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 1px 6px;
+  min-width: 18px;
+  text-align: center;
 }
 
 .discovery-chevron {

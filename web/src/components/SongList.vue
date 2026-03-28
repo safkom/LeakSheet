@@ -7,6 +7,8 @@ const props = defineProps({
   songs: Array as PropType<Song[]>,
   sections: Array as PropType<Section[]>,
   artistName: String,
+  artistSlug: String,
+  sourceUrl: { type: String as PropType<string | null>, default: null },
   eraName: String,
   eraArt: String,
   emptyMessage: { type: String, default: 'No songs found' },
@@ -73,6 +75,8 @@ const hasSongs = computed(() => displayItems.value.some(i => i.type === 'song'))
           :song="item.song"
           :expanded="expandedSong === item.index"
           :artist-name="artistName"
+          :artist-slug="artistSlug"
+          :source-url="sourceUrl"
           :era-name="eraName"
           :era-art="eraArt"
           @toggle="toggleSong(item.index)"

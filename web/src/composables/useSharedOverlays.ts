@@ -18,6 +18,8 @@ export interface ContextMenuState {
   song?: Song
   version?: SongVersion
   artistName?: string
+  artistSlug?: string
+  sourceUrl?: string | null
   eraName?: string
   eraArt?: string
 }
@@ -26,6 +28,8 @@ export interface DescriptionModalState {
   song?: Song
   version?: SongVersion
   artistName?: string
+  artistSlug?: string
+  sourceUrl?: string | null
   eraName?: string
   eraArt?: string
 }

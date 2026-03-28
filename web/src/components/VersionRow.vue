@@ -5,11 +5,15 @@ import CreditTags from './CreditTags.vue'
 import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
-import type { SongVersion } from '../composables/useEraFiltering'
+import type { Song, SongVersion } from '../composables/useEraFiltering'
 
 const props = defineProps({
   version: { type: Object as PropType<SongVersion>, required: true },
+  /** Parent song — when provided, the heart favourites the whole song (not just this version) */
+  parentSong: { type: Object as PropType<Song>, default: null },
   artistName: String,
+  artistSlug: String,
+  sourceUrl: { type: String as PropType<string | null>, default: null },
   eraName: String,
   eraArt: String,
   hideAltTitles: Boolean,
@@ -28,6 +32,8 @@ function handlePlay() {
     showDescriptionModal({
       version: props.version,
       artistName: props.artistName,
+      artistSlug: props.artistSlug,
+      sourceUrl: props.sourceUrl,
       eraName: props.eraName,
       eraArt: props.eraArt,
     })
@@ -41,8 +47,11 @@ function handleContextMenu(e) {
   showContextMenu({
     x: e.clientX,
     y: e.clientY,
+    song: props.parentSong || undefined,
     version: props.version,
     artistName: props.artistName,
+    artistSlug: props.artistSlug,
+    sourceUrl: props.sourceUrl,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
@@ -54,8 +63,11 @@ function handleMobileMenu(e: MouseEvent) {
   showContextMenu({
     x: rect.left,
     y: rect.bottom + 4,
+    song: props.parentSong || undefined,
     version: props.version,
     artistName: props.artistName,
+    artistSlug: props.artistSlug,
+    sourceUrl: props.sourceUrl,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
@@ -66,6 +78,7 @@ const badgeEmoji = computed(() => {
   if (!b) return null
   return BADGE_MAP[b] || null
 })
+
 </script>
 
 <template>

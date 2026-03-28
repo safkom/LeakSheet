@@ -71,6 +71,9 @@
   /* Error color */
   --color-error: #f85149;
 
+  /* Favourite color */
+  --favourite-color: #e84057;
+
   /* Z-index scale */
   --z-sticky: 10;
   --z-player: 200;

@@ -12,6 +12,8 @@ const props = defineProps({
   song: { type: Object as PropType<Song>, required: true },
   expanded: Boolean,
   artistName: String,
+  artistSlug: String,
+  sourceUrl: { type: String as PropType<string | null>, default: null },
   eraName: String,
   eraArt: String,
 })
@@ -91,6 +93,8 @@ function handleContextMenu(e) {
     song: props.song,
     version: firstVersion.value,
     artistName: props.artistName,
+    artistSlug: props.artistSlug,
+    sourceUrl: props.sourceUrl,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
@@ -105,10 +109,13 @@ function handleMobileMenu(e: MouseEvent) {
     song: props.song,
     version: firstVersion.value,
     artistName: props.artistName,
+    artistSlug: props.artistSlug,
+    sourceUrl: props.sourceUrl,
     eraName: props.eraName,
     eraArt: props.eraArt,
   })
 }
+
 </script>
 
 <template>
