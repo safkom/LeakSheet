@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, watch, nextTick, ref, onUnmounted, defineAsyncComponent } from 'vue'
+import { computed, watch, nextTick, ref, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { toast } from 'vue-sonner'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
 import VersionRow from './VersionRow.vue'
+import ArtistStatsBar from './ArtistStatsBar.vue'
+import EraNav from './EraNav.vue'
+import ScrollToTop from './ScrollToTop.vue'
 const ContextMenu = defineAsyncComponent(() => import('./ContextMenu.vue'))
 const SongDescriptionModal = defineAsyncComponent(() => import('./SongDescriptionModal.vue'))
 import { Input } from '@/components/ui/input'
@@ -13,6 +16,8 @@ import { playerState, setEraSongs, findStreamableLink } from '../composables/use
 import { useEraFiltering, eraSongs } from '../composables/useEraFiltering'
 import { provideSharedOverlays, type DescriptionModalState } from '../composables/useSharedOverlays'
 import { favouritesForArtist } from '../composables/useFavourites'
+import { eraStats } from '../composables/useEraStats'
+import { useEraNavigation } from '../composables/useEraNavigation'
 import type { Artist } from '../composables/useEraFiltering'
 
 const props = defineProps<{
@@ -41,6 +46,7 @@ const {
   isSearching,
   filteredEras,
   flatSearchResults,
+  searchResultCount,
   recentResults,
   filteredSongs,
   filteredSections: eraSections,
@@ -50,6 +56,39 @@ const {
   toggleRecents,
   toggleNoSnippets,
 } = useEraFiltering(eras)
+
+// ── Stats ──
+const eraStatsMap = computed(() => {
+  const map = new Map()
+  for (const era of eras.value) {
+    map.set(era.name, eraStats(era))
+  }
+  return map
+})
+
+// Derive overall stats from eraStatsMap to avoid calling eraStats() twice per era
+const overallStats = computed(() => {
+  let total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+  for (const s of eraStatsMap.value.values()) {
+    total += s.total; available += s.available; snippets += s.snippets
+    confirmed += s.confirmed; fullHQ += s.fullHQ
+  }
+  return { total, available, snippets, confirmed, fullHQ }
+})
+
+// ── Era navigation ──
+const {
+  activeEraName,
+  showScrollTop,
+  setupObservers,
+  scrollToEra,
+  scrollToTop,
+  cleanup: cleanupNav,
+} = useEraNavigation()
+
+const navVisible = computed(() =>
+  !isSearching.value && !recents.value && !showFavourites.value
+)
 
 // ---------------------------------------------------------------------------
 // Favourites
@@ -93,13 +132,13 @@ function handleToggleEra(eraName: string) {
     // Opening a new era — scroll the era card to the top of the viewport
     // after a brief delay so any collapsing era has time to begin shrinking.
     setTimeout(() => {
-      const el = eraBlockRefs.value[eraName]
-      if (el) {
-        const y = el.getBoundingClientRect().top + window.scrollY - 8
-        window.scrollTo({ top: y, behavior: 'smooth' })
-      }
+      scrollToEra(eraName, eraBlockRefs.value)
     }, 50)
   }
+}
+
+function handleEraNavJump(eraName: string) {
+  scrollToEra(eraName, eraBlockRefs.value)
 }
 
 function eraColorStyle(era) {
@@ -190,7 +229,28 @@ watch(recents, (val) => {
   }
 })
 
-onUnmounted(() => recentsObserver?.disconnect())
+onUnmounted(() => {
+  recentsObserver?.disconnect()
+  cleanupNav()
+})
+
+onMounted(() => {
+  // Give Vue a tick to render era blocks before observing
+  nextTick(() => {
+    if (Object.keys(eraBlockRefs.value).length > 0) {
+      setupObservers(eraBlockRefs.value)
+    }
+  })
+})
+
+// Re-setup observers only when the set of visible era names changes
+let _lastObservedEraKey = ''
+watch(filteredEras, (eras) => {
+  const key = eras.map(e => e.name).join('\0')
+  if (key === _lastObservedEraKey) return
+  _lastObservedEraKey = key
+  nextTick(() => setupObservers(eraBlockRefs.value))
+})
 
 </script>
 
@@ -207,9 +267,12 @@ onUnmounted(() => recentsObserver?.disconnect())
       </div>
     </div>
 
+    <!-- Artist stats bar -->
+    <ArtistStatsBar :stats="overallStats" />
+
     <!-- Search bar + Best Of toggle -->
     <div class="search-bar-wrap">
-      <div class="search-bar">
+      <div class="search-bar" :class="{ 'has-results': isSearching && searchResultCount > 0 }">
         <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14">
           <path fill="currentColor" d="M11.5 7a4.499 4.499 0 1 1-8.998 0A4.499 4.499 0 0 1 11.5 7zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04z"/>
         </svg>
@@ -243,6 +306,11 @@ onUnmounted(() => recentsObserver?.disconnect())
             <path v-else fill="currentColor" d="m8 14.25.345.666a.75.75 0 0 1-.69 0l-.008-.004-.018-.01a7.152 7.152 0 0 1-.31-.17 22.055 22.055 0 0 1-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.066 22.066 0 0 1-3.744 2.584l-.018.01-.006.003h-.002ZM4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.58 20.58 0 0 0 8 13.393a20.58 20.58 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5Z"/>
           </svg>
         </Button>
+      </div>
+      <!-- Search result count -->
+      <div v-if="isSearching" class="search-result-count">
+        <span v-if="searchResultCount > 0">{{ searchResultCount }} result{{ searchResultCount === 1 ? '' : 's' }}</span>
+        <span v-else>No results</span>
       </div>
     </div>
 
@@ -370,6 +438,7 @@ onUnmounted(() => recentsObserver?.disconnect())
           :index="eraIdx"
           :sticky="isEraExpanded(era.name)"
           :best-of="bestOf"
+          :stats="eraStatsMap.get(era.name)"
           @click="handleToggleEra(era.name)"
         />
 
@@ -392,6 +461,17 @@ onUnmounted(() => recentsObserver?.disconnect())
         </Transition>
       </div>
     </div>
+
+    <!-- Era quick-nav side rail (desktop) -->
+    <EraNav
+      :eras="filteredEras"
+      :active-era="activeEraName"
+      :visible="navVisible"
+      @jump="handleEraNavJump"
+    />
+
+    <!-- Scroll-to-top button (mobile) -->
+    <ScrollToTop :visible="showScrollTop" @click="scrollToTop" />
 
     <!-- Shared context menu (single instance for all rows) -->
     <ContextMenu
@@ -466,6 +546,13 @@ onUnmounted(() => recentsObserver?.disconnect())
 /* Search */
 .search-bar-wrap {
   margin-bottom: 20px;
+}
+
+.search-result-count {
+  margin-top: 6px;
+  padding-left: 4px;
+  font-size: 11.5px;
+  color: var(--text-dim);
 }
 
 .search-bar {
@@ -606,6 +693,41 @@ onUnmounted(() => recentsObserver?.disconnect())
 .era-expand-leave-to {
   grid-template-rows: 0fr;
   opacity: 0;
+}
+
+/* Drift-up effect on the inner panel when expanding */
+.era-expand-enter-from .era-songs-panel {
+  transform: translateY(4px);
+}
+
+.era-expand-enter-to .era-songs-panel {
+  transform: translateY(0);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Staggered reveal for song rows when era first expands */
+.era-songs-panel :deep(.song-row:nth-child(-n+8)) {
+  animation: song-row-in 0.3s ease both;
+}
+
+.era-songs-panel :deep(.song-row:nth-child(1)) { animation-delay: 0ms; }
+.era-songs-panel :deep(.song-row:nth-child(2)) { animation-delay: 30ms; }
+.era-songs-panel :deep(.song-row:nth-child(3)) { animation-delay: 60ms; }
+.era-songs-panel :deep(.song-row:nth-child(4)) { animation-delay: 90ms; }
+.era-songs-panel :deep(.song-row:nth-child(5)) { animation-delay: 120ms; }
+.era-songs-panel :deep(.song-row:nth-child(6)) { animation-delay: 150ms; }
+.era-songs-panel :deep(.song-row:nth-child(7)) { animation-delay: 180ms; }
+.era-songs-panel :deep(.song-row:nth-child(8)) { animation-delay: 210ms; }
+
+@keyframes song-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .era-songs-panel :deep(.song-row:nth-child(-n+8)) {
+    animation: none;
+  }
 }
 
 .era-expand-enter-to,

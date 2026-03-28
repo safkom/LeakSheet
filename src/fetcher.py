@@ -39,6 +39,24 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
+# ---------------------------------------------------------------------------
+# Shared async HTTP client (connection-pooled, reused across requests)
+# ---------------------------------------------------------------------------
+
+_sheets_client: httpx.AsyncClient | None = None
+
+
+def _get_sheets_client() -> httpx.AsyncClient:
+    """Return (or lazily create) the module-level shared httpx.AsyncClient."""
+    global _sheets_client
+    if _sheets_client is None or _sheets_client.is_closed:
+        _sheets_client = httpx.AsyncClient(
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT},
+        )
+    return _sheets_client
+
+
 # Regex to extract sheet GIDs from the htmlview page JS
 GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 
@@ -377,6 +395,22 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         )
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
+
+
+async def _async_get_cached(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> tuple[str, str] | None:
+    return await asyncio.to_thread(_get_cached, url, cache_ttl)
+
+
+async def _async_set_cache(url: str, html: str, title: str) -> None:
+    await asyncio.to_thread(_set_cache, url, html, title)
+
+
+async def _async_get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> "Artist | None":
+    return await asyncio.to_thread(_get_cached_parsed, url, cache_ttl)
+
+
+async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
+    await asyncio.to_thread(_set_cached_parsed, url, artist)
 
 
 def clear_cache() -> int:
@@ -805,74 +839,69 @@ async def async_fetch_sheet_html(
 
     url = _normalize_url(url)
 
-    # Check cache first (file I/O is fast enough sync)
     if use_cache and cache_ttl > 0:
-        cached = _get_cached(url, cache_ttl)
+        cached = await _async_get_cached(url, cache_ttl)
         if cached is not None:
             return cached
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=timeout,
-        headers={"User-Agent": USER_AGENT},
-    ) as client:
-        try:
-            if gid:
-                sheet_url = _build_sheet_html_url(url, gid)
-                r = await client.get(sheet_url)
-                r.raise_for_status()
-                title_match = TITLE_PATTERN.search(r.text)
-                title = title_match.group(1) if title_match else ""
-                if use_cache:
-                    _set_cache(url, r.text, title)
-                return r.text, title
-
-            # Step 1: Fetch the base page
-            r = await client.get(url)
+    client = _get_sheets_client()
+    try:
+        if gid:
+            sheet_url = _build_sheet_html_url(url, gid)
+            r = await client.get(sheet_url, timeout=timeout)
             r.raise_for_status()
-            base_html = r.text
-            title_match = TITLE_PATTERN.search(base_html)
+            title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
+            if use_cache:
+                await _async_set_cache(url, r.text, title)
+            return r.text, title
 
-            if "<table" in base_html.lower():
-                if use_cache:
-                    _set_cache(url, base_html, title)
-                return base_html, title
+        # Step 1: Fetch the base page
+        r = await client.get(url, timeout=timeout)
+        r.raise_for_status()
+        base_html = r.text
+        title_match = TITLE_PATTERN.search(base_html)
+        title = title_match.group(1) if title_match else ""
 
-            # Step 2: Discover GIDs
-            gids = _discover_gids(base_html)
-            if not gids:
-                gids = ["0"]
+        if "<table" in base_html.lower():
+            if use_cache:
+                await _async_set_cache(url, base_html, title)
+            return base_html, title
 
-            # Step 3: Try each GID
-            last_error = None
-            for try_gid in gids:
-                try:
-                    sheet_url = _build_sheet_html_url(url, try_gid)
-                    r = await client.get(sheet_url)
-                    if r.status_code == 200 and "<table" in r.text.lower():
-                        if use_cache:
-                            _set_cache(url, r.text, title)
-                        return r.text, title
-                except (httpx.HTTPError, ValueError, KeyError) as e:
-                    last_error = e
-                    continue
+        # Step 2: Discover GIDs
+        gids = _discover_gids(base_html)
+        if not gids:
+            gids = ["0"]
 
-            raise NoTablesError(
-                f"No valid sheet data found at {url}. "
-                f"Tried GIDs: {gids}. Last error: {last_error}"
-            )
+        # Step 3: Try each GID
+        last_error = None
+        for try_gid in gids:
+            try:
+                sheet_url = _build_sheet_html_url(url, try_gid)
+                r = await client.get(sheet_url, timeout=timeout)
+                if r.status_code == 200 and "<table" in r.text.lower():
+                    if use_cache:
+                        await _async_set_cache(url, r.text, title)
+                    return r.text, title
+            except (httpx.HTTPError, ValueError, KeyError) as e:
+                last_error = e
+                continue
 
-        except httpx.TimeoutException as e:
-            raise NetworkError(f"Request timed out: {e}") from e
-        except httpx.ConnectError as e:
-            raise NetworkError(f"Cannot connect to {url}: {e}") from e
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403:
-                raise AccessDeniedError(f"Access denied (403): {url}") from e
-            if e.response.status_code == 404:
-                raise InvalidURLError(f"URL not found (404): {url}") from e
-            raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+        raise NoTablesError(
+            f"No valid sheet data found at {url}. "
+            f"Tried GIDs: {gids}. Last error: {last_error}"
+        )
+
+    except httpx.TimeoutException as e:
+        raise NetworkError(f"Request timed out: {e}") from e
+    except httpx.ConnectError as e:
+        raise NetworkError(f"Cannot connect to {url}: {e}") from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            raise AccessDeniedError(f"Access denied (403): {url}") from e
+        if e.response.status_code == 404:
+            raise InvalidURLError(f"URL not found (404): {url}") from e
+        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
 
 
 async def _verify_art_images_async(
@@ -967,7 +996,7 @@ async def async_fetch_and_parse(
 
     # Check parsed result cache first (skip entire parse pipeline)
     if use_cache and cache_ttl > 0:
-        cached_artist = _get_cached_parsed(url_norm, cache_ttl)
+        cached_artist = await _async_get_cached_parsed(url_norm, cache_ttl)
         if cached_artist is not None:
             cached_artist.source_url = url
             return cached_artist
@@ -991,7 +1020,7 @@ async def async_fetch_and_parse(
                 if not unreleased_tab_gid or unreleased_tab_gid == gid:
                     artist.source_url = url
                     if use_cache:
-                        _set_cached_parsed(url_norm, artist)
+                        await _async_set_cached_parsed(url_norm, artist)
                     return artist
                 # A better "Unreleased" tab exists — fall through to full discovery
             # GID produced 0 eras — fall through to GID discovery below
@@ -999,133 +1028,129 @@ async def async_fetch_and_parse(
             pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=timeout,
-        headers={"User-Agent": USER_AGENT},
-    ) as client:
-        try:
-            r = await client.get(url_norm)
-            r.raise_for_status()
-            base_html = r.text
-            title_match = TITLE_PATTERN.search(base_html)
-            title = title_match.group(1) if title_match else ""
+    client = _get_sheets_client()
+    try:
+        r = await client.get(url_norm, timeout=timeout)
+        r.raise_for_status()
+        base_html = r.text
+        title_match = TITLE_PATTERN.search(base_html)
+        title = title_match.group(1) if title_match else ""
 
-            # If base page has tables, try parsing directly
-            if "<table" in base_html.lower():
-                name = _resolve_artist_name(base_html, title, artist_name)
-                artist = await asyncio.to_thread(parse_sheet, base_html, name)
-                if artist.eras:
-                    artist.source_url = url
+        # If base page has tables, try parsing directly
+        if "<table" in base_html.lower():
+            name = _resolve_artist_name(base_html, title, artist_name)
+            artist = await asyncio.to_thread(parse_sheet, base_html, name)
+            if artist.eras:
+                artist.source_url = url
+                if use_cache:
+                    await _async_set_cache(url_norm, base_html, title)
+                return artist
+
+        gids = _discover_gids(base_html)
+        if not gids:
+            gids = ["0"]
+
+        # Prioritize the "Unreleased" tab and identify Art tab GID
+        gids, art_gid, unreleased_gid = _prioritize_gids(base_html, gids)
+
+        # --- Fetch all GID pages concurrently, then parse to pick best ---
+        async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
+            """Fetch a single GID sheet page. Returns (gid, html) or None."""
+            try:
+                sheet_url = _build_sheet_html_url(url_norm, gid_val)
+                if use_cache and cache_ttl > 0:
+                    cached = await _async_get_cached(sheet_url, cache_ttl)
+                    if cached is not None:
+                        return (gid_val, cached[0])
+                    resp = await client.get(sheet_url, timeout=timeout)
+                    if resp.status_code != 200 or "<table" not in resp.text.lower():
+                        return None
                     if use_cache:
-                        _set_cache(url_norm, base_html, title)
-                    return artist
+                        await _async_set_cache(sheet_url, resp.text, title)
+                    return (gid_val, resp.text)
+                else:
+                    resp = await client.get(sheet_url, timeout=timeout)
+                    if resp.status_code != 200 or "<table" not in resp.text.lower():
+                        return None
+                    return (gid_val, resp.text)
+            except (httpx.HTTPError, ValueError, KeyError):
+                return None
 
-            gids = _discover_gids(base_html)
-            if not gids:
-                gids = ["0"]
+        fetched = await asyncio.gather(*[_fetch_gid(g) for g in gids])
 
-            # Prioritize the "Unreleased" tab and identify Art tab GID
-            gids, art_gid, unreleased_gid = _prioritize_gids(base_html, gids)
+        best_artist: Artist | None = None
+        best_eras = 0
+        best_html = ""
 
-            # --- Fetch all GID pages concurrently, then parse to pick best ---
-            async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
-                """Fetch a single GID sheet page. Returns (gid, html) or None."""
+        for result in fetched:
+            if result is None:
+                continue
+            result_gid, sheet_html = result
+            try:
+                name = _resolve_artist_name(sheet_html, title, artist_name)
+                candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
+                n_eras = len(candidate.eras)
+                n_songs = sum(
+                    len(s.songs)
+                    for era in candidate.eras
+                    for s in era.sections
+                )
+
+                logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
+                if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
+                    best_eras = n_eras
+                    best_artist = candidate
+                    best_html = sheet_html
+
+                # Unreleased tab wins as long as it has at least 1 era —
+                # prevents Recents/landing tabs from outcompeting it on era count.
+                if result_gid == unreleased_gid and n_eras >= 1:
+                    logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+                    break
+                elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
+                    break
+            except (ValueError, KeyError):
+                continue
+
+        if best_artist and best_eras > 0:
+            best_artist.source_url = url
+            # Fetch Art tab concurrently and upgrade era.art_url
+            if art_gid:
                 try:
-                    sheet_url = _build_sheet_html_url(url_norm, gid_val)
-                    if use_cache and cache_ttl > 0:
-                        cached = _get_cached(sheet_url, cache_ttl)
-                        if cached is not None:
-                            return (gid_val, cached[0])
-                        resp = await client.get(sheet_url)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            return None
-                        if use_cache:
-                            _set_cache(sheet_url, resp.text, title)
-                        return (gid_val, resp.text)
-                    else:
-                        resp = await client.get(sheet_url)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            return None
-                        return (gid_val, resp.text)
-                except (httpx.HTTPError, ValueError, KeyError):
-                    return None
-
-            fetched = await asyncio.gather(*[_fetch_gid(g) for g in gids])
-
-            best_artist: Artist | None = None
-            best_eras = 0
-            best_html = ""
-
-            for result in fetched:
-                if result is None:
-                    continue
-                result_gid, sheet_html = result
-                try:
-                    name = _resolve_artist_name(sheet_html, title, artist_name)
-                    candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
-                    n_eras = len(candidate.eras)
-                    n_songs = sum(
-                        len(s.songs)
-                        for era in candidate.eras
-                        for s in era.sections
-                    )
-
-                    logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                    if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
-                        best_eras = n_eras
-                        best_artist = candidate
-                        best_html = sheet_html
-
-                    # Unreleased tab wins as long as it has at least 1 era —
-                    # prevents Recents/landing tabs from outcompeting it on era count.
-                    if result_gid == unreleased_gid and n_eras >= 1:
-                        logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
-                        break
-                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
-                        break
-                except (ValueError, KeyError):
-                    continue
-
-            if best_artist and best_eras > 0:
-                best_artist.source_url = url
-                # Fetch Art tab concurrently and upgrade era.art_url
-                if art_gid:
-                    try:
-                        art_result = await _fetch_gid(art_gid)
-                        if art_result:
-                            _, art_html = art_result
-                            art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                    art_result = await _fetch_gid(art_gid)
+                    if art_result:
+                        _, art_html = art_result
+                        art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                        if art_map:
+                            art_map = await _verify_art_images_async(
+                                best_artist, art_map, client
+                            )
                             if art_map:
-                                art_map = await _verify_art_images_async(
-                                    best_artist, art_map, client
-                                )
-                                if art_map:
-                                    apply_art_tab_images(best_artist, art_map)
-                    except Exception:
-                        pass  # Art tab optional — keep existing art_url on failure
-                if use_cache and best_html:
-                    _set_cache(url_norm, best_html, title)
-                _set_cached_parsed(url_norm, best_artist)
-                return best_artist
+                                apply_art_tab_images(best_artist, art_map)
+                except Exception:
+                    pass  # Art tab optional — keep existing art_url on failure
+            if use_cache and best_html:
+                await _async_set_cache(url_norm, best_html, title)
+            await _async_set_cached_parsed(url_norm, best_artist)
+            return best_artist
 
-            # Fallback
-            html, title = await async_fetch_sheet_html(
-                url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-            )
-            name = _resolve_artist_name(html, title, artist_name)
-            artist = await asyncio.to_thread(parse_sheet, html, name)
-            artist.source_url = url
-            _set_cached_parsed(url_norm, artist)
-            return artist
+        # Fallback
+        html, title = await async_fetch_sheet_html(
+            url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+        )
+        name = _resolve_artist_name(html, title, artist_name)
+        artist = await asyncio.to_thread(parse_sheet, html, name)
+        artist.source_url = url
+        await _async_set_cached_parsed(url_norm, artist)
+        return artist
 
-        except httpx.TimeoutException as e:
-            raise NetworkError(f"Request timed out: {e}") from e
-        except httpx.ConnectError as e:
-            raise NetworkError(f"Cannot connect to {url}: {e}") from e
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403:
-                raise AccessDeniedError(f"Access denied (403): {url}") from e
-            if e.response.status_code == 404:
-                raise InvalidURLError(f"URL not found (404): {url}") from e
-            raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+    except httpx.TimeoutException as e:
+        raise NetworkError(f"Request timed out: {e}") from e
+    except httpx.ConnectError as e:
+        raise NetworkError(f"Cannot connect to {url}: {e}") from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            raise AccessDeniedError(f"Access denied (403): {url}") from e
+        if e.response.status_code == 404:
+            raise InvalidURLError(f"URL not found (404): {url}") from e
+        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e

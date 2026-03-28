@@ -12,7 +12,9 @@
     <link rel="dns-prefetch" href="https://lh5.googleusercontent.com" />
     <link rel="dns-prefetch" href="https://lh6.googleusercontent.com" />
     <link rel="dns-prefetch" href="https://ggpht.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <!-- Load fonts asynchronously to avoid render-blocking -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600;700;800;900&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" /></noscript>
   </head>
   <body>
     <div id="app"></div>

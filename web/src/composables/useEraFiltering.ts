@@ -60,7 +60,6 @@ export interface Era {
   art_url?: string | null
   highlighted_producers?: string[]
   sections?: Section[]
-  songs?: Song[]
   song_count?: number
   version_count?: number
 }
@@ -88,6 +87,9 @@ export function isBestOfSong(song: Song): boolean {
  */
 const _searchIndex = new WeakMap<Song, string>()
 
+/** Pre-lowercased scoring fields — avoids repeated .toLowerCase() in scoreSong. */
+const _scoreIndex = new WeakMap<Song, { bn: string; alts: string[] }>()
+
 function _getSongSearchText(song: Song): string {
   let cached = _searchIndex.get(song)
   if (cached !== undefined) return cached
@@ -109,9 +111,49 @@ export function songMatchesQuery(song: Song, query: string): boolean {
   return _getSongSearchText(song).includes(query)
 }
 
-/** Get songs for an era — handles both flat and section-based layouts. */
+/**
+ * Score a song against a query for ranked search results.
+ * Higher score = better match. Returns 0 if no match.
+ *
+ * Scoring tiers:
+ *   100 — exact base_name match
+ *    90 — exact alt_title match
+ *    70 — base_name starts with query
+ *    60 — alt_title starts with query
+ *    40 — base_name contains query
+ *    20 — version name or alt_title contains query (deep match)
+ */
+export function scoreSong(song: Song, query: string): number {
+  let idx = _scoreIndex.get(song)
+  if (!idx) {
+    const alts: string[] = []
+    for (const v of (song.versions || [])) {
+      if (v.alt_titles) {
+        for (const alt of v.alt_titles) alts.push(alt.toLowerCase())
+      }
+    }
+    idx = { bn: song.base_name.toLowerCase(), alts }
+    _scoreIndex.set(song, idx)
+  }
+  const { bn, alts } = idx
+
+  if (bn === query) return 100
+  if (alts.some(a => a === query)) return 90
+  if (bn.startsWith(query)) return 70
+  if (alts.some(a => a.startsWith(query))) return 60
+  if (bn.includes(query)) return 40
+
+  // Deep match in version names
+  for (const v of (song.versions || [])) {
+    if (v.name?.toLowerCase().includes(query)) return 20
+  }
+  if (alts.some(a => a.includes(query))) return 20
+
+  return 0
+}
+
+/** Get songs for an era from its sections. */
 export function eraSongs(era: Era): Song[] {
-  if (era.songs) return era.songs
   if (era.sections) {
     return era.sections.flatMap(s => s.songs || [])
   }
@@ -283,27 +325,33 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     return _filteredSectionsMap.value.get(era.name) ?? []
   }
 
-  // ── Flat search results ──
+  // ── Flat search results (ranked by match quality) ──
 
   const flatSearchResults = computed<SearchResult[]>(() => {
     const q = debouncedQuery.value.trim().toLowerCase()
     if (!q) return []
 
-    const results: SearchResult[] = []
+    const scored: Array<{ result: SearchResult; score: number }> = []
     for (const era of eras.value) {
       const songs = eraSongs(era)
       for (const song of songs) {
-        if (songMatchesQuery(song, q)) {
+        const score = scoreSong(song, q)
+        if (score > 0) {
           for (const version of (song.versions || [])) {
             if (bestOf.value && !BEST_OF_BADGES.has(version.badge ?? '')) continue
             if (noSnippets.value && _isSnippet(version)) continue
-            results.push({ song, version, era })
+            scored.push({ result: { song, version, era }, score })
           }
         }
       }
     }
-    return results
+
+    // Sort by score descending (era order preserved within same score tier)
+    scored.sort((a, b) => b.score - a.score)
+    return scored.map(s => s.result)
   })
+
+  const searchResultCount = computed(() => flatSearchResults.value.length)
 
   // ── Recents ──
 
@@ -376,6 +424,7 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
     // Computed
     filteredEras,
     flatSearchResults,
+    searchResultCount,
     recentResults,
 
     // Methods

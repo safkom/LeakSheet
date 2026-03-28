@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import TrackerInput from './components/TrackerInput.vue'
 import ArtistView from './components/ArtistView.vue'
+import RecentTrackerCard from './components/RecentTrackerCard.vue'
 const PlayerBar = defineAsyncComponent(() => import('./components/PlayerBar.vue'))
 const FavouritesPanel = defineAsyncComponent(() => import('./components/FavouritesPanel.vue'))
-import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet, USER_ABORT } from './composables/useApi'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
 import { extractAndCacheEraColors } from './composables/useEraColors'
 import { favourites } from './composables/useFavourites'
+import { recentTrackers, saveRecentTracker, clearRecentTrackers } from './composables/useRecentTrackers'
 
 const activeArtist = ref(null)
 const showFavouritesPanel = ref(false)
@@ -17,23 +18,6 @@ const loading = ref(false)
 const loadingUrl = ref('')
 const error = ref('')
 const lastUrl = ref('')
-// Multi-artist: track loaded tracker history (persisted in localStorage)
-const STORAGE_KEY = 'leaksheet_recent_trackers'
-
-function loadStoredHistory() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-function saveHistory(entries) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
-  } catch { /* quota exceeded — ignore */ }
-}
-
-const trackerHistory = ref(loadStoredHistory())
 
 const hasPlayer = computed(() => playerState.track !== null)
 
@@ -47,21 +31,7 @@ async function handleParse(url: string) {
     // Wait for all era cover images to load silently, then reveal
     await _waitForImages(data)
     activeArtist.value = data
-    // Add to history (or update existing) and persist
-    const existingIndex = trackerHistory.value.findIndex(h => h.source_url === url)
-    if (existingIndex !== -1) {
-      trackerHistory.value.splice(existingIndex, 1)
-    }
-    trackerHistory.value.unshift({
-      name: data.name,
-      source_url: url,
-      total_songs: data.total_songs,
-    })
-    // Cap history at 20 entries
-    if (trackerHistory.value.length > 20) {
-      trackerHistory.value = trackerHistory.value.slice(0, 20)
-    }
-    saveHistory(trackerHistory.value)
+    saveRecentTracker(data)
   } catch (e) {
     // Silently ignore user-initiated cancellations (user submitted a new URL).
     // We check object identity against our sentinel so that timeouts or other
@@ -116,11 +86,6 @@ function loadFromHistory(entry) {
   handleParse(entry.source_url)
 }
 
-function clearHistory() {
-  trackerHistory.value = []
-  localStorage.removeItem(STORAGE_KEY)
-}
-
 // ---------------------------------------------------------------------------
 // Artist discovery
 // ---------------------------------------------------------------------------
@@ -163,10 +128,26 @@ async function loadDiscovery() {
   }
 }
 
+const _debouncedDiscoverySearch = ref('')
+let _discoveryDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(discoverySearch, (val) => {
+  if (_discoveryDebounceTimer) clearTimeout(_discoveryDebounceTimer)
+  const trimmed = val.trim()
+  if (!trimmed) { _debouncedDiscoverySearch.value = ''; return }
+  _discoveryDebounceTimer = setTimeout(() => {
+    _debouncedDiscoverySearch.value = trimmed.toLowerCase()
+  }, 150)
+})
+
+// Pre-lowercased names for efficient search filtering
+const _discoveryNamesLower = computed(() =>
+  discoveryArtists.value.map(a => ({ artist: a, lower: a.name.toLowerCase() }))
+)
+
 const filteredDiscovery = computed(() => {
-  const q = discoverySearch.value.trim().toLowerCase()
+  const q = _debouncedDiscoverySearch.value
   if (!q) return discoveryArtists.value
-  return discoveryArtists.value.filter(a => a.name.toLowerCase().includes(q))
+  return _discoveryNamesLower.value.filter(({ lower }) => lower.includes(q)).map(({ artist }) => artist)
 })
 
 const discoveryLoadingUrl = ref('')
@@ -316,25 +297,18 @@ onUnmounted(() => {
         </Transition>
 
         <!-- History on landing page -->
-        <div v-if="trackerHistory.length" class="landing-history">
+        <div v-if="recentTrackers.length" class="landing-history">
           <div class="history-header">
             <h3 class="history-title">Recent Trackers</h3>
-            <button class="history-clear" @click="clearHistory">Clear</button>
+            <button class="history-clear" @click="clearRecentTrackers">Clear</button>
           </div>
-          <Button
-            v-for="entry in trackerHistory"
+          <RecentTrackerCard
+            v-for="entry in recentTrackers"
             :key="entry.source_url"
-            variant="outline"
-            class="history-card"
+            :entry="entry"
             :disabled="loading"
             @click="loadFromHistory(entry)"
-          >
-            <span class="history-card-name">{{ entry.name }}</span>
-            <span class="history-card-right">
-              <span v-if="loadingUrl === entry.source_url" class="history-spinner" />
-              <span v-else class="history-card-meta">{{ entry.total_songs }} songs</span>
-            </span>
-          </Button>
+          />
         </div>
       </div>
 
@@ -607,6 +581,9 @@ onUnmounted(() => {
 /* Landing history cards */
 .landing-history {
   margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .history-header {
@@ -636,27 +613,6 @@ onUnmounted(() => {
   background: rgba(248, 81, 73, 0.1);
 }
 
-.history-card {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  height: auto;
-  padding: 12px 16px;
-  margin-bottom: 8px;
-  white-space: normal;
-}
-
-.history-card:hover {
-  border-color: var(--accent-color);
-}
-
-.history-card-name {
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-}
-
 /* Content fade transition */
 .content-fade-enter-active {
   transition: opacity 0.25s ease, -webkit-transform 0.25s ease, transform 0.25s ease;
@@ -677,17 +633,6 @@ onUnmounted(() => {
   transform: translate3d(0, -6px, 0);
 }
 
-
-.history-card-meta {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.history-card-right {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
 
 .history-spinner {
   display: inline-block;

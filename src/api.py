@@ -99,11 +99,12 @@ def _sniff_audio_format(header: bytes) -> str | None:
         return "audio/mp4"
 
     # Other MP4 boxes at offset 4 (moov, mdat, free, skip, wide)
-    _MP4_BOXES = {b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
     if len(header) >= 8 and header[4:8] in _MP4_BOXES:
         return "audio/mp4"
 
     return None
+
+_MP4_BOXES = {b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
 
 # Map file extensions to MIME types — used to resolve generic upstream types
 # (application/octet-stream) when the URL contains a recognisable extension.
@@ -335,7 +336,7 @@ class SheetRequest(BaseModel):
 
 
 @app.post("/sheet")
-async def parse_sheet(req: SheetRequest):
+async def parse_sheet(req: SheetRequest, response: Response):
     """Fetch and parse a tracker spreadsheet.
 
     Accepts a Google Sheets /htmlview URL or a custom tracker domain.
@@ -367,6 +368,7 @@ async def parse_sheet(req: SheetRequest):
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
+    response.headers["Cache-Control"] = "public, max-age=300"
     data = artist.model_dump()
     return data
 

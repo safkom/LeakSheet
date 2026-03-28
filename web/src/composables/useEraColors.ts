@@ -10,7 +10,6 @@
  * ColorThief entirely.
  */
 import { shallowRef } from 'vue'
-import ColorThief from 'colorthief'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,14 +27,17 @@ export interface EraColors {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton ColorThief — stateless utility, one instance for the entire app
+// Singleton ColorThief — loaded lazily on first use to keep it out of the
+// initial JS bundle evaluation path.
 // ---------------------------------------------------------------------------
 
-let _colorThief: ColorThief | null = null
+let _colorThiefPromise: Promise<any> | null = null
 
-export function getColorThief(): ColorThief {
-  if (!_colorThief) _colorThief = new ColorThief()
-  return _colorThief
+async function _getColorThief(): Promise<any> {
+  if (!_colorThiefPromise) {
+    _colorThiefPromise = import('colorthief').then(m => new (m.default ?? m)())
+  }
+  return _colorThiefPromise
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +104,7 @@ export function getEraColors(eraName: string): EraColors | null {
 
 const _MAX_CONCURRENT = 4
 let _running = 0
-const _queue: Array<() => void> = []
+const _queue: Array<() => Promise<void>> = []
 
 function _dequeue(): void {
   while (_running < _MAX_CONCURRENT && _queue.length > 0) {
@@ -110,14 +112,12 @@ function _dequeue(): void {
     const task = _queue.shift()!
     // Run extraction in a rAF to yield to the browser between tasks
     requestAnimationFrame(() => {
-      try {
-        task()
-      } catch (e) {
+      task().catch(e => {
         console.error('[useEraColors] queue task threw:', e)
-      } finally {
+      }).finally(() => {
         _running--
         _dequeue()
-      }
+      })
     })
   }
 }
@@ -133,10 +133,10 @@ export function extractAndCacheEraColors(eraName: string, imgElement: HTMLImageE
   _dequeue()
 }
 
-function _doExtract(eraName: string, imgElement: HTMLImageElement): void {
+async function _doExtract(eraName: string, imgElement: HTMLImageElement): Promise<void> {
   if (_cache.has(eraName)) return
   try {
-    const ct = getColorThief()
+    const ct = await _getColorThief()
     const pal = ct.getPalette(imgElement, 5)
     if (pal && pal.length >= 2) {
       const c1 = pal[0]

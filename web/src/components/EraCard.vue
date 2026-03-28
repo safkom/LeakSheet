@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, onUnmounted, type PropType } from 'vue'
-import { extractAndCacheEraColors, setEraColors, getColorThief } from '../composables/useEraColors'
+import { extractAndCacheEraColors, getEraColors } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 import type { Era } from '../composables/useEraFiltering'
+import type { EraStats } from '../composables/useEraStats'
 
 const props = defineProps({
   era: { type: Object as PropType<Era>, required: true },
@@ -10,13 +11,11 @@ const props = defineProps({
   index: { type: Number, default: 0 },
   sticky: Boolean,
   bestOf: { type: Boolean, default: false },
+  stats: { type: Object as PropType<EraStats>, default: null },
 })
 
 const emit = defineEmits(['click'])
 
-const gradientStyle = ref({})
-const titleColor = ref('#e6edf3')
-const colorsReady = ref(false)
 const imgRetries = ref(0)
 const descOpen = ref(false)
 const MAX_RETRIES = 2
@@ -25,6 +24,26 @@ let _retryTimer = null
 onUnmounted(() => {
   if (_retryTimer) clearTimeout(_retryTimer)
 })
+
+// Derived from shared cache — updates reactively when extraction completes
+const _eraColors = computed(() => getEraColors(props.era.name))
+const colorsReady = computed(() => !!_eraColors.value)
+
+const gradientStyle = computed(() => {
+  const c = _eraColors.value
+  if (!c) return {}
+  const m = c.bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (!m) return {}
+  const [r, g, b] = [+m[1], +m[2], +m[3]]
+  const d1 = `rgba(${Math.floor(r * 0.55)}, ${Math.floor(g * 0.55)}, ${Math.floor(b * 0.55)}, 0.95)`
+  const d2 = `rgba(${Math.floor(r * 0.4)}, ${Math.floor(g * 0.4)}, ${Math.floor(b * 0.4)}, 0.9)`
+  return {
+    background: `linear-gradient(135deg, ${d1}, ${d2})`,
+    borderColor: c.border,
+  }
+})
+
+const titleColor = computed(() => _eraColors.value?.text ?? '#e6edf3')
 
 const artSrc = computed(() => {
   if (!props.era.art_url) return null
@@ -37,42 +56,8 @@ const artSrc = computed(() => {
   return url
 })
 
-function extractColors(imgElement) {
-  if (!imgElement || colorsReady.value) return
-  try {
-    const ct = getColorThief()
-    const pal = ct.getPalette(imgElement, 5)
-
-    if (pal && pal.length >= 2) {
-      const c1 = pal[0]
-      const c2 = pal[1]
-      const d1 = `rgba(${Math.floor(c1[0] * 0.55)}, ${Math.floor(c1[1] * 0.55)}, ${Math.floor(c1[2] * 0.55)}, 0.95)`
-      const d2 = `rgba(${Math.floor(c2[0] * 0.4)}, ${Math.floor(c2[1] * 0.4)}, ${Math.floor(c2[2] * 0.4)}, 0.9)`
-      const bright = `rgb(${Math.min(255, c1[0] + 60)}, ${Math.min(255, c1[1] + 60)}, ${Math.min(255, c1[2] + 60)})`
-
-      gradientStyle.value = {
-        background: `linear-gradient(135deg, ${d1}, ${d2})`,
-        borderColor: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
-      }
-      titleColor.value = bright
-
-      // Share colors for search result badges + player accent
-      setEraColors(props.era.name, {
-        bg: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.2)`,
-        text: bright,
-        border: `rgba(${c1[0]}, ${c1[1]}, ${c1[2]}, 0.3)`,
-        accent: bright,
-      })
-    }
-    colorsReady.value = true
-  } catch (e) {
-    colorsReady.value = true
-  }
-}
-
 function onImgLoad(e) {
-  const img = e.target
-  extractColors(img)
+  extractAndCacheEraColors(props.era.name, e.target)
 }
 
 function onImgError(e) {
@@ -95,8 +80,8 @@ function onImgError(e) {
   }
 }
 
-// Stagger animation delay based on index
-const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
+// Stagger animation delay based on index (max 500ms for larger era lists)
+const animDelay = computed(() => `${Math.min(props.index * 50, 500)}ms`)
 </script>
 
 <template>
@@ -149,6 +134,17 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
               <span class="timeline-date">{{ evt.date }}</span>
               <span class="timeline-sep">&mdash;</span>
               <span class="timeline-text">{{ evt.event }}</span>
+            </div>
+          </div>
+
+          <!-- Era stats + progress bar (hidden in sticky mode via CSS) -->
+          <div v-if="stats && stats.total > 0" class="era-stats">
+            <span class="era-stats-text">{{ stats.available }}/{{ stats.total }} available · {{ stats.percent }}%</span>
+            <div class="era-stats-bar">
+              <div
+                class="era-stats-bar-fill"
+                :style="{ width: `${stats.percent}%`, background: titleColor }"
+              ></div>
             </div>
           </div>
         </div>
@@ -218,7 +214,7 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
 
 .era-card:hover {
   border-color: rgba(255, 255, 255, 0.18);
-  transform: translateY(-1px);
+  transform: translateY(-1px) scale(1.005);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
@@ -370,6 +366,40 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 300)}ms`)
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+/* Era stats */
+.era-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.era-stats-text {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+.era-stats-bar {
+  width: 100%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.era-stats-bar-fill {
+  height: 100%;
+  border-radius: 1px;
+  opacity: 0.6;
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hidden in sticky/compact mode */
+.era-card-wrapper.era-sticky .era-stats {
+  display: none;
 }
 
 /* ── Description row ── */

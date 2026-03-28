@@ -3,9 +3,11 @@ import { computed, ref, type PropType } from 'vue'
 import VersionRow from './VersionRow.vue'
 import BadgeRow from './BadgeRow.vue'
 import CreditTags from './CreditTags.vue'
-import { playTrack, isStreamable, playerState, isTrackMatch } from '../composables/usePlayer'
+import { playTrack, isStreamable, playerState, isTrackMatch, addToQueue } from '../composables/usePlayer'
 import { BADGE_MAP } from '../composables/useUtils'
 import { useSharedOverlays } from '../composables/useSharedOverlays'
+import { useSwipeAction } from '../composables/useSwipeAction'
+import { useLongPress } from '../composables/useLongPress'
 import type { Song } from '../composables/useEraFiltering'
 
 const props = defineProps({
@@ -70,6 +72,7 @@ const isConfirmedOnly = computed(() => {
 const { showContextMenu, showDescription: showDescriptionModal } = useSharedOverlays()
 
 function handleClick() {
+  if (swipe.isSwiping.value) return
   if (hasMultipleVersions.value) {
     emit('toggle')
   } else if (isConfirmedOnly.value) {
@@ -81,6 +84,7 @@ function handleClick() {
       eraArt: props.eraArt,
     })
   } else if (firstVersion.value) {
+    navigator.vibrate?.(8)
     playTrack(firstVersion.value, props.artistName, props.eraName, props.eraArt)
   }
 }
@@ -116,6 +120,55 @@ function handleMobileMenu(e: MouseEvent) {
   })
 }
 
+// ── Swipe actions (mobile) ──
+const swipe = useSwipeAction({
+  onSwipeRight: () => {
+    if (firstVersion.value && !isConfirmedOnly.value) {
+      playTrack(firstVersion.value, props.artistName, props.eraName, props.eraArt)
+    }
+  },
+  onSwipeLeft: () => {
+    if (firstVersion.value) {
+      addToQueue(firstVersion.value, props.artistName, props.eraName, props.eraArt)
+    }
+  },
+})
+
+// ── Long press → context menu (mobile, replaces three-dot button) ──
+const { onTouchStart: longPressStart, onTouchEnd: longPressEnd } = useLongPress((x, y) => {
+  showContextMenu({
+    x,
+    y,
+    song: props.song,
+    version: firstVersion.value,
+    artistName: props.artistName,
+    artistSlug: props.artistSlug,
+    sourceUrl: props.sourceUrl,
+    eraName: props.eraName,
+    eraArt: props.eraArt,
+  })
+})
+
+function onTouchStart(e: TouchEvent) {
+  swipe.onTouchStart(e)
+  longPressStart(e)
+}
+
+function onTouchMove(e: TouchEvent) {
+  swipe.onTouchMove(e)
+}
+
+function onTouchEnd(e: TouchEvent) {
+  swipe.onTouchEnd(e)
+  longPressEnd(e)
+}
+
+const _EMPTY_STYLE = {}
+const swipeStyle = computed(() => {
+  if (!swipe.isSwiping.value || swipe.offsetX.value === 0) return _EMPTY_STYLE
+  return { transform: `translateX(${swipe.offsetX.value}px)`, transition: 'none' }
+})
+
 </script>
 
 <template>
@@ -123,8 +176,13 @@ function handleMobileMenu(e: MouseEvent) {
     <button
       class="song-row"
       :class="{ expanded, playing: isCurrentSong && !isCurrentLoading, loading: isCurrentLoading, 'confirmed-only': isConfirmedOnly && !hasMultipleVersions }"
+      :style="swipeStyle"
       @click="handleClick"
       @contextmenu="handleContextMenu"
+      @touchstart.passive="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @touchcancel="swipe.onTouchCancel"
     >
       <div class="song-content">
         <!-- Title line -->
@@ -455,7 +513,7 @@ function handleMobileMenu(e: MouseEvent) {
 }
 
 @media (max-width: 640px) {
-  .song-row { padding: 10px 8px; }
+  .song-row { padding: 10px 8px; min-height: 48px; }
   .song-title-line { font-size: 14px; }
   .song-title {
     white-space: normal;

@@ -256,7 +256,6 @@ class Era(BaseModel):
             {"name": sec.name, "group": sec.group, "songs": [s.dict(**kwargs) for s in sec.songs]}
             for sec in self.sections
         ]
-        d["songs"] = [s.dict(**kwargs) for s in self.songs]
         d["song_count"] = self.song_count
         d["version_count"] = self.version_count
         return d
