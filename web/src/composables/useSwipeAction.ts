@@ -52,8 +52,6 @@ export function useSwipeAction(options: SwipeActionOptions) {
 
     if (_axisLocked !== 'horizontal') return
 
-    // Prevent vertical scroll interference
-    e.preventDefault()
     isSwiping.value = true
 
     // Elastic rubber band past threshold

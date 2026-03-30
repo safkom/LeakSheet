@@ -180,7 +180,7 @@ const swipeStyle = computed(() => {
       @click="handleClick"
       @contextmenu="handleContextMenu"
       @touchstart.passive="onTouchStart"
-      @touchmove="onTouchMove"
+      @touchmove.passive="onTouchMove"
       @touchend="onTouchEnd"
       @touchcancel="swipe.onTouchCancel"
     >
@@ -283,6 +283,7 @@ const swipeStyle = computed(() => {
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid transparent;
   -webkit-tap-highlight-color: transparent;
+  touch-action: pan-y;
   text-align: left;
 }
 
