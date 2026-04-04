@@ -111,6 +111,83 @@ watch(() => playerState.volume, (v) => {
 
 let _audio: HTMLAudioElement | null = null
 
+// URL created from a Web Audio API fallback blob — revoked when no longer needed
+let _webAudioFallbackUrl: string | null = null
+
+/**
+ * Encode an AudioBuffer as a WAV Blob (16-bit PCM, interleaved channels).
+ * WAV is universally supported and preserves full decoded quality.
+ */
+function _encodeWav(buffer: AudioBuffer): Blob {
+  const numCh = buffer.numberOfChannels
+  const numSamples = buffer.length
+  const sampleRate = buffer.sampleRate
+  const bitsPerSample = 16
+  const byteRate = sampleRate * numCh * (bitsPerSample / 8)
+  const blockAlign = numCh * (bitsPerSample / 8)
+  const dataSize = numSamples * numCh * (bitsPerSample / 8)
+  const headerSize = 44
+
+  const ab = new ArrayBuffer(headerSize + dataSize)
+  const view = new DataView(ab)
+  const write = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+  }
+
+  write(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  write(8, 'WAVE')
+  write(12, 'fmt ')
+  view.setUint32(16, 16, true)          // chunk size
+  view.setUint16(20, 1, true)           // PCM format
+  view.setUint16(22, numCh, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitsPerSample, true)
+  write(36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  // Interleave channels and convert float32 → int16
+  let offset = headerSize
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]))
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+      offset += 2
+    }
+  }
+
+  return new Blob([ab], { type: 'audio/wav' })
+}
+
+/**
+ * Fetch and decode an audio stream via Web Audio API, then re-encode as WAV
+ * and hand back to the <audio> element. Called as a fallback when Safari's
+ * native <audio> element can't decode the file (e.g. MPEG layer 3 in certain
+ * containers, non-standard OG files).
+ */
+async function _attemptWebAudioFallback(streamUrl: string, resumeTime: number): Promise<void> {
+  const response = await fetch(streamUrl)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const arrayBuffer = await response.arrayBuffer()
+
+  // AudioContext can decode formats that <audio> cannot
+  const ctx = new AudioContext()
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+  await ctx.close()
+
+  const wavBlob = _encodeWav(audioBuffer)
+  if (_webAudioFallbackUrl) URL.revokeObjectURL(_webAudioFallbackUrl)
+  _webAudioFallbackUrl = URL.createObjectURL(wavBlob)
+
+  const audio = _getAudio()
+  audio.src = _webAudioFallbackUrl
+  audio.volume = playerState.volume
+  audio.currentTime = resumeTime
+  await audio.play()
+}
+
 function _getAudio() {
   if (!_audio) {
     _audio = new Audio()
@@ -195,7 +272,7 @@ function _getAudio() {
       playerState.loading = false
     })
 
-    _audio.addEventListener('error', () => {
+    _audio.addEventListener('error', async () => {
       const code = _audio.error?.code
       const msgs: Record<number, string> = {
         1: '', // MEDIA_ERR_ABORTED — user-initiated, stay silent
@@ -203,6 +280,22 @@ function _getAudio() {
         3: 'Decode error — try a different version',
         4: 'Stream format not supported',
       }
+
+      // For decode/format errors, try Web Audio API fallback before giving up.
+      // This helps Safari play OG files it can't handle natively (e.g. certain
+      // MP3 encodings or non-standard containers). Guard with !_webAudioFallbackUrl
+      // to prevent infinite retry if the WAV fallback itself fails.
+      if ((code === 3 || code === 4) && playerState.streamUrl && !_webAudioFallbackUrl) {
+        playerState.loading = true
+        playerState.error = ''
+        try {
+          await _attemptWebAudioFallback(playerState.streamUrl, playerState.currentTime)
+          return // success — don't set error
+        } catch {
+          // Fallback failed, fall through to show error
+        }
+      }
+
       playerState.error = (code && msgs[code] !== undefined ? msgs[code] : null) ?? 'Playback failed — try a different version'
       playerState.isPlaying = false
       playerState.loading = false
@@ -273,8 +366,10 @@ export function findStreamableLink(links: string[] | null | undefined): string |
 
 /**
  * Check if a SongVersion has any streamable links.
+ * Zip archives are not streamable even if hosted on a supported audio host.
  */
 export function isStreamable(version: SongVersion | null | undefined): boolean {
+  if (version?.og_filename?.toLowerCase().endsWith('.zip')) return false
   return findStreamableLink(version?.links) !== null
 }
 
@@ -376,6 +471,12 @@ function _updateMediaSession() {
 _initStaticMediaSessionHandlers()
 
 export function playTrack(version: SongVersion | null, artistName = '', eraName = '', artUrl = ''): void {
+  // Clean up any previous Web Audio fallback blob URL
+  if (_webAudioFallbackUrl) {
+    URL.revokeObjectURL(_webAudioFallbackUrl)
+    _webAudioFallbackUrl = null
+  }
+
   const link = findStreamableLink(version?.links)
 
   playerState.track = version

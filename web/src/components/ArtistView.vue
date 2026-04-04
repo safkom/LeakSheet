@@ -3,9 +3,9 @@ import { computed, watch, nextTick, ref, onMounted, onUnmounted, defineAsyncComp
 import { toast } from 'vue-sonner'
 import EraCard from './EraCard.vue'
 import SongList from './SongList.vue'
+import SongRow from './SongRow.vue'
 import VersionRow from './VersionRow.vue'
 import ArtistStatsBar from './ArtistStatsBar.vue'
-import EraNav from './EraNav.vue'
 import ScrollToTop from './ScrollToTop.vue'
 const ContextMenu = defineAsyncComponent(() => import('./ContextMenu.vue'))
 const SongDescriptionModal = defineAsyncComponent(() => import('./SongDescriptionModal.vue'))
@@ -78,17 +78,12 @@ const overallStats = computed(() => {
 
 // ── Era navigation ──
 const {
-  activeEraName,
   showScrollTop,
   setupObservers,
   scrollToEra,
   scrollToTop,
   cleanup: cleanupNav,
 } = useEraNavigation()
-
-const navVisible = computed(() =>
-  !isSearching.value && !recents.value && !showFavourites.value
-)
 
 // ---------------------------------------------------------------------------
 // Favourites
@@ -137,9 +132,6 @@ function handleToggleEra(eraName: string) {
   }
 }
 
-function handleEraNavJump(eraName: string) {
-  scrollToEra(eraName, eraBlockRefs.value)
-}
 
 function eraColorStyle(era) {
   const colors = getEraColors(era.name)
@@ -431,44 +423,30 @@ watch(filteredEras, (eras) => {
     <!-- Normal era browsing -->
     <div v-else class="eras-list" role="list" aria-label="Eras">
       <div v-if="filteredEras.length === 0" class="no-results">No eras with Best Of or Special tracks found</div>
-      <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block" :ref="setEraBlockRef(era.name)">
+      <div v-for="(era, eraIdx) in filteredEras" :key="era.name" class="era-block" :ref="setEraBlockRef(era.name)" v-auto-animate="{ duration: 280, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }">
         <EraCard
           :era="era"
           :expanded="isEraExpanded(era.name)"
           :index="eraIdx"
-          :sticky="isEraExpanded(era.name)"
           :best-of="bestOf"
-          :stats="eraStatsMap.get(era.name)"
           @click="handleToggleEra(era.name)"
         />
 
-        <!-- Expanded songs panel -->
-        <Transition name="era-expand">
-          <div v-if="isEraExpanded(era.name)" class="era-songs-wrap">
-            <div class="era-songs-panel">
-              <SongList
-                :sections="eraSections(era)"
-                :songs="filteredSongs(era)"
-                :artist-name="artist.name"
-                :artist-slug="artist.slug"
-                :source-url="artist.source_url ?? null"
-                :era-name="era.name"
-                :era-art="era.art_url"
-                :empty-message="bestOf ? 'No Best Of or Special tracks in this era' : 'No songs in this era'"
-              />
-            </div>
-          </div>
-        </Transition>
+        <!-- Expanded songs panel — animated by v-auto-animate on the parent -->
+        <div v-if="isEraExpanded(era.name)" class="era-songs-panel" :style="{ '--era-accent': eraColorStyle(era).borderColor }">
+          <SongList
+            :sections="eraSections(era)"
+            :songs="filteredSongs(era)"
+            :artist-name="artist.name"
+            :artist-slug="artist.slug"
+            :source-url="artist.source_url ?? null"
+            :era-name="era.name"
+            :era-art="era.art_url"
+            :empty-message="bestOf ? 'No Best Of or Special tracks in this era' : 'No songs in this era'"
+          />
+        </div>
       </div>
     </div>
-
-    <!-- Era quick-nav side rail (desktop) -->
-    <EraNav
-      :eras="filteredEras"
-      :active-era="activeEraName"
-      :visible="navVisible"
-      @jump="handleEraNavJump"
-    />
 
     <!-- Scroll-to-top button (mobile) -->
     <ScrollToTop :visible="showScrollTop" @click="scrollToTop" />
@@ -671,70 +649,13 @@ watch(filteredEras, (eras) => {
 .era-songs-panel {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-top: 2px solid var(--accent-color);
+  border-top: 2px solid var(--era-accent, var(--accent-color));
   border-radius: 0 0 12px 12px;
   padding: 0 16px 16px;
   overflow: hidden;
   min-height: 0;
 }
 
-/* Era expand/collapse — grid-row technique for smooth height animation */
-.era-songs-wrap {
-  display: grid;
-  grid-template-rows: 1fr;
-}
-
-.era-expand-enter-active,
-.era-expand-leave-active {
-  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
-}
-
-.era-expand-enter-from,
-.era-expand-leave-to {
-  grid-template-rows: 0fr;
-  opacity: 0;
-}
-
-/* Drift-up effect on the inner panel when expanding */
-.era-expand-enter-from .era-songs-panel {
-  transform: translateY(4px);
-}
-
-.era-expand-enter-to .era-songs-panel {
-  transform: translateY(0);
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Staggered reveal for song rows when era first expands */
-.era-songs-panel :deep(.song-row:nth-child(-n+8)) {
-  animation: song-row-in 0.3s ease both;
-}
-
-.era-songs-panel :deep(.song-row:nth-child(1)) { animation-delay: 0ms; }
-.era-songs-panel :deep(.song-row:nth-child(2)) { animation-delay: 30ms; }
-.era-songs-panel :deep(.song-row:nth-child(3)) { animation-delay: 60ms; }
-.era-songs-panel :deep(.song-row:nth-child(4)) { animation-delay: 90ms; }
-.era-songs-panel :deep(.song-row:nth-child(5)) { animation-delay: 120ms; }
-.era-songs-panel :deep(.song-row:nth-child(6)) { animation-delay: 150ms; }
-.era-songs-panel :deep(.song-row:nth-child(7)) { animation-delay: 180ms; }
-.era-songs-panel :deep(.song-row:nth-child(8)) { animation-delay: 210ms; }
-
-@keyframes song-row-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .era-songs-panel :deep(.song-row:nth-child(-n+8)) {
-    animation: none;
-  }
-}
-
-.era-expand-enter-to,
-.era-expand-leave-from {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
 
 /* Search results (flat list) */
 .search-results {

@@ -3,15 +3,12 @@ import { computed, ref, onUnmounted, type PropType } from 'vue'
 import { extractAndCacheEraColors, getEraColors } from '../composables/useEraColors'
 import { enhanceGoogleImageUrl } from '../composables/usePlayer'
 import type { Era } from '../composables/useEraFiltering'
-import type { EraStats } from '../composables/useEraStats'
-
 const props = defineProps({
   era: { type: Object as PropType<Era>, required: true },
   expanded: Boolean,
   index: { type: Number, default: 0 },
   sticky: Boolean,
   bestOf: { type: Boolean, default: false },
-  stats: { type: Object as PropType<EraStats>, default: null },
 })
 
 const emit = defineEmits(['click'])
@@ -137,16 +134,6 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 500)}ms`)
             </div>
           </div>
 
-          <!-- Era stats + progress bar (hidden in sticky mode via CSS) -->
-          <div v-if="stats && stats.total > 0" class="era-stats">
-            <span class="era-stats-text">{{ stats.available }}/{{ stats.total }} available · {{ stats.percent }}%</span>
-            <div class="era-stats-bar">
-              <div
-                class="era-stats-bar-fill"
-                :style="{ width: `${stats.percent}%`, background: titleColor }"
-              ></div>
-            </div>
-          </div>
         </div>
       </div>
     </button>
@@ -368,39 +355,6 @@ const animDelay = computed(() => `${Math.min(props.index * 50, 500)}ms`)
   }
 }
 
-/* Era stats */
-.era-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 6px;
-}
-
-.era-stats-text {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
-  font-variant-numeric: tabular-nums;
-}
-
-.era-stats-bar {
-  width: 100%;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 1px;
-  overflow: hidden;
-}
-
-.era-stats-bar-fill {
-  height: 100%;
-  border-radius: 1px;
-  opacity: 0.6;
-  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Hidden in sticky/compact mode */
-.era-card-wrapper.era-sticky .era-stats {
-  display: none;
-}
 
 /* ── Description row ── */
 .era-desc-row {

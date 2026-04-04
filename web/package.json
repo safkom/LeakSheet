@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.9.0",
     "@tailwindcss/vite": "^4.2.1",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",

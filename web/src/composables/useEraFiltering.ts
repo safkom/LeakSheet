@@ -246,7 +246,8 @@ export function useEraFiltering(eras: ComputedRef<Era[]>) {
   // ── Filtered eras ──
 
   const filteredEras = computed(() => {
-    let result = eras.value
+    // Drop eras with no songs at all — these are header/link rows parsed as eras
+    let result = eras.value.filter(era => eraSongs(era).length > 0)
 
     if (bestOf.value) {
       result = result.filter(era => eraSongs(era).some(isBestOfSong))

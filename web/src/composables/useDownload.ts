@@ -48,6 +48,18 @@ function resolveDownloadUrl(link: string): string {
 }
 
 /**
+ * Returns true if the resolved download URL can be fetched directly by the
+ * browser without proxying (i.e. the host sends Access-Control-Allow-Origin: *
+ * and Content-Disposition: attachment so no backend involvement is needed).
+ */
+function isDirectDownloadUrl(url: string): boolean {
+  return (
+    url.startsWith('https://api.pillows.su/api/download/') ||
+    /^https:\/\/music\.froste\.lol\/song\/[a-f0-9]+\/download$/.test(url)
+  )
+}
+
+/**
  * Core download logic — uses the correct download endpoint per host,
  * proxied through the backend for CORS.
  * Standalone function (not a composable) so it can be called from
@@ -59,6 +71,16 @@ export async function downloadFile(
   signal?: AbortSignal,
 ): Promise<void> {
   const actualDownloadUrl = resolveDownloadUrl(link)
+
+  // For hosts that serve CORS + Content-Disposition: attachment natively,
+  // navigate directly — no proxy needed and no backend roundtrip.
+  if (isDirectDownloadUrl(actualDownloadUrl)) {
+    const a = document.createElement('a')
+    a.href = actualDownloadUrl
+    a.click()
+    return
+  }
+
   const downloadUrl = `/api/stream?url=${encodeURIComponent(actualDownloadUrl)}&download=true`
 
   const toastId = toast.loading(`Downloading ${filename}...`)

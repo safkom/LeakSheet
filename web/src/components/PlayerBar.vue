@@ -660,6 +660,14 @@ const playerBarStyle = computed(() => {
   text-shadow: 0 0 8px currentColor;
 }
 
+@media (min-width: 768px) {
+  .player-inner { height: 84px; padding: 0 24px; gap: 16px; }
+  .player-art { width: 60px; height: 60px; border-radius: 8px; }
+  .player-track-name { font-size: 14px; }
+  .player-track-sub { font-size: 13px; }
+  .player-time-inline { font-size: 12px; }
+}
+
 @media (max-width: 640px) {
   .player-inner { height: 60px; padding: 0 10px; gap: 8px; }
   .player-track-name { font-size: 12px; }

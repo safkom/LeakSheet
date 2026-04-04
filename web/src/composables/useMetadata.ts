@@ -88,7 +88,7 @@ export function formatMetadataSummary(m: FileMetadata): string {
 
 /** Map a metadata field to an existing badge variant. */
 export function metadataBadgeVariant(field: string, value: unknown): string {
-  if (field === 'lossless') return value === true ? 'lossless' : 'hq'
+  if (field === 'lossless') return value === true ? 'lossless' : 'secondary'
   if (field === 'quality_mismatch') return value === true ? 'lq' : 'full'
   if (field === 'bitrate' || field === 'estimated_bitrate') {
     const num = parseInt(String(value))

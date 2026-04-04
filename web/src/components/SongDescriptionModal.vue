@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import type { Song, SongVersion } from '@/composables/useEraFiltering'
 
 const props = defineProps({
-  song: { type: Object as PropType<Song>, required: true },
+  song: { type: Object as PropType<Song> },
   version: { type: Object as PropType<SongVersion> },
   eraArt: String,
   eraName: String,
@@ -121,7 +121,15 @@ const metadataFields = computed(() => {
     fields.push({ label: 'Lossless', value: m.lossless ? 'Yes' : 'No', variant: metadataBadgeVariant('lossless', m.lossless) })
   }
   if (m.channels) fields.push({ label: 'Channels', value: String(m.channels), variant: 'secondary' })
-  if (m.estimated_bitrate) fields.push({ label: 'Est. Bitrate', value: `${m.estimated_bitrate} kbps`, variant: metadataBadgeVariant('estimated_bitrate', m.estimated_bitrate) })
+  if (m.estimated_bitrate) fields.push({ label: 'Est. Bitrate', value: `${Math.round(m.estimated_bitrate)} kbps`, variant: metadataBadgeVariant('estimated_bitrate', m.estimated_bitrate) })
+  if (m.duration) {
+    const secs = parseFloat(String(m.duration))
+    if (!isNaN(secs) && secs > 0) {
+      const mins = Math.floor(secs / 60)
+      const s = Math.floor(secs % 60)
+      fields.push({ label: 'Duration', value: `${mins}:${s.toString().padStart(2, '0')}`, variant: 'secondary' })
+    }
+  }
   if (m.frequency_cutoff) fields.push({ label: 'Freq. Cutoff', value: `${Math.round(m.frequency_cutoff)} Hz`, variant: 'secondary' })
   if (m.quality_mismatch !== undefined && m.quality_mismatch !== null) {
     fields.push({ label: 'Quality Match', value: m.quality_mismatch ? 'Mismatch' : 'OK', variant: metadataBadgeVariant('quality_mismatch', m.quality_mismatch) })

@@ -507,8 +507,8 @@ def _parse_froste_metadata(data: dict) -> dict:
     """Normalize froste.lol analyze-quality JSON."""
     result: dict = {"provider": "froste"}
     if "estimatedBitrate" in data:
-        result["estimated_bitrate"] = data["estimatedBitrate"]
-        result["bitrate"] = f"{data['estimatedBitrate']}kbps"
+        result["estimated_bitrate"] = round(data["estimatedBitrate"])
+        result["bitrate"] = f"{round(data['estimatedBitrate'])}kbps"
     if "frequencyCutoff" in data:
         result["frequency_cutoff"] = round(data["frequencyCutoff"], 1)
     if "qualityMismatch" in data:
