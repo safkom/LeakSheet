@@ -253,12 +253,32 @@ const cssVars = computed(() => {
           </div>
         </div>
 
-        <!-- Technical Parameters (collapsible card) -->
+        <!-- Notes (card container) -->
+        <div v-if="cleanedNotes" class="section">
+          <div class="section-label">Notes</div>
+          <div class="notes-card">
+            <p class="notes-text">{{ cleanedNotes }}</p>
+          </div>
+        </div>
+
+        <!-- Remaining Alt Titles -->
+        <div v-if="remainingAltTitles.length" class="section">
+          <div class="section-label">Alternative Titles</div>
+          <div v-for="(alt, i) in remainingAltTitles" :key="'alt_' + i + '_' + alt" class="alt-title">{{ alt }}</div>
+        </div>
+
+        <!-- Samples -->
+        <div v-if="v?.samples?.length" class="section">
+          <div class="section-label">Samples</div>
+          <div v-for="(s, i) in v.samples" :key="'sample_' + i + '_' + s" class="sample-item">{{ s }}</div>
+        </div>
+
+        <!-- Metadata (collapsible card) -->
         <div v-if="metadataFields.length || metadataLoading" class="section">
           <Collapsible v-model:open="techOpen">
             <div class="tech-card">
               <CollapsibleTrigger class="tech-trigger">
-                <span class="section-label-inline">Technical Parameters</span>
+                <span class="section-label-inline">Metadata</span>
                 <svg :class="['chevron', { open: techOpen }]" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
@@ -274,26 +294,6 @@ const cssVars = computed(() => {
               </CollapsibleContent>
             </div>
           </Collapsible>
-        </div>
-
-        <!-- Remaining Alt Titles -->
-        <div v-if="remainingAltTitles.length" class="section">
-          <div class="section-label">Alternative Titles</div>
-          <div v-for="(alt, i) in remainingAltTitles" :key="'alt_' + i + '_' + alt" class="alt-title">{{ alt }}</div>
-        </div>
-
-        <!-- Samples -->
-        <div v-if="v?.samples?.length" class="section">
-          <div class="section-label">Samples</div>
-          <div v-for="(s, i) in v.samples" :key="'sample_' + i + '_' + s" class="sample-item">{{ s }}</div>
-        </div>
-
-        <!-- Notes (card container) -->
-        <div v-if="cleanedNotes" class="section">
-          <div class="section-label">Notes</div>
-          <div class="notes-card">
-            <p class="notes-text">{{ cleanedNotes }}</p>
-          </div>
         </div>
 
         <!-- Secondary links (if multiple) -->
