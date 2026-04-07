@@ -6,6 +6,7 @@ import SongList from './SongList.vue'
 import SongRow from './SongRow.vue'
 import VersionRow from './VersionRow.vue'
 import ArtistStatsBar from './ArtistStatsBar.vue'
+import NoticeBanner from './NoticeBanner.vue'
 import ScrollToTop from './ScrollToTop.vue'
 const ContextMenu = defineAsyncComponent(() => import('./ContextMenu.vue'))
 const SongDescriptionModal = defineAsyncComponent(() => import('./SongDescriptionModal.vue'))
@@ -27,6 +28,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   back: []
 }>()
+
+const noticesDismissed = ref(false)
+watch(() => props.artist, () => { noticesDismissed.value = false })
 
 const eras = computed(() => props.artist?.eras || [])
 
@@ -258,6 +262,13 @@ watch(filteredEras, (eras) => {
         <h2 class="artist-name">{{ artist.name }}</h2>
       </div>
     </div>
+
+    <!-- Tracker notices -->
+    <NoticeBanner
+      v-if="artist.notices?.length && !noticesDismissed"
+      :notices="artist.notices"
+      @dismiss="noticesDismissed = true"
+    />
 
     <!-- Artist stats bar -->
     <ArtistStatsBar :stats="overallStats" />

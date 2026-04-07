@@ -282,6 +282,7 @@ class Artist(BaseModel):
     eras: list[Era] = Field(default_factory=list)
     tracker_stats: TrackerStats | None = Field(None, description="Global tracker statistics")
     parse_metadata: ParseMetadata | None = Field(None, description="Parsing diagnostics")
+    notices: list[str] = Field(default_factory=list, description="Announcement notices from tracker header")
 
     @property
     def total_songs(self) -> int:

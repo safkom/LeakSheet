@@ -249,6 +249,21 @@ def extract_table(html_content: str, color_map: dict[str, str] | None = None) ->
 # Column detection
 # ---------------------------------------------------------------------------
 
+def _match_column_alias(key: str) -> str | None:
+    """Try to match a normalised key against COLUMN_ALIASES.
+
+    Tries exact match first, then prefix matching for glued-on text
+    (e.g. "noteswelcome to..." → "notes").
+    """
+    canonical = COLUMN_ALIASES.get(key)
+    if canonical:
+        return canonical
+    for alias, canon in COLUMN_ALIASES.items():
+        if key.startswith(alias) and len(alias) > 2:
+            return canon
+    return None
+
+
 def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     """Map canonical field names to column indices from the header row.
 
@@ -265,20 +280,84 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
         key = raw.strip().lower()
         key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
 
-        canonical = COLUMN_ALIASES.get(key)
+        canonical = _match_column_alias(key)
 
-        # If no match, try matching against known aliases as prefixes
-        # (handles cases like "NotesWelcome to..." where extra text is glued on)
+        # If no match on the full cell text, try each individual line.
+        # Handles cells where the column name appears on a separate line
+        # mixed with notice/announcement text (e.g. "[notice]\nNotes").
         if not canonical:
-            for alias, canon in COLUMN_ALIASES.items():
-                if key.startswith(alias) and len(alias) > 2:
-                    canonical = canon
-                    break
+            for line in raw.split("\n"):
+                line_key = re.sub(r'\s+', ' ', line.strip().lower())
+                if line_key:
+                    canonical = _match_column_alias(line_key)
+                    if canonical:
+                        break
 
         if canonical and canonical not in col_map:
             col_map[canonical] = idx
 
     return col_map
+
+
+def _extract_header_notices(
+    header_row: list[_Cell],
+    pre_header_rows: list[list[_Cell]],
+    artist_name: str,
+) -> list[str]:
+    """Extract announcement/notice text from header cells and pre-header rows.
+
+    Notices are lines in header cells that don't match any known column alias,
+    plus any substantial text from rows above the column header row.
+
+    Returns a deduplicated list of notice strings.
+    """
+    notices: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        text = text.strip()
+        # Strip wrapping parentheses for cleaner display
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1].strip()
+        if len(text) < 10:
+            return
+        key = text.lower()
+        if key not in seen:
+            seen.add(key)
+            notices.append(text)
+
+    # --- Header cell notices ---
+    for cell in header_row:
+        raw = cell.text.strip()
+        if not raw:
+            continue
+        lines = raw.split("\n")
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Normalise for alias matching
+            norm = re.sub(r'\s+', ' ', stripped.lower())
+            # Remove parenthetical for matching
+            p = norm.find("(")
+            match_key = norm[:p].strip() if p > 0 else norm
+            if _match_column_alias(match_key):
+                continue
+            _add(stripped)
+
+    # --- Pre-header rows ---
+    artist_lower = artist_name.lower() if artist_name else ""
+    for row in pre_header_rows:
+        row_texts = [c.text.strip() for c in row if c.text.strip()]
+        for text in row_texts:
+            norm = text.lower()
+            # Skip if it's just the artist/tracker name
+            if norm == artist_lower or "tracker" in norm and len(text) < 40:
+                continue
+            for line in text.split("\n"):
+                _add(line.strip())
+
+    return notices
 
 
 # ---------------------------------------------------------------------------
@@ -1105,6 +1184,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Step 1: detect column layout from header row.
     header_row_idx, col_map = _detect_header_row(rows)
 
+    # Step 1b: extract announcement notices from header cells and pre-header rows.
+    pre_header_rows = rows[:header_row_idx] if header_row_idx > 0 else []
+    notices = _extract_header_notices(rows[header_row_idx], pre_header_rows, artist_name)
+
     # Step 2: walk rows, classify and extract
     eras: list[Era] = []
     current_era: Era | None = None
@@ -1472,6 +1555,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         eras=eras,
         tracker_stats=tracker_stats,
         parse_metadata=metadata,
+        notices=notices,
     )
 
 

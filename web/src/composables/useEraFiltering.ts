@@ -71,6 +71,7 @@ export interface Artist {
   eras: Era[]
   total_songs?: number
   total_versions?: number
+  notices?: string[]
 }
 
 // ---------------------------------------------------------------------------
