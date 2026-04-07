@@ -32,25 +32,46 @@ python -m pytest tests/
 src/
   models.py     — Pydantic data models (Artist, Era, Song, SongVersion, etc.)
   parser.py     — HTML table → structured data extraction
-  fetcher.py    — Google Sheets URL fetching with file-based cache
-  streaming.py  — Audio stream URL resolution + proxying (pillows.su, imgur.gg)
-  api.py        — FastAPI HTTP layer with in-memory store
+  fetcher.py    — Google Sheets URL fetching with file-based disk cache
+  streaming.py  — Audio stream URL resolution + proxying (pillows.su, imgur.gg, froste.lol, krakenfiles.com)
+  api.py        — FastAPI HTTP layer with disk caching + ETag validation
   config.py     — Column aliases, path management
 
 web/
   src/
-    composables/usePlayer.js       — HTML5 Audio playback with backend stream proxy
-    composables/useApi.js          — API client wrapper
-    composables/useUtils.js        — Badge/availability display helpers
+    composables/usePlayer.ts       — HTML5 Audio playback with backend stream proxy, queue
+    composables/useApi.ts          — API client with ETag caching, AbortController
+    composables/useUtils.ts        — Badge/availability display helpers
+    composables/useEraColors.ts    — ColorThief dominant color extraction
+    composables/useEraFiltering.ts — TypeScript types, search/best-of/recents filtering
+    composables/useEraStats.ts     — Per-era and artist-level stat computation
+    composables/useFavourites.ts   — Favourites (localStorage persistence)
+    composables/useLocalCache.ts   — IndexedDB cache for tracker data + ETag
+    composables/useDownload.ts     — File download with MIME→extension mapping
+    composables/useMetadata.ts     — Audio file metadata via /api/metadata
+    composables/useSwipeAction.ts  — Horizontal swipe with rubber-band effect
+    composables/useLongPress.ts    — Long-press detection (haptic feedback)
+    composables/useRecentTrackers.ts — Recent trackers singleton (localStorage)
+    composables/useSharedOverlays.ts — Shared ContextMenu + Modal instances
+    composables/useEraNavigation.ts  — IntersectionObserver for active era tracking
     components/TrackerInput.vue    — Tracker URL input form with validation
     components/ArtistView.vue      — Artist detail view with search/filter
+    components/ArtistStatsBar.vue  — Total/available/snippets/full HQ counts
     components/EraCard.vue         — Collapsible era card with cover art colors
-    components/SongList.vue        — Song list wrapper
-    components/SongRow.vue         — Song display with streamable indicators
-    components/VersionRow.vue      — Version display with play/equalizer animation
-    components/PlayerBar.vue       — Progress bar, seek, volume, transport controls
-    components/ContextMenu.vue     — Right-click context menu (copy link, download)
+    components/EraNav.vue          — Side navigation rail with era abbreviations
+    components/SongList.vue        — Song list wrapper with section/group rendering
+    components/SongRow.vue         — Song display with expand/collapse, swipe
+    components/VersionRow.vue      — Version display with play/stream, badges
+    components/BadgeRow.vue        — Quality + availability badge rendering
+    components/CreditTags.vue      — Collaboration/featuring/producers tags
+    components/PlayerBar.vue       — Global audio player with progress, seek, volume, queue
+    components/QueuePanel.vue      — Playback queue with reorder/remove/clear
+    components/FavouritesPanel.vue — Favourited songs grouped by artist/era
+    components/ContextMenu.vue     — Right-click context menu (play/queue/favourite/copy)
     components/SongDescriptionModal.vue — Detailed song/version info modal
+    components/RecentTrackerCard.vue    — Recently viewed tracker card
+    components/ScrollToTop.vue     — Fixed scroll-to-top button
+    components/ui/                 — 15 shadcn/reka-ui primitive components
 ```
 
 ## Input Sources
@@ -83,13 +104,13 @@ The backend proxies audio to avoid CORS issues.
 |------|-------------|-----------|
 | pillows.su / pillowcase.su | `pillows.su/f/{id}` | `api.pillows.su/api/get/{id}` |
 | imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` | `temp.imgur.gg/api/file/{id}/download` |
-| music.froste.lol | `music.froste.lol/song/{hash}` | `music.froste.lol/song/{hash}/download` |
-
+| music.froste.lol | `music.froste.lol/song/{hash}` | `music.froste.lol/song/{hash}/download` || krakenfiles.com | `krakenfiles.com/view/{id}/file.html` | CDN URL extracted from view page |
 ### API Endpoints
 
 ```
 POST /api/sheet                      → Parse tracker URL → full Artist JSON
 GET  /api/image-proxy?url=...        → Proxy images through backend (CORS bypass)
+GET  /api/metadata?url=...           → Fetch audio file metadata from provider APIs
 GET  /api/stream?url=...             → Proxy audio stream from supported hosts
 POST /api/cache/clear                → Clear URL fetch cache
 ```
