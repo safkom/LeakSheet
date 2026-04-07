@@ -7,6 +7,7 @@ const PlayerBar = defineAsyncComponent(() => import('./components/PlayerBar.vue'
 const FavouritesPanel = defineAsyncComponent(() => import('./components/FavouritesPanel.vue'))
 import { Toaster } from '@/components/ui/sonner'
 import { parseSheet, USER_ABORT } from './composables/useApi'
+import { getCachedTracker } from './composables/useLocalCache'
 import { playerState, togglePlay, seekTo, enhanceGoogleImageUrl } from './composables/usePlayer'
 import { extractAndCacheEraColors } from './composables/useEraColors'
 import { favourites } from './composables/useFavourites'
@@ -22,15 +23,29 @@ const lastUrl = ref('')
 const hasPlayer = computed(() => playerState.track !== null)
 
 async function handleParse(url: string) {
-  loading.value = true
-  loadingUrl.value = url
   lastUrl.value = url
   error.value = ''
+
+  // Try local IndexedDB cache for instant render on return visits
+  const cached = await getCachedTracker(url).catch(() => null)
+  if (cached?.data) {
+    await _waitForImages(cached.data)
+    activeArtist.value = cached.data
+  }
+
+  // Show loading spinner only when there's no cached view
+  if (!cached?.data) {
+    loading.value = true
+    loadingUrl.value = url
+  }
+
   try {
-    const data = await parseSheet(url)
-    // Wait for all era cover images to load silently, then reveal
-    await _waitForImages(data)
-    activeArtist.value = data
+    const { data, unchanged } = await parseSheet(url)
+    // Skip re-render if API confirmed data hasn't changed (304)
+    if (!unchanged || !cached?.data) {
+      await _waitForImages(data)
+      activeArtist.value = data
+    }
     saveRecentTracker(data)
   } catch (e) {
     // Silently ignore user-initiated cancellations (user submitted a new URL).
@@ -38,6 +53,8 @@ async function handleParse(url: string) {
     // AbortError variants always surface as an error message instead of
     // disappearing silently.
     if (e === USER_ABORT) return
+    // If we already showed cached data, silently keep it on network errors
+    if (cached?.data) return
     // TimeoutError means the request took too long — offer a retry
     if (e?.name === 'TimeoutError' || e?.message?.includes('timeout') || e?.message?.includes('timed out')) {
       error.value = 'Request timed out — check your connection and try again'

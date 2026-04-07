@@ -22,7 +22,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -32,11 +32,17 @@ from starlette.responses import StreamingResponse
 from src.fetcher import (
     AccessDeniedError,
     async_fetch_and_parse,
+    async_get_cached_age,
+    async_get_cached_etag,
+    async_get_cached_parsed_relaxed,
     clear_cache,
+    compute_content_hash,
+    DEFAULT_CACHE_TTL,
     InvalidURLError,
     NetworkError,
     NoTablesError,
     ParseError,
+    STALE_CACHE_TTL,
 )
 from src.streaming import (
     close_shared_client,
@@ -320,13 +326,34 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition", "ETag", "X-Cache-Status"],
 )
 
 
 # ---------------------------------------------------------------------------
 # POST /api/sheet — parse a tracker URL → full Artist JSON
 # ---------------------------------------------------------------------------
+
+# Background revalidation — prevents thundering herd on stale cache
+_revalidating: set[str] = set()
+
+
+async def _background_revalidate(url: str, artist_name: str | None) -> None:
+    """Re-fetch and re-parse a tracker URL in the background to refresh cache."""
+    url_key = url.strip().lower()
+    if url_key in _revalidating:
+        return
+    _revalidating.add(url_key)
+    try:
+        await async_fetch_and_parse(
+            url, artist_name=artist_name, cache_ttl=0, use_cache=True
+        )
+        logger.info("Background revalidation complete: %s", url[:80])
+    except Exception as e:
+        logger.warning("Background revalidation failed for %s: %s", url[:80], e)
+    finally:
+        _revalidating.discard(url_key)
+
 
 class SheetRequest(BaseModel):
     url: str = Field(..., description="Tracker URL (Google Sheets htmlview or custom domain)")
@@ -336,20 +363,64 @@ class SheetRequest(BaseModel):
 
 
 @app.post("/sheet")
-async def parse_sheet(req: SheetRequest, response: Response):
+async def parse_sheet(
+    req: SheetRequest,
+    request: Request,
+    response: Response,
+    bg: BackgroundTasks,
+):
     """Fetch and parse a tracker spreadsheet.
 
-    Accepts a Google Sheets /htmlview URL or a custom tracker domain.
-    Returns the full parsed Artist object with all eras, songs, and versions.
+    Supports ETag-based conditional requests (If-None-Match header) and
+    stale-while-revalidate: cached data up to 24h old is served instantly
+    while a background refresh is triggered.
     """
-    cache_ttl = 0 if req.force_refresh else 3600
     use_cache = req.use_cache and not req.force_refresh
 
+    # --- ETag-based 304 fast path ---
+    if use_cache:
+        if_none_match = request.headers.get("if-none-match", "").strip().strip('"')
+        if if_none_match:
+            server_etag = await async_get_cached_etag(req.url)
+            if server_etag and server_etag == if_none_match:
+                age = await async_get_cached_age(req.url)
+                if age is not None and age < STALE_CACHE_TTL:
+                    if age > DEFAULT_CACHE_TTL:
+                        bg.add_task(_background_revalidate, req.url, req.artist_name)
+                    return Response(
+                        status_code=304,
+                        headers={
+                            "ETag": f'"{server_etag}"',
+                            "X-Cache-Status": "validated",
+                            "Cache-Control": "public, max-age=300",
+                        },
+                    )
+
+    # --- Stale-while-revalidate fast path ---
+    if use_cache:
+        stale_artist = await async_get_cached_parsed_relaxed(req.url, max_age=STALE_CACHE_TTL)
+        if stale_artist is not None:
+            stale_artist.source_url = req.url
+            data = stale_artist.model_dump()
+            etag = compute_content_hash(data)
+
+            age = await async_get_cached_age(req.url)
+            is_stale = age is not None and age > DEFAULT_CACHE_TTL
+
+            if is_stale:
+                bg.add_task(_background_revalidate, req.url, req.artist_name)
+
+            response.headers["ETag"] = f'"{etag}"'
+            response.headers["X-Cache-Status"] = "stale" if is_stale else "hit"
+            response.headers["Cache-Control"] = "public, max-age=300"
+            return data
+
+    # --- Cache miss: full fetch + parse ---
     try:
         artist = await async_fetch_and_parse(
             req.url,
             artist_name=req.artist_name,
-            cache_ttl=cache_ttl,
+            cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
             use_cache=use_cache,
         )
     except InvalidURLError as e:
@@ -368,8 +439,11 @@ async def parse_sheet(req: SheetRequest, response: Response):
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
-    response.headers["Cache-Control"] = "public, max-age=300"
     data = artist.model_dump()
+    etag = compute_content_hash(data)
+    response.headers["ETag"] = f'"{etag}"'
+    response.headers["X-Cache-Status"] = "miss"
+    response.headers["Cache-Control"] = "public, max-age=300"
     return data
 
 

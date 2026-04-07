@@ -36,6 +36,7 @@ from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet, _era_ma
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
+STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
@@ -335,6 +336,13 @@ def _infer_artist_from_sheet(html: str) -> str | None:
 # File-based cache
 # ---------------------------------------------------------------------------
 
+
+def compute_content_hash(data: dict) -> str:
+    """Compute a short SHA-256 hash of serialized data as content fingerprint (ETag)."""
+    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 def _cache_key(url: str) -> str:
     """SHA-256 hash of URL as cache filename."""
     return hashlib.sha256(url.encode()).hexdigest()
@@ -384,7 +392,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 
 
 def _set_cached_parsed(url: str, artist: Artist) -> None:
-    """Write parsed Artist JSON to cache."""
+    """Write parsed Artist JSON to cache, with content hash in metadata."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
     try:
@@ -392,6 +400,18 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         (CACHE_DIR / f"{key}.parsed.json").write_text(
             json.dumps(data, ensure_ascii=False),
             encoding="utf-8",
+        )
+        # Update metadata with content hash for ETag support
+        meta_file = CACHE_DIR / f"{key}.meta.json"
+        meta = {}
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        meta["content_hash"] = compute_content_hash(data)
+        meta_file.write_text(
+            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
         )
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -422,6 +442,63 @@ def clear_cache() -> int:
         f.unlink()
         count += 1
     return count
+
+
+# ---------------------------------------------------------------------------
+# Public cache info helpers (used by API layer for ETag / stale-while-revalidate)
+# ---------------------------------------------------------------------------
+
+def get_cached_etag(url: str) -> str | None:
+    """Return the content hash (ETag) for a cached parsed result, or None."""
+    url_norm = _normalize_url(url)
+    key = _cache_key(url_norm)
+    meta_file = CACHE_DIR / f"{key}.meta.json"
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            return meta.get("content_hash")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def get_cached_age(url: str) -> float | None:
+    """Return seconds since the URL was last fetched, or None if not cached."""
+    url_norm = _normalize_url(url)
+    key = _cache_key(url_norm)
+    meta_file = CACHE_DIR / f"{key}.meta.json"
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text())
+            ts = meta.get("timestamp", 0)
+            if ts > 0:
+                return time.time() - ts
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def get_cached_parsed_relaxed(url: str, max_age: float = STALE_CACHE_TTL) -> Artist | None:
+    """Return cached parsed Artist if within max_age, ignoring default TTL."""
+    url_norm = _normalize_url(url)
+    return _get_cached_parsed(url_norm, cache_ttl=max_age)
+
+
+async def async_get_cached_etag(url: str) -> str | None:
+    """Async variant of get_cached_etag."""
+    return await asyncio.to_thread(get_cached_etag, url)
+
+
+async def async_get_cached_age(url: str) -> float | None:
+    """Async variant of get_cached_age."""
+    return await asyncio.to_thread(get_cached_age, url)
+
+
+async def async_get_cached_parsed_relaxed(
+    url: str, max_age: float = STALE_CACHE_TTL
+) -> Artist | None:
+    """Async variant of get_cached_parsed_relaxed."""
+    return await asyncio.to_thread(get_cached_parsed_relaxed, url, max_age)
 
 
 # ---------------------------------------------------------------------------
