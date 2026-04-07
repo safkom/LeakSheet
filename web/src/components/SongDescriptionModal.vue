@@ -253,29 +253,6 @@ const cssVars = computed(() => {
           </div>
         </div>
 
-        <!-- Technical Parameters (collapsible card) -->
-        <div v-if="metadataFields.length || metadataLoading" class="section">
-          <Collapsible v-model:open="techOpen">
-            <div class="tech-card">
-              <CollapsibleTrigger class="tech-trigger">
-                <span class="section-label-inline">Technical Parameters</span>
-                <svg :class="['chevron', { open: techOpen }]" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <div v-if="metadataLoading" class="metadata-loading">Fetching file info...</div>
-                <div v-else class="detail-grid tech-grid">
-                  <template v-for="f in metadataFields" :key="f.label">
-                    <span class="detail-label">{{ f.label }}</span>
-                    <Badge :variant="f.variant" class="self-center justify-self-start">{{ f.value }}</Badge>
-                  </template>
-                </div>
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
-        </div>
-
         <!-- Remaining Alt Titles -->
         <div v-if="remainingAltTitles.length" class="section">
           <div class="section-label">Alternative Titles</div>
@@ -294,6 +271,29 @@ const cssVars = computed(() => {
           <div class="notes-card">
             <p class="notes-text">{{ cleanedNotes }}</p>
           </div>
+        </div>
+
+        <!-- Metadata (collapsible card) -->
+        <div v-if="metadataFields.length || metadataLoading" class="section">
+          <Collapsible v-model:open="techOpen">
+            <div class="tech-card">
+              <CollapsibleTrigger class="tech-trigger">
+                <span class="section-label-inline">Metadata</span>
+                <svg :class="['chevron', { open: techOpen }]" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div v-if="metadataLoading" class="metadata-loading">Fetching file info...</div>
+                <div v-else class="detail-grid tech-grid">
+                  <template v-for="f in metadataFields" :key="f.label">
+                    <span class="detail-label">{{ f.label }}</span>
+                    <Badge :variant="f.variant" class="self-center justify-self-start">{{ f.value }}</Badge>
+                  </template>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
         </div>
 
         <!-- Secondary links (if multiple) -->
