@@ -253,14 +253,6 @@ const cssVars = computed(() => {
           </div>
         </div>
 
-        <!-- Notes (card container) -->
-        <div v-if="cleanedNotes" class="section">
-          <div class="section-label">Notes</div>
-          <div class="notes-card">
-            <p class="notes-text">{{ cleanedNotes }}</p>
-          </div>
-        </div>
-
         <!-- Remaining Alt Titles -->
         <div v-if="remainingAltTitles.length" class="section">
           <div class="section-label">Alternative Titles</div>
@@ -271,6 +263,14 @@ const cssVars = computed(() => {
         <div v-if="v?.samples?.length" class="section">
           <div class="section-label">Samples</div>
           <div v-for="(s, i) in v.samples" :key="'sample_' + i + '_' + s" class="sample-item">{{ s }}</div>
+        </div>
+
+        <!-- Notes (card container) -->
+        <div v-if="cleanedNotes" class="section">
+          <div class="section-label">Notes</div>
+          <div class="notes-card">
+            <p class="notes-text">{{ cleanedNotes }}</p>
+          </div>
         </div>
 
         <!-- Metadata (collapsible card) -->
