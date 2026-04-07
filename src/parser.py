@@ -20,6 +20,7 @@ from src.models import (
     Artist,
     Era,
     EraStats,
+    Notice,
     ParseMetadata,
     Section,
     Song,
@@ -148,6 +149,7 @@ class _TableExtractor(HTMLParser):
             self.in_td = True
             self._cell_text = ""
             self._cell_links = []
+            self._cell_link_lines = []
             self._cell_images = []
             self._cell_class = a.get("class", "")
             try:
@@ -173,12 +175,14 @@ class _TableExtractor(HTMLParser):
             self.in_a = False
             if self._a_href:
                 self._cell_links.append(self._a_href)
+                self._cell_link_lines.append(self._cell_text.count("\n"))
             self._a_href = ""
         elif tag == "td" and self.in_td:
             self.in_td = False
             cell = _Cell(
                 text=self._cell_text.strip(),
                 links=list(self._cell_links),
+                link_lines=list(self._cell_link_lines),
                 images=list(self._cell_images),
                 css_class=self._cell_class,
             )
@@ -201,22 +205,23 @@ class _TableExtractor(HTMLParser):
 
 class _Cell:
     """A single table cell with text content, extracted links, images, CSS class, and bg color."""
-    __slots__ = ("text", "links", "images", "css_class", "bg_color")
+    __slots__ = ("text", "links", "link_lines", "images", "css_class", "bg_color")
 
     def __init__(
         self,
         text: str = "",
         links: list[str] | None = None,
+        link_lines: list[int] | None = None,
         images: list[str] | None = None,
         css_class: str = "",
         bg_color: str | None = None,
     ) -> None:
         self.text = text
         self.links = links or []
+        self.link_lines = link_lines or []
         self.images = images or []
         self.css_class = css_class
         self.bg_color = bg_color
-        self.css_class = css_class
 
     def __repr__(self) -> str:
         parts = [f"Cell({self.text!r}"]
@@ -303,36 +308,62 @@ def _extract_header_notices(
     header_row: list[_Cell],
     pre_header_rows: list[list[_Cell]],
     artist_name: str,
-) -> list[str]:
+) -> list[Notice]:
     """Extract announcement/notice text from header cells and pre-header rows.
 
     Notices are lines in header cells that don't match any known column alias,
     plus any substantial text from rows above the column header row.
+    Each link is associated with the specific line it appears on via link_lines.
 
-    Returns a deduplicated list of notice strings.
+    Returns a deduplicated list of Notice objects.
     """
-    notices: list[str] = []
+    # Keywords that indicate an urgent/alert notice (vs informational links)
+    _ALERT_KEYWORDS = re.compile(
+        r"not working|shut down|shutdown|expired|broken|taken down|"
+        r"dmca|copyright|removed|reuploaded?|reupload|unavailable|"
+        r"\bdown\b.*(?:fix|working|progress|eta)|"
+        r"(?:fix|working on).*(?:asap|soon|eta)|"
+        r"\bno eta\b|in.progress.of",
+        re.IGNORECASE,
+    )
+
+    notices: list[Notice] = []
     seen: set[str] = set()
 
-    def _add(text: str) -> None:
+    def _clean(text: str) -> str:
         text = text.strip()
-        # Strip wrapping parentheses for cleaner display
         if text.startswith("(") and text.endswith(")"):
             text = text[1:-1].strip()
+        return text
+
+    def _is_alert(text: str) -> bool:
+        return bool(_ALERT_KEYWORDS.search(text))
+
+    def _add(text: str, link: str | None = None) -> None:
+        text = _clean(text)
         if len(text) < 10:
             return
         key = text.lower()
         if key not in seen:
             seen.add(key)
-            notices.append(text)
+            kind = "alert" if _is_alert(text) else "info"
+            notices.append(Notice(text=text, link=link, kind=kind))
 
     # --- Header cell notices ---
     for cell in header_row:
         raw = cell.text.strip()
         if not raw:
             continue
+        # Build per-line link mapping: line_index → cleaned URL
+        line_link_map: dict[int, str] = {}
+        for link_idx, line_num in enumerate(cell.link_lines):
+            if link_idx < len(cell.links):
+                cleaned = _clean_link(cell.links[link_idx])
+                if cleaned:
+                    line_link_map[line_num] = cleaned
+
         lines = raw.split("\n")
-        for line in lines:
+        for line_idx, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 continue
@@ -343,19 +374,28 @@ def _extract_header_notices(
             match_key = norm[:p].strip() if p > 0 else norm
             if _match_column_alias(match_key):
                 continue
-            _add(stripped)
+            _add(stripped, line_link_map.get(line_idx))
 
     # --- Pre-header rows ---
     artist_lower = artist_name.lower() if artist_name else ""
     for row in pre_header_rows:
-        row_texts = [c.text.strip() for c in row if c.text.strip()]
-        for text in row_texts:
+        for cell in row:
+            text = cell.text.strip()
+            if not text:
+                continue
             norm = text.lower()
             # Skip if it's just the artist/tracker name
             if norm == artist_lower or "tracker" in norm and len(text) < 40:
                 continue
-            for line in text.split("\n"):
-                _add(line.strip())
+            # Build per-line link mapping
+            line_link_map = {}
+            for link_idx, line_num in enumerate(cell.link_lines):
+                if link_idx < len(cell.links):
+                    cleaned = _clean_link(cell.links[link_idx])
+                    if cleaned:
+                        line_link_map[line_num] = cleaned
+            for line_idx, line in enumerate(text.split("\n")):
+                _add(line.strip(), line_link_map.get(line_idx))
 
     return notices
 

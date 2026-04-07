@@ -2,6 +2,7 @@
 import { computed, ref, watch, type PropType } from 'vue'
 import { BADGE_MAP, qualityVariant, availabilityVariant } from '@/composables/useUtils'
 import { fetchMetadata, metadataBadgeVariant, type FileMetadata } from '@/composables/useMetadata'
+import { getEraColors } from '@/composables/useEraColors'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { Song, SongVersion } from '@/composables/useEraFiltering'
 
 const props = defineProps({
@@ -28,7 +30,7 @@ function handleOpenChange(open: boolean) {
 
 const v = computed(() => props.version || props.song?.versions?.[0])
 
-const BADGE_LABEL_TEXT = { best: 'Best Of', special: 'Special', worst: 'Worst Of', grail: 'Grail', wanted: 'Wanted', ai: 'AI Generated' }
+const BADGE_LABEL_TEXT: Record<string, string> = { best: 'Best Of', special: 'Special', worst: 'Worst Of', grail: 'Grail', wanted: 'Wanted', ai: 'AI Generated' }
 const BADGE_LABELS = Object.fromEntries(
   Object.entries(BADGE_MAP).map(([k, emoji]) => [k, { emoji, label: BADGE_LABEL_TEXT[k] }])
 )
@@ -43,8 +45,10 @@ const displayName = computed(() => {
   return v.value.name || props.song?.base_name || 'Unknown'
 })
 
+const subtitle = computed(() => v.value?.alt_titles?.[0] || null)
+
 const credits = computed(() => {
-  const parts = []
+  const parts: Array<{ label: string; value: string }> = []
   if (v.value?.collaboration) parts.push({ label: 'with', value: v.value.collaboration })
   if (v.value?.featuring) parts.push({ label: 'feat.', value: v.value.featuring })
   if (v.value?.producers) parts.push({ label: 'prod.', value: v.value.producers })
@@ -52,7 +56,7 @@ const credits = computed(() => {
   return parts
 })
 
-function copyLink(link) {
+function copyLink(link: string) {
   navigator.clipboard.writeText(link).then(() => {
     toast.success('Link copied')
   }).catch(() => {
@@ -60,15 +64,20 @@ function copyLink(link) {
   })
 }
 
+// Quality & availability pulled out as prominent badges
+const qualityBadge = computed(() => {
+  if (!v.value?.quality) return null
+  return { value: v.value.quality, variant: qualityVariant(v.value.quality) }
+})
+const availBadge = computed(() => {
+  if (!v.value?.available_length) return null
+  return { value: v.value.available_length, variant: availabilityVariant(v.value.available_length) }
+})
+
+// Detail grid — everything except quality/availability (those are now prominent badges)
 const details = computed(() => {
-  const items = []
+  const items: Array<{ label: string; value: string }> = []
   if (v.value?.version_tag) items.push({ label: 'Version', value: v.value.version_tag })
-  if (v.value?.quality) {
-    items.push({ label: 'Quality', value: v.value.quality, badgeVariant: qualityVariant(v.value.quality) })
-  }
-  if (v.value?.available_length) {
-    items.push({ label: 'Available', value: v.value.available_length, badgeVariant: availabilityVariant(v.value.available_length) })
-  }
   if (v.value?.track_length) items.push({ label: 'Duration', value: v.value.track_length })
   if (v.value?.file_date) items.push({ label: 'File Date', value: v.value.file_date })
   if (v.value?.leak_date) items.push({ label: 'Leak Date', value: v.value.leak_date })
@@ -88,6 +97,16 @@ const cleanedNotes = computed(() => {
     .join('\n')
     .trim()
 })
+
+// Remaining alt titles (skip first — it's used as subtitle)
+const remainingAltTitles = computed(() => {
+  const all = v.value?.alt_titles
+  if (!all || all.length <= 1) return []
+  return all.slice(1)
+})
+
+// Collapsible state for Technical Parameters
+const techOpen = ref(false)
 
 // Fetch provider metadata
 const fileMetadata = ref<FileMetadata | null>(null)
@@ -136,81 +155,151 @@ const metadataFields = computed(() => {
   }
   return fields
 })
+
+const primaryLink = computed(() => v.value?.links?.[0] || null)
+const secondaryLinks = computed(() => {
+  if (!v.value?.links || v.value.links.length <= 1) return []
+  return v.value.links.slice(1)
+})
+
+// Era accent colors from ColorThief cache
+const eraColors = computed(() => props.eraName ? getEraColors(props.eraName) : null)
+
+// Extract raw RGB from the bg rgba string for blending
+const eraRgb = computed(() => {
+  const bg = eraColors.value?.bg
+  if (!bg) return null
+  const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  return m ? { r: +m[1], g: +m[2], b: +m[3] } : null
+})
+
+// Stronger tinted background for the entire modal
+const modalBg = computed(() => {
+  const c = eraRgb.value
+  if (!c) return undefined
+  return `rgb(${Math.round(c.r * 0.15 + 20)}, ${Math.round(c.g * 0.15 + 22)}, ${Math.round(c.b * 0.15 + 28)})`
+})
+
+const cssVars = computed(() => {
+  if (!eraColors.value) return {}
+  return {
+    '--era-accent': eraColors.value.accent,
+    '--era-bg': eraColors.value.bg,
+    '--era-border': eraColors.value.border,
+    '--era-text': eraColors.value.text,
+    ...(modalBg.value ? { '--modal-bg': modalBg.value } : {}),
+  } as Record<string, string>
+})
 </script>
 
 <template>
   <Dialog :open="true" @update:open="handleOpenChange">
-    <DialogScrollContent class="max-w-[520px] p-0 border-white/10 bg-[hsl(220_24%_12%)] overflow-y-auto rounded-xl">
-      <!-- Accessible title (visually hidden fallback) -->
+    <DialogScrollContent
+      class="song-desc-modal max-w-[520px] !p-0 !gap-0 border-white/10 overflow-y-auto rounded-xl"
+    >
+      <div class="modal-shell" :style="cssVars">
       <DialogTitle class="sr-only">{{ displayName }}</DialogTitle>
       <DialogDescription class="sr-only">{{ eraName }}</DialogDescription>
 
-      <!-- Header -->
-      <div class="modal-header">
-        <div class="modal-title-row">
-          <span v-if="badgeInfo" class="modal-badge-emoji" aria-hidden="true">{{ badgeInfo.emoji }}</span>
-          <h2 class="modal-title">{{ displayName }}</h2>
-        </div>
-        <div v-if="eraName || badgeInfo" class="modal-meta-row">
-          <span v-if="eraName" class="modal-era-pill">{{ eraName }}</span>
-          <span v-if="badgeInfo" class="modal-badge-label">{{ badgeInfo.label }}</span>
-        </div>
+      <!-- Top bar: "Description" center, X right -->
+      <div class="top-bar">
+        <span class="top-bar-spacer" />
+        <span class="top-bar-title">Description</span>
+        <button class="top-bar-close" aria-label="Close" @click="emit('close')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
       </div>
 
-      <div class="p-5">
+      <!-- Content -->
+      <div class="content">
+        <!-- Era pill + badge label -->
+        <div class="era-header">
+          <div v-if="eraName" class="era-pill" :style="eraColors ? { color: eraColors.accent, background: eraColors.bg } : {}">{{ eraName }}</div>
+          <span v-if="badgeInfo" class="badge-label-under-era">{{ badgeInfo.label }}</span>
+        </div>
+
+        <!-- Title -->
+        <div class="title-row">
+          <span v-if="badgeInfo" class="badge-emoji" aria-hidden="true">{{ badgeInfo.emoji }}</span>
+          <h2 class="song-title">{{ displayName }}</h2>
+        </div>
+
+        <!-- Subtitle (first alt title) -->
+        <p v-if="subtitle" class="song-subtitle">{{ subtitle }}</p>
+
         <!-- Credits -->
-        <div v-if="credits.length" class="modal-section">
+        <div v-if="credits.length" class="credits">
           <div v-for="c in credits" :key="c.label" class="credit-line">
             <span class="credit-label">{{ c.label }}</span>
             <span class="credit-value">{{ c.value }}</span>
           </div>
         </div>
 
-        <!-- Metadata -->
-        <div v-if="details.length" class="modal-section">
+        <!-- Prominent status badges -->
+        <div v-if="qualityBadge || availBadge" class="status-badges">
+          <Badge v-if="qualityBadge" :variant="qualityBadge.variant" class="status-pill">{{ qualityBadge.value }}</Badge>
+          <Badge v-if="availBadge" :variant="availBadge.variant" class="status-pill">{{ availBadge.value }}</Badge>
+        </div>
+
+        <!-- Detail grid -->
+        <div v-if="details.length" class="section">
           <div class="detail-grid">
             <template v-for="d in details" :key="d.label">
               <span class="detail-label">{{ d.label }}</span>
-              <Badge v-if="d.badgeVariant" :variant="d.badgeVariant" class="self-center justify-self-start">{{ d.value }}</Badge>
-              <span v-else class="detail-value">{{ d.value }}</span>
+              <span class="detail-value">{{ d.value }}</span>
             </template>
           </div>
         </div>
 
-        <!-- File Info (fetched from provider) -->
-        <div v-if="metadataFields.length || metadataLoading" class="modal-section">
-          <div class="section-label">File Info</div>
-          <div v-if="metadataLoading" class="metadata-loading">Fetching...</div>
-          <div v-else class="detail-grid">
-            <template v-for="f in metadataFields" :key="f.label">
-              <span class="detail-label">{{ f.label }}</span>
-              <Badge :variant="f.variant" class="self-center justify-self-start">{{ f.value }}</Badge>
-            </template>
-          </div>
+        <!-- Technical Parameters (collapsible card) -->
+        <div v-if="metadataFields.length || metadataLoading" class="section">
+          <Collapsible v-model:open="techOpen">
+            <div class="tech-card">
+              <CollapsibleTrigger class="tech-trigger">
+                <span class="section-label-inline">Technical Parameters</span>
+                <svg :class="['chevron', { open: techOpen }]" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div v-if="metadataLoading" class="metadata-loading">Fetching file info...</div>
+                <div v-else class="detail-grid tech-grid">
+                  <template v-for="f in metadataFields" :key="f.label">
+                    <span class="detail-label">{{ f.label }}</span>
+                    <Badge :variant="f.variant" class="self-center justify-self-start">{{ f.value }}</Badge>
+                  </template>
+                </div>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
         </div>
 
-        <!-- Alt Titles -->
-        <div v-if="v?.alt_titles?.length" class="modal-section">
+        <!-- Remaining Alt Titles -->
+        <div v-if="remainingAltTitles.length" class="section">
           <div class="section-label">Alternative Titles</div>
-          <div v-for="(alt, i) in v.alt_titles" :key="'alt_' + i + '_' + alt" class="alt-title">{{ alt }}</div>
+          <div v-for="(alt, i) in remainingAltTitles" :key="'alt_' + i + '_' + alt" class="alt-title">{{ alt }}</div>
         </div>
 
         <!-- Samples -->
-        <div v-if="v?.samples?.length" class="modal-section">
+        <div v-if="v?.samples?.length" class="section">
           <div class="section-label">Samples</div>
           <div v-for="(s, i) in v.samples" :key="'sample_' + i + '_' + s" class="sample-item">{{ s }}</div>
         </div>
 
-        <!-- Notes -->
-        <div v-if="cleanedNotes" class="modal-section">
+        <!-- Notes (card container) -->
+        <div v-if="cleanedNotes" class="section">
           <div class="section-label">Notes</div>
-          <p class="notes-text">{{ cleanedNotes }}</p>
+          <div class="notes-card">
+            <p class="notes-text">{{ cleanedNotes }}</p>
+          </div>
         </div>
 
-        <!-- Links -->
-        <div v-if="v?.links?.length" class="modal-section">
-          <div class="section-label">Links</div>
-          <div v-for="(link, i) in v.links" :key="'link_' + i + '_' + link" class="link-item">
+        <!-- Secondary links (if multiple) -->
+        <div v-if="secondaryLinks.length" class="section">
+          <div class="section-label">Additional Links</div>
+          <div v-for="(link, i) in secondaryLinks" :key="'link_' + i + '_' + link" class="link-item">
             <a :href="link" target="_blank" rel="noopener">{{ link }}</a>
             <button class="link-copy-btn" @click.prevent="copyLink(link)" aria-label="Copy link">
               <svg viewBox="0 0 16 16" width="13" height="13">
@@ -219,98 +308,194 @@ const metadataFields = computed(() => {
             </button>
           </div>
         </div>
+
+        <!-- Download button (always last) -->
+        <div v-if="primaryLink" class="download-area">
+          <a :href="primaryLink" target="_blank" rel="noopener" class="download-btn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download
+          </a>
+        </div>
+      </div>
       </div>
     </DialogScrollContent>
   </Dialog>
 </template>
 
 <style scoped>
-.modal-header {
-  padding: 22px 24px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+/* ── Modal shell (carries bg + CSS vars) ───── */
+.modal-shell {
+  background: var(--modal-bg, hsl(220 24% 12%));
+  border-radius: 12px;
+  min-height: 100%;
 }
 
-.modal-title-row {
+/* ── Top bar ─────────────────────────────────── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--modal-bg, hsl(220 24% 12%));
+  border-bottom: 1px solid var(--era-border, rgba(255, 255, 255, 0.06));
+}
+
+.top-bar-close {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.top-bar-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.top-bar-title {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.top-bar-spacer {
+  width: 26px;
+  flex-shrink: 0;
+}
+
+/* ── Content ─────────────────────────────────── */
+.content {
+  padding: 20px 24px 24px;
+}
+
+/* ── Era header (pill + badge label) ──────────── */
+.era-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.era-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--era-accent, hsl(230 80% 68%));
+  background: rgba(255, 255, 255, 0.08);
+  padding: 5px 14px;
+  border-radius: 20px;
+}
+
+.badge-label-under-era {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+}
+
+/* ── Title ───────────────────────────────────── */
+.title-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
 }
 
-.modal-badge-emoji {
-  font-size: 18px;
+.badge-emoji {
+  font-size: 24px;
   line-height: 1;
   flex-shrink: 0;
 }
 
-.modal-title {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--text-primary);
+.song-title {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--era-accent, hsl(230 80% 68%));
   margin: 0;
 }
 
-.modal-meta-row {
+.song-subtitle {
+  font-size: 15px;
+  color: var(--text-dim);
+  margin: 6px 0 0;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* ── Credits ─────────────────────────────────── */
+.credits {
+  margin-top: 14px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.modal-era-pill {
-  font-size: 12px;
-  color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.07);
-  padding: 2px 9px;
-  border-radius: 20px;
-  letter-spacing: 0.1px;
-}
-
-.modal-badge-label {
-  font-size: 11px;
-  color: var(--text-dim);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.modal-section {
-  padding: 12px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.modal-section:first-of-type {
-  border-top: none;
-  padding-top: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .credit-line {
-  display: flex;
-  gap: 6px;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
 .credit-label {
-  color: var(--text-dim);
-  font-weight: 500;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--era-accent, var(--text-primary));
+  margin-right: 4px;
 }
 
 .credit-value {
   color: var(--text-secondary);
 }
 
+/* ── Status badges ───────────────────────────── */
+.status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.status-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+}
+
+
+
+/* ── Sections ────────────────────────────────── */
+.section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--era-border, rgba(255, 255, 255, 0.06));
+}
+
+/* ── Detail grid ─────────────────────────────── */
 .detail-grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 5px 16px;
-  font-size: 13px;
+  gap: 8px 20px;
+  font-size: 14px;
 }
 
 .detail-label {
-  color: var(--text-dim);
+  color: var(--era-accent, var(--text-dim));
   font-weight: 500;
+  opacity: 0.7;
 }
 
 .detail-value {
@@ -320,35 +505,96 @@ const metadataFields = computed(() => {
   min-width: 0;
 }
 
-.section-label {
+/* ── Technical Parameters (collapsible card) ─── */
+.tech-card {
+  border: 1px solid var(--era-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--era-bg, rgba(255, 255, 255, 0.02));
+}
+
+.tech-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
   color: var(--text-dim);
-  font-size: 10px;
-  font-weight: 600;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.section-label-inline {
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  margin-bottom: 6px;
+  color: var(--era-accent, var(--text-dim));
+  opacity: 0.7;
+}
+
+.chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-dim);
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.tech-grid {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Section labels ──────────────────────────── */
+.section-label {
+  color: var(--era-accent, var(--text-dim));
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+  opacity: 0.7;
 }
 
 .alt-title {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   font-style: italic;
   line-height: 1.5;
 }
 
 .sample-item {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
-.notes-text {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  white-space: pre-wrap;
+/* ── Notes card ──────────────────────────────── */
+.notes-card {
+  background: var(--era-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--era-border, rgba(255, 255, 255, 0.06));
+  border-radius: 12px;
+  padding: 16px;
 }
 
+/* ── Link accent color ───────────────────────── */
+.link-item a {
+  color: var(--era-accent, var(--accent-color));
+}
+
+.notes-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* ── Links ───────────────────────────────────── */
 .link-item {
   display: flex;
   align-items: flex-start;
@@ -357,7 +603,7 @@ const metadataFields = computed(() => {
 
 .link-item a {
   flex: 1;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent-color);
   word-break: break-all;
   line-height: 1.6;
@@ -382,9 +628,44 @@ const metadataFields = computed(() => {
   color: var(--text-primary);
 }
 
+/* ── Download ────────────────────────────────── */
+.download-area {
+  margin-top: 24px;
+}
+
+.download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--era-text, var(--text-primary));
+  background: var(--era-bg, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--era-border, rgba(255, 255, 255, 0.06));
+  transition: background 0.15s, border-color 0.15s;
+  text-decoration: none;
+}
+
+.download-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ── Metadata loading ────────────────────────── */
 .metadata-loading {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   font-style: italic;
+  margin-top: 10px;
+}
+</style>
+
+<!-- Non-scoped: hide the built-in DialogClose in portaled dialog -->
+<style>
+.song-desc-modal > button:last-child {
+  display: none !important;
 }
 </style>

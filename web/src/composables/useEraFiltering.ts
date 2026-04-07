@@ -64,6 +64,12 @@ export interface Era {
   version_count?: number
 }
 
+export interface Notice {
+  text: string
+  link?: string | null
+  kind?: 'alert' | 'info'
+}
+
 export interface Artist {
   name: string
   slug: string
@@ -71,7 +77,7 @@ export interface Artist {
   eras: Era[]
   total_songs?: number
   total_versions?: number
-  notices?: string[]
+  notices?: Notice[]
 }
 
 // ---------------------------------------------------------------------------
