@@ -38,7 +38,7 @@ async function handlePaste() {
       </svg>
       <Input
         v-model="url"
-        type="url"
+        type="text"
         variant="ghost"
         class="flex-1 px-3 py-2.5 text-base"
         placeholder="Paste a tracker URL..."
