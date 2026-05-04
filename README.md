@@ -1,130 +1,152 @@
 # LeakSheet
-A web application + python parser similar to trackerhub.cx that parses Google Docs spreadsheets and displays artist information with albums and tracks.
 
-> ⚠️ **NOTICE**
-> This was **made with Claude Opus 4.6**, so expect bugs and random shit. It was made for fun, and to serve me as a replacement for Trackerhub temporarily.
+A modern reader for tracker spreadsheets — turns clunky Google Docs trackers into a fast, browsable artist library with inline audio streaming.
+
+Inspired by trackerhub.cx, built as a personal replacement while it's down.
+
+> Made for fun with Claude Opus 4.6. Expect rough edges.
+
+---
+
+## What's in this repo
+
+LeakSheet is split into three pieces:
+
+| Piece | Path | Stack |
+|---|---|---|
+| **Backend / parser** | `src/` | Python 3.10+, FastAPI, httpx |
+| **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) |
+| **iOS app** | `LeakSheet-iOS/` | SwiftUI (iOS 26+), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
+
+Both apps talk to the same FastAPI backend.
+
+### Web app (in short)
+
+Browser-based tracker reader. Search and filter eras, stream audio inline, favourite songs, manage a queue, and switch between multiple trackers. Works on desktop and mobile.
+
+### iOS app (in short)
+
+Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-screen / Now Playing integration, swipe gestures, and offline disk caching with ETag validation.
+
+---
+
+## Features (backend + apps)
+
+- 🎵 **Inline streaming** from pillows.su, imgur.gg, music.froste.lol, and krakenfiles.com
+- 📊 **Live parsing** of Google Sheets trackers — no manual exports
+- 🎨 **Per-era cover art colors** extracted on the fly
+- 🔍 **Fast search & filters** across eras, songs, and versions
+- ⭐ **Favourites & queue** persisted locally
+- 📦 **ETag-aware caching** on both backend and clients
+
+---
 
 ## Quick Start
 
+You'll need Python 3.10+ and (for the web app) Node 18+.
+
 ```bash
+# Backend
 pip install -r requirements.txt
+uvicorn src.api:app --reload          # → http://localhost:8000
 
-# Start the API server
-uvicorn src.api:app --reload
+# Web app (separate terminal)
+cd web && npm install && npm run dev  # → http://localhost:5173
+```
 
-# Start the web frontend (separate terminal)
-cd web && npm install && npm run dev
+Then open the frontend and paste any supported tracker URL. For the iOS app, open `LeakSheet-iOS/LeakSheet.xcodeproj` in Xcode 26+ and run.
 
-# Parse a live Google Sheets URL
+### One-liner: parse a tracker from the CLI
+
+```bash
 python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https://yetracker.net/'); print(f'{a.name}: {a.total_songs} songs')"
+```
 
-# Inspect with CLI tools
-python -m tests.tools.inspect_eras --tracker ye
-python -m tests.tools.inspect_songs --tracker ye --era "Yeezus 2"
+### Tests
 
-# Run tests
+```bash
 python -m pytest tests/
 ```
 
-## Architecture
+---
 
-```
-src/
-  models.py     — Pydantic data models (Artist, Era, Song, SongVersion, etc.)
-  parser.py     — HTML table → structured data extraction
-  fetcher.py    — Google Sheets URL fetching with file-based disk cache
-  streaming.py  — Audio stream URL resolution + proxying (pillows.su, imgur.gg, froste.lol, krakenfiles.com)
-  api.py        — FastAPI HTTP layer with disk caching + ETag validation
-  config.py     — Column aliases, path management
-
-web/
-  src/
-    composables/usePlayer.ts       — HTML5 Audio playback with backend stream proxy, queue
-    composables/useApi.ts          — API client with ETag caching, AbortController
-    composables/useUtils.ts        — Badge/availability display helpers
-    composables/useEraColors.ts    — ColorThief dominant color extraction
-    composables/useEraFiltering.ts — TypeScript types, search/best-of/recents filtering
-    composables/useEraStats.ts     — Per-era and artist-level stat computation
-    composables/useFavourites.ts   — Favourites (localStorage persistence)
-    composables/useLocalCache.ts   — IndexedDB cache for tracker data + ETag
-    composables/useDownload.ts     — File download with MIME→extension mapping
-    composables/useMetadata.ts     — Audio file metadata via /api/metadata
-    composables/useSwipeAction.ts  — Horizontal swipe with rubber-band effect
-    composables/useLongPress.ts    — Long-press detection (haptic feedback)
-    composables/useRecentTrackers.ts — Recent trackers singleton (localStorage)
-    composables/useSharedOverlays.ts — Shared ContextMenu + Modal instances
-    composables/useEraNavigation.ts  — IntersectionObserver for active era tracking
-    components/TrackerInput.vue    — Tracker URL input form with validation
-    components/ArtistView.vue      — Artist detail view with search/filter
-    components/ArtistStatsBar.vue  — Total/available/snippets/full HQ counts
-    components/EraCard.vue         — Collapsible era card with cover art colors
-    components/EraNav.vue          — Side navigation rail with era abbreviations
-    components/SongList.vue        — Song list wrapper with section/group rendering
-    components/SongRow.vue         — Song display with expand/collapse, swipe
-    components/VersionRow.vue      — Version display with play/stream, badges
-    components/BadgeRow.vue        — Quality + availability badge rendering
-    components/CreditTags.vue      — Collaboration/featuring/producers tags
-    components/PlayerBar.vue       — Global audio player with progress, seek, volume, queue
-    components/QueuePanel.vue      — Playback queue with reorder/remove/clear
-    components/FavouritesPanel.vue — Favourited songs grouped by artist/era
-    components/ContextMenu.vue     — Right-click context menu (play/queue/favourite/copy)
-    components/SongDescriptionModal.vue — Detailed song/version info modal
-    components/RecentTrackerCard.vue    — Recently viewed tracker card
-    components/ScrollToTop.vue     — Fixed scroll-to-top button
-    components/ui/                 — 15 shadcn/reka-ui primitive components
-```
-
-## Input Sources
+## Supported Inputs
 
 | Source | Example |
-|--------|---------|
+|---|---|
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` |
-| Custom tracker domain | `sites with imbedded spreadsheets` (redirects to htmlview) |
-| Links file | `Trackers/links.txt` (one URL per line) |
-| Local HTML export | `Trackers/Ye Tracker - Google Drive_files/sheet.html` |
+| Custom tracker domain | sites with embedded sheets (auto-redirected) |
+| Links file | `Trackers/links.txt` — one URL per line |
+| Local HTML export | `Trackers/.../sheet.html` (dev only) |
 
-> Production always uses live URLs. Local HTML files exist for offline development only.
+---
 
-## Data Hierarchy
+## Streaming Hosts
+
+The backend proxies audio so clients can play it without CORS pain.
+
+| Host | Link Format |
+|---|---|
+| pillows.su / pillowcase.su | `pillows.su/f/{id}` |
+| imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` |
+| music.froste.lol | `music.froste.lol/song/{hash}` |
+| krakenfiles.com | `krakenfiles.com/view/{id}/file.html` (CDN URL scraped) |
+
+---
+
+## API
+
+```
+POST /api/sheet              → Parse tracker URL → Artist JSON
+GET  /api/stream?url=...     → Proxy audio from supported hosts
+GET  /api/image-proxy?url=…  → Proxy images (CORS bypass)
+GET  /api/metadata?url=...   → Audio file metadata
+POST /api/cache/clear        → Clear URL fetch cache
+```
+
+---
+
+## Data Model
 
 ```
 Artist
-  └── Era (album/mixtape period)
-        └── Section (optional sub-group, e.g. "Surfaced")
-              └── Song (logical song, may have multiple versions)
-                    └── SongVersion (specific leak/recording with metadata)
+└── Era (album / mixtape period)
+    └── Section (optional sub-group, e.g. "Surfaced")
+        └── Song (logical song, may have multiple versions)
+            └── SongVersion (specific leak/recording with metadata)
 ```
 
-## Audio Streaming
+---
 
-Songs with links to supported file hosts can be streamed directly in the web player.
-The backend proxies audio to avoid CORS issues.
-
-| Host | Link Format | API Endpoint |
-|------|-------------|-----------|
-| pillows.su / pillowcase.su | `pillows.su/f/{id}` | `api.pillows.su/api/get/{id}` |
-| imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` | `temp.imgur.gg/api/file/{id}/download` |
-| music.froste.lol | `music.froste.lol/song/{hash}` | `music.froste.lol/song/{hash}/download` || krakenfiles.com | `krakenfiles.com/view/{id}/file.html` | CDN URL extracted from view page |
-### API Endpoints
+## Backend Layout
 
 ```
-POST /api/sheet                      → Parse tracker URL → full Artist JSON
-GET  /api/image-proxy?url=...        → Proxy images through backend (CORS bypass)
-GET  /api/metadata?url=...           → Fetch audio file metadata from provider APIs
-GET  /api/stream?url=...             → Proxy audio stream from supported hosts
-POST /api/cache/clear                → Clear URL fetch cache
+src/
+  models.py     — Pydantic data models
+  parser.py     — HTML table → structured data
+  fetcher.py    — URL fetching + disk cache
+  streaming.py  — Audio stream resolution + proxying
+  api.py        — FastAPI HTTP layer
+  config.py     — Column aliases, paths
 ```
+
+For deeper architecture notes, parsing strategy, and design decisions, see [agents.md](agents.md).
+
+---
 
 ## CLI Tools
 
+Useful when adding support for a new tracker layout:
+
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `tests/tools/dump_raw_table.py` | Dump raw HTML table rows |
 | `tests/tools/inspect_eras.py` | Show eras with song/version counts |
 | `tests/tools/inspect_songs.py` | Inspect parsed songs with filters |
 | `tests/tools/diff_trackers.py` | Compare column layouts across trackers |
 | `tests/tools/debug_zero_eras.py` | Diagnose eras with 0 matched songs |
 
-## Architecture
-
-See [agents.md](agents.md) for detailed architecture, data model, parsing strategy, and API design.
+```bash
+python -m tests.tools.inspect_eras --tracker ye
+python -m tests.tools.inspect_songs --tracker ye --era "Yeezus 2"
+```
