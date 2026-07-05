@@ -1629,3 +1629,62 @@ class TestParseMiscTab:
     def test_artist_default_empty(self):
         from src.models import Artist
         assert Artist(name="X", slug="x").dict()["misc_entries"] == []
+
+
+def test_placeholder_with_shared_alt_title_groups():
+    """'???' rows sharing a fan-made alt title are versions of the same
+    unknown song and must group under it."""
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["TIME2TIME"], notes="v1"), index)
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["Time2Time"], notes="v2"), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 1, f"Expected 1 grouped song, got {len(songs)}"
+    assert len(songs[0].versions) == 2
+
+
+def test_placeholder_with_different_alt_titles_not_grouped():
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["Time2Time"]), index)
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["You Know It"]), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 2, f"Expected 2 songs, got {len(songs)}"
+
+
+def test_placeholder_alt_title_does_not_group_with_titleless():
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["Time2Time"]), index)
+    _add_version_to_era(era, SongVersion(name="???"), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 2, f"Expected 2 songs, got {len(songs)}"
+
+
+def test_placeholder_any_shared_alt_title_groups():
+    """A row listing several alt titles bridges to a group via ANY of them
+    (song known first as one fan name, later renamed)."""
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="??? [V1]", version_tag="V1", alt_titles=["???. Bon Iver", "Time2Time"]), index)
+    _add_version_to_era(era, SongVersion(name="???", alt_titles=["???. Bon Iver"]), index)
+    _add_version_to_era(era, SongVersion(name="??? [V2]", version_tag="V2", alt_titles=["Time2Time"]), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 1, f"Expected 1 bridged song, got {len(songs)}"
+    assert len(songs[0].versions) == 3

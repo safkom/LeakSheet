@@ -35,7 +35,7 @@ BASELINES = {
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "Kendrick Lamar": dict(
-        eras=19, songs=670, versions=863,
+        eras=19, songs=668, versions=863,
         total_rows=931, song_rows=863, skipped=1, footer=23, other_rows=44,
         fuzzy=0, songs_with_10plus_versions=1,
     ),
@@ -45,7 +45,7 @@ BASELINES = {
         fuzzy=13, songs_with_10plus_versions=4,
     ),
     "Ye": dict(
-        eras=42, songs=3608, versions=8105,
+        eras=42, songs=3586, versions=8105,
         total_rows=8299, song_rows=8105, skipped=0, footer=108, other_rows=86,
         fuzzy=5, songs_with_10plus_versions=123,
     ),
@@ -137,15 +137,19 @@ class TestFixtureAccuracy:
         assert len(big) == BASELINES[name]["songs_with_10plus_versions"]
 
     def test_no_placeholder_grouping(self, parsed, name):
-        """'???' / 'Unknown' rows are distinct songs — never merged."""
+        """'???' / 'Unknown' rows only group via shared fan-made alt titles
+        (the song's de-facto identity). A grouped placeholder song must never
+        contain an alt-title-less version — those are distinct mystery
+        tracks and stay standalone."""
         from src.parser import _PLACEHOLDER_BASE_NAMES
 
-        merged = [
-            (song.base_name, len(song.versions), era.name)
-            for era, song in _all_songs(parsed[name])
-            if song.base_name.lower() in _PLACEHOLDER_BASE_NAMES and len(song.versions) > 1
-        ]
-        assert merged == [], f"placeholder songs wrongly grouped: {merged}"
+        merged_wrongly = []
+        for era, song in _all_songs(parsed[name]):
+            if song.base_name.lower() not in _PLACEHOLDER_BASE_NAMES or len(song.versions) <= 1:
+                continue
+            if any(not (v.alt_titles or []) for v in song.versions):
+                merged_wrongly.append((era.name, song.base_name, len(song.versions)))
+        assert merged_wrongly == [], f"placeholder songs wrongly grouped: {merged_wrongly}"
 
     def test_no_duplicate_era_names(self, parsed, name):
         from collections import Counter

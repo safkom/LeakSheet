@@ -1902,8 +1902,10 @@ def _add_version_to_era(
     (current) section. ``song_index`` maps (id(era), base_name) → Song so the
     grouping lookup is O(1) instead of scanning every song in the era.
 
-    Placeholder names ("???", "Unknown", …) are exempt from grouping — each
-    such row is its own standalone Song.
+    Placeholder names ("???", "Unknown", …) mark songs the fanbase can't
+    identify by title. When such a row carries a fan-made alt title, that alt
+    title is the song's identity — rows sharing it group together. Without an
+    alt title each row is its own standalone Song (distinct mystery tracks).
     """
     if not era.sections:
         era.sections.append(Section())
@@ -1914,7 +1916,22 @@ def _add_version_to_era(
     base_key = base_name.strip()
 
     if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
-        era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
+        alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
+        if not alts:
+            era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
+            return
+        # Group by fan-made alt title instead of the placeholder name. Any
+        # shared alt title joins the group — a row listing several alts
+        # bridges renames (e.g. '???. Bon Iver' later known as 'Time2Time').
+        alt_keys = [(id(era), f"alt::{a}") for a in alts]
+        song = next((song_index[k] for k in alt_keys if k in song_index), None)
+        if song is None:
+            song = Song(base_name=base_key, versions=[version])
+            era.sections[-1].songs.append(song)
+        else:
+            song.versions.append(version)
+        for k in alt_keys:
+            song_index.setdefault(k, song)
         return
 
     key = (id(era), base_key)
