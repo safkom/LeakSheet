@@ -1,14 +1,14 @@
 # LeakSheet iOS — Specification
 
 > Auto-generated reference from the LeakSheet web app analysis.
-> Target: SwiftUI, iOS 26+, Swift 6, Liquid Glass design language.
+> Target: SwiftUI, iOS 27+, Swift 6, Liquid Glass design language.
 
 ---
 
 ## 0. Architecture
 
 - **Language:** Swift 6 (strict concurrency)
-- **UI:** SwiftUI, iOS 26+
+- **UI:** SwiftUI, iOS 27+
 - **Build settings:** `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`
 - **Navigation:** `NavigationStack(path:)` with type-safe `.navigationDestination(for: Artist.self)`
 - **State:** `@Observable` macro (Observation framework), `@Environment` injection

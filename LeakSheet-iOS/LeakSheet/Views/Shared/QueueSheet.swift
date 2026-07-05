@@ -12,7 +12,7 @@ struct QueueSheet: View {
                     ContentUnavailableView(
                         "Queue Empty",
                         systemImage: "list.bullet",
-                        description: Text("Swipe right on a song to add it to the queue.")
+                        description: Text("Swipe left on a song to add it to the queue.")
                     )
                 } else {
                     List {

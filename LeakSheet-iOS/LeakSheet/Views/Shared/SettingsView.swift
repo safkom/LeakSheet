@@ -3,7 +3,14 @@ import SwiftUI
 /// App settings — streaming quality mode and other preferences.
 struct SettingsView: View {
     @AppStorage("leaksheet_streaming_mode") private var useOriginalQuality: Bool = false
+    @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @Environment(\.dismiss) private var dismiss
+
+    private var customURLInvalid: Bool {
+        let trimmed = customServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty
+            && (!trimmed.lowercased().hasPrefix("http") || URL(string: trimmed) == nil)
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,6 +39,23 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 } header: {
                     Text("Playback Quality")
+                }
+
+                SwiftUI.Section {
+                    TextField(APIClient.defaultBaseURL, text: $customServerURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.subheadline.monospaced())
+                } header: {
+                    Text("Backend Server")
+                } footer: {
+                    if customURLInvalid {
+                        Text("Invalid URL — the default server will be used.")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Leave empty to use the default server.")
+                    }
                 }
             }
             .listStyle(.insetGrouped)

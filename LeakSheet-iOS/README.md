@@ -4,7 +4,7 @@ Native SwiftUI client for [LeakSheet](../README.md). Browse trackers, stream aud
 
 ## Stack
 
-- **SwiftUI**, iOS 26+
+- **SwiftUI**, iOS 27+
 - **Swift 6** (strict concurrency, `MainActor` default isolation)
 - **Observation framework** (`@Observable`) for state
 - **AVPlayer** + `MPNowPlayingInfoCenter` for playback
@@ -13,7 +13,7 @@ Native SwiftUI client for [LeakSheet](../README.md). Browse trackers, stream aud
 
 ## Setup
 
-Requires **Xcode 26+** and an iOS 26+ device or simulator.
+Requires **Xcode 27+** and an iOS 27+ device or simulator.
 
 ```bash
 open LeakSheet.xcodeproj

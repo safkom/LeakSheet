@@ -22,10 +22,12 @@ struct LeakSheetApp: App {
     }
 
     private func configureAudioSession() {
+        // Only set the category here. Activating the session at launch would
+        // interrupt other apps' audio before the user plays anything —
+        // AudioEngine activates the session right before playback instead.
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("Failed to configure audio session: \(error)")
         }

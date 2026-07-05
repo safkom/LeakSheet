@@ -9,3 +9,6 @@ ui_ideas
 iOS
 .worktrees
 .superpowers
+Log.txt
+.DS_Store
+xcuserdata/
