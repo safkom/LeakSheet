@@ -280,6 +280,25 @@ class ParseMetadata(BaseModel):
     )
 
 
+class MiscEntry(BaseModel):
+    """One entry from a secondary tracker tab (Misc / Music Videos).
+
+    These tabs share the main tracker's era-grouped grammar but carry their
+    own column sets and are kept fully separate from the era/song tree.
+    """
+    era_name: str = Field("", description="Era label from the last era header row")
+    name: str = Field(..., description="Entry title")
+    notes: str | None = Field(None, description="Description text")
+    entry_type: str | None = Field(None, description="Type column, e.g. 'Released', 'Freestyle', 'Book'")
+    date: str | None = Field(None, description="Date / Release Date column")
+    length: str | None = Field(None, description="Length / Media Length column")
+    available: str | None = Field(None, description="Available column (Misc tab)")
+    quality: str | None = Field(None, description="Quality column (Misc tab)")
+    streaming: bool | None = Field(None, description="Streaming Yes/No (Music Videos tab)")
+    links: list[str] = Field(default_factory=list, description="Entry URLs")
+    source_tab: str = Field(..., description="'misc' or 'music_videos'")
+
+
 class Notice(BaseModel):
     """An announcement notice extracted from a tracker header."""
     text: str = Field(..., description="Notice display text")
@@ -296,6 +315,10 @@ class Artist(BaseModel):
     tracker_stats: TrackerStats | None = Field(None, description="Global tracker statistics")
     parse_metadata: ParseMetadata | None = Field(None, description="Parsing diagnostics")
     notices: list[Notice] = Field(default_factory=list, description="Announcement notices from tracker header")
+    misc_entries: list[MiscEntry] = Field(
+        default_factory=list,
+        description="Entries from secondary Misc / Music Videos tabs (separate from eras)",
+    )
 
     @property
     def total_songs(self) -> int:

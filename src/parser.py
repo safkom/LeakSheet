@@ -20,6 +20,7 @@ from src.models import (
     Artist,
     Era,
     EraStats,
+    MiscEntry,
     Notice,
     ParseMetadata,
     Section,
@@ -1926,6 +1927,139 @@ def _add_version_to_era(
     song = Song(base_name=base_key, versions=[version])
     era.sections[-1].songs.append(song)
     song_index[key] = song
+
+
+# ---------------------------------------------------------------------------
+# Misc / Music Videos tab parsing — secondary tabs, kept separate from eras
+# ---------------------------------------------------------------------------
+
+# Local alias map — deliberately separate from COLUMN_ALIASES so these tabs'
+# quirks ("Media Length", "Streaming") never perturb main-tab detection.
+_MISC_COLUMN_ALIASES = {
+    "era": "era",
+    "name": "name",
+    "notes": "notes",
+    "length": "length",
+    "media length": "length",
+    "date": "date",
+    "release date": "date",
+    "type": "entry_type",
+    "available": "available",
+    "quality": "quality",
+    "streaming": "streaming",
+    "links": "links",
+    "link(s)": "links",
+    "link": "links",
+}
+
+# Era header rows in these tabs carry per-era stats in the era column,
+# e.g. "3 Released 0 Unreleased 0 BTS 0 On Streaming".
+_MISC_ERA_STATS_RE = re.compile(
+    r"\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
+)
+
+
+def _misc_header_key(text: str) -> str:
+    key = text.strip()
+    paren = key.find("(")
+    if paren > 0:
+        key = key[:paren]
+    # "Link(s)" — the paren is part of the name, keep a special case
+    if text.strip().lower().startswith("link"):
+        key = "links"
+    return re.sub(r"\s+", " ", key.strip().lower())
+
+
+def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
+    """Parse a Misc or Music Videos tab HTML export into MiscEntry rows.
+
+    ``kind`` is ``"misc"`` or ``"music_videos"`` and is stamped on each entry
+    as ``source_tab``. Rows keep the literal era label from their era column
+    (or the last era header); no fuzzy matching against main-tab eras.
+    """
+    rows = extract_table(html)
+    if not rows:
+        return []
+
+    # Find the header row: needs at least era+name (or name+links) matches.
+    col_map: dict[str, int] = {}
+    header_idx = -1
+    for idx, row in enumerate(rows[: _MAX_HEADER_SCAN_ROWS]):
+        candidate: dict[str, int] = {}
+        for c_idx, cell in enumerate(row):
+            key = _misc_header_key(cell.text)
+            canonical = _MISC_COLUMN_ALIASES.get(key)
+            if canonical and canonical not in candidate:
+                candidate[canonical] = c_idx
+        if "name" in candidate and ("era" in candidate or "links" in candidate):
+            col_map = candidate
+            header_idx = idx
+            break
+    if header_idx < 0:
+        return []
+
+    def cell_text(row: list[_Cell], field: str) -> str:
+        idx = col_map.get(field, -1)
+        if idx < 0 or idx >= len(row):
+            return ""
+        return row[idx].text.strip()
+
+    entries: list[MiscEntry] = []
+    current_era = ""
+
+    for row in rows[header_idx + 1:]:
+        if all(not c.text.strip() for c in row):
+            continue
+
+        era_text = cell_text(row, "era")
+        name = cell_text(row, "name")
+
+        # Era header row: stats text in the era column, era name in the name
+        # column (mirrors the main tab's grammar).
+        if era_text and _MISC_ERA_STATS_RE.search(era_text):
+            if name:
+                current_era = name.split("\n")[0].strip()
+            continue
+        if not name:
+            continue
+
+        if era_text:
+            current_era = era_text.split("\n")[0].strip()
+
+        # Links: prefer parsed <a href> targets, fall back to URL-ish text.
+        links: list[str] = []
+        links_idx = col_map.get("links", -1)
+        if 0 <= links_idx < len(row):
+            cell = row[links_idx]
+            links.extend(_clean_link(l) for l in cell.links)
+            if not links:
+                text = cell.text.strip()
+                if text.startswith(("http://", "https://")):
+                    links.append(text)
+        links = [l for l in links if l]
+
+        streaming_text = cell_text(row, "streaming").lower()
+        streaming = {"yes": True, "no": False}.get(streaming_text)
+
+        def opt(field: str) -> str | None:
+            val = cell_text(row, field)
+            return val or None
+
+        entries.append(MiscEntry(
+            era_name=current_era,
+            name=name.split("\n")[0].strip(),
+            notes=opt("notes"),
+            entry_type=opt("entry_type"),
+            date=opt("date"),
+            length=opt("length"),
+            available=opt("available"),
+            quality=opt("quality"),
+            streaming=streaming,
+            links=links,
+            source_tab=kind,
+        ))
+
+    return entries
 
 
 # ---------------------------------------------------------------------------

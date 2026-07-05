@@ -1566,3 +1566,66 @@ class TestDroppedColumns:
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Notes"), _Cell(text="Quality")]
         col_map = detect_columns(header)
         assert detect_dropped_columns(header, col_map) == []
+
+
+# ---------------------------------------------------------------------------
+# Misc / Music Videos tab parsing
+# ---------------------------------------------------------------------------
+
+class TestParseMiscTab:
+    @staticmethod
+    def _fixture(name):
+        return (Path(__file__).parent / "fixtures" / name).read_text(encoding="utf-8")
+
+    def test_music_videos_fixture(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self._fixture("kendrick_music_videos_tab.html"), "music_videos")
+        assert len(entries) == 107
+        first = entries[0]
+        assert first.era_name == "C4"
+        assert first.name.startswith("Jay Rock - What's Up")
+        assert first.entry_type == "Released"
+        assert first.streaming is False
+        assert first.links and ("youtu" in first.links[0])
+        assert all(e.source_tab == "music_videos" for e in entries)
+
+    def test_misc_fixture(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self._fixture("kendrick_misc_tab.html"), "misc")
+        assert len(entries) == 69
+        freestyle = next(e for e in entries if e.name == "XXL Freshman Freestyle")
+        assert freestyle.era_name == "Section.80"
+        assert freestyle.entry_type == "Freestyle"
+        assert freestyle.available == "Full"
+        assert freestyle.quality == "High Quality"
+        assert freestyle.streaming is None
+        assert freestyle.links
+
+    def test_empty_html(self):
+        from src.parser import parse_misc_tab
+        assert parse_misc_tab("<html><body>no table</body></html>", "misc") == []
+
+    def test_synthetic_era_header_grouping(self):
+        from src.parser import parse_misc_tab
+        html = """
+        <table>
+          <tr><td>Era</td><td>Name</td><td>Notes</td><td>Type</td><td>Link(s)</td></tr>
+          <tr><td>2 Released 1 Unreleased</td><td>Era One</td><td></td><td></td><td></td></tr>
+          <tr><td></td><td>Entry A</td><td>note</td><td>Video</td><td>https://example.com/a</td></tr>
+          <tr><td>Era Two</td><td>Entry B</td><td></td><td>Freestyle</td><td></td></tr>
+        </table>
+        """
+        entries = parse_misc_tab(html, "misc")
+        assert [(e.era_name, e.name) for e in entries] == [("Era One", "Entry A"), ("Era Two", "Entry B")]
+        assert entries[0].links == ["https://example.com/a"]
+
+    def test_artist_serializes_misc_entries(self):
+        from src.models import Artist, MiscEntry
+        artist = Artist(name="X", slug="x", misc_entries=[MiscEntry(name="A", source_tab="misc")])
+        data = artist.dict()
+        assert data["misc_entries"][0]["name"] == "A"
+        assert data["misc_entries"][0]["source_tab"] == "misc"
+
+    def test_artist_default_empty(self):
+        from src.models import Artist
+        assert Artist(name="X", slug="x").dict()["misc_entries"] == []
