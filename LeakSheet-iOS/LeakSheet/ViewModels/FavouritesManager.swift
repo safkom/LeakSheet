@@ -26,7 +26,12 @@ final class FavouritesManager {
         let songVersionCount: Int
         let badge: String?
         let addedAt: Date
-        // Version data (optional for backward compat)
+        // Full version snapshot — preserves featuring, producers, samples,
+        // refs, etc. so the description sheet renders complete metadata.
+        // Optional so entries persisted before this field existed still decode.
+        let primaryVersion: SongVersion?
+        // Legacy flat fields kept for backward compatibility with entries
+        // written before `primaryVersion` was added. New writes leave them nil.
         let primaryVersionName: String?
         let primaryVersionTag: String?
         let links: [String]?
@@ -36,8 +41,11 @@ final class FavouritesManager {
         let trackLength: String?
         let leakDate: String?
 
-        /// Reconstruct a SongVersion from stored fields for playback.
+        /// Reconstruct a SongVersion for playback / description display.
+        /// Prefers the full stored snapshot; falls back to the legacy flat
+        /// fields for entries written before the snapshot field existed.
         var toSongVersion: SongVersion? {
+            if let v = primaryVersion { return v }
             guard let name = primaryVersionName else { return nil }
             return SongVersion(
                 name: name,
@@ -50,6 +58,7 @@ final class FavouritesManager {
                 altTitles: nil,
                 notes: notes,
                 ogFilename: nil,
+                ogFilenames: nil,
                 samples: nil,
                 trackLength: trackLength,
                 fileDate: nil,
@@ -135,14 +144,15 @@ final class FavouritesManager {
                 songVersionCount: song.versions.count,
                 badge: song.computedBadge?.rawValue,
                 addedAt: Date(),
-                primaryVersionName: primary?.name,
-                primaryVersionTag: primary?.versionTag,
-                links: primary?.links,
-                quality: primary?.quality,
-                availableLength: primary?.availableLength,
-                notes: primary?.notes,
-                trackLength: primary?.trackLength,
-                leakDate: primary?.leakDate
+                primaryVersion: primary,
+                primaryVersionName: nil,
+                primaryVersionTag: nil,
+                links: nil,
+                quality: nil,
+                availableLength: nil,
+                notes: nil,
+                trackLength: nil,
+                leakDate: nil
             )
             entries.insert(entry, at: 0)
             _groupedCache = nil
@@ -179,14 +189,15 @@ final class FavouritesManager {
                 songVersionCount: 1,
                 badge: version.badge,
                 addedAt: Date(),
-                primaryVersionName: version.name,
-                primaryVersionTag: version.versionTag,
-                links: version.links,
-                quality: version.quality,
-                availableLength: version.availableLength,
-                notes: version.notes,
-                trackLength: version.trackLength,
-                leakDate: version.leakDate
+                primaryVersion: version,
+                primaryVersionName: nil,
+                primaryVersionTag: nil,
+                links: nil,
+                quality: nil,
+                availableLength: nil,
+                notes: nil,
+                trackLength: nil,
+                leakDate: nil
             )
             entries.insert(entry, at: 0)
             _groupedCache = nil

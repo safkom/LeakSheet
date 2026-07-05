@@ -8,7 +8,7 @@ actor EraColorExtractor {
 
     // Cache: eraName → [r, g, b] in 0-1 range
     private var cache: [String: [Double]]
-    private static let cacheKey = "leaksheet_era_rgb_v2"
+    private static let cacheKey = "leaksheet_era_rgb_v3"
 
     private init() {
         cache = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: [Double]] ?? [:]
@@ -73,11 +73,14 @@ actor EraColorExtractor {
         guard let data = context.data else { return nil }
         let pixels = data.bindMemory(to: UInt8.self, capacity: sampleW * sampleH * 4)
 
-        // Quantize each pixel to 5-bit buckets (32 levels per channel).
-        // Count hits per bucket, accumulate real RGB sums for averaging.
-        typealias Bucket = (count: Int, rSum: Int, gSum: Int, bSum: Int)
-        var buckets = [Int32: Bucket]()
-        buckets.reserveCapacity(512)
+        // Collect sampled pixels with ColorThief's filter: skip transparent
+        // and near-pure-white pixels only. A mostly-white cover keeps its
+        // off-white pixels and resolves to a neutral, and a warm multi-tone
+        // cover isn't out-voted by one small flat region (median cut groups
+        // similar tones into one box instead of splitting them across
+        // hundreds of fixed buckets).
+        var samples: [Pixel] = []
+        samples.reserveCapacity((sampleW / 2 + 1) * (sampleH / 2 + 1))
 
         let pixelStride = 2
         for y in Swift.stride(from: 0, to: sampleH, by: pixelStride) {
@@ -88,27 +91,56 @@ actor EraColorExtractor {
                 let b = Int(pixels[o + 2])
                 let a = Int(pixels[o + 3])
 
-                if a < 128 { continue }              // transparent
-                let bright = max(r, g, b)
-                if bright < 25 { continue }           // too dark
-                let colorfulness = bright - min(r, g, b)
-                if bright > 230 && colorfulness < 20 { continue } // near-white
-
-                let key = Int32(r >> 3) * 1024 + Int32(g >> 3) * 32 + Int32(b >> 3)
-                var bkt = buckets[key] ?? (0, 0, 0, 0)
-                bkt.count += 1; bkt.rSum += r; bkt.gSum += g; bkt.bSum += b
-                buckets[key] = bkt
+                if a < 125 { continue }                       // transparent
+                if r > 250 && g > 250 && b > 250 { continue } // pure white
+                samples.append(Pixel(r: r, g: g, b: b))
             }
         }
 
-        guard let best = buckets.values.max(by: { $0.count < $1.count }),
-              best.count > 0 else { return nil }
+        guard !samples.isEmpty else { return nil }
 
-        return RGB(
-            r: Double(best.rSum) / Double(best.count) / 255.0,
-            g: Double(best.gSum) / Double(best.count) / 255.0,
-            b: Double(best.bSum) / Double(best.count) / 255.0
-        )
+        // Median cut to 3 levels → up to 8 boxes; the most populated box's
+        // average is the dominant color (ColorThief getPalette()[0]).
+        var boxes: [ArraySlice<Pixel>] = [samples[...]]
+        for _ in 0..<3 {
+            var next: [ArraySlice<Pixel>] = []
+            for box in boxes {
+                if box.count < 2 { next.append(box); continue }
+                next.append(contentsOf: Self.medianSplit(box))
+            }
+            boxes = next
+        }
+
+        guard let best = boxes.max(by: { $0.count < $1.count }), !best.isEmpty else { return nil }
+
+        var rSum = 0, gSum = 0, bSum = 0
+        for p in best { rSum += p.r; gSum += p.g; bSum += p.b }
+        let n = Double(best.count)
+        return RGB(r: Double(rSum) / n / 255.0, g: Double(gSum) / n / 255.0, b: Double(bSum) / n / 255.0)
+    }
+
+    private struct Pixel: Sendable { let r, g, b: Int }
+
+    /// Splits a box at the median of its widest channel.
+    nonisolated private static func medianSplit(_ box: ArraySlice<Pixel>) -> [ArraySlice<Pixel>] {
+        var minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0
+        for p in box {
+            minR = min(minR, p.r); maxR = max(maxR, p.r)
+            minG = min(minG, p.g); maxG = max(maxG, p.g)
+            minB = min(minB, p.b); maxB = max(maxB, p.b)
+        }
+        let rangeR = maxR - minR, rangeG = maxG - minG, rangeB = maxB - minB
+
+        var sorted = Array(box)
+        if rangeR >= rangeG && rangeR >= rangeB {
+            sorted.sort { $0.r < $1.r }
+        } else if rangeG >= rangeB {
+            sorted.sort { $0.g < $1.g }
+        } else {
+            sorted.sort { $0.b < $1.b }
+        }
+        let mid = sorted.count / 2
+        return [sorted[..<mid], sorted[mid...]]
     }
 
     // MARK: - Cache helpers

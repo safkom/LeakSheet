@@ -115,7 +115,7 @@ struct SongRowView: View {
                     if let onPlay {
                         onPlay(v)
                     } else {
-                        player.playTrack(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
+                        player.playTrack(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
                     }
                 } label: {
                     Image(systemName: "play.fill")

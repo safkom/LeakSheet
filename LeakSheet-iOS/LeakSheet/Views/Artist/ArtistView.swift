@@ -9,7 +9,6 @@ struct ArtistView: View {
     @State private var showQueue = false
     @State private var eraColors: [String: Color] = [:]
     @State private var activeEraColor: Color?
-    @State private var showSearch = false
     @State private var recentsDisplayCount = 60
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
@@ -24,17 +23,6 @@ struct ArtistView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // Large artist name header
-                    HStack(spacing: 0) {
-                        Text(artist.name)
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle((activeEraColor ?? .primary).ensureReadable(against: .lsBackground))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-
                     // Notices
                     if let notices = artist.notices, !notices.isEmpty {
                         VStack(spacing: 4) {
@@ -53,16 +41,13 @@ struct ArtistView: View {
                     filterToggles
                         .padding(.bottom, 8)
 
-                    // Content
-                    if vm.recents {
+                    // Content: search results take priority over eras/recents
+                    if vm.isSearching {
+                        searchResultsList
+                    } else if vm.recents {
                         recentsList
                     } else {
                         erasList(proxy: proxy)
-                    }
-
-                    // Bottom padding for mini player
-                    if player.currentTrack != nil {
-                        Color.clear.frame(height: 100)
                     }
                 }
             }
@@ -80,66 +65,34 @@ struct ArtistView: View {
                     }
                 }
             )
+            .swipeActionsContainer()
         }
-        .overlay {
-            if showSearch {
-                SearchOverlayView(
-                    search: { vm.searchResults(for: $0) },
-                    artistName: artist.name,
-                    artistSlug: artist.slug,
-                    sourceUrl: artist.sourceUrl,
-                    onShowDescription: { payload in
-                        showDescription = payload
-                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { showSearch = false }
-                    },
-                    onDismiss: {
-                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { showSearch = false }
-                    }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(reduceMotion ? nil : .spring(duration: 0.35), value: showSearch)
-        .toolbarTitleDisplayMode(.inline)
+        .navigationTitle(artist.name)
+        .navigationSubtitle("\(vm.artistStats.total) tracks")
+        .toolbarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
-                    Text(artist.name)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle((activeEraColor ?? .primary).ensureReadable(against: .lsBackground))
-                        .lineLimit(1)
-                    Text("\(vm.artistStats.total) tracks")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 GlassEffectContainer {
-                    HStack(spacing: 4) {
-                        Button {
-                            withAnimation(reduceMotion ? nil : .spring(duration: 0.35)) {
-                                showSearch = true
-                            }
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                                .frame(width: 36, height: 36)
-                                .accessibilityHidden(true)
-                        }
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .accessibilityLabel("Search songs")
-                        Button {
-                            showQueue = true
-                        } label: {
-                            Image(systemName: "list.bullet")
-                                .frame(width: 36, height: 36)
-                                .accessibilityHidden(true)
-                        }
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .accessibilityLabel("Queue")
+                    Button {
+                        showQueue = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .frame(width: 36, height: 36)
+                            .accessibilityHidden(true)
                     }
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .accessibilityLabel("Queue")
                 }
             }
+            // System search item in the nav bar — keeps the search affordance
+            // out of the bottom slot where the mini player (safeAreaBar) lives.
+            DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
         }
+        .searchable(
+            text: Binding(get: { vm.searchQuery }, set: { vm.searchQuery = $0 }),
+            prompt: "Search songs…"
+        )
+        .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
         }
@@ -153,9 +106,9 @@ struct ArtistView: View {
                 await group.next()
                 group.cancelAll()
             }
-            for (eraName, color) in vm.prefetchedColors {
-                eraColors[eraName] = color
-            }
+            // Single assignment — per-key writes invalidate every visible
+            // era card's glass effect once per key, all in the same frame.
+            eraColors = eraColors.merging(vm.prefetchedColors) { _, new in new }
             // Register ordered era list with the engine so playback auto-continues
             // to the next era when the current one runs out.
             let eraContexts = artist.eras.map { era in
@@ -163,7 +116,8 @@ struct ArtistView: View {
                     eraName: era.name,
                     artistName: artist.name,
                     artUrl: era.artUrl ?? "",
-                    versions: era.allSongs.flatMap(\.versions).filter(\.isStreamable)
+                    versions: era.allSongs.flatMap(\.versions).filter(\.isStreamable),
+                    artistSlug: artist.slug
                 )
             }
             player.setArtistEras(eraContexts)
@@ -178,20 +132,94 @@ struct ArtistView: View {
         }
     }
 
+    // MARK: - Search results
+
+    @ViewBuilder
+    private var searchResultsList: some View {
+        let results = vm.searchResults(for: vm.debouncedQuery)
+        if results.isEmpty {
+            ContentUnavailableView.search(text: vm.debouncedQuery)
+                .padding(.top, 40)
+        } else {
+            Text("\(results.count) result\(results.count == 1 ? "" : "s")")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 4)
+
+            ForEach(results) { result in
+                SongRowView(
+                    song: result.song,
+                    version: result.version,
+                    artistName: artist.name,
+                    artistSlug: artist.slug,
+                    sourceUrl: artist.sourceUrl,
+                    eraName: result.era.name,
+                    eraArt: result.era.artUrl,
+                    showVersionBadge: true,
+                    onShowDescription: { payload in showDescription = payload }
+                )
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .onTapGesture {
+                    if result.version.isStreamable {
+                        Haptics.light()
+                        playWithinList(
+                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
+                            tappedId: result.id
+                        )
+                    } else {
+                        showDescription = DescriptionSheet.Payload(
+                            song: result.song, version: result.version,
+                            artistName: artist.name, artistSlug: artist.slug,
+                            eraName: result.era.name, eraArt: result.era.artUrl
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    /// Start playback of the tapped entry inside its visible ordered list, so
+    /// auto-advance continues down the list (search results, recents) instead
+    /// of stopping after one track.
+    private func playWithinList(_ entries: [(version: SongVersion, era: Era, id: String)], tappedId: String) {
+        let streamable = entries.filter { $0.version.isStreamable }
+        guard let idx = streamable.firstIndex(where: { $0.id == tappedId }) else { return }
+        let items = streamable.map {
+            PlaybackListItem(
+                version: $0.version,
+                artistName: artist.name,
+                eraName: $0.era.name,
+                artUrl: $0.era.artUrl ?? "",
+                artistSlug: artist.slug
+            )
+        }
+        player.playInList(items, startAt: idx)
+    }
+
     // MARK: - Filter toggles
 
     private var filterToggles: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                FilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tintColor: .filterBestOf) {
-                    vm.toggleBestOf()
-                }
-                FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
-                    vm.toggleRecents()
-                    recentsDisplayCount = 60
-                }
-                FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
-                    vm.toggleNoSnippets()
+            // Sibling glass elements belong in one container — standalone
+            // effects re-resolve independently and can trip the
+            // "glassEffect() tried to update multiple times per frame" fault.
+            GlassEffectContainer {
+                HStack(spacing: 8) {
+                    FilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tintColor: .filterBestOf) {
+                        vm.toggleBestOf()
+                    }
+                    FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
+                        vm.toggleRecents()
+                        recentsDisplayCount = 60
+                    }
+                    FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
+                        vm.toggleNoSnippets()
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -280,7 +308,7 @@ struct ArtistView: View {
                     HStack(spacing: 8) {
                         Text(result.era.name.uppercased())
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(eraColors[result.era.name] ?? .secondary)
+                            .foregroundStyle((eraColors[result.era.name] ?? .secondary).ensureReadable(against: .lsBackground))
                         Rectangle()
                             .fill(Color.lsBorder)
                             .frame(height: 1)
@@ -323,7 +351,12 @@ struct ArtistView: View {
                 .onTapGesture {
                     if result.version.isStreamable {
                         Haptics.light()
-                        player.playTrack(result.version, artistName: artist.name, eraName: result.era.name, artUrl: result.era.artUrl ?? "")
+                        // Continue down the full recents list, not just the
+                        // currently rendered prefix.
+                        playWithinList(
+                            allResults.map { (version: $0.version, era: $0.era, id: $0.id) },
+                            tappedId: result.id
+                        )
                     } else {
                         showDescription = DescriptionSheet.Payload(
                             song: result.song, version: result.version,
@@ -339,147 +372,6 @@ struct ArtistView: View {
                     }
                 }
             }
-        }
-    }
-}
-
-// MARK: - Search overlay
-
-struct SearchOverlayView: View {
-    /// Called with the trimmed query — returns ranked results without touching filteredEras.
-    var search: (String) -> [ArtistViewModel.SearchResult]
-    let artistName: String
-    let artistSlug: String
-    let sourceUrl: String?
-    var onShowDescription: (DescriptionSheet.Payload) -> Void
-    var onDismiss: () -> Void
-
-    @State private var query = ""
-    @State private var results: [ArtistViewModel.SearchResult] = []
-    @FocusState private var focused: Bool
-    @Environment(PlayerViewModel.self) private var player
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .top) {
-                // Near-solid background for readability
-                Color.lsBackground.opacity(0.97)
-                    .ignoresSafeArea(.all)
-                    .ignoresSafeArea(.keyboard)
-                    .onTapGesture { onDismiss() }
-
-                VStack(spacing: 0) {
-                    // Liquid glass search bar at top
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Search songs...", text: $query)
-                            .focused($focused)
-                            .textFieldStyle(.plain)
-                            .autocorrectionDisabled()
-                            .submitLabel(.search)
-                        if !query.isEmpty {
-                            Button {
-                                query = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Button("Done") {
-                            onDismiss()
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.lsAccent)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
-
-                    // Results area
-                    if !query.isEmpty {
-                        if results.isEmpty {
-                            VStack(spacing: 10) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.title2)
-                                    .foregroundStyle(.tertiary)
-                                Text("No results for \"\(query)\"")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                            .transition(.opacity)
-                        } else {
-                            ScrollView {
-                                LazyVStack(spacing: 0) {
-                                    Text("\(results.count) result\(results.count == 1 ? "" : "s")")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 16)
-                                        .padding(.bottom, 4)
-
-                                    ForEach(results) { result in
-                                        SongRowView(
-                                            song: result.song,
-                                            version: result.version,
-                                            artistName: artistName,
-                                            artistSlug: artistSlug,
-                                            sourceUrl: sourceUrl,
-                                            eraName: result.era.name,
-                                            eraArt: result.era.artUrl,
-                                            showVersionBadge: true,
-                                            onShowDescription: onShowDescription
-                                        )
-                                        .contentShape(Rectangle())
-                                        .accessibilityAddTraits(.isButton)
-                                        .onTapGesture {
-                                            if result.version.isStreamable {
-                                                Haptics.light()
-                                                player.playTrack(result.version, artistName: artistName, eraName: result.era.name, artUrl: result.era.artUrl ?? "")
-                                            } else {
-                                                onShowDescription(DescriptionSheet.Payload(
-                                                    song: result.song, version: result.version,
-                                                    artistName: artistName, artistSlug: artistSlug,
-                                                    eraName: result.era.name, eraArt: result.era.artUrl
-                                                ))
-                                            }
-                                        }
-                                        .padding(.horizontal, 16)
-                                    }
-                                }
-                                .padding(.top, 4)
-                                .padding(.bottom, 8)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                    }
-
-                    Spacer()
-                }
-                .animation(.spring(duration: 0.3), value: results.count)
-                .animation(.spring(duration: 0.3), value: query.isEmpty)
-            }
-        }
-        // Debounce: wait 200ms after last keystroke before searching
-        .task(id: query) {
-            guard !query.isEmpty else {
-                results = []
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }
-            results = search(query)
-        }
-        .task {
-            // Delay focus until the slide-up animation completes
-            try? await Task.sleep(for: .milliseconds(350))
-            focused = true
         }
     }
 }
@@ -500,7 +392,7 @@ struct FilterChip: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .foregroundStyle(isActive ? .white : .secondary)
-                .glassEffect(isActive ? .regular.tint(tintColor).interactive() : .regular.interactive())
+                .glassEffect(.regular.tint(isActive ? tintColor : .clear).interactive())
         }
         .buttonStyle(.plain)
         .frame(minHeight: 44)

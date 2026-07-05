@@ -10,6 +10,16 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showDescription: DescriptionSheet.Payload?
 
+    /// Era accent brightened until it reads against the actual backdrop at the
+    /// controls' position — the gradient there is roughly the accent fading
+    /// well into the black background, so very dark accents (navy, deep green)
+    /// would otherwise render illegible tints.
+    private var readableAccent: Color? {
+        guard let accent = accentColor else { return nil }
+        let backdrop = accent.blended(with: .lsBackground, fraction: 0.7)
+        return accent.ensureReadable(against: backdrop)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -57,7 +67,7 @@ struct NowPlayingView: View {
                             }
                         }
                     )
-                    .tint(accentColor ?? Color.lsAccent)
+                    .tint(readableAccent ?? Color.lsAccent)
 
                     HStack {
                         Text(PlayerViewModel.formatTime(player.displayTime))
@@ -72,7 +82,18 @@ struct NowPlayingView: View {
                 .padding(.horizontal, 32)
 
                 // Transport controls
-                HStack(spacing: 40) {
+                HStack(spacing: 24) {
+                    Button {
+                        player.skipBackward()
+                    } label: {
+                        Image(systemName: "\(Int(player.skipInterval)).arrow.trianglehead.counterclockwise")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Skip back \(Int(player.skipInterval)) seconds")
+
                     Button {
                         player.playPrevious()
                     } label: {
@@ -94,7 +115,7 @@ struct NowPlayingView: View {
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.title2.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent))
                                 .frame(width: 56, height: 56)
                                 .contentTransition(.symbolEffect(.replace))
                         }
@@ -113,6 +134,17 @@ struct NowPlayingView: View {
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Next track")
+
+                    Button {
+                        player.skipForward()
+                    } label: {
+                        Image(systemName: "\(Int(player.skipInterval)).arrow.trianglehead.clockwise")
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Skip forward \(Int(player.skipInterval)) seconds")
                 }
 
                 // Secondary controls row
@@ -131,7 +163,7 @@ struct NowPlayingView: View {
                                 systemImage: player.originalQuality ? "waveform" : "antenna.radiowaves.left.and.right"
                             )
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(player.originalQuality ? (accentColor ?? Color.lsAccent) : .secondary)
+                            .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                         }
@@ -152,11 +184,11 @@ struct NowPlayingView: View {
 
                     // Favourite
                     if let track = player.currentTrack {
-                        let isFav = favourites.entries.contains { $0.primaryVersionName == track.name }
+                        let isFav = favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName)
                         Button {
                             favourites.toggleFromVersion(
                                 version: track,
-                                artistSlug: player.artistName.slugified,
+                                artistSlug: player.artistSlug,
                                 artistName: player.artistName,
                                 sourceUrl: nil,
                                 eraName: player.eraName,
@@ -179,7 +211,7 @@ struct NowPlayingView: View {
                             showDescription = DescriptionSheet.Payload(
                                 song: nil, version: track,
                                 artistName: player.artistName,
-                                artistSlug: player.artistName.slugified,
+                                artistSlug: player.artistSlug,
                                 eraName: player.eraName,
                                 eraArt: player.artUrl.isEmpty ? nil : player.artUrl
                             )
@@ -237,7 +269,7 @@ struct NowPlayingView: View {
                             Button {
                                 favourites.toggleFromVersion(
                                     version: track,
-                                    artistSlug: player.artistName.slugified,
+                                    artistSlug: player.artistSlug,
                                     artistName: player.artistName,
                                     sourceUrl: nil,
                                     eraName: player.eraName,
@@ -245,7 +277,10 @@ struct NowPlayingView: View {
                                 )
                                 Haptics.light()
                             } label: {
-                                Label("Favourite", systemImage: "heart")
+                                Label(
+                                    favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName) ? "Unfavourite" : "Favourite",
+                                    systemImage: favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName) ? "heart.fill" : "heart"
+                                )
                             }
                         }
                         if let link = player.currentTrack?.links?.first {

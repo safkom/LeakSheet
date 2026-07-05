@@ -5,7 +5,7 @@ struct ContentView: View {
     @State private var showFavourites = false
     @State private var showSettings = false
     @State private var showBrowse = false
-    @State private var pendingBrowseUrl: String?
+    @State private var pendingBrowse: PendingBrowse?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -14,7 +14,7 @@ struct ContentView: View {
                     withAnimation { path.append(artist) }
                 },
                 onBrowseTapped: { showBrowse = true },
-                pendingBrowseUrl: $pendingBrowseUrl
+                pendingBrowse: $pendingBrowse
             )
             .navigationDestination(for: Artist.self) { artist in
                 ArtistView(artist: artist)
@@ -39,7 +39,11 @@ struct ContentView: View {
         .environment(PlayerViewModel.shared)
         .environment(FavouritesManager.shared)
         .environment(RecentTrackersManager.shared)
-        .overlay(alignment: .bottom) {
+        // safeAreaBar (not overlay) registers the mini player as a bottom
+        // bar, so the system stacks the floating search field above it
+        // instead of laying it out underneath, and scroll content is
+        // automatically inset to clear the bar.
+        .safeAreaBar(edge: .bottom) {
             MiniPlayerBar()
                 .environment(PlayerViewModel.shared)
         }
@@ -52,9 +56,9 @@ struct ContentView: View {
             SettingsView()
         }
         .sheet(isPresented: $showBrowse) {
-            BrowseArtistsView { pickedUrl in
+            BrowseArtistsView { pickedUrl, pickedName in
                 showBrowse = false
-                pendingBrowseUrl = pickedUrl
+                pendingBrowse = PendingBrowse(url: pickedUrl, name: pickedName)
             }
         }
     }

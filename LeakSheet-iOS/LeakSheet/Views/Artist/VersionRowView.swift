@@ -3,6 +3,9 @@ import SwiftUI
 /// A specific version row — shown when a multi-version song is expanded.
 struct VersionRowView: View {
     let version: SongVersion
+    /// Position within the song's version list — fallback label when the
+    /// version has no explicit tag, so untagged versions stay tellable apart.
+    var versionIndex: Int? = nil
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -23,14 +26,22 @@ struct VersionRowView: View {
         version.isStreamable
     }
 
+    private var versionLabel: String? {
+        if let tag = version.versionTag { return "[\(tag)]" }
+        if let idx = versionIndex { return "#\(idx + 1)" }
+        return nil
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            // Version tag (indented, no vertical line)
-            if let tag = version.versionTag {
-                Text("[\(tag)]")
+            // Version tag (indented, no vertical line); untagged versions
+            // fall back to their list position so rows remain identifiable.
+            if let label = versionLabel {
+                Text(label)
                     .font(.caption.weight(.bold).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 40, alignment: .center)
+                    .accessibilityLabel("Version \(label)")
             } else {
                 Spacer().frame(width: 40)
             }

@@ -16,6 +16,7 @@ struct BadgeRowView: View {
                     .background(variant.background)
                     .clipShape(Capsule())
                     .fixedSize()
+                    .accessibilityLabel("Quality: \(quality)")
             }
 
             if let avail = version.availableLength, !avail.isEmpty {
@@ -28,6 +29,7 @@ struct BadgeRowView: View {
                     .background(variant.background)
                     .clipShape(Capsule())
                     .fixedSize()
+                    .accessibilityLabel("Availability: \(avail)")
             }
         }
     }

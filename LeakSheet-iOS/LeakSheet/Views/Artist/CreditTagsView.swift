@@ -36,5 +36,7 @@ struct CreditTagsView: View {
         .padding(.vertical, 2)
         .background(type.color.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(type.accessibilityLabel) \(text)")
     }
 }

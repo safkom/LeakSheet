@@ -174,6 +174,19 @@ extension Color {
         background.relativeLuminance < 0.5 ? Color.white : Color.black
     }
 
+    /// Linear blend toward `other` (0 = self, 1 = other). Used to approximate
+    /// the effective backdrop where a gradient sits between two colors.
+    func blended(with other: Color, fraction: Double) -> Color {
+        let f = min(max(fraction, 0), 1)
+        let (r1, g1, b1) = rgbComponents
+        let (r2, g2, b2) = other.rgbComponents
+        return Color(
+            red: r1 + (r2 - r1) * f,
+            green: g1 + (g2 - g1) * f,
+            blue: b1 + (b2 - b1) * f
+        )
+    }
+
     // MARK: - Filter-specific accent colors
 
     static let filterBestOf = Color(hue: 45/360, saturation: 0.85, brightness: 0.90)
@@ -212,6 +225,16 @@ enum CreditType: String {
         case .producers: "prod."
         case .collaboration: "with"
         case .refs: "ref."
+        }
+    }
+
+    /// Spoken form for VoiceOver — the abbreviated visual label reads poorly.
+    var accessibilityLabel: String {
+        switch self {
+        case .featuring: "Featuring"
+        case .producers: "Produced by"
+        case .collaboration: "With"
+        case .refs: "Reference by"
         }
     }
 }

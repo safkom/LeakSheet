@@ -59,7 +59,10 @@ enum StreamResolver {
         }
 
         if krakenPattern.firstMatch(in: originalLink, range: range) != nil {
-            return URL(string: originalLink)
+            // The view URL is an HTML page — AVPlayer can't play it directly.
+            // The backend proxy scrapes the CDN URL and streams the original
+            // file bytes, so "original quality" IS the proxied stream here.
+            return streamURL(for: originalLink)
         }
 
         return nil

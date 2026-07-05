@@ -21,7 +21,7 @@ struct SongContextMenu: View {
                 if let onPlay {
                     onPlay(version)
                 } else {
-                    player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
+                    player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
                 }
             } label: {
                 Label("Play", systemImage: "play.fill")

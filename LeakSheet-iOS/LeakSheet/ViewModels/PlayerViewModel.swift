@@ -11,6 +11,8 @@ final class PlayerViewModel {
 
     var currentTrack: SongVersion? { engine.currentTrack }
     var artistName: String { engine.artistName }
+    /// Canonical artist slug for the playing track — favourites key material.
+    var artistSlug: String { engine.artistSlug }
     var eraName: String { engine.eraName }
     var artUrl: String { engine.artUrl }
     var isPlaying: Bool { engine.isPlaying }
@@ -30,8 +32,8 @@ final class PlayerViewModel {
 
     private init() {}
 
-    func playTrack(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "") {
-        engine.playTrack(version, artistName: artistName, eraName: eraName, artUrl: artUrl)
+    func playTrack(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
+        engine.playTrack(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
     }
 
     func togglePlay() {
@@ -78,6 +80,17 @@ final class PlayerViewModel {
         engine.playPrevious()
     }
 
+    /// Seconds moved by skipForward/skipBackward — single source of truth.
+    var skipInterval: TimeInterval { AudioEngine.skipInterval }
+
+    func skipForward() {
+        engine.skipForward()
+    }
+
+    func skipBackward() {
+        engine.skipBackward()
+    }
+
     func playOriginalQuality() {
         engine.playOriginalQuality()
     }
@@ -86,12 +99,25 @@ final class PlayerViewModel {
         engine.playCompressedStream()
     }
 
-    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion]) {
-        engine.setEraSongs(eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions)
+    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
+        engine.setEraSongs(eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
+    }
+
+    /// Set era context and start playback in a single call so the two states
+    /// can never be observed out of sync. Prefer this over calling
+    /// `setEraSongs(...)` followed by `playTrack(...)`.
+    func playInEra(_ version: SongVersion, eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
+        engine.playInEra(version, eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
     }
 
     func setArtistEras(_ eras: [EraSongContext]) {
         engine.setArtistEras(eras)
+    }
+
+    /// Play a track as part of an ad-hoc ordered list (recents, search
+    /// results, a song's versions) — auto-advance continues down the list.
+    func playInList(_ items: [PlaybackListItem], startAt index: Int) {
+        engine.playInList(items, startAt: index)
     }
 
     /// Format seconds as "m:ss".

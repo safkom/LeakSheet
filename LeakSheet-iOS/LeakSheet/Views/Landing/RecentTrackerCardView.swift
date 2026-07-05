@@ -31,7 +31,8 @@ struct RecentTrackerCardView: View {
                     Text(statLine)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()

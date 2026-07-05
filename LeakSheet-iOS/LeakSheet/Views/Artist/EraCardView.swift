@@ -28,9 +28,7 @@ struct EraCardView: View {
 
                 if expanded {
                     if let alts = era.altNames, !alts.isEmpty {
-                        Text(alts.joined(separator: " · "))
-                            .font(.footnote)
-                            .foregroundStyle(bodyColor.opacity(0.85))
+                        altNamesLabel(alts, lineLimit: nil)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if let desc = era.description, !desc.isEmpty {
@@ -47,7 +45,11 @@ struct EraCardView: View {
             // Liquid Glass + tinted gradient:
             // glass sits directly behind content (frosted refraction layer),
             // gradient is the deeper background that bleeds through the glass.
-            .glassEffect(.regular, in: cardShape)
+            // The glass shape stays constant; the outer clipShape(cardShape)
+            // squares the bottom corners when expanded, so the glass shape
+            // itself never animates (cheaper than reshaping the effect
+            // through the expand spring, identical visual result).
+            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             .background {
                 cardShape.fill(eraBackground)
             }
@@ -93,15 +95,24 @@ struct EraCardView: View {
                 .lineLimit(expanded ? 3 : 2)
                 .multilineTextAlignment(.leading)
 
-            // Collapsed: show alts inline under title (no A.K.A. prefix)
             if !expanded, let alts = era.altNames, !alts.isEmpty {
-                Text(alts.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(bodyColor.opacity(0.85))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                altNamesLabel(alts, lineLimit: 1)
             }
         }
+    }
+
+    /// Alt era names prefixed with "A.K.A." so they read as aliases,
+    /// not as a second, unrelated title.
+    private func altNamesLabel(_ alts: [String], lineLimit: Int?) -> some View {
+        (Text("A.K.A. ")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(bodyColor.opacity(0.6))
+        + Text(alts.joined(separator: " · "))
+            .font(.caption)
+            .foregroundStyle(bodyColor.opacity(0.85)))
+            .lineLimit(lineLimit)
+            .truncationMode(.tail)
+            .accessibilityLabel("Also known as \(alts.joined(separator: ", "))")
     }
 
     // MARK: - Shapes
@@ -159,7 +170,7 @@ private struct EraCardBorder: Shape {
     let cornerRadius: CGFloat
     let expanded: Bool
 
-    func path(in rect: CGRect) -> Path {
+    nonisolated func path(in rect: CGRect) -> Path {
         var path = Path()
         let r = cornerRadius
 

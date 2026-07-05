@@ -187,6 +187,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let altTitles: [String]?
     let notes: String?
     let ogFilename: String?
+    let ogFilenames: [String]?
     let samples: [String]?
     let trackLength: String?
     let fileDate: String?
@@ -218,7 +219,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     var isStreamable: Bool {
-        if let og = ogFilename, Self.pathHasNonAudioExtension(og) { return false }
+        if allOgFilenames.contains(where: Self.pathHasNonAudioExtension) { return false }
         guard let link = streamableLink else { return false }
         if let urlPath = URL(string: link)?.path, Self.pathHasNonAudioExtension(urlPath) {
             return false
@@ -231,11 +232,20 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         return links.first { StreamResolver.isStreamableURL($0) }
     }
 
+    /// All OG filenames — prefers the plural field, falls back to the legacy
+    /// singular one for responses from older backends.
+    var allOgFilenames: [String] {
+        if let list = ogFilenames, !list.isEmpty { return list }
+        if let single = ogFilename, !single.isEmpty { return [single] }
+        return []
+    }
+
     enum CodingKeys: String, CodingKey {
         case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, links, type
         case versionTag = "version_tag"
         case altTitles = "alt_titles"
         case ogFilename = "og_filename"
+        case ogFilenames = "og_filenames"
         case trackLength = "track_length"
         case fileDate = "file_date"
         case leakDate = "leak_date"

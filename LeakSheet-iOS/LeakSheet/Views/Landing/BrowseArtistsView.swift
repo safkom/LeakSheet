@@ -2,7 +2,9 @@ import SwiftUI
 
 /// Browse artists panel — loads from discovery NDJSON endpoint.
 struct BrowseArtistsView: View {
-    var onPick: (String) -> Void
+    /// Called with (url, curated artist name) — the name overrides the
+    /// backend's sheet-title inference, which trips on joke tracker titles.
+    var onPick: (String, String?) -> Void
 
     @State private var artists: [DiscoveryArtist] = []
     @State private var searchText = ""
@@ -40,7 +42,7 @@ struct BrowseArtistsView: View {
                         ForEach(filtered) { artist in
                             Button {
                                 loadingUrl = artist.url
-                                onPick(artist.url)
+                                onPick(artist.url, artist.name)
                             } label: {
                                 HStack(spacing: 12) {
                                     // Initials

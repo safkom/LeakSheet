@@ -1,6 +1,7 @@
 import AVFoundation
 import MediaPlayer
 import Observation
+import OSLog
 import SwiftUI
 
 /// Singleton audio engine managing AVPlayer, queue, and system media controls.
@@ -9,10 +10,19 @@ import SwiftUI
 final class AudioEngine {
     static let shared = AudioEngine()
 
+    private nonisolated static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Audio")
+
     // MARK: - State
+
+    /// Seconds skipped by the in-app skip-forward/back buttons.
+    static let skipInterval: TimeInterval = 15
 
     var currentTrack: SongVersion?
     var artistName = ""
+    /// Canonical artist slug from the API — used as the favourites key so
+    /// hearts toggled from the player match entries written from song rows.
+    /// Falls back to a slugified name when a call site doesn't know it.
+    private(set) var artistSlug = ""
     var eraName = ""
     var artUrl = ""
     var isPlaying = false
@@ -27,9 +37,19 @@ final class AudioEngine {
     var originalQuality = false
 
     private(set) var eraSongs: EraSongContext?
+    /// Ad-hoc ordered playback list (recents, search results, a song's
+    /// versions). When set, auto-advance walks this list instead of the era
+    /// context and stops at its end — there is no rollover into other
+    /// collections. Mutually exclusive with `eraSongs`.
+    private(set) var playbackList: [PlaybackListItem]?
     /// Optional list of all eras in the current artist, in display order,
     /// used to auto-continue playback past the end of the current era.
     private(set) var artistEras: [EraSongContext] = []
+    /// Position of `eraSongs` inside `artistEras`. Tracked at set time so that
+    /// auto-advance does not have to re-match by name — which would mis-resolve
+    /// when an artist has two eras sharing a name. Nil when no era is set or
+    /// the current era couldn't be resolved to a position.
+    private var currentEraIndex: Int?
 
     // MARK: - Private
 
@@ -38,7 +58,10 @@ final class AudioEngine {
     private var observations: [NSKeyValueObservation] = []
     private var endOfTrackObserver: (any NSObjectProtocol)?
     private var interruptionObserver: (any NSObjectProtocol)?
+    private var resumptionObserver: (any NSObjectProtocol)?
     private var loadingTimeoutTask: Task<Void, Never>?
+    private var routeChangeObserver: (any NSObjectProtocol)?
+    private var seekInFlight = false
     private var queueIdCounter = 0
     private var cachedArtworkUrl: String?
     private var cachedArtwork: MPMediaItemArtwork?
@@ -55,9 +78,10 @@ final class AudioEngine {
 
     // MARK: - Playback
 
-    func playTrack(_ version: SongVersion?, artistName: String = "", eraName: String = "", artUrl: String = "") {
+    func playTrack(_ version: SongVersion?, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
         currentTrack = version
         self.artistName = artistName
+        self.artistSlug = artistSlug.isEmpty ? artistName.slugified : artistSlug
         self.eraName = eraName
         self.artUrl = artUrl
         currentTime = 0
@@ -130,8 +154,24 @@ final class AudioEngine {
 
     func seekTo(_ time: TimeInterval) {
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        // Show the target position immediately, and suppress time-observer
+        // writes until the seek lands — otherwise the observer briefly snaps
+        // the slider back to the pre-seek position.
+        seekInFlight = true
         currentTime = time
+        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.seekInFlight = false
+            }
+        }
+    }
+
+    func skipForward() {
+        seekTo(min(currentTime + Self.skipInterval, duration > 0 ? duration : .greatestFiniteMagnitude))
+    }
+
+    func skipBackward() {
+        seekTo(max(0, currentTime - Self.skipInterval))
     }
 
     func stopTrack() {
@@ -160,8 +200,10 @@ final class AudioEngine {
         error = ""
         streamUrl = ""
         artUrl = ""
+        artistSlug = ""
         cachedArtworkUrl = nil
         eraSongs = nil
+        playbackList = nil
         clearNowPlayingInfo()
     }
 
@@ -251,19 +293,53 @@ final class AudioEngine {
         playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl)
     }
 
-    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion]) {
+    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
+        playbackList = nil
         eraSongs = EraSongContext(
             eraName: eraName,
             artistName: artistName,
             artUrl: artUrl,
-            versions: versions
+            versions: versions,
+            artistSlug: artistSlug
         )
+        // Resolve to a position in artistEras for safer auto-advance. Match
+        // on multiple fields so two eras sharing a name still disambiguate
+        // (e.g. "Bonus Tracks" present under both an LP and a deluxe era).
+        currentEraIndex = artistEras.firstIndex { ctx in
+            ctx.eraName == eraName
+            && ctx.artistName == artistName
+            && ctx.artUrl == artUrl
+            && ctx.versions.count == versions.count
+        }
+    }
+
+    /// Atomic equivalent of `setEraSongs` followed by `playTrack`, kept as a
+    /// single method so callers can't accidentally play a track without
+    /// the era context that drives auto-advance.
+    func playInEra(_ version: SongVersion, eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
+        setEraSongs(eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
+        playTrack(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug ?? "")
+    }
+
+    /// Start playback at `index` of an ad-hoc ordered list (recents, search
+    /// results, a song's versions from the description sheet). Auto-advance
+    /// continues down the list and stops at its end.
+    func playInList(_ items: [PlaybackListItem], startAt index: Int) {
+        guard items.indices.contains(index) else { return }
+        playbackList = items
+        eraSongs = nil
+        currentEraIndex = nil
+        let item = items[index]
+        playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
     }
 
     /// Register the ordered list of eras for the current artist so that, when the
     /// currently-playing era ends, playback automatically continues with the next era.
     func setArtistEras(_ eras: [EraSongContext]) {
         artistEras = eras
+        // The artist list changed — the cached era index no longer points
+        // at the right entry. Next setEraSongs / nextEraAfter will rebuild.
+        currentEraIndex = nil
     }
 
     // MARK: - Private Setup
@@ -299,7 +375,9 @@ final class AudioEngine {
         ) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.currentTime = time.seconds
+                if !self.seekInFlight {
+                    self.currentTime = time.seconds
+                }
                 // Update lock screen every ~3 seconds
                 tickCount += 1
                 if tickCount % 30 == 0 {
@@ -389,7 +467,7 @@ final class AudioEngine {
             endOfTrackObserver = nil
         }
         endOfTrackObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
             object: item,
             queue: .main
         ) { [weak self] _ in
@@ -404,13 +482,27 @@ final class AudioEngine {
 
     // MARK: - Audio Session
 
+    /// Re-setting the category on an already-active session is a slow,
+    /// main-thread-blocking operation (SessionCore warns about it) — the
+    /// category never changes after the first successful set, so do it once.
+    private var audioCategoryConfigured = false
+
     private func activateAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            // Best-effort — playback may still work with default session
+        let session = AVAudioSession.sharedInstance()
+        if !audioCategoryConfigured {
+            do {
+                try session.setCategory(.playback, mode: .default, options: [])
+                audioCategoryConfigured = true
+            } catch {
+                Self.log.warning("Failed to set audio session category: \(error)")
+            }
+        }
+        // iOS 27 asynchronous activation — synchronous setActive(true) on the
+        // main thread triggers a UI-unresponsiveness runtime warning.
+        session.activate(options: []) { activated, error in
+            if let error {
+                Self.log.warning("Audio session activation failed (activated=\(activated)): \(error)")
+            }
         }
     }
 
@@ -433,6 +525,17 @@ final class AudioEngine {
             return
         }
 
+        // Ad-hoc list context — continue down the list, stop at its end.
+        if let list = playbackList, let current = currentTrack {
+            if let idx = Self.indexOf(current, eraName: eraName, in: list), idx + 1 < list.count {
+                let item = list[idx + 1]
+                playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
+            } else {
+                stopTrack()
+            }
+            return
+        }
+
         // Try next song in era
         guard let context = eraSongs, let current = currentTrack else {
             stopTrack()
@@ -442,14 +545,14 @@ final class AudioEngine {
         if let idx = context.versions.firstIndex(where: { $0.name == current.name && $0.versionTag == current.versionTag }),
            idx + 1 < context.versions.count {
             let next = context.versions[idx + 1]
-            playTrack(next, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl)
+            playTrack(next, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl, artistSlug: context.artistSlug ?? "")
             return
         }
 
         // End of current era — roll over to the next era with streamable versions.
         if let nextEra = nextEraAfter(context), let first = nextEra.versions.first {
             eraSongs = nextEra
-            playTrack(first, artistName: nextEra.artistName, eraName: nextEra.eraName, artUrl: nextEra.artUrl)
+            playTrack(first, artistName: nextEra.artistName, eraName: nextEra.eraName, artUrl: nextEra.artUrl, artistSlug: nextEra.artistSlug ?? "")
             return
         }
 
@@ -457,19 +560,60 @@ final class AudioEngine {
     }
 
     private func nextEraAfter(_ current: EraSongContext) -> EraSongContext? {
-        guard let idx = artistEras.firstIndex(where: { $0.eraName == current.eraName && $0.artistName == current.artistName }) else {
+        // Prefer the index recorded when the era was set — it survives
+        // duplicate era names that would defeat a name-based lookup.
+        // Fall back to the legacy name match if the index is unset (e.g.
+        // setArtistEras ran after setEraSongs).
+        let startIdx: Int
+        if let idx = currentEraIndex, artistEras.indices.contains(idx) {
+            startIdx = idx + 1
+        } else if let idx = artistEras.firstIndex(where: {
+            $0.eraName == current.eraName && $0.artistName == current.artistName
+        }) {
+            startIdx = idx + 1
+        } else {
             return nil
         }
-        for candidate in artistEras.dropFirst(idx + 1) where !candidate.versions.isEmpty {
+        for candidate in artistEras.dropFirst(startIdx) where !candidate.versions.isEmpty {
+            // Cache the new position so successive auto-advances continue
+            // walking the array without re-resolving each time.
+            currentEraIndex = artistEras.firstIndex { ctx in
+                ctx.eraName == candidate.eraName
+                && ctx.artistName == candidate.artistName
+                && ctx.artUrl == candidate.artUrl
+                && ctx.versions.count == candidate.versions.count
+            }
             return candidate
         }
         return nil
+    }
+
+    /// Position of the playing track inside an ad-hoc list — matches on the
+    /// track identity plus era so same-named songs from different eras don't
+    /// collide.
+    private static func indexOf(_ current: SongVersion, eraName: String, in list: [PlaybackListItem]) -> Int? {
+        list.firstIndex {
+            $0.version.name == current.name
+                && $0.version.versionTag == current.versionTag
+                && $0.eraName == eraName
+        }
     }
 
     func playPrevious() {
         // If more than 3 seconds in, restart current track
         if currentTime > 3 {
             seekTo(0)
+            return
+        }
+
+        // Ad-hoc list context — step back up the list.
+        if let list = playbackList, let current = currentTrack {
+            if let idx = Self.indexOf(current, eraName: eraName, in: list), idx > 0 {
+                let item = list[idx - 1]
+                playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
+            } else {
+                seekTo(0)
+            }
             return
         }
 
@@ -482,7 +626,7 @@ final class AudioEngine {
         if let idx = context.versions.firstIndex(where: { $0.name == current.name && $0.versionTag == current.versionTag }),
            idx > 0 {
             let prev = context.versions[idx - 1]
-            playTrack(prev, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl)
+            playTrack(prev, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl, artistSlug: context.artistSlug ?? "")
         } else {
             seekTo(0)
         }
@@ -517,52 +661,60 @@ final class AudioEngine {
             Task { @MainActor in self?.seekTo(position) }
             return .success
         }
-        commandCenter.skipForwardCommand.preferredIntervals = [10]
-        commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.seekTo(self.currentTime + 10)
-            }
-            return .success
-        }
-        commandCenter.skipBackwardCommand.preferredIntervals = [10]
-        commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.seekTo(max(0, self.currentTime - 10))
-            }
-            return .success
-        }
+        // Keep the seconds-skip commands disabled: when they're enabled the
+        // lock screen shows ±skip buttons instead of previous/next track.
+        // In-app skip buttons cover seconds-skipping (Self.skipInterval).
+        commandCenter.skipForwardCommand.isEnabled = false
+        commandCenter.skipBackwardCommand.isEnabled = false
     }
 
     private func setupInterruptionHandling() {
+        // iOS 27 replaces AVAudioSession.interruptionNotification with a
+        // deactivation notification (interruption began) and a resumption
+        // recommendation notification (interruption ended + should resume).
         interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification,
+            forName: AVAudioSession.didBecomeInactiveNotification,
             object: AVAudioSession.sharedInstance(),
             queue: .main
         ) { [weak self] notification in
             // Extract info before crossing isolation boundary
-            let userInfo = notification.userInfo
-            let typeValue = userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            let optionsValue = userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            let context = notification.userInfo?[AVAudioSession.deactivationContextKey]
+                as? AVAudioSession.DeactivationContext
+            let systemDeactivated = context?.source == .system
             MainActor.assumeIsolated {
-                guard let self,
-                      let typeValue,
-                      let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+                guard let self, systemDeactivated else { return }
+                self.isPlaying = false
+            }
+        }
 
-                switch type {
-                case .began:
-                    self.isPlaying = false
-                case .ended:
-                    guard let optionsValue else { return }
-                    let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                    if options.contains(.shouldResume) {
-                        try? AVAudioSession.sharedInstance().setActive(true)
-                        self.player?.play()
-                    }
-                @unknown default:
-                    break
-                }
+        resumptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.resumptionRecommendationNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            let context = notification.userInfo?[AVAudioSession.resumptionContextKey]
+                as? AVAudioSession.ResumptionContext
+            let shouldResume = context?.recommendation == .shouldResume
+            MainActor.assumeIsolated {
+                guard let self, shouldResume else { return }
+                AVAudioSession.sharedInstance().activate(options: []) { _, _ in }
+                self.player?.play()
+            }
+        }
+
+        // Pause when the active output route disappears (headphones unplugged,
+        // Bluetooth device disconnected) — standard iOS media-app behavior.
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = rawReason.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            MainActor.assumeIsolated {
+                guard let self, reason == .oldDeviceUnavailable else { return }
+                self.player?.pause()
+                self.isPlaying = false
             }
         }
     }
@@ -677,4 +829,18 @@ struct EraSongContext: Sendable {
     let artistName: String
     let artUrl: String
     let versions: [SongVersion]
+    /// Canonical API slug — optional so older call sites keep compiling;
+    /// playback falls back to a slugified artist name when absent.
+    var artistSlug: String? = nil
+}
+
+/// One entry of an ad-hoc playback list — each item carries its own era
+/// metadata because such lists (recents, search results) span eras.
+struct PlaybackListItem: Sendable {
+    let version: SongVersion
+    let artistName: String
+    let eraName: String
+    let artUrl: String
+    /// Canonical API slug — optional so call sites without it keep compiling.
+    var artistSlug: String? = nil
 }

@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// A tracker picked from the browse list — carries the curated artist name so
+/// the API doesn't have to infer it from the sheet title (which may be a joke
+/// name like "Creator, The Tyler Tracker").
+struct PendingBrowse: Equatable {
+    let url: String
+    let name: String?
+}
+
 /// Landing screen — URL input, recent trackers, discovery.
 struct LandingView: View {
     @Environment(PlayerViewModel.self) private var player
@@ -11,7 +19,7 @@ struct LandingView: View {
 
     var onArtistLoaded: (Artist) -> Void
     var onBrowseTapped: () -> Void = {}
-    @Binding var pendingBrowseUrl: String?
+    @Binding var pendingBrowse: PendingBrowse?
 
     var body: some View {
         ScrollView {
@@ -90,15 +98,15 @@ struct LandingView: View {
         }
         .background(Color.lsBackground)
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: pendingBrowseUrl) { _, newValue in
-            guard let pickedUrl = newValue else { return }
-            url = pickedUrl
-            pendingBrowseUrl = nil
-            Task { await handleParse(pickedUrl) }
+        .onChange(of: pendingBrowse) { _, newValue in
+            guard let picked = newValue else { return }
+            url = picked.url
+            pendingBrowse = nil
+            Task { await handleParse(picked.url, artistName: picked.name) }
         }
     }
 
-    private func handleParse(_ urlString: String) async {
+    private func handleParse(_ urlString: String, artistName: String? = nil) async {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         withAnimation { error = nil }
@@ -106,7 +114,7 @@ struct LandingView: View {
         defer { loading = false }
 
         do {
-            let result = try await APIClient.shared.parseSheet(url: trimmed)
+            let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
             recents.saveTracker(artist: result.artist)
             onArtistLoaded(result.artist)
         } catch let apiError as APIError {

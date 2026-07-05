@@ -52,6 +52,30 @@ struct SongDescriptionSheet: View {
         payload.version.isStreamable
     }
 
+    /// Play the sheet's version. When the full song is known, hand the player
+    /// the song's streamable versions as a list so playback continues instead
+    /// of stopping after this one track.
+    private func play() {
+        Haptics.light()
+        if let song = payload.song {
+            let streamable = song.versions.filter(\.isStreamable)
+            if let idx = streamable.firstIndex(where: { $0.id == payload.version.id }) {
+                let items = streamable.map {
+                    PlaybackListItem(
+                        version: $0,
+                        artistName: payload.artistName,
+                        eraName: payload.eraName,
+                        artUrl: payload.eraArt ?? "",
+                        artistSlug: payload.artistSlug
+                    )
+                }
+                player.playInList(items, startAt: idx)
+                return
+            }
+        }
+        player.playTrack(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -146,11 +170,23 @@ struct SongDescriptionSheet: View {
                             }
                         }
 
+                        // OG file(s) — dedicated section, pluralized by count
+                        let ogFiles = payload.version.allOgFilenames
+                        if !ogFiles.isEmpty {
+                            cardSection(title: ogFiles.count == 1 ? "OG File" : "OG Files") {
+                                ForEach(ogFiles, id: \.self) { file in
+                                    Text(file)
+                                        .font(.subheadline.monospaced())
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                        }
+
                         // Samples
                         if let samples = payload.version.samples, !samples.isEmpty {
                             cardSection(title: "Samples") {
                                 ForEach(samples, id: \.self) { sample in
-                                    Text(sample.trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
+                                    Text(sample)
                                         .font(.subheadline)
                                         .foregroundStyle(.primary)
                                 }
@@ -173,27 +209,29 @@ struct SongDescriptionSheet: View {
                             }
                         }
 
-                        // Links
-                        if let links = payload.version.links, !links.isEmpty {
+                        // Links — filter to valid URLs first so the header
+                        // never renders above an empty list.
+                        let validLinks = (payload.version.links ?? []).compactMap { link in
+                            URL(string: link).map { (raw: link, url: $0) }
+                        }
+                        if !validLinks.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Links")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
-                                ForEach(links, id: \.self) { link in
-                                    if let url = URL(string: link) {
-                                        Link(destination: url) {
-                                            HStack(spacing: 6) {
-                                                Image(systemName: "link")
-                                                    .font(.caption2)
-                                                Text(linkDomain(link))
-                                                    .font(.caption)
-                                            }
-                                            .foregroundStyle(Color.lsAccent)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(Color.lsAccent.opacity(0.1))
-                                            .clipShape(Capsule())
+                                ForEach(validLinks, id: \.raw) { link in
+                                    Link(destination: link.url) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "link")
+                                                .font(.caption2)
+                                            Text(linkDomain(link.raw))
+                                                .font(.caption)
                                         }
+                                        .foregroundStyle(Color.lsAccent)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.lsAccent.opacity(0.1))
+                                        .clipShape(Capsule())
                                     }
                                 }
                             }
@@ -206,8 +244,7 @@ struct SongDescriptionSheet: View {
                 HStack(spacing: 12) {
                     if canStream {
                         Button {
-                            Haptics.light()
-                            player.playTrack(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "")
+                            play()
                             dismiss()
                         } label: {
                             Label("Play", systemImage: "play.fill")
@@ -280,8 +317,7 @@ struct SongDescriptionSheet: View {
                     Menu {
                         if canStream {
                             Button {
-                                Haptics.light()
-                                player.playTrack(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "")
+                                play()
                             } label: {
                                 Label("Play", systemImage: "play.fill")
                             }
@@ -388,7 +424,6 @@ struct SongDescriptionSheet: View {
             ("Leak Date", payload.version.leakDate),
             ("Type", payload.version.type),
             ("Recording", payload.version.dateOfRecording),
-            ("OG Filename", payload.version.ogFilename),
         ].compactMap { label, val in
             guard let v = val, !v.isEmpty else { return nil }
             return (label, v)

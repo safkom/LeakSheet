@@ -5,20 +5,31 @@ actor APIClient {
     static let shared = APIClient()
 
     /// Production API base URL. The web app serves API under /api on the same domain.
-    /// Update this to your production hostname.
-    static let baseURL = "https://sheets.safko.eu/api"
+    static let defaultBaseURL = "https://sheets.safko.eu/api"
 
-    // Hoisted endpoint constants. Built from a known-good base URL; if a
-    // future edit breaks them we want a clear, descriptive crash here rather
-    // than at the first network call.
-    private static let sheetEndpoint: URL = makeEndpoint("sheet")
-    private static let cacheClearEndpoint: URL = makeEndpoint("cache/clear")
+    /// UserDefaults key for a custom backend URL set in Settings.
+    static let baseURLDefaultsKey = "leaksheet_api_base_url"
+
+    /// Active API base URL — a custom server from Settings, or the production default.
+    static var baseURL: String {
+        let custom = UserDefaults.standard.string(forKey: baseURLDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !custom.isEmpty, custom.lowercased().hasPrefix("http"), URL(string: custom) != nil else {
+            return defaultBaseURL
+        }
+        return custom.hasSuffix("/") ? String(custom.dropLast()) : custom
+    }
+
+    private static var sheetEndpoint: URL { makeEndpoint("sheet") }
+    private static var cacheClearEndpoint: URL { makeEndpoint("cache/clear") }
 
     private static func makeEndpoint(_ path: String) -> URL {
-        guard let url = URL(string: "\(baseURL)/\(path)") else {
-            fatalError("APIClient: invalid endpoint URL '\(baseURL)/\(path)'")
+        if let url = URL(string: "\(baseURL)/\(path)") {
+            return url
         }
-        return url
+        // Custom base URL produced an invalid endpoint — fall back to the
+        // known-good production URL rather than crashing.
+        return URL(string: "\(defaultBaseURL)/\(path)")!
     }
 
     private let session: URLSession

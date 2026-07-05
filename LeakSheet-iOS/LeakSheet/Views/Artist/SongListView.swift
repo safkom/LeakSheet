@@ -19,8 +19,14 @@ struct SongListView: View {
     }
 
     private func playWithEraContext(_ version: SongVersion) {
-        PlayerViewModel.shared.setEraSongs(eraName: era.name, artistName: artistName, artUrl: era.artUrl ?? "", versions: allStreamableVersions)
-        PlayerViewModel.shared.playTrack(version, artistName: artistName, eraName: era.name, artUrl: era.artUrl ?? "")
+        PlayerViewModel.shared.playInEra(
+            version,
+            eraName: era.name,
+            artistName: artistName,
+            artUrl: era.artUrl ?? "",
+            versions: allStreamableVersions,
+            artistSlug: artistSlug
+        )
     }
 
     var body: some View {
@@ -111,9 +117,10 @@ struct SongListView: View {
 
         // Expanded versions
         if isExpanded && hasMultiple {
-            ForEach(Array(song.versions.enumerated()), id: \.offset) { _, version in
+            ForEach(Array(song.versions.enumerated()), id: \.offset) { idx, version in
                 VersionRowView(
                     version: version,
+                    versionIndex: idx,
                     artistName: artistName,
                     artistSlug: artistSlug,
                     sourceUrl: sourceUrl,
