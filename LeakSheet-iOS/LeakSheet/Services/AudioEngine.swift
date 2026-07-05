@@ -14,9 +14,6 @@ final class AudioEngine {
 
     // MARK: - State
 
-    /// Seconds skipped by the in-app skip-forward/back buttons.
-    static let skipInterval: TimeInterval = 15
-
     var currentTrack: SongVersion?
     var artistName = ""
     /// Canonical artist slug from the API — used as the favourites key so
@@ -164,14 +161,6 @@ final class AudioEngine {
                 self?.seekInFlight = false
             }
         }
-    }
-
-    func skipForward() {
-        seekTo(min(currentTime + Self.skipInterval, duration > 0 ? duration : .greatestFiniteMagnitude))
-    }
-
-    func skipBackward() {
-        seekTo(max(0, currentTime - Self.skipInterval))
     }
 
     func stopTrack() {

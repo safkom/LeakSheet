@@ -80,17 +80,6 @@ final class PlayerViewModel {
         engine.playPrevious()
     }
 
-    /// Seconds moved by skipForward/skipBackward — single source of truth.
-    var skipInterval: TimeInterval { AudioEngine.skipInterval }
-
-    func skipForward() {
-        engine.skipForward()
-    }
-
-    func skipBackward() {
-        engine.skipBackward()
-    }
-
     func playOriginalQuality() {
         engine.playOriginalQuality()
     }

@@ -82,18 +82,7 @@ struct NowPlayingView: View {
                 .padding(.horizontal, 32)
 
                 // Transport controls
-                HStack(spacing: 24) {
-                    Button {
-                        player.skipBackward()
-                    } label: {
-                        Image(systemName: "\(Int(player.skipInterval)).arrow.trianglehead.counterclockwise")
-                            .font(.title3)
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Skip back \(Int(player.skipInterval)) seconds")
-
+                HStack(spacing: 40) {
                     Button {
                         player.playPrevious()
                     } label: {
@@ -134,17 +123,6 @@ struct NowPlayingView: View {
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Next track")
-
-                    Button {
-                        player.skipForward()
-                    } label: {
-                        Image(systemName: "\(Int(player.skipInterval)).arrow.trianglehead.clockwise")
-                            .font(.title3)
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Skip forward \(Int(player.skipInterval)) seconds")
                 }
 
                 // Secondary controls row

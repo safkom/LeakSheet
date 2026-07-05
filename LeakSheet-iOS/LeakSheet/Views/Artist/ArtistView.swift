@@ -88,12 +88,15 @@ struct ArtistView: View {
                     .accessibilityLabel("Queue")
                 }
             }
-            // System search item in the nav bar — keeps the search affordance
-            // out of the bottom slot where the mini player (safeAreaBar) lives.
-            DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
         }
+        // navigationBarDrawer pins the search field under the navigation bar
+        // at the TOP of the screen. The default iPhone placement (and the
+        // toolbar search item's minimized form) both live in the bottom slot,
+        // where they end up behind the mini player (safeAreaBar) — the drawer
+        // is the one placement that can never collide with it.
         .searchable(
             text: Binding(get: { vm.searchQuery }, set: { vm.searchQuery = $0 }),
+            placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "Search songs…"
         )
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
