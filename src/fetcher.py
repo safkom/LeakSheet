@@ -850,7 +850,9 @@ def fetch_and_parse(
         if not gids:
             gids = ["0"]
 
-        gids, art_gid, unreleased_gid = _prioritize_gids(base_html, gids)
+        # Misc/MV tabs are only fetched on the async path; the sync path
+        # (offline tools, tests) skips them.
+        gids, art_gid, unreleased_gid, _misc_tabs = _prioritize_gids(base_html, gids)
 
         # Step 3: Try each GID, pick the one that produces the most eras
         best_artist: Artist | None = None
