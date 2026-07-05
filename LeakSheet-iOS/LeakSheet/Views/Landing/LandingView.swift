@@ -113,14 +113,41 @@ struct LandingView: View {
         loading = true
         defer { loading = false }
 
+        // Conditional request: send the cached ETag so an unchanged tracker
+        // comes back as a bodyless 304 and we reopen the local copy instead
+        // of re-downloading and re-decoding the full multi-MB payload.
+        let cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
+
         do {
-            let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
+            let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName, cachedEtag: cachedEtag)
+            if let etag = result.etag {
+                await CacheService.shared.cacheTracker(
+                    url: trimmed,
+                    artist: result.artist,
+                    etag: etag,
+                    totalSongs: result.artist.computedTotalSongs,
+                    totalVersions: result.artist.computedTotalVersions
+                )
+            }
             recents.saveTracker(artist: result.artist)
             onArtistLoaded(result.artist)
         } catch let apiError as APIError {
             switch apiError {
             case .notModified:
-                break
+                if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed) {
+                    recents.saveTracker(artist: cachedArtist)
+                    onArtistLoaded(cachedArtist)
+                } else {
+                    // ETag matched but local copy is gone — refetch unconditionally.
+                    await CacheService.shared.removeTracker(for: trimmed)
+                    do {
+                        let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
+                        recents.saveTracker(artist: result.artist)
+                        onArtistLoaded(result.artist)
+                    } catch {
+                        withAnimation { self.error = "Failed to load tracker" }
+                    }
+                }
             case .httpError(_, let msg):
                 withAnimation { error = msg }
             case .decodingError:

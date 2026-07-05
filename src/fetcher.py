@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse, urlencode
 
@@ -39,6 +40,36 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
+
+
+class PhaseTimer:
+    """Collects per-phase wall-clock durations across one request.
+
+    Phases repeat (e.g. one ``gid_fetch`` per tab) and accumulate. Exposed to
+    clients via the ``Server-Timing`` response header so slow requests can be
+    diagnosed from curl or the app without server log access.
+    """
+
+    def __init__(self) -> None:
+        self.phases: dict[str, float] = {}
+
+    @contextmanager
+    def phase(self, name: str):
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.phases[name] = self.phases.get(name, 0.0) + time.perf_counter() - start
+
+    def server_timing_header(self) -> str:
+        return ", ".join(
+            f"{name};dur={dur * 1000:.1f}" for name, dur in self.phases.items()
+        )
+
+    def log_line(self) -> str:
+        total = sum(self.phases.values())
+        parts = " ".join(f"{n}={d * 1000:.0f}ms" for n, d in self.phases.items())
+        return f"{parts} total={total * 1000:.0f}ms"
 
 # ---------------------------------------------------------------------------
 # Shared async HTTP client (connection-pooled, reused across requests)
@@ -484,6 +515,43 @@ def get_cached_parsed_relaxed(url: str, max_age: float = STALE_CACHE_TTL) -> Art
     """Return cached parsed Artist if within max_age, ignoring default TTL."""
     url_norm = _normalize_url(url)
     return _get_cached_parsed(url_norm, cache_ttl=max_age)
+
+
+def get_cached_parsed_bytes(
+    url: str, max_age: float = STALE_CACHE_TTL
+) -> tuple[bytes, str | None, float] | None:
+    """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
+    for a cache entry within ``max_age``, or None.
+
+    Serving the raw file bytes skips pydantic validation and re-serialization
+    of multi-MB artists on the warm path. The stored content hash equals the
+    ETag the full path would compute for the same data (both derive from the
+    identical ``artist.dict()`` written at cache time).
+    """
+    url_norm = _normalize_url(url)
+    key = _cache_key(url_norm)
+    parsed_file = CACHE_DIR / f"{key}.parsed.json"
+    meta_file = CACHE_DIR / f"{key}.meta.json"
+    if not parsed_file.exists() or not meta_file.exists():
+        return None
+    try:
+        meta = json.loads(meta_file.read_text())
+        ts = meta.get("timestamp", 0)
+        if ts <= 0:
+            return None
+        age = time.time() - ts
+        if age > max_age:
+            return None
+        return parsed_file.read_bytes(), meta.get("content_hash"), age
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+async def async_get_cached_parsed_bytes(
+    url: str, max_age: float = STALE_CACHE_TTL
+) -> tuple[bytes, str | None, float] | None:
+    """Async variant of get_cached_parsed_bytes."""
+    return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
 
 
 async def async_get_cached_etag(url: str) -> str | None:
@@ -1062,12 +1130,14 @@ async def async_fetch_and_parse(
     timeout: float = DEFAULT_TIMEOUT,
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
+    timer: PhaseTimer | None = None,
 ) -> Artist:
     """Async version of fetch_and_parse.
 
     Like the sync version, tries multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
     """
+    t = timer if timer is not None else PhaseTimer()
     # Extract GID from original URL BEFORE normalization strips query/fragment
     if not gid:
         gid = _extract_gid_from_url(url)
@@ -1075,7 +1145,8 @@ async def async_fetch_and_parse(
 
     # Check parsed result cache first (skip entire parse pipeline)
     if use_cache and cache_ttl > 0:
-        cached_artist = await _async_get_cached_parsed(url_norm, cache_ttl)
+        with t.phase("cache_read"):
+            cached_artist = await _async_get_cached_parsed(url_norm, cache_ttl)
         if cached_artist is not None:
             cached_artist.source_url = url
             return cached_artist
@@ -1084,11 +1155,13 @@ async def async_fetch_and_parse(
     # If it produces 0 eras, fall through to GID discovery.
     if gid:
         try:
-            html, title = await async_fetch_sheet_html(
-                url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-            )
+            with t.phase("gid_fetch"):
+                html, title = await async_fetch_sheet_html(
+                    url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+                )
             name = _resolve_artist_name(html, title, artist_name)
-            artist = await asyncio.to_thread(parse_sheet, html, name)
+            with t.phase("parse"):
+                artist = await asyncio.to_thread(parse_sheet, html, name)
             if artist.eras:
                 # Before returning, check if this page reveals a better
                 # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
@@ -1109,16 +1182,18 @@ async def async_fetch_and_parse(
     # Discover all GIDs and try them
     client = _get_sheets_client()
     try:
-        r = await client.get(url_norm, timeout=timeout)
-        r.raise_for_status()
-        base_html = r.text
+        with t.phase("base_fetch"):
+            r = await client.get(url_norm, timeout=timeout)
+            r.raise_for_status()
+            base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)
         title = title_match.group(1) if title_match else ""
 
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():
             name = _resolve_artist_name(base_html, title, artist_name)
-            artist = await asyncio.to_thread(parse_sheet, base_html, name)
+            with t.phase("parse"):
+                artist = await asyncio.to_thread(parse_sheet, base_html, name)
             if artist.eras:
                 artist.source_url = url
                 if use_cache:
@@ -1136,81 +1211,98 @@ async def async_fetch_and_parse(
         async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
             """Fetch a single GID sheet page. Returns (gid, html) or None."""
             try:
-                sheet_url = _build_sheet_html_url(url_norm, gid_val)
-                if use_cache and cache_ttl > 0:
-                    cached = await _async_get_cached(sheet_url, cache_ttl)
-                    if cached is not None:
-                        return (gid_val, cached[0])
-                    resp = await client.get(sheet_url, timeout=timeout)
-                    if resp.status_code != 200 or "<table" not in resp.text.lower():
-                        return None
-                    if use_cache:
-                        await _async_set_cache(sheet_url, resp.text, title)
-                    return (gid_val, resp.text)
-                else:
-                    resp = await client.get(sheet_url, timeout=timeout)
-                    if resp.status_code != 200 or "<table" not in resp.text.lower():
-                        return None
-                    return (gid_val, resp.text)
+                with t.phase("gid_fetch"):
+                    sheet_url = _build_sheet_html_url(url_norm, gid_val)
+                    if use_cache and cache_ttl > 0:
+                        cached = await _async_get_cached(sheet_url, cache_ttl)
+                        if cached is not None:
+                            return (gid_val, cached[0])
+                        resp = await client.get(sheet_url, timeout=timeout)
+                        if resp.status_code != 200 or "<table" not in resp.text.lower():
+                            return None
+                        if use_cache:
+                            await _async_set_cache(sheet_url, resp.text, title)
+                        return (gid_val, resp.text)
+                    else:
+                        resp = await client.get(sheet_url, timeout=timeout)
+                        if resp.status_code != 200 or "<table" not in resp.text.lower():
+                            return None
+                        return (gid_val, resp.text)
             except (httpx.HTTPError, ValueError, KeyError):
                 return None
 
-        fetched = await asyncio.gather(*[_fetch_gid(g) for g in gids])
+        # Start every GID fetch concurrently but consume them in priority
+        # order, parsing each as it lands and cancelling the rest once a
+        # winner is found. Large trackers expose 15+ tabs; the prioritized
+        # (unreleased) tab is almost always index 0, so eagerly completing
+        # every fetch downloads megabytes that are thrown away.
+        fetch_tasks = [asyncio.create_task(_fetch_gid(g)) for g in gids]
 
         best_artist: Artist | None = None
         best_eras = 0
         best_html = ""
 
-        for result in fetched:
-            if result is None:
-                continue
-            result_gid, sheet_html = result
-            try:
-                name = _resolve_artist_name(sheet_html, title, artist_name)
-                candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
-                n_eras = len(candidate.eras)
-                n_songs = sum(
-                    len(s.songs)
-                    for era in candidate.eras
-                    for s in era.sections
-                )
+        try:
+            for task in fetch_tasks:
+                result = await task
+                if result is None:
+                    continue
+                result_gid, sheet_html = result
+                try:
+                    name = _resolve_artist_name(sheet_html, title, artist_name)
+                    with t.phase("parse"):
+                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
+                    n_eras = len(candidate.eras)
+                    n_songs = sum(
+                        len(s.songs)
+                        for era in candidate.eras
+                        for s in era.sections
+                    )
 
-                logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
-                    best_eras = n_eras
-                    best_artist = candidate
-                    best_html = sheet_html
+                    logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
+                    if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
+                        best_eras = n_eras
+                        best_artist = candidate
+                        best_html = sheet_html
 
-                # Unreleased tab wins as long as it has at least 1 era —
-                # prevents Recents/landing tabs from outcompeting it on era count.
-                if result_gid == unreleased_gid and n_eras >= 1:
-                    logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
-                    break
-                elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
-                    break
-            except (ValueError, KeyError):
-                continue
+                    # Unreleased tab wins as long as it has at least 1 era —
+                    # prevents Recents/landing tabs from outcompeting it on era count.
+                    if result_gid == unreleased_gid and n_eras >= 1:
+                        logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+                        break
+                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
+                        break
+                except (ValueError, KeyError):
+                    continue
+        finally:
+            for task in fetch_tasks:
+                task.cancel()
+            await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
         if best_artist and best_eras > 0:
             best_artist.source_url = url
             # Fetch Art tab concurrently and upgrade era.art_url
             if art_gid:
                 try:
-                    art_result = await _fetch_gid(art_gid)
+                    with t.phase("art_fetch"):
+                        art_result = await _fetch_gid(art_gid)
                     if art_result:
                         _, art_html = art_result
-                        art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                        with t.phase("art_parse"):
+                            art_map = await asyncio.to_thread(parse_art_tab, art_html)
                         if art_map:
-                            art_map = await _verify_art_images_async(
-                                best_artist, art_map, client
-                            )
+                            with t.phase("art_verify"):
+                                art_map = await _verify_art_images_async(
+                                    best_artist, art_map, client
+                                )
                             if art_map:
                                 apply_art_tab_images(best_artist, art_map)
                 except Exception:
                     pass  # Art tab optional — keep existing art_url on failure
-            if use_cache and best_html:
-                await _async_set_cache(url_norm, best_html, title)
-            await _async_set_cached_parsed(url_norm, best_artist)
+            with t.phase("cache_write"):
+                if use_cache and best_html:
+                    await _async_set_cache(url_norm, best_html, title)
+                await _async_set_cached_parsed(url_norm, best_artist)
             return best_artist
 
         # Fallback

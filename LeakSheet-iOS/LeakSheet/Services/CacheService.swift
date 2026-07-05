@@ -83,6 +83,10 @@ actor CacheService {
         try? entryData.write(to: file, options: .atomic)
     }
 
+    func removeTracker(for url: String) {
+        try? FileManager.default.removeItem(at: cacheFile(for: url))
+    }
+
     func clearCache() {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: cacheDirectory,

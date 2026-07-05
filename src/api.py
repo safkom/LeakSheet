@@ -34,7 +34,7 @@ from src.fetcher import (
     async_fetch_and_parse,
     async_get_cached_age,
     async_get_cached_etag,
-    async_get_cached_parsed_relaxed,
+    async_get_cached_parsed_bytes,
     clear_cache,
     compute_content_hash,
     DEFAULT_CACHE_TTL,
@@ -42,6 +42,7 @@ from src.fetcher import (
     NetworkError,
     NoTablesError,
     ParseError,
+    PhaseTimer,
     STALE_CACHE_TTL,
 )
 from src.streaming import (
@@ -318,7 +319,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000)
+# compresslevel 6 ≈ level 9's ratio on JSON at a fraction of the CPU —
+# level 9 spent ~0.5s gzipping a 6.5MB artist on every warm request.
+app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000, compresslevel=6)
 
 app.add_middleware(
     CORSMiddleware,
@@ -355,6 +358,26 @@ async def _background_revalidate(url: str, artist_name: str | None) -> None:
         _revalidating.discard(url_key)
 
 
+def _parse_if_none_match(header_value: str) -> str:
+    """Extract the opaque tag from an `If-None-Match` header value.
+
+    Per RFC 7232 §2.3, an ETag may be strong (`"abc"`) or weak (`W/"abc"`),
+    and `If-None-Match` may carry one or more comma-separated entries or `*`.
+    We only ever emit single, strong-shaped ETags, so we accept either form
+    on the request side and compare the unwrapped opaque tag. Returns an
+    empty string when no usable tag is present.
+    """
+    if not header_value:
+        return ""
+    # Only consider the first entry — we never issue multi-ETag responses.
+    first = header_value.split(",", 1)[0].strip()
+    if not first or first == "*":
+        return ""
+    if first[:2] in ("W/", "w/"):
+        first = first[2:].lstrip()
+    return first.strip().strip('"')
+
+
 class SheetRequest(BaseModel):
     url: str = Field(..., description="Tracker URL (Google Sheets htmlview or custom domain)")
     artist_name: str | None = Field(None, description="Override inferred artist name")
@@ -379,7 +402,7 @@ async def parse_sheet(
 
     # --- ETag-based 304 fast path ---
     if use_cache:
-        if_none_match = request.headers.get("if-none-match", "").strip().strip('"')
+        if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
         if if_none_match:
             server_etag = await async_get_cached_etag(req.url)
             if server_etag and server_etag == if_none_match:
@@ -397,31 +420,44 @@ async def parse_sheet(
                     )
 
     # --- Stale-while-revalidate fast path ---
+    # Serves the raw cached JSON bytes: no pydantic validation, no
+    # re-serialization, no content re-hash — those cost ~400ms on a 6.5MB
+    # artist and were the bulk of warm-request latency.
     if use_cache:
-        stale_artist = await async_get_cached_parsed_relaxed(req.url, max_age=STALE_CACHE_TTL)
-        if stale_artist is not None:
-            stale_artist.source_url = req.url
-            data = stale_artist.model_dump()
-            etag = compute_content_hash(data)
-
-            age = await async_get_cached_age(req.url)
-            is_stale = age is not None and age > DEFAULT_CACHE_TTL
+        timer = PhaseTimer()
+        with timer.phase("cache_read"):
+            cached = await async_get_cached_parsed_bytes(req.url, max_age=STALE_CACHE_TTL)
+        if cached is not None:
+            raw, etag, age = cached
+            if not etag:
+                # Legacy cache entry without a stored hash — compute once.
+                with timer.phase("etag"):
+                    etag = compute_content_hash(json.loads(raw))
+            is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
                 bg.add_task(_background_revalidate, req.url, req.artist_name)
 
-            response.headers["ETag"] = f'"{etag}"'
-            response.headers["X-Cache-Status"] = "stale" if is_stale else "hit"
-            response.headers["Cache-Control"] = "public, max-age=300"
-            return data
+            return Response(
+                content=raw,
+                media_type="application/json",
+                headers={
+                    "ETag": f'"{etag}"',
+                    "X-Cache-Status": "stale" if is_stale else "hit",
+                    "Cache-Control": "public, max-age=300",
+                    "Server-Timing": timer.server_timing_header(),
+                },
+            )
 
     # --- Cache miss: full fetch + parse ---
+    timer = PhaseTimer()
     try:
         artist = await async_fetch_and_parse(
             req.url,
             artist_name=req.artist_name,
             cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
             use_cache=use_cache,
+            timer=timer,
         )
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL: {e}")
@@ -439,11 +475,15 @@ async def parse_sheet(
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
-    data = artist.model_dump()
-    etag = compute_content_hash(data)
+    with timer.phase("serialize"):
+        data = artist.model_dump()
+    with timer.phase("etag"):
+        etag = compute_content_hash(data)
     response.headers["ETag"] = f'"{etag}"'
     response.headers["X-Cache-Status"] = "miss"
     response.headers["Cache-Control"] = "public, max-age=300"
+    response.headers["Server-Timing"] = timer.server_timing_header()
+    logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
     return data
 
 
@@ -654,6 +694,31 @@ async def proxy_metadata(
 # GET /api/stream — proxy audio (CORS bypass) with range request support
 # ---------------------------------------------------------------------------
 
+async def _slice_byte_stream(source, range_start: int, range_end: int):
+    """Yield only bytes [range_start, range_end] (inclusive) from a chunked stream.
+
+    Used to synthesise HTTP 206 responses when the upstream host ignores
+    Range requests. Stops consuming the source once the range is served.
+    """
+    skipped = 0
+    async for chunk in source:
+        chunk_end = skipped + len(chunk)
+        # Entirely before range_start — skip
+        if chunk_end <= range_start:
+            skipped += len(chunk)
+            continue
+        # Compute the slice of this chunk we need
+        start_in_chunk = max(0, range_start - skipped)
+        end_in_chunk = min(len(chunk), range_end + 1 - skipped)
+        portion = chunk[start_in_chunk:end_in_chunk]
+        if portion:
+            yield portion
+        skipped += len(chunk)
+        # Past range_end — stop
+        if skipped > range_end:
+            break
+
+
 @app.get("/stream")
 async def proxy_stream(
     request: Request,
@@ -847,25 +912,10 @@ async def proxy_stream(
 
     async def _iter_range():
         try:
-            skipped = 0
-            sent = 0
-            async for chunk in _source_iter():
-                chunk_end = skipped + len(chunk)
-                # Entirely before range_start — skip
-                if chunk_end <= range_start:
-                    skipped += len(chunk)
-                    continue
-                # Compute the slice of this chunk we need
-                start_in_chunk = max(0, range_start - skipped)
-                end_in_chunk = min(len(chunk), range_end + 1 - skipped)
-                portion = chunk[start_in_chunk:end_in_chunk]
-                if portion:
-                    yield portion
-                    sent += len(portion)
-                skipped += len(chunk)
-                # Past range_end — stop
-                if skipped > range_end:
-                    break
+            async for portion in _slice_byte_stream(
+                _source_iter(), range_start, range_end
+            ):
+                yield portion
         finally:
             await resp.aclose()
 
