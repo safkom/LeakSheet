@@ -401,6 +401,28 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     return col_map
 
 
+def detect_dropped_columns(header_row: list[_Cell], col_map: dict[str, int]) -> list[str]:
+    """Return header cell texts that matched no known column alias.
+
+    A non-empty header cell missing from ``col_map`` means every value in
+    that column is silently dropped — surfaced via ParseMetadata so unknown
+    tracker layouts are visible instead of quietly losing fields.
+    """
+    mapped = set(col_map.values())
+    dropped: list[str] = []
+    for idx, cell in enumerate(header_row):
+        text = cell.text.strip()
+        if not text or idx in mapped:
+            continue
+        first_line = text.split("\n")[0].strip()
+        paren = first_line.find("(")
+        if paren > 0:
+            first_line = first_line[:paren].strip()
+        if first_line:
+            dropped.append(first_line[:60])
+    return dropped
+
+
 def _extract_header_notices(
     header_row: list[_Cell],
     pre_header_rows: list[list[_Cell]],
@@ -1366,6 +1388,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     song_rows = 0
     skipped_rows = 0
     unmatched_rows: list[str] = []
+    unmatched_total = 0
     footer_rows = 0
     fuzzy_matched_rows = 0
 
@@ -1551,6 +1574,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if not _looks_like_era_name(row_era):
                     # Skip non-era rows (announcements, footers, etc.)
                     skipped_rows += 1
+                    unmatched_total += 1
                     if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
                         row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
                         if row_text:
@@ -1672,6 +1696,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
         # Unmatched row — track it for diagnostics
         skipped_rows += 1
+        unmatched_total += 1
         if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
             row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
             if row_text:
@@ -1696,8 +1721,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         song_rows=song_rows,
         skipped_rows=skipped_rows,
         unmatched_rows=unmatched_rows,
+        unmatched_rows_total=unmatched_total,
         footer_rows=footer_rows,
         fuzzy_matched_rows=fuzzy_matched_rows,
+        dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
     )
 
     logger.debug(
@@ -1856,6 +1883,12 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     return version
 
 
+# Base names that mark an UNKNOWN song rather than a shared title. Rows with
+# these names are distinct mystery tracks (different notes/dates/samples) and
+# must never be grouped as versions of one song.
+_PLACEHOLDER_BASE_NAMES = frozenset({"???", "??", "?", "unknown", "untitled", "tba", "n/a"})
+
+
 def _add_version_to_era(
     era: Era,
     version: SongVersion,
@@ -1867,6 +1900,9 @@ def _add_version_to_era(
     grouped together — even across sections. New songs are added to the last
     (current) section. ``song_index`` maps (id(era), base_name) → Song so the
     grouping lookup is O(1) instead of scanning every song in the era.
+
+    Placeholder names ("???", "Unknown", …) are exempt from grouping — each
+    such row is its own standalone Song.
     """
     if not era.sections:
         era.sections.append(Section())
@@ -1875,6 +1911,10 @@ def _add_version_to_era(
     # Also strip any sub-info in parens for grouping
     # But keep the base_name as-is for matching — only strip version tags
     base_key = base_name.strip()
+
+    if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
+        era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
+        return
 
     key = (id(era), base_key)
     song = song_index.get(key)

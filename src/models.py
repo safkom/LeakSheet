@@ -271,8 +271,13 @@ class ParseMetadata(BaseModel):
     song_rows: int = Field(0, description="Rows successfully parsed as songs")
     skipped_rows: int = Field(0, description="Rows that matched no era and were skipped")
     unmatched_rows: list[str] = Field(default_factory=list, description="First 50 unmatched row summaries")
+    unmatched_rows_total: int = Field(0, description="Total unmatched rows encountered (uncapped)")
     footer_rows: int = Field(0, description="Rows detected as footer content")
     fuzzy_matched_rows: int = Field(0, description="Rows matched via fuzzy era matching")
+    dropped_columns: list[str] = Field(
+        default_factory=list,
+        description="Non-empty header cells that matched no known column alias",
+    )
 
 
 class Notice(BaseModel):

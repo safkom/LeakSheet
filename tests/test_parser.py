@@ -1431,3 +1431,138 @@ class TestParseFileEncoding:
         p.write_bytes(html.encode("cp1252"))
         artist = parse_file(p, "Test Artist")
         assert artist.name == "Test Artist"
+
+
+# ---------------------------------------------------------------------------
+# Placeholder-name grouping (accuracy harness finding)
+# ---------------------------------------------------------------------------
+
+def test_placeholder_names_not_grouped():
+    """Rows named '???' are distinct unknown songs, not versions of one song."""
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, Song, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    for i in range(3):
+        _add_version_to_era(era, SongVersion(name="???", notes=f"unknown song {i}"), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 3, f"Expected 3 standalone ??? songs, got {len(songs)}"
+    assert all(len(s.versions) == 1 for s in songs)
+
+
+def test_placeholder_with_tag_not_grouped():
+    """Even tagged placeholders ('??? [V2]') describe different unknown songs."""
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="??? [V2]", version_tag="V2", notes="beat A"), index)
+    _add_version_to_era(era, SongVersion(name="??? [V2]", version_tag="V2", notes="beat B"), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 2, f"Expected 2 standalone songs, got {len(songs)}"
+
+
+def test_normal_names_still_group():
+    from src.parser import _add_version_to_era
+    from src.models import Era, Section, SongVersion
+
+    era = Era(name="Test Era", sections=[Section()])
+    index = {}
+    _add_version_to_era(era, SongVersion(name="Song [V1]", version_tag="V1"), index)
+    _add_version_to_era(era, SongVersion(name="Song [V2]", version_tag="V2"), index)
+
+    songs = [s for sec in era.sections for s in sec.songs]
+    assert len(songs) == 1 and len(songs[0].versions) == 2
+
+
+# ---------------------------------------------------------------------------
+# Ranked-risk regression tests (accuracy review)
+# ---------------------------------------------------------------------------
+
+class TestFuzzyEraMatch:
+    def _eras(self, *names):
+        from src.models import Era
+        from src.parser import _era_match_key
+        return {_era_match_key(n): Era(name=n) for n in names}
+
+    def test_collab_variant_matches(self):
+        from src.parser import _fuzzy_era_match
+        eras = self._eras("Collaboration with Digital Nas")
+        match = _fuzzy_era_match("digital nas collab", eras)
+        assert match is not None and match.name == "Collaboration with Digital Nas"
+
+    def test_single_shared_word_does_not_match(self):
+        """One shared word must never fuzzy-match (needs >= 2 significant words)."""
+        from src.parser import _fuzzy_era_match
+        eras = self._eras("Rodeo")
+        assert _fuzzy_era_match("rodeo days tour", eras) is None
+
+    def test_no_significant_words_no_match(self):
+        from src.parser import _fuzzy_era_match
+        eras = self._eras("Ye")
+        assert _fuzzy_era_match("ye", eras) is None
+
+
+class TestSectionLabelDetection:
+    def _row(self, texts):
+        from src.parser import _Cell
+        return [_Cell(text=t) for t in texts]
+
+    def test_sparse_song_with_notes_is_not_section_label(self):
+        """A song row with a substantive note must stay a song."""
+        from src.parser import _is_section_label_version
+        from src.models import SongVersion
+        v = SongVersion(name="Throwaway Song", notes="Rumoured to exist from the 2019 sessions.")
+        row = self._row(["Some Era", "Throwaway Song", "Rumoured to exist from the 2019 sessions."])
+        assert not _is_section_label_version(v, row, era_col=0)
+
+    def test_bare_label_is_section_label(self):
+        from src.parser import _is_section_label_version
+        from src.models import SongVersion
+        v = SongVersion(name="Pre-VMA")
+        row = self._row(["Some Era", "Pre-VMA", ""])
+        assert _is_section_label_version(v, row, era_col=0)
+
+    def test_dynamic_label_rejects_linked_rows(self):
+        from src.parser import _is_dynamic_section_label, _Cell
+        row = [_Cell(text=""), _Cell(text="WLR Higher Bitrate Files", links=["https://x.test/f"]), _Cell(text="")]
+        assert _is_dynamic_section_label(row, {"name": 1}) is None
+
+
+class TestColspanAlignment:
+    def test_colspan_preserves_column_indices(self):
+        """A colspan cell expands with filler cells so later columns keep
+        their indices."""
+        from src.parser import extract_table
+        html = """
+        <table>
+          <tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td></tr>
+          <tr><td colspan="2">Merged Era+Name</td><td>note text</td><td>CD Quality</td></tr>
+        </table>
+        """
+        rows = extract_table(html)
+        assert len(rows[1]) == 4
+        assert rows[1][0].text.strip() == "Merged Era+Name"
+        assert rows[1][1].text.strip() == ""          # filler keeps alignment
+        assert rows[1][2].text.strip() == "note text"
+        assert rows[1][3].text.strip() == "CD Quality"
+
+
+class TestDroppedColumns:
+    def test_unknown_header_surfaced(self):
+        from src.parser import _Cell, detect_columns, detect_dropped_columns
+        header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Bit Rate"), _Cell(text="Quality")]
+        col_map = detect_columns(header)
+        dropped = detect_dropped_columns(header, col_map)
+        assert "Bit Rate" in dropped
+        assert "Era" not in dropped and "Quality" not in dropped
+
+    def test_fully_mapped_header_drops_nothing(self):
+        from src.parser import _Cell, detect_columns, detect_dropped_columns
+        header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Notes"), _Cell(text="Quality")]
+        col_map = detect_columns(header)
+        assert detect_dropped_columns(header, col_map) == []
