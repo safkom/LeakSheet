@@ -41,8 +41,12 @@ struct ArtistView: View {
                     filterToggles
                         .padding(.bottom, 8)
 
-                    // Content: search results take priority over eras/recents
-                    if vm.isSearching {
+                    // Content: Misc is a strict mode (never mixed with era
+                    // songs; search/chips filter within it), then search
+                    // results take priority over eras/recents.
+                    if vm.misc {
+                        miscList
+                    } else if vm.isSearching {
                         searchResultsList
                     } else if vm.recents {
                         recentsList
@@ -220,6 +224,11 @@ struct ArtistView: View {
                     FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
                         vm.toggleNoSnippets()
                     }
+                    if vm.hasMiscEntries {
+                        FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .filterMisc) {
+                            vm.toggleMisc()
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -288,6 +297,83 @@ struct ArtistView: View {
             // Gap between eras
             .padding(.bottom, 12)
         }
+    }
+
+    // MARK: - Misc entries
+
+    @ViewBuilder
+    private var miscList: some View {
+        let entries = vm.miscResults
+
+        if entries.isEmpty {
+            ContentUnavailableView(
+                "No Misc Entries",
+                systemImage: "film.stack",
+                description: Text("Nothing matches the current filters.")
+            )
+            .padding(.top, 40)
+        } else {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
+                // Era group header — shown when the era changes
+                if idx == 0 || entries[idx - 1].eraName != entry.eraName {
+                    HStack(spacing: 8) {
+                        Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle((eraColors[entry.eraName] ?? .secondary).ensureReadable(against: .lsBackground))
+                        Rectangle()
+                            .fill(Color.lsBorder)
+                            .frame(height: 1)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, idx == 0 ? 4 : 12)
+                    .padding(.bottom, 2)
+                }
+
+                MiscEntryRowView(entry: entry) { payload in
+                    showDescription = payload
+                }
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .onTapGesture {
+                    handleMiscTap(entry, in: entries)
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    /// Streamable entries play with continuation across the misc list;
+    /// non-streamable entries open their link externally, and link-less
+    /// entries show the description sheet.
+    private func handleMiscTap(_ entry: MiscEntry, in entries: [MiscEntry]) {
+        if entry.isStreamable {
+            Haptics.light()
+            let streamable = entries.filter(\.isStreamable)
+            guard let idx = streamable.firstIndex(where: { $0.id == entry.id }) else { return }
+            let items = streamable.map {
+                PlaybackListItem(
+                    version: $0.asSongVersion,
+                    artistName: artist.name,
+                    eraName: $0.eraName,
+                    artUrl: eraArtUrl(for: $0.eraName) ?? "",
+                    artistSlug: artist.slug
+                )
+            }
+            player.playInList(items, startAt: idx)
+        } else if let link = entry.links.first, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else {
+            showDescription = DescriptionSheet.Payload(
+                song: nil, version: entry.asSongVersion,
+                artistName: artist.name, artistSlug: artist.slug,
+                eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
+            )
+        }
+    }
+
+    /// Era art for a misc entry — matched against the main-tab eras by name.
+    private func eraArtUrl(for eraName: String) -> String? {
+        artist.eras.first { $0.name.caseInsensitiveCompare(eraName) == .orderedSame }?.artUrl
     }
 
     // MARK: - Recents

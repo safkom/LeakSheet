@@ -1,7 +1,6 @@
 import Foundation
 import SwiftUI
 import Observation
-import Combine
 
 /// ViewModel for artist detail screen — search, filter, era state.
 @MainActor
@@ -24,6 +23,10 @@ final class ArtistViewModel {
     var bestOf: Bool = false
     var recents: Bool = false
     var noSnippets: Bool = false
+    /// Misc mode — a strict switch, not a peer filter: when ON, only entries
+    /// from the tracker's Misc / Music Videos tabs are shown, never mixed
+    /// with era songs; the other chips (and search) filter within them.
+    var misc: Bool = false
     var expandedEra: String? = nil
 
     // MARK: - State
@@ -196,11 +199,16 @@ final class ArtistViewModel {
     // MARK: - Recents (sorted by leak date, cached)
 
     struct RecentResult: Identifiable {
-        let id = UUID()
         let song: Song
         let version: SongVersion
         let era: Era
         let timestamp: TimeInterval
+
+        // Stable content-derived id so SwiftUI's ForEach can diff results
+        // across filter/query changes instead of rebuilding every row each
+        // keystroke (a fresh UUID() on every rebuild caused row flicker
+        // and lost expand state).
+        var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
     }
 
     private var recentsTask: Task<Void, Never>?
@@ -314,6 +322,52 @@ final class ArtistViewModel {
     func toggleNoSnippets() {
         noSnippets.toggle()
         invalidateRecentsCache()
+    }
+
+    func toggleMisc() {
+        misc.toggle()
+        if !misc && !bestOf && !recents { expandedEra = nil }
+    }
+
+    var hasMiscEntries: Bool {
+        !(artist.miscEntries ?? []).isEmpty
+    }
+
+    /// Misc entries after in-mode filters: No Snippets drops unavailable
+    /// entries, Recent sorts by date descending, search matches name /
+    /// notes / era / type. Best Of restricts to badge-marked names when any
+    /// exist (misc entries usually carry no badges — then it's a no-op).
+    var miscResults: [MiscEntry] {
+        guard misc else { return [] }
+        var entries = artist.miscEntries ?? []
+        if noSnippets {
+            entries = entries.filter { e in
+                let al = (e.available ?? "").lowercased()
+                let q = (e.quality ?? "").lowercased()
+                return !(al.contains("snippet") || al.contains("unavailable") || q.contains("not available"))
+            }
+        }
+        if bestOf {
+            let starred = entries.filter { e in
+                Badge.allCases.contains { e.name.contains($0.emoji) }
+            }
+            if !starred.isEmpty { entries = starred }
+        }
+        if isSearching {
+            let q = debouncedQuery.lowercased()
+            entries = entries.filter { e in
+                e.name.lowercased().contains(q)
+                    || (e.notes ?? "").lowercased().contains(q)
+                    || e.eraName.lowercased().contains(q)
+                    || (e.entryType ?? "").lowercased().contains(q)
+            }
+        }
+        if recents {
+            entries = entries.sorted {
+                Self.parseLeakDate($0.date ?? "") > Self.parseLeakDate($1.date ?? "")
+            }
+        }
+        return entries
     }
 
     // MARK: - Stats

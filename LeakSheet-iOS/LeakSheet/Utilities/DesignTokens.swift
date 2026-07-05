@@ -192,6 +192,7 @@ extension Color {
     static let filterBestOf = Color(hue: 45/360, saturation: 0.85, brightness: 0.90)
     static let filterRecent = Color(hue: 140/360, saturation: 0.70, brightness: 0.80)
     static let filterNoSnippets = Color(hue: 280/360, saturation: 0.60, brightness: 0.85)
+    static let filterMisc = Color(hue: 200/360, saturation: 0.65, brightness: 0.85)
 }
 
 // MARK: - String Slugify

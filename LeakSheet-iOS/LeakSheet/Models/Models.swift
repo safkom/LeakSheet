@@ -12,6 +12,9 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     let notices: [Notice]?
     let totalSongs: Int?
     let totalVersions: Int?
+    /// Entries from secondary Misc / Music Videos tabs — optional so older
+    /// cached responses and servers decode fine (ogFilenames precedent).
+    let miscEntries: [MiscEntry]?
 
     var id: String { slug }
 
@@ -30,6 +33,7 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
         case parseMetadata = "parse_metadata"
         case totalSongs = "total_songs"
         case totalVersions = "total_versions"
+        case miscEntries = "misc_entries"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -253,6 +257,68 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         case qualityColor = "quality_color"
         case availableLengthColor = "available_length_color"
         case dateOfRecording = "date_of_recording"
+    }
+}
+
+// MARK: - MiscEntry
+
+/// One entry from a secondary tracker tab (Misc / Music Videos) — kept fully
+/// separate from the era/song tree.
+nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
+    let eraName: String
+    let name: String
+    let notes: String?
+    let entryType: String?
+    let date: String?
+    let length: String?
+    let available: String?
+    let quality: String?
+    let streaming: Bool?
+    let links: [String]
+    let sourceTab: String
+
+    var id: String { "\(sourceTab)::\(eraName)::\(name)::\(date ?? "")" }
+
+    var streamableLink: String? {
+        links.first { StreamResolver.isStreamableURL($0) }
+    }
+
+    var isStreamable: Bool { streamableLink != nil }
+
+    /// Minimal SongVersion so misc entries flow through the existing playback
+    /// and description-sheet machinery unchanged.
+    var asSongVersion: SongVersion {
+        SongVersion(
+            name: name,
+            versionTag: nil,
+            badge: nil,
+            featuring: nil,
+            producers: nil,
+            collaboration: nil,
+            refs: nil,
+            altTitles: nil,
+            notes: notes,
+            ogFilename: nil,
+            ogFilenames: nil,
+            samples: nil,
+            trackLength: length,
+            fileDate: nil,
+            leakDate: date,
+            availableLength: available,
+            quality: quality,
+            links: links,
+            qualityColor: nil,
+            availableLengthColor: nil,
+            dateOfRecording: nil,
+            type: entryType
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, notes, date, length, available, quality, streaming, links
+        case eraName = "era_name"
+        case entryType = "entry_type"
+        case sourceTab = "source_tab"
     }
 }
 
