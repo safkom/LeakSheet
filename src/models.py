@@ -86,8 +86,9 @@ class SongVersion(BaseModel):
     refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
     notes: str | None = Field(None, description="Description/history text")
-    og_filename: str | None = Field(None, description="Original filename from metadata, e.g. 'Bitch Im In The CLub NEW'")
-    samples: list[str] = Field(default_factory=list, description="Sampled songs/works, e.g. ['Got Money by Lil Wayne']")
+    og_filename: str | None = Field(None, description="First original filename from metadata (legacy single-value field)")
+    og_filenames: list[str] = Field(default_factory=list, description="All original filenames from metadata, in order of appearance")
+    samples: list[str] = Field(default_factory=list, description="Sampled songs/works, e.g. ['Got Money — Lil Wayne']")
     track_length: str | None = Field(None, description="Duration, e.g. '3:14'")
     file_date: str | None = Field(None, description="Date the file was created")
     leak_date: str | None = Field(None, description="Date the version leaked")
@@ -357,7 +358,7 @@ def slugify(text: str) -> str:
 # Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
 # Also handles emoji-prefixed labels ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
-    r"(\d+)\s+([A-Za-z][A-Za-z /()]+?)(?=\d|\Z)",
+    r"(\d+)\s+([A-Za-z][A-Za-z /()]*?)(?=\s*\d|[^A-Za-z /()]|\Z)",
 )
 
 
@@ -383,11 +384,15 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
     for m in _STAT_LINE_PATTERN.finditer(cleaned):
         count = int(m.group(1))
         label = m.group(2).strip().lower()
-        # Normalize: strip "(s)" suffix (e.g. "Snippet(s)" → "snippet")
+        # Normalize: strip "(s)" suffix (e.g. "Snippet(s)" → "snippet"),
+        # including truncated variants from unbalanced parens ("(s", "(")
         if label.endswith("(s)"):
             label = label[:-3]
+        elif label.endswith("(s"):
+            label = label[:-2]
         elif label.endswith("("):
             label = label[:-1]
+        label = label.strip()
         result[label] = count
     return result
 
@@ -563,65 +568,216 @@ def parse_timeline(text: str) -> list[TimelineEvent]:
 # Notes metadata extraction
 # ---------------------------------------------------------------------------
 
-# OG Filename patterns:
+# OG Filename lead-in. Observed forms:
 #   "OG Filename (Metadata): Bitch Im In The CLub NEW"
 #   "OG Filename: Broke My Heart 1"
-_OG_FILENAME_PATTERN = re.compile(
-    r"OG Filename(?:\s*\(Metadata\))?:\s*(.+?)(?:\n|$)",
+#   "OG Filename (?): Blazin' (KW Verse)"
+#   "OG Filenames: Ohh Yeah Tellem RUFF &\nOhh Yeah Tellem RUFF 73.3"   (multi, '&' continues on next line)
+#   "OG Filename KW - Where Are We Ref (1.15.13)"                       (no colon)
+#   "OG Filename - Tel Aviv [melody demo 1]"                            (dash separator)
+_OG_LEADIN_PATTERN = re.compile(
+    r"OG Filenames?(?:\s*\([^)]*\))?\s*(?::\s*|-\s+|\s+)",
     re.IGNORECASE,
 )
 
-# Samples patterns:
-#   'Samples "Got Money" by Lil Wayne'
-#   "Samples Rufus & Chaka Khan's 'Ain't Nobody'"
-#   'Samples "Ain\'t Nobody" by Rufus & Chaka Khan'
-_SAMPLES_PATTERN = re.compile(
-    r"""Samples\s+(?:[^""\u201c]+?\s+)?[""\u201c](.+?)[""\u201d](?:\s+by\s+(.+?))?(?:\.|,|\n|$)"""
-    r"""|Samples\s+(.+?)'s\s+["'\u2018\u2019](.+?)["'\u2018\u2019]""",
+_OG_QUOTED_NAME_PATTERN = re.compile(r'\s*"([^"\n]+)"')
+
+# Samples lead-in: everything from the keyword to the end of the line is one
+# enumeration of sampled works ('Samples "A" by X and "B" by Y, "C" by Z.').
+_SAMPLES_LEADIN_PATTERN = re.compile(r"\bSamples\b(?!\s+(?:from|of)\b)", re.IGNORECASE)
+
+# Quoted title within a samples enumeration (quotes normalized to straight ").
+_SAMPLE_TITLE_PATTERN = re.compile(r'"([^"\n]+)"')
+
+# Pattern 2: "Samples Rufus & Chaka Khan's 'Ain't Nobody'". The closing single
+# quote must sit on a word boundary so apostrophes inside the title survive.
+_SAMPLE_POSSESSIVE_PATTERN = re.compile(
+    r"Samples\s+([^\"'\n]+?)'s\s+'(.+?)'(?=[\s,.;)!?]|$)",
     re.IGNORECASE,
 )
+
+# Artist capture after "by", up to the next sample/separator.
+_SAMPLE_ARTIST_PATTERN = re.compile(r"^\s*by\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+_SMART_QUOTES = {
+    "\u201c": '"', "\u201d": '"',   # \u201c \u201d
+    "\u2018": "'", "\u2019": "'",   # \u2018 \u2019
+}
+
+
+def _normalize_quotes(text: str) -> str:
+    for smart, straight in _SMART_QUOTES.items():
+        text = text.replace(smart, straight)
+    return text
 
 
 def extract_og_filename(notes: str) -> str | None:
-    """Extract OG Filename from notes text.
+    """Extract the first OG Filename from notes text (legacy single-value API).
 
     Returns the filename string or None.
     """
-    m = _OG_FILENAME_PATTERN.search(notes)
-    if m:
-        return m.group(1).strip()
-    return None
+    filenames = extract_og_filenames(notes)
+    return filenames[0] if filenames else None
+
+
+def _clean_og_name(name: str) -> str:
+    return name.strip().rstrip("&").strip()
+
+
+def _walk_og_lines(notes: str):
+    """Yield (line_index, is_og, names) per line.
+
+    A line whose stripped text starts with an OG lead-in is an OG line; a
+    trailing '&' continues the filename list on the following line(s), which
+    are also flagged as OG lines so stripping can drop the whole block.
+    """
+    lines = notes.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        m = _OG_LEADIN_PATTERN.match(stripped)
+        if not m:
+            yield i, False, []
+            i += 1
+            continue
+
+        rest = stripped[m.end():].strip()
+        # A quoted filename bounds the capture; otherwise take the line rest.
+        quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
+        names = [quoted.group(1)] if quoted else ([rest] if rest else [])
+        indices = [i]
+        # '&' continuation: the next line holds another filename \u2014 unless it
+        # is itself a labelled OG line, which the outer loop handles.
+        while names and names[-1].rstrip().endswith("&") and i + 1 < len(lines):
+            nxt = lines[i + 1].strip()
+            if _OG_LEADIN_PATTERN.match(nxt):
+                break
+            i += 1
+            indices.append(i)
+            if nxt:
+                names.append(nxt)
+        yield indices[0], True, [n for n in (_clean_og_name(x) for x in names) if n]
+        for extra in indices[1:]:
+            yield extra, True, []
+        i += 1
+
+
+def extract_og_filenames(notes: str) -> list[str]:
+    """Extract every OG Filename from notes text, in order of appearance.
+
+    Handles the singular and plural labels, parenthetical qualifiers,
+    '&'-continued multi-line lists, and quoted filenames embedded in prose.
+    """
+    names: list[str] = []
+    for _, is_og, line_names in _walk_og_lines(notes):
+        names.extend(line_names)
+    # Quoted filenames mentioned mid-sentence ("\u2026 the file included it's
+    # OG Filename: \"X.mp3\" \u2026") \u2014 extract the quoted token only.
+    for m in _OG_LEADIN_PATTERN.finditer(notes):
+        line_start = notes.rfind("\n", 0, m.start()) + 1
+        if notes[line_start:m.start()].strip():  # lead-in is mid-line
+            quoted = _OG_QUOTED_NAME_PATTERN.match(notes, m.end())
+            if quoted:
+                names.append(_clean_og_name(quoted.group(1)))
+    return names
+
+
+def strip_og_filename_lines(notes: str) -> str:
+    """Remove standalone 'OG Filename\u2026' lines (and their '&' continuation
+    lines) from notes.
+
+    The filenames are extracted into a structured field; leaving the lines in
+    the notes text makes every client display them twice. Prose sentences
+    that merely mention an OG filename are left intact.
+    """
+    lines = notes.split("\n")
+    og_indices = {i for i, is_og, _ in _walk_og_lines(notes) if is_og}
+    kept = [line for i, line in enumerate(lines) if i not in og_indices]
+    return "\n".join(kept).strip()
+
+
+def _clean_sample_artist(artist: str) -> str | None:
+    """Trim enumeration/sentence noise from a captured artist string."""
+    # Stop at a sentence boundary: a period after a word of 3+ letters
+    # ('Chaka Khan. Leaked in\u2026'), so honorifics like 'Dr.' or initials like
+    # 'J.' don't split the name. Commas/semicolons always end the artist.
+    artist = re.split(r"(?<=\w\w\w)\.\s", artist)[0]
+    artist = re.split(r"[,;]", artist)[0]
+    # Drop trailing separators and dangling conjunctions left by slicing at
+    # the next quoted title ('Mobb Deep and ' \u2192 'Mobb Deep').
+    artist = artist.strip().rstrip(",;.").strip()
+    artist = re.sub(r"\s+and$", "", artist, flags=re.IGNORECASE)
+    # Strip trailing sentence noise. These handle cases like "George Benson
+    # and the Common vs. Kanye\u2026" where the capture ran into prose. The "and"
+    # strip is a heuristic that may affect compound band names; "&"-joined
+    # names are unaffected.
+    artist = re.sub(r"\s+and\s+.+$", "", artist, flags=re.IGNORECASE).strip()
+    artist = re.sub(r"\s+vs\.?\s*.*$", "", artist, flags=re.IGNORECASE).strip()
+    artist = re.sub(r"\s+feat\.?(\s+.+)?$", "", artist, flags=re.IGNORECASE).strip()
+    # Prose continuation ('CyHi from his 2014 mixtape …') is commentary, not
+    # part of the artist name.
+    artist = re.sub(r"\s+from\s+(?:his|her|their|the)\b.*$", "", artist, flags=re.IGNORECASE).strip()
+    artist = artist.rstrip(",;.").strip()
+    # An implausibly long "artist" means the capture ran into prose.
+    if len(artist) > 60:
+        return None
+    return artist or None
+
+
+def _format_sample(song: str, artist: str | None) -> str:
+    return f"{song} \u2014 {artist}" if artist else song
 
 
 def extract_samples(notes: str) -> list[str]:
     """Extract sampled works from notes text.
 
-    Returns list of sample descriptions, e.g. ['"Got Money" by Lil Wayne'].
+    Handles multiple samples per enumeration ('Samples "A" by X and "B" by Y,
+    "C" by Z.') and smart quotes. Returns clean strings without quote
+    characters, e.g. ['Got Money \u2014 Lil Wayne'].
     """
+    text = _normalize_quotes(notes)
     results: list[str] = []
-    for m in _SAMPLES_PATTERN.finditer(notes):
-        if m.group(1):
-            # Pattern 1: Samples "Song" by Artist
-            song = m.group(1).strip()
-            artist = m.group(2).strip() if m.group(2) else None
-            if artist:
-                # Strip trailing sentence noise from the artist field. These patterns handle cases
-                # like "George Benson and the Common vs. Kanye..." where the regex captured too
-                # much. Note: the "and" strip is a heuristic that may affect compound band names.
-                artist = re.sub(r'\s+and\s+.+$', '', artist, flags=re.IGNORECASE).strip()
-                artist = re.sub(r'\s+vs\.?\s*.*$', '', artist, flags=re.IGNORECASE).strip()
-                artist = re.sub(r'\s+feat\.?(\s+.+)?$', '', artist, flags=re.IGNORECASE).strip()
-                results.append(f'"{song}" by {artist}')
-            else:
-                results.append(f'"{song}"')
-        elif m.group(3):
-            # Pattern 2: Samples Artist's "Song"
-            artist = m.group(3).strip()
-            song = m.group(4).strip() if m.group(4) else ""
-            if song:
-                results.append(f'"{song}" by {artist}')
-            else:
-                results.append(artist)
+
+    for lead in _SAMPLES_LEADIN_PATTERN.finditer(text):
+        # One enumeration runs to the end of the line.
+        end = text.find("\n", lead.end())
+        segment = text[lead.end():end if end != -1 else len(text)]
+
+        titles = list(_SAMPLE_TITLE_PATTERN.finditer(segment))
+        if titles:
+            prev_end = 0
+            for i, title_match in enumerate(titles):
+                # The lead-in and each further title must sit close to the
+                # previous one \u2014 quoted phrases later in a prose sentence are
+                # quotations, not sample titles.
+                gap = segment[prev_end:title_match.start()]
+                if i == 0:
+                    if len(gap) > 50:
+                        break
+                elif len(gap) > 60 or not re.search(r"(?:,|;|\band\b|&)\s*$", gap, re.IGNORECASE):
+                    break
+                song = title_match.group(1).strip()
+                if len(song) > 80:
+                    break
+                # Text between this title and the next holds the optional
+                # "by Artist" clause \u2014 slicing here is what keeps one
+                # sample's artist from swallowing the next sample.
+                tail_end = titles[i + 1].start() if i + 1 < len(titles) else len(segment)
+                tail = segment[title_match.end():tail_end]
+                artist_match = _SAMPLE_ARTIST_PATTERN.match(tail.strip())
+                artist = _clean_sample_artist(artist_match.group(1)) if artist_match else None
+                results.append(_format_sample(song, artist))
+                prev_end = title_match.end()
+        else:
+            # Pattern 2: Samples Artist's 'Song'
+            possessive = _SAMPLE_POSSESSIVE_PATTERN.search(
+                text[lead.start():end if end != -1 else len(text)]
+            )
+            if possessive:
+                artist = possessive.group(1).strip()
+                song = possessive.group(2).strip()
+                results.append(_format_sample(song, artist or None))
+
     return results
 
 

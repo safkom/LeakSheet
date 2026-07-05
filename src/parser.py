@@ -28,8 +28,9 @@ from src.models import (
     TrackerStats,
     VERSION_TAG_PATTERN,
     extract_badge,
-    extract_og_filename,
+    extract_og_filenames,
     extract_samples,
+    strip_og_filename_lines,
     extract_version_tag,
     parse_era_stats,
     parse_highlighted_producers,
@@ -232,22 +233,118 @@ class _Cell:
         return "".join(parts) + ")"
 
 
+try:
+    from lxml import etree
+    from lxml import html as _lxml_html
+except ImportError:  # pragma: no cover - lxml is in requirements
+    _lxml_html = None
+
+
+def _cell_from_td(td) -> _Cell:
+    """Build a _Cell from an lxml <td> element.
+
+    Mirrors _TableExtractor semantics exactly: <br> becomes "\\n", img alt
+    text joins the cell text, and each link records the line number the
+    anchor closes on.
+    """
+    parts: list[str] = []
+    links: list[str] = []
+    link_lines: list[int] = []
+    images: list[str] = []
+    newlines = 0  # running count of "\n" appended so far
+
+    def walk(el) -> None:
+        nonlocal newlines
+        tag = el.tag
+        if not isinstance(tag, str):  # comment / processing instruction
+            return
+        if tag == "br":
+            parts.append("\n")
+            newlines += 1
+        elif tag == "img":
+            src = el.get("src")
+            if src:
+                images.append(src)
+            alt = el.get("alt")
+            if alt:
+                parts.append(alt)
+                newlines += alt.count("\n")
+        text = el.text
+        if text:
+            parts.append(text)
+            newlines += text.count("\n")
+        for child in el:
+            walk(child)
+            tail = child.tail
+            if tail:
+                parts.append(tail)
+                newlines += tail.count("\n")
+        if tag == "a":
+            href = el.get("href")
+            if href:
+                links.append(href)
+                link_lines.append(newlines)
+
+    walk(td)
+    return _Cell(
+        text="".join(parts).strip(),
+        links=links,
+        link_lines=link_lines,
+        images=images,
+        css_class=td.get("class", ""),
+    )
+
+
+def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
+    """Fast table extraction via lxml (≈10x quicker than html.parser)."""
+    if not html_content.strip():
+        return []
+    try:
+        doc = _lxml_html.fromstring(html_content)
+    except etree.ParserError:
+        return []
+    rows: list[list[_Cell]] = []
+    for tr in doc.iter("tr"):
+        current: list[_Cell] = []
+        for td in tr:
+            if td.tag != "td":
+                continue
+            cell = _cell_from_td(td)
+            current.append(cell)
+            try:
+                colspan = int(td.get("colspan", "1") or "1")
+            except (ValueError, TypeError):
+                colspan = 1
+            for _ in range(colspan - 1):
+                current.append(_Cell())
+        if current:
+            rows.append(current)
+    return rows
+
+
 def extract_table(html_content: str, color_map: dict[str, str] | None = None) -> list[list[_Cell]]:
     """Parse HTML and return all table rows as lists of _Cell.
+
+    Uses lxml when available (much faster on large exports), falling back to
+    the stdlib HTMLParser implementation otherwise.
 
     If *color_map* is provided (from `_extract_class_colors`), each cell's
     `bg_color` is resolved from its CSS class at construction time.
     """
-    parser = _TableExtractor()
-    parser.feed(html_content)
+    if _lxml_html is not None:
+        rows = _extract_table_lxml(html_content)
+    else:
+        parser = _TableExtractor()
+        parser.feed(html_content)
+        rows = parser.rows
     if not color_map:
-        return parser.rows
+        return rows
     # Resolve bg_color for every cell whose class is in color_map
-    for row in parser.rows:
+    for row in rows:
         for cell in row:
             if cell.css_class and cell.css_class in color_map:
                 cell.bg_color = color_map[cell.css_class]
-    return parser.rows
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -828,6 +925,7 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     # Second pass: merge version-tagged empty eras into ANY era with matching base name.
     # e.g. "HiTunes [V3]" (0 songs) → merge into "HiTunes" (has songs).
     remaining_empty = [e for e in result if sum(len(s.songs) for s in e.sections) == 0]
+    merged_away: set[int] = set()
     for empty_era in remaining_empty:
         base_key = _era_match_key(empty_era.name)
         if not base_key:
@@ -839,8 +937,10 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
             target_songs = sum(len(s.songs) for s in target.sections)
             if target_key == base_key and target_songs > 0:
                 _transfer_era_metadata(empty_era, target)
-                result.remove(empty_era)
+                merged_away.add(id(empty_era))
                 break
+    if merged_away:
+        result = [e for e in result if id(e) not in merged_away]
 
     return result
 
@@ -907,16 +1007,20 @@ _FOOTER_KEYWORDS = {
 }
 
 
+# Single alternation scan beats checking every keyword separately per cell
+_FOOTER_KEYWORDS_RE = re.compile(
+    "|".join(re.escape(k) for k in sorted(_FOOTER_KEYWORDS, key=len, reverse=True))
+)
+
+
 def _is_tracker_footer(row: list[_Cell]) -> bool:
     """Check if a row belongs to the tracker footer (stats, changelogs, guidelines).
 
     This prevents footer content from being attributed to the last era.
     """
     for cell in row:
-        text_lower = cell.text.strip().lower()
-        for keyword in _FOOTER_KEYWORDS:
-            if keyword in text_lower:
-                return True
+        if cell.text and _FOOTER_KEYWORDS_RE.search(cell.text.lower()):
+            return True
     return False
 
 
@@ -1029,10 +1133,13 @@ def _clean_link(url: str) -> str:
     Google Sheets wraps links as: https://www.google.com/url?q=REAL_URL&...
     """
     if "google.com/url" in url:
-        parsed = urlparse(url)
-        qs = parse_qs(parsed.query)
-        if "q" in qs:
-            return qs["q"][0]
+        try:
+            qs = parse_qs(urlparse(url).query)
+        except ValueError:
+            return url
+        target = qs.get("q")
+        if target and target[0]:
+            return target[0]
     return url
 
 
@@ -1045,10 +1152,18 @@ def _register_era_keys(
     era: Era,
     era_name: str,
     era_by_key: dict[str, Era],
+    fallback_keys: dict[str, Era] | None = None,
 ) -> None:
     """Register all matching keys for an era (primary, full, alt-names, slash parts).
 
-    Uses setdefault so earlier (more authoritative) registrations win.
+    Primary, full, and alt-name keys are written to ``era_by_key`` with
+    setdefault semantics (earlier authoritative registrations win).
+
+    Slash-separated parts ("38 Baby / Ay Ay" → "38 baby", "ay ay") are written
+    to ``fallback_keys`` when provided so they only resolve a row era when no
+    primary registration matches — preventing a partial-name from shadowing a
+    genuine standalone era declared later in the tracker. If ``fallback_keys``
+    is None, slash parts fall back to the same ``era_by_key`` dict (legacy).
     """
     primary = _era_match_key(era_name)
     if primary:
@@ -1063,10 +1178,11 @@ def _register_era_keys(
             era_by_key.setdefault(alt_key, era)
     # Slash-separated: "38 Baby / Ay Ay" → register both parts
     if " / " in era_name:
+        target = fallback_keys if fallback_keys is not None else era_by_key
         for part in era_name.split(" / "):
             part_key = _era_match_key(part)
             if part_key:
-                era_by_key.setdefault(part_key, era)
+                target.setdefault(part_key, era)
 
 
 # ---------------------------------------------------------------------------
@@ -1234,9 +1350,15 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Map from lowercased era matching key → Era object.
     # Keys are lowercase, parenthetical-stripped, version-tag-stripped.
     era_by_key: dict[str, Era] = {}
+    # Fallback registrations (currently: slash-split parts). Consulted only
+    # when the primary dict has no match — so a genuine "Ay Ay" era declared
+    # later still wins over a "38 Baby / Ay Ay" partial registration.
+    era_by_key_fallback: dict[str, Era] = {}
     # Eras whose name cell had an image but no usable text — backfill from
     # the first song row's era column.
     _needs_name_backfill: set[int] = set()  # id(era) values
+    # (id(era), song base name) → Song, for O(1) version grouping
+    song_index: dict[tuple[int, str], Song] = {}
     in_footer = False
 
     # Parse metadata tracking
@@ -1273,7 +1395,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             in_footer = False
             current_era, needs_backfill = _parse_era_header_row(row, col_map)
             eras.append(current_era)
-            _register_era_keys(current_era, current_era.name, era_by_key)
+            _register_era_keys(current_era, current_era.name, era_by_key, era_by_key_fallback)
             if needs_backfill:
                 _needs_name_backfill.add(id(current_era))
             continue
@@ -1310,11 +1432,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             and id(current_era) in _needs_name_backfill
         ):
             current_era.name = row_era
-            _register_era_keys(current_era, row_era, era_by_key)
+            _register_era_keys(current_era, row_era, era_by_key, era_by_key_fallback)
             _needs_name_backfill.discard(id(current_era))
             version = _parse_song_row(row, col_map)
             if version:
-                _add_version_to_era(current_era, version)
+                _add_version_to_era(current_era, version, song_index)
                 song_rows += 1
             continue
 
@@ -1324,12 +1446,18 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             matched_era = era_by_key.get(row_era_norm)
 
             # Try stripped key (version tags removed) if exact fails
-            if matched_era is None:
-                row_era_stripped = _era_match_key(row_era)
-                if row_era_stripped != row_era_norm:
-                    matched_era = era_by_key.get(row_era_stripped)
+            row_era_stripped = _era_match_key(row_era)
+            if matched_era is None and row_era_stripped != row_era_norm:
+                matched_era = era_by_key.get(row_era_stripped)
 
-            # Fuzzy match if exact lookup fails
+            # Fallback dict (slash parts) — only consulted after primary fails,
+            # so a real era declared later still wins over a partial registration.
+            if matched_era is None:
+                matched_era = era_by_key_fallback.get(row_era_norm)
+                if matched_era is None and row_era_stripped != row_era_norm:
+                    matched_era = era_by_key_fallback.get(row_era_stripped)
+
+            # Fuzzy match if all exact paths fail
             if matched_era is None:
                 matched_era = _fuzzy_era_match(row_era_norm, era_by_key)
                 if matched_era is not None:
@@ -1345,7 +1473,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     if _is_section_label_version(version, row, era_col):
                         current_era.sections.append(Section(name=version.name))
                     else:
-                        _add_version_to_era(current_era, version)
+                        _add_version_to_era(current_era, version, song_index)
                         song_rows += 1
                 continue
 
@@ -1361,7 +1489,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # Same era (abbreviated or exact) — assign to current
                     version = _parse_song_row(row, col_map)
                     if version:
-                        _add_version_to_era(current_era, version)
+                        _add_version_to_era(current_era, version, song_index)
                         song_rows += 1
                     else:
                         non_empty = [c for c in row if c.text.strip()]
@@ -1379,19 +1507,19 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                         # This handles trackers where song rows use different era
                         # abbreviations than the header (e.g. Pop Smoke, Jay-Z).
                         if _has_song_data(version):
-                            _add_version_to_era(current_era, version)
+                            _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                             # Register this era name variant for future rows
                             era_by_key.setdefault(_era_match_key(row_era), current_era)
                         else:
                             new_era = Era(name=row_era, sections=[Section()])
                             eras.append(new_era)
-                            _register_era_keys(new_era, row_era, era_by_key)
+                            _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
                     elif version:
                         # Not a plausible era name but has song data —
                         # assign to current era as fallback
-                        _add_version_to_era(current_era, version)
+                        _add_version_to_era(current_era, version, song_index)
                         song_rows += 1
                     else:
                         # No song data — could be a sub-era section header
@@ -1414,7 +1542,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                                     break
                             new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
                             eras.append(new_era)
-                            _register_era_keys(new_era, row_era, era_by_key)
+                            _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
                     continue
             else:
@@ -1433,9 +1561,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if version:
                     new_era = Era(name=row_era, sections=[Section()])
                     eras.append(new_era)
-                    _register_era_keys(new_era, row_era, era_by_key)
+                    _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                     current_era = new_era
-                    _add_version_to_era(current_era, version)
+                    _add_version_to_era(current_era, version, song_index)
                     song_rows += 1
                 else:
                     # No song data — stats-less era header (Kid Cudi style)
@@ -1538,7 +1666,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         if not row_era and current_era is not None:
             version = _parse_song_row(row, col_map)
             if version and (version.name or _has_song_data(version)):
-                _add_version_to_era(current_era, version)
+                _add_version_to_era(current_era, version, song_index)
                 song_rows += 1
                 continue
 
@@ -1677,9 +1805,13 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     notes_cell = _get_cell(row, notes_idx)
     notes_text = notes_cell.text.strip() if notes_cell.text else None
 
-    # Extract structured metadata from notes
-    og_filename = extract_og_filename(notes_text) if notes_text else None
+    # Extract structured metadata from notes, then strip the extracted OG
+    # lines so clients don't render the filenames twice (structured field +
+    # raw notes text).
+    og_filenames = extract_og_filenames(notes_text) if notes_text else []
     samples = extract_samples(notes_text) if notes_text else []
+    if og_filenames and notes_text:
+        notes_text = strip_og_filename_lines(notes_text) or None
 
     links_idx = col_map.get("links")
     alt_links_idx = col_map.get("alt_links")
@@ -1706,7 +1838,8 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         refs=refs,
         alt_titles=alt_titles,
         notes=notes_text,
-        og_filename=og_filename,
+        og_filename=og_filenames[0] if og_filenames else None,
+        og_filenames=og_filenames,
         samples=samples,
         track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
         file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
@@ -1723,11 +1856,17 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     return version
 
 
-def _add_version_to_era(era: Era, version: SongVersion) -> None:
+def _add_version_to_era(
+    era: Era,
+    version: SongVersion,
+    song_index: dict[tuple[int, str], Song],
+) -> None:
     """Add a version to the appropriate Song in the era, creating it if needed.
 
     Songs with the same base name (ignoring version tags [V1], [V2], etc.) are
-    grouped together. New songs are added to the last (current) section.
+    grouped together — even across sections. New songs are added to the last
+    (current) section. ``song_index`` maps (id(era), base_name) → Song so the
+    grouping lookup is O(1) instead of scanning every song in the era.
     """
     if not era.sections:
         era.sections.append(Section())
@@ -1737,16 +1876,16 @@ def _add_version_to_era(era: Era, version: SongVersion) -> None:
     # But keep the base_name as-is for matching — only strip version tags
     base_key = base_name.strip()
 
-    # Search across all sections for grouping (a song may span sections)
-    for section in era.sections:
-        for song in section.songs:
-            if song.base_name == base_key:
-                song.versions.append(version)
-                return
+    key = (id(era), base_key)
+    song = song_index.get(key)
+    if song is not None:
+        song.versions.append(version)
+        return
 
     # Create new song in the last (current) section
     song = Song(base_name=base_key, versions=[version])
     era.sections[-1].songs.append(song)
+    song_index[key] = song
 
 
 # ---------------------------------------------------------------------------
@@ -1848,7 +1987,11 @@ def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
 def parse_file(path: Path | str, artist_name: str) -> Artist:
     """Parse a tracker HTML file into an Artist model."""
     path = Path(path)
-    html_content = path.read_text(encoding="utf-8")
+    try:
+        html_content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        # Some exports arrive cp1252-encoded (smart quotes etc.)
+        html_content = path.read_text(encoding="cp1252", errors="replace")
     return parse_sheet(html_content, artist_name)
 
 

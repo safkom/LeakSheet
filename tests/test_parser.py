@@ -1046,7 +1046,8 @@ def test_sample_pattern2_requires_apostrophe_s():
     result = extract_samples(
         'Samples the songs "The Infamous Prelude" by Mobb Deep and "Melodies of Love" by Joe Sample.'
     )
-    assert '"The Infamous Prelude" by Mobb Deep' in result, f"Got: {result}"
+    assert 'The Infamous Prelude — Mobb Deep' in result, f"Got: {result}"
+
 
 def test_sample_artist_not_truncated_by_vs():
     """Artist field should not include trailing 'and X vs' noise."""
@@ -1054,7 +1055,144 @@ def test_sample_artist_not_truncated_by_vs():
     result = extract_samples(
         'Samples "The World is a Ghetto" by George Benson and the Common vs. Kanye freestyle battle.'
     )
-    assert result == ['"The World is a Ghetto" by George Benson'], f"Got: {result}"
+    assert result == ['The World is a Ghetto — George Benson'], f"Got: {result}"
+
+
+def test_sample_multiple_and_separated():
+    """All samples in an 'and'-joined enumeration must be extracted."""
+    from src.models import extract_samples
+    result = extract_samples(
+        'Samples the songs "The Infamous Prelude" by Mobb Deep and "Melodies of Love" by Joe Sample.'
+    )
+    assert result == [
+        'The Infamous Prelude — Mobb Deep',
+        'Melodies of Love — Joe Sample',
+    ], f"Got: {result}"
+
+
+def test_sample_multiple_comma_separated():
+    """Comma-separated samples must not collapse to one."""
+    from src.models import extract_samples
+    result = extract_samples('Samples "Got Money" by Lil Wayne, "Ain\'t Nobody" by Chaka Khan.')
+    assert result == [
+        'Got Money — Lil Wayne',
+        "Ain't Nobody — Chaka Khan",
+    ], f"Got: {result}"
+
+
+def test_sample_smart_quotes_normalized():
+    """Smart quotes (“”) must extract identically to straight quotes."""
+    from src.models import extract_samples
+    result = extract_samples('Samples “Got Money” by Lil Wayne.')
+    assert result == ['Got Money — Lil Wayne'], f"Got: {result}"
+
+
+def test_sample_no_stray_quote_characters():
+    """Emitted sample strings must not contain quote characters at all."""
+    from src.models import extract_samples
+    result = extract_samples('Samples "Got Money" by Lil Wayne. Also samples “Flashing Lights”.')
+    for s in result:
+        assert '"' not in s and '“' not in s and '”' not in s, f"Stray quotes in: {s!r}"
+
+
+def test_sample_compound_artist_preserved():
+    """Ampersand-joined artists must survive the artist cleanup."""
+    from src.models import extract_samples
+    result = extract_samples('Samples "Ain\'t Nobody" by Rufus & Chaka Khan.')
+    assert result == ["Ain't Nobody — Rufus & Chaka Khan"], f"Got: {result}"
+
+
+def test_sample_pattern2_apostrophe_title():
+    """Pattern 2 ('Artist's 'Song'') must keep apostrophes inside the title."""
+    from src.models import extract_samples
+    result = extract_samples("Samples Rufus & Chaka Khan's 'Ain't Nobody'")
+    assert result == ["Ain't Nobody — Rufus & Chaka Khan"], f"Got: {result}"
+
+
+# ---------------------------------------------------------------------------
+# OG filename extraction tests
+# ---------------------------------------------------------------------------
+
+def test_og_filenames_multiple():
+    """Every 'OG Filename:' line must be captured, not just the first."""
+    from src.models import extract_og_filenames
+    notes = "OG Filename: Version A\nSome note\nOG Filename (Metadata): Version B"
+    assert extract_og_filenames(notes) == ["Version A", "Version B"]
+
+
+def test_og_filenames_single_backcompat():
+    from src.models import extract_og_filename, extract_og_filenames
+    notes = "OG Filename: Broke My Heart 1\nRest of note"
+    assert extract_og_filename(notes) == "Broke My Heart 1"
+    assert extract_og_filenames(notes) == ["Broke My Heart 1"]
+
+
+def test_og_lines_stripped_from_notes():
+    """OG Filename lines must be removed from notes so the description text
+    doesn't duplicate the structured field."""
+    from src.models import strip_og_filename_lines
+    notes = "OG Filename: Version A\nTrack 12 off the demo tape.\nOG Filename: Version B"
+    cleaned = strip_og_filename_lines(notes)
+    assert "OG Filename" not in cleaned
+    assert cleaned == "Track 12 off the demo tape."
+
+
+def test_og_strip_preserves_notes_without_og():
+    from src.models import strip_og_filename_lines
+    notes = "Track 12 off the demo tape.\nWould later be reused."
+    assert strip_og_filename_lines(notes) == notes
+
+
+def test_og_filenames_plural_label_with_continuation():
+    """'OG Filenames: A &\\nB' lists two files across lines."""
+    from src.models import extract_og_filenames, strip_og_filename_lines
+    notes = "OG Filenames: Ohh Yeah Tellem RUFF &\nOhh Yeah Tellem RUFF 73.3\nInstrumental found in 2020."
+    assert extract_og_filenames(notes) == [
+        "Ohh Yeah Tellem RUFF",
+        "Ohh Yeah Tellem RUFF 73.3",
+    ]
+    assert strip_og_filename_lines(notes) == "Instrumental found in 2020."
+
+
+def test_og_filename_ampersand_before_second_label():
+    """A trailing '&' followed by another 'OG Filename:' line yields two clean names."""
+    from src.models import extract_og_filenames
+    notes = "OG Filename: Paid M17 K 120MT &\nOG Filename: PAID M17 K Master USE Flatten 120MT"
+    assert extract_og_filenames(notes) == [
+        "Paid M17 K 120MT",
+        "PAID M17 K Master USE Flatten 120MT",
+    ]
+
+
+def test_og_filename_parenthetical_variants():
+    from src.models import extract_og_filenames
+    assert extract_og_filenames("OG Filename (?): Blazin' (KW Verse)") == ["Blazin' (KW Verse)"]
+    assert extract_og_filenames("OG Filename (Metadata): Broke My Heart 1") == ["Broke My Heart 1"]
+
+
+def test_og_filename_quoted_midsentence():
+    """A quoted filename inside prose is extracted without the surrounding
+    sentence, and the prose itself is left in the notes."""
+    from src.models import extract_og_filenames, strip_og_filename_lines
+    notes = 'The file included it\'s OG Filename: "KING OF HEARTS MD MIX 2.mp3". This suggests earlier mixes.'
+    assert extract_og_filenames(notes) == ["KING OF HEARTS MD MIX 2.mp3"]
+    assert strip_og_filename_lines(notes) == notes
+
+
+def test_sample_artist_prose_not_captured():
+    """Sentence text after the artist must not leak into the sample string."""
+    from src.models import extract_samples
+    result = extract_samples(
+        'Samples "Ain\'t Nobody" by Rufus & Chaka Khan. Leaked in Oct 2016 by garetare from the tape.'
+    )
+    assert result == ["Ain't Nobody — Rufus & Chaka Khan"], f"Got: {result}"
+
+
+def test_sample_artist_abbreviation_survives():
+    """Short honorifics like 'Dr.' must not be treated as sentence ends."""
+    from src.models import extract_samples
+    result = extract_samples('Samples "Xxplosive" by Dr. Dre')
+    assert result == ["Xxplosive — Dr. Dre"], f"Got: {result}"
 
 
 def test_carti_tracker_hub_not_a_section():
@@ -1073,3 +1211,223 @@ def test_carti_tracker_hub_not_a_section():
                 for v in song.versions:
                     assert "carti tracker hub" not in v.name.lower(), \
                         f"Found tracker hub as song in era '{era.name}'"
+
+
+class TestSlashEraRegistration:
+    """Verify slash-split era parts don't shadow a genuine standalone era.
+
+    Before the fix, registering era "38 Baby / Ay Ay" populated era_by_key
+    with both "38 baby" and "ay ay" via setdefault. A later genuine "Ay Ay"
+    era was then blocked from owning the "ay ay" key — any song row with
+    era="Ay Ay" mis-attributed to the slash era. After the fix slash parts
+    live in a fallback dict only consulted when the primary lookup fails.
+    """
+
+    @staticmethod
+    def _register(era_name: str, primary: dict, fallback: dict):
+        from src.parser import _register_era_keys
+        from src.models import Era, Section
+        era = Era(name=era_name, sections=[Section()])
+        _register_era_keys(era, era_name, primary, fallback)
+        return era
+
+    def test_slash_part_goes_to_fallback_not_primary(self):
+        primary: dict = {}
+        fallback: dict = {}
+        slash_era = self._register("38 Baby / Ay Ay", primary, fallback)
+        assert primary.get("38 baby / ay ay") is slash_era
+        assert "38 baby" in fallback and primary.get("38 baby") is None
+        assert "ay ay" in fallback and primary.get("ay ay") is None
+
+    def test_genuine_era_wins_over_slash_part_registered_first(self):
+        primary: dict = {}
+        fallback: dict = {}
+        slash_era = self._register("38 Baby / Ay Ay", primary, fallback)
+        genuine = self._register("Ay Ay", primary, fallback)
+        assert primary.get("ay ay") is genuine
+        assert fallback.get("ay ay") is slash_era
+
+    def test_slash_part_resolves_when_no_genuine_era_exists(self):
+        primary: dict = {}
+        fallback: dict = {}
+        slash_era = self._register("38 Baby / Ay Ay", primary, fallback)
+        assert primary.get("ay ay") is None
+        assert fallback.get("ay ay") is slash_era
+        assert fallback.get("38 baby") is slash_era
+
+    def test_legacy_call_without_fallback_dict_keeps_old_behaviour(self):
+        from src.parser import _register_era_keys
+        from src.models import Era, Section
+        primary: dict = {}
+        era = Era(name="A / B", sections=[Section()])
+        _register_era_keys(era, era.name, primary)
+        assert primary.get("a") is era
+        assert primary.get("b") is era
+
+
+# ---------------------------------------------------------------------------
+# Stat extraction robustness
+# ---------------------------------------------------------------------------
+
+class TestStatPairExtraction:
+    """Stats followed by trailing prose/punctuation must not be dropped.
+
+    The old _STAT_LINE_PATTERN lookahead only accepted a digit or
+    end-of-string after the label, so "5 Snippet(s) - new finds" failed to
+    match at all and the stat silently vanished.
+    """
+
+    def test_label_with_trailing_comment(self):
+        from src.models import _extract_stat_pairs
+        assert _extract_stat_pairs("5 Snippet(s) - new finds") == {"snippet": 5}
+
+    def test_label_with_trailing_punctuation(self):
+        from src.models import _extract_stat_pairs
+        assert _extract_stat_pairs("45 Full!") == {"full": 45}
+
+    def test_concatenated_format_unchanged(self):
+        from src.models import _extract_stat_pairs
+        assert _extract_stat_pairs("1 OG File(s)45 Full1 Tagged") == {
+            "og file": 1, "full": 45, "tagged": 1,
+        }
+
+    def test_newline_format_unchanged(self):
+        from src.models import _extract_stat_pairs
+        assert _extract_stat_pairs("1 Total Full\n0 OG File\n3 Unavailable") == {
+            "total full": 1, "og file": 0, "unavailable": 3,
+        }
+
+    def test_unbalanced_paren_normalizes(self):
+        from src.models import _extract_stat_pairs
+        assert _extract_stat_pairs("1 OG File(s")["og file"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Link cleaning
+# ---------------------------------------------------------------------------
+
+class TestLinkCleaning:
+    """_clean_link must unwrap Google redirects and never raise."""
+
+    def test_unwraps_google_redirect(self):
+        from src.parser import _clean_link
+        wrapped = "https://www.google.com/url?q=https%3A%2F%2Fpillows.su%2Ff%2Fabc&sa=D"
+        assert _clean_link(wrapped) == "https://pillows.su/f/abc"
+
+    def test_wrapper_without_q_returns_original(self):
+        from src.parser import _clean_link
+        url = "https://www.google.com/url?x=y&z=1"
+        assert _clean_link(url) == url
+
+    def test_wrapper_with_empty_q_returns_original(self):
+        from src.parser import _clean_link
+        url = "https://www.google.com/url?q=&sa=D"
+        assert _clean_link(url) == url
+
+    def test_plain_url_untouched(self):
+        from src.parser import _clean_link
+        assert _clean_link("https://pillows.su/f/abc") == "https://pillows.su/f/abc"
+
+    def test_malformed_url_does_not_raise(self):
+        from src.parser import _clean_link
+        # Invalid IPv6-style bracket makes urlparse raise ValueError
+        url = "https://www.google.com/url?q=x#[invalid"
+        assert _clean_link(url)  # any non-crashing result is acceptable
+
+
+# ---------------------------------------------------------------------------
+# Robustness: malformed / degenerate input must never crash the parser
+# ---------------------------------------------------------------------------
+
+class TestParserRobustness:
+    def _parse(self, html: str):
+        from src.parser import parse_sheet
+        return parse_sheet(html, "Test Artist")
+
+    def test_empty_document(self):
+        artist = self._parse("")
+        assert artist.eras == []
+
+    def test_document_without_table(self):
+        artist = self._parse("<html><body><p>nothing here</p></body></html>")
+        assert artist.eras == []
+
+    def test_empty_table(self):
+        artist = self._parse("<table></table>")
+        assert artist.eras == []
+
+    def test_unclosed_tags(self):
+        html = "<table><tr><td>Era<td>Name<tr><td>Yeezus<td>New Song"
+        artist = self._parse(html)  # must not raise
+        assert artist.name == "Test Artist"
+
+    def test_nested_table_does_not_crash(self):
+        html = (
+            "<table><tr><td>Era</td><td>Name</td></tr>"
+            "<tr><td><table><tr><td>inner</td></tr></table></td><td>Song A</td></tr>"
+            "</table>"
+        )
+        artist = self._parse(html)
+        assert artist.name == "Test Artist"
+
+    def test_missing_columns(self):
+        """Header with only an Era column — song rows must not blow up."""
+        html = (
+            "<table><tr><td>Era</td><td>Name</td></tr>"
+            "<tr><td>Yeezus</td><td>Some Song</td></tr></table>"
+        )
+        artist = self._parse(html)
+        assert artist.name == "Test Artist"
+
+    def test_unicode_era_and_song_names(self):
+        html = (
+            "<table><tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>ROSALÍA Été</td><td>Süß Song 🎵</td><td>geëky note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = self._parse(html)
+        assert artist.name == "Test Artist"
+
+    def test_html_entities_decoded(self):
+        html = (
+            "<table><tr><td>Era</td><td>Name</td></tr>"
+            "<tr><td>Caf&eacute; Era</td><td>Song &amp; Co</td></tr></table>"
+        )
+        from src.parser import extract_table
+        rows = extract_table(html)
+        assert rows[1][0].text == "Café Era"
+        assert rows[1][1].text == "Song & Co"
+
+    def test_colspan_pads_cells(self):
+        from src.parser import extract_table
+        rows = extract_table(
+            "<table><tr><td colspan='3'>wide</td><td>end</td></tr></table>"
+        )
+        assert len(rows[0]) == 4
+        assert rows[0][0].text == "wide"
+        assert rows[0][3].text == "end"
+
+    def test_br_becomes_newline_and_link_lines_tracked(self):
+        from src.parser import extract_table
+        rows = extract_table(
+            "<table><tr><td>line1<br>"
+            '<a href="https://x.test/a">link on line 2</a></td></tr></table>'
+        )
+        cell = rows[0][0]
+        assert cell.text == "line1\nlink on line 2"
+        assert cell.links == ["https://x.test/a"]
+        assert cell.link_lines == [1]
+
+
+# ---------------------------------------------------------------------------
+# File-level encoding fallback
+# ---------------------------------------------------------------------------
+
+class TestParseFileEncoding:
+    def test_non_utf8_file_falls_back(self, tmp_path):
+        """A cp1252-encoded export (curly quote = 0x92) must not crash parse_file."""
+        html = "<html><body><table><tr><td>Era</td><td>Don’t Stop</td></tr></table></body></html>"
+        p = tmp_path / "tracker.html"
+        p.write_bytes(html.encode("cp1252"))
+        artist = parse_file(p, "Test Artist")
+        assert artist.name == "Test Artist"

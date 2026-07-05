@@ -229,6 +229,8 @@ def _infer_artist_name(title: str) -> str:
     # Step 5: Map well-known tracker aliases to real artist names
     _TRACKER_ALIASES = {
         "the guy from degrassi": "Drake",
+        # Some trackers flip the comma order as a joke.
+        "creator, the tyler": "Tyler, The Creator",
     }
     name_lower = name.lower()
     if name_lower in _TRACKER_ALIASES:
