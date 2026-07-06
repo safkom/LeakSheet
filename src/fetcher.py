@@ -234,17 +234,24 @@ def _infer_artist_name(title: str) -> str:
         if name.endswith(suffix):
             name = name[: -len(suffix)].strip()
 
-    # Step 1b: Strip "Tracker 2.0" / "Tracker v3" style version suffixes
-    # (e.g. "Travis Scott Tracker 2.0" → "Travis Scott Tracker" → "Travis Scott")
-    name = re.sub(r"\s+Tracker\s+[\d.v]+\s*$", "", name, flags=re.IGNORECASE).strip()
+    # Step 1b: Strip "Tracker 2.0" / "Tracker v3" version suffixes and
+    # "Tracker PUBLIC" / "Tracker [Official]" style qualifiers that follow
+    # the word Tracker (2026-07-06 census: 'Ye Tracker PUBLIC',
+    # 'Playboi Carti Tracker [Official]')
+    name = re.sub(
+        r"\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE|\[[^\]]*\]|\([^)]*\))\s*$",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    ).strip()
     # Re-apply suffix stripping after version removal
     for suffix in TITLE_SUFFIXES:
         if name.endswith(suffix):
             name = name[: -len(suffix)].strip()
 
-    # Step 2: Strip trailing parenthetical metadata like "(reup 12.29.25)"
-    # that prevents suffix stripping on the first pass
-    paren_match = re.search(r"\s*\([^)]*\)\s*$", name)
+    # Step 2: Strip trailing parenthetical/bracketed metadata like
+    # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
+    paren_match = re.search(r"\s*[\(\[][^)\]]*[\)\]]\s*$", name)
     if paren_match:
         stripped = name[: paren_match.start()].strip()
         # Re-apply suffix stripping on the cleaned name
