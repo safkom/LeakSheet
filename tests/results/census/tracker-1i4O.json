@@ -1,0 +1,720 @@
+{
+  "artist": "Kendrick Lamar",
+  "slug": "kendrick-lamar",
+  "source": "https://docs.google.com/spreadsheets/d/1i4OQglDHiiqMDthqfUFPutGmpZzK7n63LaoWApqhQXI/htmlview",
+  "origin": "live",
+  "totals": {
+    "eras": 19,
+    "songs": 735,
+    "versions": 974,
+    "misc_entries": 0,
+    "notices": 2,
+    "links": 826,
+    "streamable_links": 570,
+    "streamable_pct": 69.0
+  },
+  "eras": [
+    {
+      "name": "Training Day",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 2,
+      "versions": 2,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "No Sleep 'Til NYC",
+      "alt_names": [
+        "Collaboration with Jay Rock"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 6,
+      "versions": 6,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "C4",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 12,
+      "versions": 12,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "The Kendrick Lamar EP",
+      "alt_names": [
+        "The Kendrick Lamar LP, Kendrick Lamar"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 9,
+      "versions": 12,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Overly Dedicated",
+      "alt_names": [
+        "The Kendrick Lamar O.D"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 7,
+      "versions": 7,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Collaboration with J. Cole",
+      "alt_names": [
+        "Out the Sky, Burning Leather"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 10,
+      "versions": 10,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Section.80",
+      "alt_names": [
+        "Good Kid in a Mad City"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 23,
+      "versions": 25,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "good kid, m.A.A.d city",
+      "alt_names": [
+        "good kid, m.A.A.d city: a short film by Kendrick Lamar"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 61,
+      "versions": 83,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Tu Pimp A Caterpillar [V1]",
+      "alt_names": [
+        "How Much A Dollar Cost, To Pimp A Butterfly, To Pimp A Butterfly: a blank letter by Kendrick Lamar"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 34,
+      "versions": 42,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "To Pimp A Butterfly [V2]",
+      "alt_names": [
+        "How Much A Dollar Cost, Tu Pimp A Caterpillar, To Pimp A Butterfly: a blank letter by Kendrick Lamar"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 82,
+      "versions": 99,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "DAMN.",
+      "alt_names": [
+        "What Happens On Earth, Stays On Earth., ain't nobody praying for me, GOD DAMN"
+      ],
+      "sections": [
+        "DAMN. Sessions (March 4th 2016 - January 21st, 2017)",
+        "New York Sessions (Janurary 21st, 2017)",
+        "DAMN. Sessions (Feburary 22nd, 2017 - April 14th, 2017)"
+      ],
+      "songs": 138,
+      "versions": 179,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Black Panther: The Album",
+      "alt_names": [
+        "Collaboration with TDE"
+      ],
+      "sections": [
+        "Black Panther Sessions (August 2017 - Feburary 9th, 2018)",
+        "Pre-Everybody Sensitive Sessions (October 2017 - Feburary 9th, 2018)"
+      ],
+      "songs": 41,
+      "versions": 58,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Look Woman",
+      "alt_names": [
+        "Look Woman, Amen!, Look Woman, Amen: A Horror Film by Kendrick L. Duckworth"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 22,
+      "versions": 22,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Everybody Sensitive [V1]",
+      "alt_names": [
+        "An Audio Book By Kendrick L. Duckworth, Mr. Morale & The Big Steppers"
+      ],
+      "sections": [
+        "Everybody Sensitive Sessions (December 1st, 2017 - August 2018)",
+        "Everybody Sensitive Sessions (August 2018 - December 2018)",
+        "London Sessions (Feburary 11th, 2019)",
+        "Everybody Sensitive Sessions (March 2019 - August 2019)",
+        "Everybody Sensitive Sessions (September, 2019 - January 11th, 2020)",
+        "Everybody Sensitive Sessions (January 11th, 2020 - March 15th, 2020)"
+      ],
+      "songs": 150,
+      "versions": 219,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Mr. Morale [V2]",
+      "alt_names": [
+        "Everybody Sensitive, Mr. Morale & The Big Steppers"
+      ],
+      "sections": [
+        "Mr. Morale Sessions (March 15th, 2020 - May 5th, 2020)",
+        "Mr. Morale Sessions (May 5th, 2020 - March 19th, 2021)",
+        "Mr. Morale Sessions (March 19th, 2021 - August 2nd, 2021)"
+      ],
+      "songs": 39,
+      "versions": 51,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Mr. Morale [V3]",
+      "alt_names": [
+        "Everybody Sensitive, Mr. Morale & The Big Steppers"
+      ],
+      "sections": [
+        "Mr. Morale Sessions (August 2nd, 2021 - April 18th, 2022)",
+        "Mr. Morale Sessions (April 18th, 2022 - May 3rd, 2022)",
+        "Mr. Morale Sessions (May 3rd, 2022 - May 13th, 2022)"
+      ],
+      "songs": 33,
+      "versions": 66,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "GNX",
+      "alt_names": [],
+      "sections": [
+        "Drake vs. Kendrick Lamar",
+        "GNX"
+      ],
+      "songs": 44,
+      "versions": 52,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Rap Album",
+      "alt_names": [
+        "LP7, GNX Deluxe"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 6,
+      "versions": 6,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Compton Cowboys",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 16,
+      "versions": 23,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    }
+  ],
+  "distributions": {
+    "badges": {
+      "special": 94,
+      "best": 57,
+      "grail": 45,
+      "worst": 10
+    },
+    "version_tags": {
+      "V1": 166,
+      "V2": 152,
+      "V3": 85,
+      "V4": 54,
+      "V5": 37,
+      "V6": 18,
+      "V7": 12,
+      "V8": 11,
+      "V10": 7,
+      "V9": 6,
+      "V?": 6,
+      "V11": 6,
+      "V1-V2": 5,
+      "V1-V?": 3,
+      "V2-V3": 3,
+      "V12": 3,
+      "V14": 3,
+      "Clean": 2,
+      "V3-V?": 2,
+      "V13": 2,
+      "V1-V4": 2,
+      "V15": 2,
+      "V2-V5": 2,
+      "V21": 2,
+      "V22": 2
+    },
+    "quality": {
+      "Not Available": 420,
+      "CD Quality": 204,
+      "High Quality": 183,
+      "Lossless": 77,
+      "Recording": 71,
+      "Low Quality": 18,
+      "Conflicting Sources": 1
+    },
+    "availability": {
+      "Confirmed": 323,
+      "OG File": 175,
+      "Full": 139,
+      "Snippet": 125,
+      "Rumored": 94,
+      "Partial": 40,
+      "Beat Only": 38,
+      "Stem Bounce": 23,
+      "Tagged": 10,
+      "Vocals Only": 4,
+      "Conflicting Sources": 3
+    },
+    "type": {},
+    "link_hosts": {
+      "pillows.su": 570,
+      "youtube.com": 118,
+      "complex.com": 9,
+      "web.archive.org": 7,
+      "youtu.be": 7,
+      "open.spotify.com": 6,
+      "reddit.com": 6,
+      "rollingstone.com": 6,
+      "hiphopdx.com": 5,
+      "instagram.com": 5,
+      "x.com": 5,
+      "npr.org": 5,
+      "genius.com": 4,
+      "djbooth.net": 4,
+      "pitchfork.com": 4,
+      "dubcnn.com": 3,
+      "xxlmag.com": 3,
+      "theneptunes.org": 3,
+      "i.ibb.co": 3,
+      "billboard.com": 3,
+      "thefader.com": 3,
+      "people.com": 3,
+      "facebook.com": 3,
+      "myspace.com": 2,
+      "www-billboard-com.cdn.ampproject.org": 2
+    }
+  },
+  "misc_entry_types": {},
+  "coverage": {
+    "notes": {
+      "count": 974,
+      "pct": 100.0
+    },
+    "samples": {
+      "count": 46,
+      "pct": 4.7
+    },
+    "og_filenames": {
+      "count": 292,
+      "pct": 30.0
+    },
+    "featuring": {
+      "count": 318,
+      "pct": 32.6
+    },
+    "producers": {
+      "count": 654,
+      "pct": 67.1
+    },
+    "track_length": {
+      "count": 947,
+      "pct": 97.2
+    },
+    "file_date": {
+      "count": 212,
+      "pct": 21.8
+    },
+    "leak_date": {
+      "count": 560,
+      "pct": 57.5
+    },
+    "quality": {
+      "count": 974,
+      "pct": 100.0
+    },
+    "available_length": {
+      "count": 974,
+      "pct": 100.0
+    }
+  },
+  "parse_signals": {
+    "total_rows": 1042,
+    "song_rows": 974,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
+    "footer_rows": 22,
+    "fuzzy_matched_rows": 0,
+    "dropped_columns": [],
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
+  },
+  "suspicions": {
+    "zero_song_eras": [],
+    "single_song_eras": [],
+    "songs_10plus_versions": [
+      {
+        "song": "Beyoncé - Blessed",
+        "versions": 10,
+        "era": "Everybody Sensitive [V1]"
+      }
+    ],
+    "duplicate_songs_across_eras": [
+      {
+        "song": "bangladesh - west coast anthem",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "cartoon & cereal",
+        "eras": [
+          "Overly Dedicated",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "choose me",
+        "eras": [
+          "Mr. Morale [V2]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
+        "song": "daddy issues",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Look Woman",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "flashlight",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "friends",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "it's us",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "kanye west - no more parties in l.a.",
+        "eras": [
+          "The Kendrick Lamar EP",
+          "To Pimp A Butterfly [V2]"
+        ]
+      },
+      {
+        "song": "love",
+        "eras": [
+          "DAMN.",
+          "To Pimp A Butterfly [V2]"
+        ]
+      },
+      {
+        "song": "nigga news",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
+        "song": "not for sale",
+        "eras": [
+          "Compton Cowboys",
+          "Everybody Sensitive [V1]"
+        ]
+      },
+      {
+        "song": "overthink",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "push",
+        "eras": [
+          "Mr. Morale [V2]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
+        "song": "rich the kid - for the birds",
+        "eras": [
+          "Black Panther: The Album",
+          "DAMN."
+        ]
+      },
+      {
+        "song": "rich the kid - new freezer",
+        "eras": [
+          "Black Panther: The Album",
+          "DAMN."
+        ]
+      },
+      {
+        "song": "rihanna - righteous",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
+        "song": "somebody",
+        "eras": [
+          "Black Panther: The Album",
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "style",
+        "eras": [
+          "Black Panther: The Album",
+          "Look Woman"
+        ]
+      },
+      {
+        "song": "take off",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
+        "song": "terrace martin - drones",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "To Pimp A Butterfly [V2]"
+        ]
+      },
+      {
+        "song": "tranquilizer",
+        "eras": [
+          "Compton Cowboys",
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
+        "song": "travis scott - goosebumps",
+        "eras": [
+          "DAMN.",
+          "To Pimp A Butterfly [V2]"
+        ]
+      },
+      {
+        "song": "ty dolla $ign - ???",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "GNX"
+        ]
+      },
+      {
+        "song": "unknown [album throwaways]",
+        "eras": [
+          "Tu Pimp A Caterpillar [V1]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [ash riser collaborations]",
+        "eras": [
+          "To Pimp A Butterfly [V2]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [cardo got wings beats]",
+        "eras": [
+          "To Pimp A Butterfly [V2]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [dj premier beats]",
+        "eras": [
+          "DAMN.",
+          "To Pimp A Butterfly [V2]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [dr. dre collaborations]",
+        "eras": [
+          "GNX",
+          "Section.80"
+        ]
+      },
+      {
+        "song": "unknown [kanye west collaborations]",
+        "eras": [
+          "GNX",
+          "Tu Pimp A Caterpillar [V1]"
+        ]
+      },
+      {
+        "song": "unknown [mike will made-it beats]",
+        "eras": [
+          "DAMN.",
+          "To Pimp A Butterfly [V2]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [pharrell williams collaborations]",
+        "eras": [
+          "Mr. Morale [V3]",
+          "To Pimp A Butterfly [V2]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [q-tip collaborations]",
+        "eras": [
+          "Tu Pimp A Caterpillar [V1]",
+          "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [the game collaborations]",
+        "eras": [
+          "Black Panther: The Album",
+          "Training Day"
+        ]
+      }
+    ],
+    "placeholder_groups": [
+      {
+        "era": "Tu Pimp A Caterpillar [V1]",
+        "base": "Untitled",
+        "versions": 3,
+        "alt_title_clusters": [
+          "Validation And Promise, Real Good, Get It"
+        ]
+      },
+      {
+        "era": "GNX",
+        "base": "???",
+        "versions": 2,
+        "alt_title_clusters": [
+          "gnx"
+        ]
+      }
+    ],
+    "era_like_song_names": [],
+    "over_long_names": []
+  },
+  "snapshot": "tests/fixtures/snapshots/tracker-1i4O.html.gz"
+}

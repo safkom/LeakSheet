@@ -1,0 +1,867 @@
+{
+  "artist": "Drake",
+  "slug": "drake",
+  "source": "https://docs.google.com/spreadsheets/d/1v55XAPLzw1iuWxH1OQKajCIYPhW2BXcLoV4mXDZ55DI/htmlview",
+  "origin": "live",
+  "totals": {
+    "eras": 29,
+    "songs": 793,
+    "versions": 998,
+    "misc_entries": 0,
+    "notices": 4,
+    "links": 572,
+    "streamable_links": 400,
+    "streamable_pct": 69.9
+  },
+  "eras": [
+    {
+      "name": "Before So Far Gone",
+      "alt_names": [
+        "Room For Improvement, Comeback Season"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 30,
+      "versions": 30,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "So Far Gone",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 49,
+      "versions": 70,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "We Are Young Money",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 5,
+      "versions": 6,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Thank Me Later",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 70,
+      "versions": 84,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "It's Never Enough",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 13,
+      "versions": 13,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Take Care",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 23,
+      "versions": 31,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Posthumous Aaliyah Project",
+      "alt_names": [
+        "Collaboration with Aaliyah",
+        "exec prod. Drake & 40"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 6,
+      "versions": 6,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Nothing Was The Same",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 57,
+      "versions": 61,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Views From The 6ix [V1]",
+      "alt_names": [
+        "Views"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 10,
+      "versions": 11,
+      "has_art": true,
+      "has_description": false,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "If You're Reading This It's Too Late",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 38,
+      "versions": 58,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "What A Time To Be Alive",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 19,
+      "versions": 19,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Wolves",
+      "alt_names": [
+        "Collabaration with Kanye West",
+        "New Abu Dhabi, Calabasas Is The New Abu Dhabi"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 6,
+      "versions": 7,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Views [V2]",
+      "alt_names": [
+        "Views From The 6ix"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 35,
+      "versions": 55,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "More Life",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 29,
+      "versions": 41,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Scorpion [V1]",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 42,
+      "versions": 63,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Scorpion [V2]",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 23,
+      "versions": 31,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "What A Time To Be Alive 2",
+      "alt_names": [
+        "Collaboration with Future"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 13,
+      "versions": 14,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Certified Lover Boy [V1]",
+      "alt_names": [],
+      "sections": [
+        "Early Sessions",
+        "2019 / Care Package 2 / Dark Lane Demo Tapes",
+        "Barbados Sessions",
+        "2020 Sessions"
+      ],
+      "songs": 80,
+      "versions": 94,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "Certified Lover Boy [V2]",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 50,
+      "versions": 72,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Honestly, Nevermind",
+      "alt_names": [
+        "I Wish I Could Sing, Titles Ruin Everything"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 27,
+      "versions": 34,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Her Loss",
+      "alt_names": [
+        "Collaboration with 21 Savage"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 20,
+      "versions": 29,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "For All The Dogs",
+      "alt_names": [
+        "FOR ALL THE DOGSDEM, Scary Hours 3"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 41,
+      "versions": 44,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "100 GIGS",
+      "alt_names": [
+        "100 GIGS FOR YOUR HEADTOP",
+        "exec prod. Drake, 40, Oliver El-Khatib & Noel Cadastre"
+      ],
+      "sections": [
+        "Before 100 GIGS",
+        "100 GIGS"
+      ],
+      "songs": 21,
+      "versions": 28,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "$ome $exy $ongs 4 U",
+      "alt_names": [
+        "Collaboration with PARTYNEXTDOOR",
+        "exec prod. Drake & PARTYNEXTDOOR"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 22,
+      "versions": 27,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "ICEMAN [V1]",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 29,
+      "versions": 32,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "ICEMAN [V2]",
+      "alt_names": [
+        "MAID OF HONOUR, HABIBTI"
+      ],
+      "sections": [
+        "Post Rework",
+        "MAID OF HONOUR Sessions",
+        "HABIBTI Sessions"
+      ],
+      "songs": 28,
+      "versions": 31,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Ongoing",
+      "alt_names": [
+        "Scary Hours 4"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 2,
+      "versions": 2,
+      "has_art": true,
+      "has_description": false,
+      "has_stats": true,
+      "timeline_events": 1
+    },
+    {
+      "name": "Performance Tracks",
+      "alt_names": [],
+      "sections": [
+        "It's All A Blur Tour"
+      ],
+      "songs": 5,
+      "versions": 5,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 0
+    },
+    {
+      "name": "Unknown",
+      "alt_names": [],
+      "sections": [],
+      "songs": 0,
+      "versions": 0,
+      "has_art": true,
+      "has_description": false,
+      "has_stats": true,
+      "timeline_events": 0
+    }
+  ],
+  "distributions": {
+    "badges": {
+      "special": 81,
+      "best": 67,
+      "grail": 24,
+      "worst": 4
+    },
+    "version_tags": {
+      "V1": 169,
+      "V2": 151,
+      "V3": 57,
+      "V4": 26,
+      "V5": 19,
+      "V6": 12,
+      "V7": 9,
+      "V11": 7,
+      "V8": 6,
+      "V9": 6,
+      "V10": 6,
+      "V13": 5,
+      "V12": 4,
+      "V2-V9": 3,
+      "V1-V2": 2,
+      "V14": 2,
+      "V17": 2,
+      "V2-V4": 2,
+      "V1-V16": 2,
+      "V1-V10": 2,
+      "V1-V4": 1,
+      "V9-V11": 1,
+      "V3-V6": 1,
+      "V2-V?": 1,
+      "V3-V?": 1
+    },
+    "quality": {
+      "Not Available": 453,
+      "CD Quality": 221,
+      "High Quality": 175,
+      "Recording": 79,
+      "Lossless": 39,
+      "Low Quality": 27
+    },
+    "availability": {
+      "Confirmed": 346,
+      "Full": 238,
+      "OG File": 121,
+      "Rumored": 104,
+      "Snippet": 101,
+      "Partial": 43,
+      "Tagged": 18,
+      "Beat Only": 14,
+      "Stem Bounce": 6,
+      "Conflicting Sources": 3
+    },
+    "type": {},
+    "link_hosts": {
+      "pillows.su": 365,
+      "youtube.com": 29,
+      "krakenfiles.com": 25,
+      "gottahaverockandroll.com": 12,
+      "youtu.be": 12,
+      "complex.com": 9,
+      "reddit.com": 8,
+      "billboard.com": 7,
+      "web.archive.org": 7,
+      "imgur.gg": 7,
+      "twitter.com": 7,
+      "vibe.com": 6,
+      "pixeldrain.com": 6,
+      "pbs.twimg.com": 4,
+      "instagram.com": 4,
+      "hiphop-n-more.com": 3,
+      "imgur.com": 3,
+      "rapradar.com": 3,
+      "google.com": 3,
+      "hiphopdx.com": 3,
+      "i.imgur.com": 3,
+      "soundcloud.com": 3,
+      "ibb.co": 3,
+      "genius.com": 3,
+      "revolt.tv": 2
+    }
+  },
+  "misc_entry_types": {},
+  "coverage": {
+    "notes": {
+      "count": 997,
+      "pct": 99.9
+    },
+    "samples": {
+      "count": 14,
+      "pct": 1.4
+    },
+    "og_filenames": {
+      "count": 211,
+      "pct": 21.1
+    },
+    "featuring": {
+      "count": 416,
+      "pct": 41.7
+    },
+    "producers": {
+      "count": 696,
+      "pct": 69.7
+    },
+    "track_length": {
+      "count": 317,
+      "pct": 31.8
+    },
+    "file_date": {
+      "count": 109,
+      "pct": 10.9
+    },
+    "leak_date": {
+      "count": 666,
+      "pct": 66.7
+    },
+    "quality": {
+      "count": 994,
+      "pct": 99.6
+    },
+    "available_length": {
+      "count": 994,
+      "pct": 99.6
+    }
+  },
+  "parse_signals": {
+    "total_rows": 1142,
+    "song_rows": 998,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
+    "footer_rows": 63,
+    "fuzzy_matched_rows": 0,
+    "dropped_columns": [],
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
+  },
+  "suspicions": {
+    "zero_song_eras": [
+      {
+        "era": "Unknown",
+        "has_description": false,
+        "has_timeline": false
+      }
+    ],
+    "single_song_eras": [],
+    "songs_10plus_versions": [
+      {
+        "song": "Kanye West - 30 Hours",
+        "versions": 14,
+        "era": "Views [V2]"
+      },
+      {
+        "song": "Kanye West - When I See It",
+        "versions": 12,
+        "era": "If You're Reading This It's Too Late"
+      },
+      {
+        "song": "Kanye West - Yikes",
+        "versions": 11,
+        "era": "Scorpion [V1]"
+      },
+      {
+        "song": "Kanye West - Lift Yourself",
+        "versions": 10,
+        "era": "Scorpion [V1]"
+      }
+    ],
+    "duplicate_songs_across_eras": [
+      {
+        "song": "bad bunny - mía",
+        "eras": [
+          "Scorpion [V1]",
+          "Scorpion [V2]"
+        ]
+      },
+      {
+        "song": "champagne poetry",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "desires",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "What A Time To Be Alive 2"
+        ]
+      },
+      {
+        "song": "down for me",
+        "eras": [
+          "ICEMAN [V1]",
+          "ICEMAN [V2]"
+        ]
+      },
+      {
+        "song": "dr. dre - ???",
+        "eras": [
+          "So Far Gone",
+          "Thank Me Later"
+        ]
+      },
+      {
+        "song": "dr. dre - man's best friend",
+        "eras": [
+          "Take Care",
+          "Thank Me Later"
+        ]
+      },
+      {
+        "song": "drakeo the ruler - talk to me",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "fountains",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "french montana - splash brothers",
+        "eras": [
+          "100 GIGS",
+          "Honestly, Nevermind"
+        ]
+      },
+      {
+        "song": "fucking fans",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "gunna - pussy power",
+        "eras": [
+          "Certified Lover Boy [V2]",
+          "Honestly, Nevermind"
+        ]
+      },
+      {
+        "song": "i could never",
+        "eras": [
+          "Honestly, Nevermind",
+          "Scorpion [V1]",
+          "Views [V2]"
+        ]
+      },
+      {
+        "song": "in the bible",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "jaded",
+        "eras": [
+          "Scorpion [V1]",
+          "Scorpion [V2]"
+        ]
+      },
+      {
+        "song": "jaÿ-z - ???",
+        "eras": [
+          "Nothing Was The Same",
+          "So Far Gone"
+        ]
+      },
+      {
+        "song": "kanye west - when i see it",
+        "eras": [
+          "If You're Reading This It's Too Late",
+          "Views [V2]"
+        ]
+      },
+      {
+        "song": "lil wayne - ???",
+        "eras": [
+          "Scorpion [V2]",
+          "Thank Me Later"
+        ]
+      },
+      {
+        "song": "love all",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "michael jackson - it don't matter to me",
+        "eras": [
+          "Before So Far Gone",
+          "Nothing Was The Same"
+        ]
+      },
+      {
+        "song": "national treasure",
+        "eras": [
+          "100 GIGS",
+          "ICEMAN [V1]"
+        ]
+      },
+      {
+        "song": "nokia",
+        "eras": [
+          "$ome $exy $ongs 4 U",
+          "100 GIGS"
+        ]
+      },
+      {
+        "song": "pistol in my bed",
+        "eras": [
+          "More Life",
+          "Views From The 6ix [V1]"
+        ]
+      },
+      {
+        "song": "plot twist",
+        "eras": [
+          "ICEMAN [V1]",
+          "ICEMAN [V2]"
+        ]
+      },
+      {
+        "song": "sandra's rose",
+        "eras": [
+          "Scorpion [V1]",
+          "Scorpion [V2]"
+        ]
+      },
+      {
+        "song": "say something",
+        "eras": [
+          "Performance Tracks",
+          "Thank Me Later"
+        ]
+      },
+      {
+        "song": "scary hours 4 [project]",
+        "eras": [
+          "Ongoing",
+          "Performance Tracks"
+        ]
+      },
+      {
+        "song": "stuck",
+        "eras": [
+          "ICEMAN [V1]",
+          "ICEMAN [V2]"
+        ]
+      },
+      {
+        "song": "summer games",
+        "eras": [
+          "Scorpion [V1]",
+          "Scorpion [V2]"
+        ]
+      },
+      {
+        "song": "unknown [dr. dre collaborations]",
+        "eras": [
+          "Before So Far Gone",
+          "It's Never Enough",
+          "Views [V2]"
+        ]
+      },
+      {
+        "song": "unknown [playboi carti collaborations]",
+        "eras": [
+          "100 GIGS",
+          "Certified Lover Boy [V2]"
+        ]
+      },
+      {
+        "song": "usher - slow motion",
+        "eras": [
+          "Certified Lover Boy [V1]",
+          "If You're Reading This It's Too Late"
+        ]
+      },
+      {
+        "song": "vital",
+        "eras": [
+          "Ongoing",
+          "Scorpion [V1]"
+        ]
+      },
+      {
+        "song": "yeat - idgaf",
+        "eras": [
+          "Certified Lover Boy [V2]",
+          "For All The Dogs"
+        ]
+      },
+      {
+        "song": "🎖️ ???",
+        "eras": [
+          "$ome $exy $ongs 4 U",
+          "Certified Lover Boy [V1]",
+          "Certified Lover Boy [V2]",
+          "For All The Dogs",
+          "ICEMAN [V1]",
+          "More Life",
+          "Nothing Was The Same",
+          "Thank Me Later",
+          "Views From The 6ix [V1]"
+        ]
+      },
+      {
+        "song": "🎖️ dr. dre - ???",
+        "eras": [
+          "It's Never Enough",
+          "Thank Me Later"
+        ]
+      }
+    ],
+    "placeholder_groups": [
+      {
+        "era": "Certified Lover Boy [V1]",
+        "base": "???",
+        "versions": 2,
+        "alt_title_clusters": [
+          "Piece Of Me"
+        ]
+      }
+    ],
+    "era_like_song_names": [],
+    "over_long_names": []
+  },
+  "snapshot": "tests/fixtures/snapshots/tracker-1v55.html.gz"
+}

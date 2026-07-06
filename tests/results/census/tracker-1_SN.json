@@ -1,0 +1,279 @@
+{
+  "artist": "Baby Keem",
+  "slug": "baby-keem",
+  "source": "https://docs.google.com/spreadsheets/d/1_SNZQS-AAXVleukgKlraegaozkLOu8WMHbUwmPm61hc/htmlview",
+  "origin": "live",
+  "totals": {
+    "eras": 6,
+    "songs": 197,
+    "versions": 286,
+    "misc_entries": 0,
+    "notices": 2,
+    "links": 233,
+    "streamable_links": 213,
+    "streamable_pct": 91.4
+  },
+  "eras": [
+    {
+      "name": "Before Baby Keem",
+      "alt_names": [
+        "as Hykeem Carter and HiiFii"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 8,
+      "versions": 8,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "The Sound of Bad Habit",
+      "alt_names": [
+        "Collaboration with Cardo"
+      ],
+      "sections": [
+        ""
+      ],
+      "songs": 20,
+      "versions": 22,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "DIE FOR MY BITCH",
+      "alt_names": [],
+      "sections": [
+        ""
+      ],
+      "songs": 40,
+      "versions": 52,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "The Melodic Blue",
+      "alt_names": [
+        "LLC THE DEAD"
+      ],
+      "sections": [
+        "Pre Pandemic Late 2019-2020",
+        "Post Pandemic 2020-2021",
+        "Lil Uzi Vert - Pink Tape",
+        "Mr Morale Sessions",
+        "The Melodic Blue Deluxe"
+      ],
+      "songs": 94,
+      "versions": 167,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Child With Wolves",
+      "alt_names": [
+        "Janice, eerietimes, Classical Rage"
+      ],
+      "sections": [
+        "May 25th, 2022 - August 5th, 2023",
+        "Child With Wolves"
+      ],
+      "songs": 24,
+      "versions": 25,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Ca$ino",
+      "alt_names": [
+        "Janice"
+      ],
+      "sections": [
+        "Ca$ino",
+        "Ca$ino (Deluxe)"
+      ],
+      "songs": 11,
+      "versions": 12,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    }
+  ],
+  "distributions": {
+    "badges": {
+      "grail": 22,
+      "special": 20,
+      "best": 19,
+      "worst": 2
+    },
+    "version_tags": {
+      "V2": 53,
+      "V1": 51,
+      "V3": 18,
+      "V4": 7,
+      "V5": 4,
+      "V6": 3,
+      "V7": 3,
+      "V26": 2,
+      "V44": 2,
+      "V30": 2,
+      "V31": 2,
+      "V32": 2,
+      "V33": 2,
+      "V34": 2,
+      "V38": 2,
+      "V39": 2,
+      "V40": 2,
+      "V41": 2,
+      "V42": 2,
+      "V45": 2,
+      "V46": 2,
+      "V47": 2,
+      "V48": 2,
+      "V15": 2,
+      "Radio Mix": 1
+    },
+    "quality": {
+      "CD Quality": 108,
+      "Not Available": 80,
+      "High Quality": 38,
+      "Recording": 33,
+      "Lossless": 19,
+      "Low Quality": 8
+    },
+    "availability": {
+      "Full": 75,
+      "Snippet": 61,
+      "Confirmed": 52,
+      "OG File": 47,
+      "Rumored": 28,
+      "Partial": 18,
+      "Stem Bounce": 4,
+      "Beat Only": 1
+    },
+    "type": {},
+    "link_hosts": {
+      "pillows.su": 211,
+      "youtube.com": 4,
+      "i.ibb.co": 3,
+      "thesource.to": 2,
+      "pixeldrain.com": 2,
+      "imgur.gg": 2,
+      "x.com": 2,
+      "web.archive.org": 1,
+      "soundcloud.com": 1,
+      "rollingstone.com": 1,
+      "gq.com": 1,
+      "www-billboard-com.cdn.ampproject.org": 1,
+      "reddit.com": 1,
+      "tiktok.com": 1
+    }
+  },
+  "misc_entry_types": {},
+  "coverage": {
+    "notes": {
+      "count": 286,
+      "pct": 100.0
+    },
+    "samples": {
+      "count": 4,
+      "pct": 1.4
+    },
+    "og_filenames": {
+      "count": 82,
+      "pct": 28.7
+    },
+    "featuring": {
+      "count": 114,
+      "pct": 39.9
+    },
+    "producers": {
+      "count": 181,
+      "pct": 63.3
+    },
+    "track_length": {
+      "count": 222,
+      "pct": 77.6
+    },
+    "file_date": {
+      "count": 46,
+      "pct": 16.1
+    },
+    "leak_date": {
+      "count": 212,
+      "pct": 74.1
+    },
+    "quality": {
+      "count": 286,
+      "pct": 100.0
+    },
+    "available_length": {
+      "count": 286,
+      "pct": 100.0
+    }
+  },
+  "parse_signals": {
+    "total_rows": 334,
+    "song_rows": 286,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
+    "footer_rows": 19,
+    "fuzzy_matched_rows": 0,
+    "dropped_columns": [],
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
+  },
+  "suspicions": {
+    "zero_song_eras": [],
+    "single_song_eras": [],
+    "songs_10plus_versions": [
+      {
+        "song": "Kanye West - Praise God",
+        "versions": 23,
+        "era": "The Melodic Blue"
+      },
+      {
+        "song": "Kanye West - We Did It Kid",
+        "versions": 16,
+        "era": "The Melodic Blue"
+      }
+    ],
+    "duplicate_songs_across_eras": [
+      {
+        "song": "kanye west - we did it",
+        "eras": [
+          "Ca$ino",
+          "The Melodic Blue"
+        ]
+      },
+      {
+        "song": "kanye west - we did it kid",
+        "eras": [
+          "Ca$ino",
+          "The Melodic Blue"
+        ]
+      },
+      {
+        "song": "shibuya",
+        "eras": [
+          "Child With Wolves",
+          "The Melodic Blue"
+        ]
+      }
+    ],
+    "placeholder_groups": [],
+    "era_like_song_names": [],
+    "over_long_names": []
+  },
+  "snapshot": "tests/fixtures/snapshots/tracker-1_SN.html.gz"
+}

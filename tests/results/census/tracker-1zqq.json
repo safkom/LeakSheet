@@ -1,0 +1,1526 @@
+{
+  "artist": "Lil Uzi Vert",
+  "slug": "lil-uzi-vert",
+  "source": "https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview",
+  "origin": "live",
+  "totals": {
+    "eras": 30,
+    "songs": 2225,
+    "versions": 2459,
+    "misc_entries": 0,
+    "notices": 1,
+    "links": 2218,
+    "streamable_links": 2199,
+    "streamable_pct": 99.1
+  },
+  "eras": [
+    {
+      "name": "Purple Thoughtz",
+      "alt_names": [
+        "Purple Thoughtz EP Vol. 1",
+        "℗ 2014 Warner Music Group"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 16,
+      "versions": 16,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Home Economic$",
+      "alt_names": [
+        "Collaboration with Reese LaFlare"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Not Available"
+      ],
+      "songs": 3,
+      "versions": 3,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "The Real Uzi",
+      "alt_names": [
+        "Hosted by Don Cannon"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Snippets"
+      ],
+      "songs": 16,
+      "versions": 18,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Luv Is Rage",
+      "alt_names": [
+        "℗ 2015 Atlantic Records & Generation Now"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 96,
+      "versions": 110,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Lil Uzi Vert vs. The World",
+      "alt_names": [
+        "℗ 2016 Atlantic Records & Generation Now"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 49,
+      "versions": 56,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "The Perfect LUV Tape",
+      "alt_names": [
+        "TPLT",
+        "exec. prod. Don Cannon",
+        "℗ 2016 Atlantic Records & Generation Now"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 23,
+      "versions": 26,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Luv Is Rage 2 [V1]",
+      "alt_names": [
+        "LIR2 V1",
+        "℗ 2016 Atlantic Records & Warner Music Group"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 52,
+      "versions": 62,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "1017 vs. The World",
+      "alt_names": [
+        "with Gucci Mane",
+        "exec. prod. Almighty Red",
+        "℗ 2016 Generation Now & GUWOP"
+      ],
+      "sections": [
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 7,
+      "versions": 8,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Luv Is Rage 2 [V2]",
+      "alt_names": [
+        "LIR2 V2, Hawaii Sessions, Luv Is Rage 1.5, 2 Luv Is 2 Rage",
+        "exec. prod. Leighton “Lakeshow” Morrison, Don Cannon & DJ Drama",
+        "℗ 2017 Atlantic Records & Warner Music Group"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 127,
+      "versions": 163,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Too Fast",
+      "alt_names": [
+        "Collaboration with YoungBoy Never Broke Again"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Open Verses (Demos) + OG Versions / Release OGs"
+      ],
+      "songs": 5,
+      "versions": 5,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Lil Uzi Vert vs. The World 2 [V1]",
+      "alt_names": [
+        "LUV vs. The World 2, Luv Is Rage 2 (Deluxe)",
+        "℗ 2017 Atlantic Records & Warner Music Group"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 68,
+      "versions": 86,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "16*29",
+      "alt_names": [
+        "Collaboration with Playboi Carti"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Open Verses (Demos) + OG Versions / Release OGs",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 12,
+      "versions": 14,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Tsunami Island",
+      "alt_names": [
+        "Collaboration with Wheezy"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Not Available"
+      ],
+      "songs": 12,
+      "versions": 12,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Eternal Atake [V1]",
+      "alt_names": [
+        "℗ 2019 Atlantic Records & Warner Music Group"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available",
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 281,
+      "versions": 325,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 7
+    },
+    {
+      "name": "Eternal Atake [V2]",
+      "alt_names": [
+        "ETERNAL ATAKE, eternal. [ ih-tur-nl ], Tranquility",
+        "℗ 2019 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 76,
+      "versions": 82,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "Eternal Atake [V3]",
+      "alt_names": [
+        "Eternal Atake (Deluxe) - LUV vs. The World 2, Lil Uzi Vert vs. The World 2 [V2], \"Uzi, Orenji, Baby Pluto\"",
+        "℗ 2020 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 28,
+      "versions": 32,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Baby Pluto Era",
+      "alt_names": [
+        "Sasuke Era, Post Eternal Atake Sessions, Pluto x Baby Pluto Side-Sessions, The Perfect LUV Tape 2",
+        "℗ 2020 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 104,
+      "versions": 108,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Pluto x Baby Pluto",
+      "alt_names": [
+        "Collaboration with Future",
+        "exec. prod. DJ ESCO",
+        "℗ 2020 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Snippets"
+      ],
+      "songs": 16,
+      "versions": 16,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Forever Young",
+      "alt_names": [
+        "Luv Is Rage 3 [V1], The Real Uzi 2, SoundCloud Tape [V1]",
+        "℗ 2021 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available",
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 238,
+      "versions": 246,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 8
+    },
+    {
+      "name": "Pink Tape [V1]",
+      "alt_names": [
+        "Delta Pink, The Pink Tape, Forever Young [V2], SoundCloud Tape [V2], Astrokat",
+        "℗ 2021 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 149,
+      "versions": 160,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Super geëky",
+      "alt_names": [
+        "Collaboration with Yeat",
+        "1600TR, Pink Lyfë, P!nk Lyfe, 1600twizz"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Open Verses (Demos) + OG Versions / Release OGs",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 22,
+      "versions": 27,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Pink Tape [V2]",
+      "alt_names": [
+        "RED & WHITE, Rehab Season, SoundCloud Tape [V3]",
+        "exec. prod. Baby Keem",
+        "℗ 2022 Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available",
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 311,
+      "versions": 335,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 8
+    },
+    {
+      "name": "METROOOO PINK",
+      "alt_names": [
+        "Collaboration with Metro Boomin",
+        "Metro Pink, Lil Uzi Vert vs. Metro Boomin, Lil Metro Boomin"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Snippets",
+        "Unavailable"
+      ],
+      "songs": 11,
+      "versions": 11,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 3
+    },
+    {
+      "name": "Pink Tape [V3]",
+      "alt_names": [
+        "ピンクテープ",
+        "℗ 2023 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 171,
+      "versions": 182,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "Barter 16",
+      "alt_names": [
+        "B16🩸, Barter 16: The Mixtape",
+        "exec. prod. London on da Track",
+        "℗ 2023 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 206,
+      "versions": 222,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 6
+    },
+    {
+      "name": "Luv Is Rage 3 [V2]",
+      "alt_names": [
+        "LIR3, 💔3",
+        "℗ 2024 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "OG Versions / Release OGs",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 27,
+      "versions": 30,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 7
+    },
+    {
+      "name": "Eternal Atake 2",
+      "alt_names": [
+        "EA 2, EA2",
+        "℗ 2024 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 35,
+      "versions": 37,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "ALL WHITE",
+      "alt_names": [
+        "Luv Is Rage 3 [V3], The Perfect LUV Tape 2",
+        "℗ 2025 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 27,
+      "versions": 29,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    },
+    {
+      "name": "W.H.2.U",
+      "alt_names": [
+        "What Happened 2 Uzi, Summer Tape, The Perfect LUV Tape 2, Lil Uzi Vert vs. The World 3",
+        "℗ 2025 Generation Now & Atlantic Records"
+      ],
+      "sections": [
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 17,
+      "versions": 18,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "LP 5",
+      "alt_names": [
+        "W.H.2.U [V2], Cor(e), The Takeover",
+        "℗ 2026 Cor(e) & Roc Nation Distribution"
+      ],
+      "sections": [
+        "Surfaced Throwaways",
+        "Features",
+        "Snippets",
+        "Not Available"
+      ],
+      "songs": 20,
+      "versions": 20,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
+    }
+  ],
+  "distributions": {
+    "badges": {
+      "special": 509,
+      "best": 232,
+      "wanted": 105,
+      "grail": 59,
+      "worst": 53
+    },
+    "version_tags": {
+      "V1": 352,
+      "V2": 294,
+      "V3": 92,
+      "Unfinished": 90,
+      "V4": 36,
+      "V5": 26,
+      "V6": 11,
+      "V?": 10,
+      "V7": 4,
+      "V13": 2,
+      "V8": 2,
+      "V10": 2,
+      "V14": 1,
+      "v1": 1,
+      "V9": 1
+    },
+    "quality": {
+      "CD Quality": 1261,
+      "High Quality": 459,
+      "Recording": 355,
+      "Not Available": 295,
+      "Lossless": 78,
+      "Low Quality": 11
+    },
+    "availability": {
+      "OG File": 1371,
+      "Snippet": 330,
+      "Full": 324,
+      "Confirmed": 204,
+      "Rumored": 69,
+      "Partial": 65,
+      "Self-Bounce": 54,
+      "Conflicting Sources": 23,
+      "Cut": 11,
+      "Tagged": 7,
+      "Beat Only": 1
+    },
+    "type": {
+      "Throwaway": 1588,
+      "Demo": 208,
+      "OG": 157,
+      "Feature": 142,
+      "Alt Mix": 101,
+      "Unknown": 95,
+      "Scrap. Release": 83,
+      "Remix": 35,
+      "OG File": 15,
+      "Other": 10,
+      "Misc": 10,
+      "Ref Track": 8,
+      "Album": 1,
+      "OG/High Bitrate Rip": 1
+    },
+    "link_hosts": {
+      "pillows.su": 1925,
+      "imgur.gg": 271,
+      "youtube.com": 8,
+      "music.froste.lol": 3,
+      "instagram.com": 3,
+      "x.com": 2,
+      "reddit.com": 2,
+      "soundcloud.com": 1,
+      "open.spotify.com": 1,
+      "imgur.com": 1,
+      "complex.com": 1
+    }
+  },
+  "misc_entry_types": {},
+  "coverage": {
+    "notes": {
+      "count": 2459,
+      "pct": 100.0
+    },
+    "samples": {
+      "count": 81,
+      "pct": 3.3
+    },
+    "og_filenames": {
+      "count": 1794,
+      "pct": 73.0
+    },
+    "featuring": {
+      "count": 341,
+      "pct": 13.9
+    },
+    "producers": {
+      "count": 2400,
+      "pct": 97.6
+    },
+    "track_length": {
+      "count": 2454,
+      "pct": 99.8
+    },
+    "file_date": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "leak_date": {
+      "count": 2335,
+      "pct": 95.0
+    },
+    "quality": {
+      "count": 2459,
+      "pct": 100.0
+    },
+    "available_length": {
+      "count": 2459,
+      "pct": 100.0
+    }
+  },
+  "parse_signals": {
+    "total_rows": 2674,
+    "song_rows": 2459,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
+    "footer_rows": 31,
+    "fuzzy_matched_rows": 0,
+    "dropped_columns": [],
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
+  },
+  "suspicions": {
+    "zero_song_eras": [],
+    "single_song_eras": [],
+    "songs_10plus_versions": [
+      {
+        "song": "Racks",
+        "versions": 10,
+        "era": "Eternal Atake [V1]"
+      }
+    ],
+    "duplicate_songs_across_eras": [
+      {
+        "song": "1600",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "The Perfect LUV Tape"
+        ]
+      },
+      {
+        "song": "20 till' i'm on",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "3d wrist",
+        "eras": [
+          "Forever Young",
+          "Luv Is Rage 2 [V1]"
+        ]
+      },
+      {
+        "song": "alive",
+        "eras": [
+          "Pink Tape [V2]",
+          "The Perfect LUV Tape"
+        ]
+      },
+      {
+        "song": "all night",
+        "eras": [
+          "Baby Pluto Era",
+          "Luv Is Rage",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "all of the lights",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "at all",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "automatic",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "awesome",
+        "eras": [
+          "Baby Pluto Era",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "aye",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "baby pluto",
+        "eras": [
+          "Eternal Atake [V3]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "back",
+        "eras": [
+          "Luv Is Rage 2 [V2]",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "balenciaga",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "billy",
+        "eras": [
+          "Barter 16",
+          "Eternal Atake [V1]"
+        ]
+      },
+      {
+        "song": "bird",
+        "eras": [
+          "Eternal Atake [V2]",
+          "The Perfect LUV Tape"
+        ]
+      },
+      {
+        "song": "body",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "business",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "call back",
+        "eras": [
+          "Barter 16",
+          "Eternal Atake [V2]"
+        ]
+      },
+      {
+        "song": "can't lose",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Lil Uzi Vert vs. The World"
+        ]
+      },
+      {
+        "song": "cartier",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Luv Is Rage",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "check",
+        "eras": [
+          "Luv Is Rage",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "cold",
+        "eras": [
+          "Forever Young",
+          "Lil Uzi Vert vs. The World"
+        ]
+      },
+      {
+        "song": "count that cake",
+        "eras": [
+          "Forever Young",
+          "Lil Uzi Vert vs. The World"
+        ]
+      },
+      {
+        "song": "counting",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "dasani",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "daytona",
+        "eras": [
+          "Baby Pluto Era",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "die for me",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Pluto x Baby Pluto"
+        ]
+      },
+      {
+        "song": "die today",
+        "eras": [
+          "Barter 16",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "do better",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "dope",
+        "eras": [
+          "Baby Pluto Era",
+          "Lil Uzi Vert vs. The World"
+        ]
+      },
+      {
+        "song": "fact",
+        "eras": [
+          "Baby Pluto Era",
+          "Eternal Atake [V1]",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "feng shui",
+        "eras": [
+          "Barter 16",
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "fire",
+        "eras": [
+          "Forever Young",
+          "Lil Uzi Vert vs. The World",
+          "The Perfect LUV Tape"
+        ]
+      },
+      {
+        "song": "flex up",
+        "eras": [
+          "Luv Is Rage 2 [V2]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "for life",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "for real",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "foreplay",
+        "eras": [
+          "Pink Tape [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "gang",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "get back",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "get it back",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Tsunami Island"
+        ]
+      },
+      {
+        "song": "goose chase",
+        "eras": [
+          "Forever Young",
+          "Luv Is Rage 2 [V1]"
+        ]
+      },
+      {
+        "song": "heartbeat",
+        "eras": [
+          "Pink Tape [V2]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "heavy",
+        "eras": [
+          "Baby Pluto Era",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "high",
+        "eras": [
+          "Baby Pluto Era",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "high as me*",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Luv Is Rage 3 [V2]"
+        ]
+      },
+      {
+        "song": "home",
+        "eras": [
+          "16*29",
+          "Lil Uzi Vert vs. The World",
+          "METROOOO PINK"
+        ]
+      },
+      {
+        "song": "i get it",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "i gotta",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "i know",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Luv Is Rage 2 [V2]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "i'm sorry",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "i'm the type",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Eternal Atake [V2]"
+        ]
+      },
+      {
+        "song": "idk",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "it's on me",
+        "eras": [
+          "Luv Is Rage 3 [V2]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "it's up",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "ken carson - like this",
+        "eras": [
+          "Luv Is Rage 3 [V2]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "lambo'",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "leave me alone",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "leo",
+        "eras": [
+          "Eternal Atake [V2]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "let's go",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Eternal Atake [V2]"
+        ]
+      },
+      {
+        "song": "lil uzi vert",
+        "eras": [
+          "Pink Tape [V2]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "lonely",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "mama, i'm sorry",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "margiela",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "me and the moon relate",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "memories",
+        "eras": [
+          "Eternal Atake [V3]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "million in a month",
+        "eras": [
+          "Eternal Atake 2",
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "molly",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "mood",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Luv Is Rage 2 [V1]"
+        ]
+      },
+      {
+        "song": "move",
+        "eras": [
+          "Barter 16",
+          "Eternal Atake [V2]",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "my bad",
+        "eras": [
+          "Luv Is Rage 2 [V2]",
+          "The Perfect LUV Tape"
+        ]
+      },
+      {
+        "song": "my way",
+        "eras": [
+          "Barter 16",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "no heart*",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "party with the demons",
+        "eras": [
+          "Baby Pluto Era",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "peppermint",
+        "eras": [
+          "Baby Pluto Era",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "pill",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "playboi carti - lookin",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "pluto to mars",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "pockets stuffed",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Luv Is Rage 2 [V1]",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "poppin'*",
+        "eras": [
+          "Luv Is Rage 2 [V1]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "proud of you",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Forever Young"
+        ]
+      },
+      {
+        "song": "racks",
+        "eras": [
+          "Baby Pluto Era",
+          "Barter 16",
+          "Eternal Atake [V1]"
+        ]
+      },
+      {
+        "song": "rain",
+        "eras": [
+          "Pink Tape [V1]",
+          "Super geëky"
+        ]
+      },
+      {
+        "song": "ready",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "regular",
+        "eras": [
+          "LP 5",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "rick owens",
+        "eras": [
+          "Forever Young",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "rick owens*",
+        "eras": [
+          "ALL WHITE",
+          "Luv Is Rage 2 [V2]"
+        ]
+      },
+      {
+        "song": "rolli",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Lil Uzi Vert vs. The World 2 [V1]"
+        ]
+      },
+      {
+        "song": "run it up",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "sanguine paradise",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Eternal Atake [V2]"
+        ]
+      },
+      {
+        "song": "slatt",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Lil Uzi Vert vs. The World 2 [V1]"
+        ]
+      },
+      {
+        "song": "slide",
+        "eras": [
+          "Baby Pluto Era",
+          "Barter 16"
+        ]
+      },
+      {
+        "song": "some room",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "space cadet",
+        "eras": [
+          "Baby Pluto Era",
+          "Forever Young",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "step",
+        "eras": [
+          "Pink Tape [V1]",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "this way",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Luv Is Rage 2 [V1]"
+        ]
+      },
+      {
+        "song": "tlc",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "today",
+        "eras": [
+          "1017 vs. The World",
+          "Baby Pluto Era"
+        ]
+      },
+      {
+        "song": "top",
+        "eras": [
+          "Luv Is Rage",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "travis scott - look at my rollie",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Lil Uzi Vert vs. The World 2 [V1]"
+        ]
+      },
+      {
+        "song": "tsunami*",
+        "eras": [
+          "Pink Tape [V1]",
+          "W.H.2.U"
+        ]
+      },
+      {
+        "song": "unknown [destroy lonely collaborations]",
+        "eras": [
+          "Barter 16",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "vibe",
+        "eras": [
+          "Baby Pluto Era",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "victory",
+        "eras": [
+          "Forever Young",
+          "Pink Tape [V2]"
+        ]
+      },
+      {
+        "song": "watch this",
+        "eras": [
+          "Eternal Atake [V1]",
+          "Pink Tape [V1]"
+        ]
+      },
+      {
+        "song": "what's up?",
+        "eras": [
+          "Baby Pluto Era",
+          "Eternal Atake [V2]"
+        ]
+      },
+      {
+        "song": "wild thing",
+        "eras": [
+          "Baby Pluto Era",
+          "Eternal Atake [V1]"
+        ]
+      },
+      {
+        "song": "yaya chronicles - cap a lot",
+        "eras": [
+          "Eternal Atake [V3]",
+          "Pink Tape [V3]"
+        ]
+      },
+      {
+        "song": "you mad",
+        "eras": [
+          "Lil Uzi Vert vs. The World 2 [V1]",
+          "Luv Is Rage 2 [V1]"
+        ]
+      }
+    ],
+    "placeholder_groups": [],
+    "era_like_song_names": [
+      {
+        "era": "16*29",
+        "song": "[Unknown 16*29 Songs]"
+      }
+    ],
+    "over_long_names": []
+  },
+  "snapshot": "tests/fixtures/snapshots/tracker-1zqq.html.gz"
+}
