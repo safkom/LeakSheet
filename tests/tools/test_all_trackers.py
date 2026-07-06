@@ -52,7 +52,7 @@ def build_url(entry: dict) -> str | None:
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
 
 
-def test_tracker(name: str, url: str, use_cache: bool = True, verbose: bool = False) -> dict:
+def check_tracker(name: str, url: str, use_cache: bool = True, verbose: bool = False) -> dict:
     """Fetch and parse a single tracker, returning results dict."""
     result = {
         "name": name,
@@ -177,7 +177,7 @@ def main():
             continue
 
         print(f"[{i+1}/{len(artists)}] {name:<30} ", end="", flush=True)
-        r = test_tracker(name, url, use_cache=not args.no_cache, verbose=args.verbose)
+        r = check_tracker(name, url, use_cache=not args.no_cache, verbose=args.verbose)
         results.append(r)
 
         status = r["status"]

@@ -208,7 +208,7 @@ def load_artists(
 # Async test runner
 # ---------------------------------------------------------------------------
 
-async def test_one(
+async def check_one(
     entry: dict,
     semaphore: asyncio.Semaphore,
     timeout: float = 120.0,
@@ -303,7 +303,7 @@ async def run_all(
             done += 1
             return r
 
-        r = await test_one(entry, semaphore, timeout)
+        r = await check_one(entry, semaphore, timeout)
         done += 1
         counts[Status(r.status)] += 1
 
