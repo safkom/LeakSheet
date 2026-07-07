@@ -30,23 +30,14 @@ final class AudioEngine {
     var error = ""
     var streamUrl = ""
     var volume: Float = 1.0
-    var queue: [QueueItem] = []
     var originalQuality = false
 
-    private(set) var eraSongs: EraSongContext?
-    /// Ad-hoc ordered playback list (recents, search results, a song's
-    /// versions). When set, auto-advance walks this list instead of the era
-    /// context and stops at its end — there is no rollover into other
-    /// collections. Mutually exclusive with `eraSongs`.
-    private(set) var playbackList: [PlaybackListItem]?
-    /// Optional list of all eras in the current artist, in display order,
-    /// used to auto-continue playback past the end of the current era.
-    private(set) var artistEras: [EraSongContext] = []
-    /// Position of `eraSongs` inside `artistEras`. Tracked at set time so that
-    /// auto-advance does not have to re-match by name — which would mis-resolve
-    /// when an artist has two eras sharing a name. Nil when no era is set or
-    /// the current era couldn't be resolved to a position.
-    private var currentEraIndex: Int?
+    /// Playback-ordering decisions (queue, era rollover, ad-hoc lists) live
+    /// in a pure value type so they are unit-testable; the engine executes
+    /// its decisions against AVPlayer.
+    private var logic = PlaybackQueueLogic()
+
+    var queue: [QueueItem] { logic.queue }
 
     // MARK: - Private
 
@@ -59,7 +50,6 @@ final class AudioEngine {
     private var loadingTimeoutTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
     private var seekInFlight = false
-    private var queueIdCounter = 0
     private var cachedArtworkUrl: String?
     private var cachedArtwork: MPMediaItemArtwork?
 
@@ -191,8 +181,7 @@ final class AudioEngine {
         artUrl = ""
         artistSlug = ""
         cachedArtworkUrl = nil
-        eraSongs = nil
-        playbackList = nil
+        logic.clearContexts()
         clearNowPlayingInfo()
     }
 
@@ -252,83 +241,73 @@ final class AudioEngine {
     // MARK: - Queue
 
     func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "") {
-        guard queue.count < 200 else { return }
-        queueIdCounter += 1
-        queue.append(QueueItem(
-            id: queueIdCounter,
-            version: version,
-            artistName: artistName,
-            eraName: eraName,
-            artUrl: artUrl
-        ))
+        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl)
     }
 
     func removeFromQueue(at index: Int) {
-        guard queue.indices.contains(index) else { return }
-        queue.remove(at: index)
+        logic.removeFromQueue(at: index)
     }
 
     func clearQueue() {
-        queue.removeAll()
+        logic.clearQueue()
     }
 
     func moveInQueue(from source: IndexSet, to destination: Int) {
-        queue.move(fromOffsets: source, toOffset: destination)
+        logic.moveInQueue(from: source, to: destination)
     }
 
     func playFromQueue(at index: Int) {
-        guard queue.indices.contains(index) else { return }
-        let item = queue.remove(at: index)
-        playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl)
+        guard let target = logic.playFromQueue(at: index) else { return }
+        play(target)
     }
 
     func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
-        playbackList = nil
-        eraSongs = EraSongContext(
+        logic.setEraSongs(EraSongContext(
             eraName: eraName,
             artistName: artistName,
             artUrl: artUrl,
             versions: versions,
             artistSlug: artistSlug
-        )
-        // Resolve to a position in artistEras for safer auto-advance. Match
-        // on multiple fields so two eras sharing a name still disambiguate
-        // (e.g. "Bonus Tracks" present under both an LP and a deluxe era).
-        currentEraIndex = artistEras.firstIndex { ctx in
-            ctx.eraName == eraName
-            && ctx.artistName == artistName
-            && ctx.artUrl == artUrl
-            && ctx.versions.count == versions.count
-        }
+        ))
     }
 
     /// Atomic equivalent of `setEraSongs` followed by `playTrack`, kept as a
     /// single method so callers can't accidentally play a track without
     /// the era context that drives auto-advance.
     func playInEra(_ version: SongVersion, eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
-        setEraSongs(eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
-        playTrack(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug ?? "")
+        let context = EraSongContext(
+            eraName: eraName,
+            artistName: artistName,
+            artUrl: artUrl,
+            versions: versions,
+            artistSlug: artistSlug
+        )
+        guard let target = logic.playInEra(version, context: context) else { return }
+        play(target)
     }
 
     /// Start playback at `index` of an ad-hoc ordered list (recents, search
     /// results, a song's versions from the description sheet). Auto-advance
     /// continues down the list and stops at its end.
     func playInList(_ items: [PlaybackListItem], startAt index: Int) {
-        guard items.indices.contains(index) else { return }
-        playbackList = items
-        eraSongs = nil
-        currentEraIndex = nil
-        let item = items[index]
-        playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
+        guard let target = logic.playInList(items, startAt: index) else { return }
+        play(target)
     }
 
     /// Register the ordered list of eras for the current artist so that, when the
     /// currently-playing era ends, playback automatically continues with the next era.
     func setArtistEras(_ eras: [EraSongContext]) {
-        artistEras = eras
-        // The artist list changed — the cached era index no longer points
-        // at the right entry. Next setEraSongs / nextEraAfter will rebuild.
-        currentEraIndex = nil
+        logic.setArtistEras(eras)
+    }
+
+    private func play(_ target: PlaybackQueueLogic.Target) {
+        playTrack(
+            target.version,
+            artistName: target.artistName,
+            eraName: target.eraName,
+            artUrl: target.artUrl,
+            artistSlug: target.artistSlug
+        )
     }
 
     // MARK: - Private Setup
@@ -508,116 +487,24 @@ final class AudioEngine {
     }
 
     func playNext() {
-        // Try queue first
-        if !queue.isEmpty {
-            playFromQueue(at: 0)
-            return
-        }
-
-        // Ad-hoc list context — continue down the list, stop at its end.
-        if let list = playbackList, let current = currentTrack {
-            if let idx = Self.indexOf(current, eraName: eraName, in: list), idx + 1 < list.count {
-                let item = list[idx + 1]
-                playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
-            } else {
-                stopTrack()
-            }
-            return
-        }
-
-        // Try next song in era
-        guard let context = eraSongs, let current = currentTrack else {
+        switch logic.next() {
+        case .play(let target):
+            play(target)
+        case .restart:
+            seekTo(0)
+        case .stop:
             stopTrack()
-            return
-        }
-
-        if let idx = context.versions.firstIndex(where: { $0.name == current.name && $0.versionTag == current.versionTag }),
-           idx + 1 < context.versions.count {
-            let next = context.versions[idx + 1]
-            playTrack(next, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl, artistSlug: context.artistSlug ?? "")
-            return
-        }
-
-        // End of current era — roll over to the next era with streamable versions.
-        if let nextEra = nextEraAfter(context), let first = nextEra.versions.first {
-            eraSongs = nextEra
-            playTrack(first, artistName: nextEra.artistName, eraName: nextEra.eraName, artUrl: nextEra.artUrl, artistSlug: nextEra.artistSlug ?? "")
-            return
-        }
-
-        stopTrack()
-    }
-
-    private func nextEraAfter(_ current: EraSongContext) -> EraSongContext? {
-        // Prefer the index recorded when the era was set — it survives
-        // duplicate era names that would defeat a name-based lookup.
-        // Fall back to the legacy name match if the index is unset (e.g.
-        // setArtistEras ran after setEraSongs).
-        let startIdx: Int
-        if let idx = currentEraIndex, artistEras.indices.contains(idx) {
-            startIdx = idx + 1
-        } else if let idx = artistEras.firstIndex(where: {
-            $0.eraName == current.eraName && $0.artistName == current.artistName
-        }) {
-            startIdx = idx + 1
-        } else {
-            return nil
-        }
-        for candidate in artistEras.dropFirst(startIdx) where !candidate.versions.isEmpty {
-            // Cache the new position so successive auto-advances continue
-            // walking the array without re-resolving each time.
-            currentEraIndex = artistEras.firstIndex { ctx in
-                ctx.eraName == candidate.eraName
-                && ctx.artistName == candidate.artistName
-                && ctx.artUrl == candidate.artUrl
-                && ctx.versions.count == candidate.versions.count
-            }
-            return candidate
-        }
-        return nil
-    }
-
-    /// Position of the playing track inside an ad-hoc list — matches on the
-    /// track identity plus era so same-named songs from different eras don't
-    /// collide.
-    private static func indexOf(_ current: SongVersion, eraName: String, in list: [PlaybackListItem]) -> Int? {
-        list.firstIndex {
-            $0.version.name == current.name
-                && $0.version.versionTag == current.versionTag
-                && $0.eraName == eraName
         }
     }
 
     func playPrevious() {
-        // If more than 3 seconds in, restart current track
-        if currentTime > 3 {
+        switch logic.previous(currentTime: currentTime) {
+        case .play(let target):
+            play(target)
+        case .restart:
             seekTo(0)
-            return
-        }
-
-        // Ad-hoc list context — step back up the list.
-        if let list = playbackList, let current = currentTrack {
-            if let idx = Self.indexOf(current, eraName: eraName, in: list), idx > 0 {
-                let item = list[idx - 1]
-                playTrack(item.version, artistName: item.artistName, eraName: item.eraName, artUrl: item.artUrl, artistSlug: item.artistSlug ?? "")
-            } else {
-                seekTo(0)
-            }
-            return
-        }
-
-        // Try previous song in era context
-        guard let context = eraSongs, let current = currentTrack else {
-            seekTo(0)
-            return
-        }
-
-        if let idx = context.versions.firstIndex(where: { $0.name == current.name && $0.versionTag == current.versionTag }),
-           idx > 0 {
-            let prev = context.versions[idx - 1]
-            playTrack(prev, artistName: context.artistName, eraName: context.eraName, artUrl: context.artUrl, artistSlug: context.artistSlug ?? "")
-        } else {
-            seekTo(0)
+        case .stop:
+            stopTrack()
         }
     }
 
