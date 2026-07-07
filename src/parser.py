@@ -26,6 +26,7 @@ from src.models import (
     Section,
     Song,
     SongVersion,
+    SourceRef,
     TrackerStats,
     VERSION_TAG_PATTERN,
     extract_badge,
@@ -1845,6 +1846,26 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     alt_links_idx = col_map.get("alt_links")
     link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
     alt_link_cell = _get_cell(row, alt_links_idx) if alt_links_idx is not None else _Cell()
+
+    # Sources column (Travis Scott tracker): labeled evidence links, kept
+    # separate from listen links. Each URL pairs with the text line it sits
+    # on (same link_lines mechanism the notice extractor uses).
+    sources: list[SourceRef] = []
+    sources_idx = col_map.get("sources")
+    if sources_idx is not None:
+        src_cell = _get_cell(row, sources_idx)
+        src_lines = src_cell.text.split("\n")
+        for link_idx, link in enumerate(src_cell.links):
+            cleaned = _clean_link(link)
+            if not cleaned:
+                continue
+            line_num = (
+                src_cell.link_lines[link_idx]
+                if link_idx < len(src_cell.link_lines)
+                else -1
+            )
+            label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
+            sources.append(SourceRef(label=label, url=cleaned))
     # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
     # merging them while preserving order and removing duplicates.
     all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell)
@@ -1869,6 +1890,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         og_filename=og_filenames[0] if og_filenames else None,
         og_filenames=og_filenames,
         samples=samples,
+        sources=sources,
         track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
         file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
         leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,

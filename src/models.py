@@ -75,6 +75,16 @@ VERSION_TAG_PATTERN = re.compile(
 )
 
 
+class SourceRef(BaseModel):
+    """A labeled evidence link from a tracker's Sources column.
+
+    E.g. label='First Mention (Screenshot)', url='https://imgur.com/…' —
+    provenance for how a leak/track is known, distinct from listen links.
+    """
+    label: str = Field("", description="Human label from the source cell line")
+    url: str = Field(..., description="Evidence URL")
+
+
 class SongVersion(BaseModel):
     """A specific version of a song with its metadata."""
     name: str = Field(..., description="Song title (first line only, no credits)")
@@ -89,6 +99,7 @@ class SongVersion(BaseModel):
     og_filename: str | None = Field(None, description="First original filename from metadata (legacy single-value field)")
     og_filenames: list[str] = Field(default_factory=list, description="All original filenames from metadata, in order of appearance")
     samples: list[str] = Field(default_factory=list, description="Sampled songs/works, e.g. ['Got Money — Lil Wayne']")
+    sources: list[SourceRef] = Field(default_factory=list, description="Labeled evidence links from a Sources column")
     track_length: str | None = Field(None, description="Duration, e.g. '3:14'")
     file_date: str | None = Field(None, description="Date the file was created")
     leak_date: str | None = Field(None, description="Date the version leaked")

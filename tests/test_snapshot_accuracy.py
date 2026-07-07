@@ -60,9 +60,7 @@ BASELINES = {
 
 # Deviations observed at pinning time — each is a live review finding; a fix
 # removes the entry here in the same commit.
-KNOWN_DROPPED_COLUMNS = {
-    "tracker-1gJq": {"sources"},  # finding: 'Sources' column data silently dropped
-}
+KNOWN_DROPPED_COLUMNS: dict[str, set[str]] = {}
 KNOWN_EMPTY_ERAS = {
     "tracker-1v55": {"unknown"},  # finding: era header captured, contents lost?
 }
@@ -144,3 +142,35 @@ class TestSnapshotAccuracy:
         md = parsed[name].parse_metadata
         unknown = [c for c in md.dropped_columns if c.lower() not in allowed]
         assert unknown == [], f"unmapped header columns dropping data: {unknown}"
+
+
+class TestTravisSources:
+    """The Travis Scott tracker's 'Sources' column carries labeled evidence
+    links ('First Mention (Screenshot)', 'Trailer (YouTube)') — 513 rows.
+    Verified against the raw snapshot on 2026-07-06."""
+
+    def test_sources_extracted_with_labels(self, parsed):
+        artist = parsed["tracker-1gJq"]
+        versions = [
+            v for era in artist.eras for song in era.songs for v in song.versions
+        ]
+        with_sources = [v for v in versions if v.sources]
+        assert len(with_sources) >= 400, (
+            f"expected ~513 versions with sources, got {len(with_sources)}"
+        )
+        # Spot-check a known row: '$tay [Demo]' sources a YouTube trailer.
+        stay = next(v for v in versions if v.name.startswith("$tay"))
+        assert any(
+            s.label == "Trailer (YouTube)" and "youtube.com" in s.url
+            for s in stay.sources
+        ), f"$tay sources: {[(s.label, s.url[:60]) for s in stay.sources]}"
+
+    def test_source_urls_cleaned_of_google_redirects(self, parsed):
+        artist = parsed["tracker-1gJq"]
+        for era in artist.eras:
+            for song in era.songs:
+                for v in song.versions:
+                    for s in v.sources:
+                        assert not s.url.startswith("https://www.google.com/url"), (
+                            f"unclean source url on {v.name!r}: {s.url[:80]}"
+                        )

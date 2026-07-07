@@ -113,6 +113,11 @@ COLUMN_ALIASES: dict[str, str] = {
     "streaming?": "streaming",
     "in circulation": "available_length",  # Yung Lean
 
+    # Evidence/provenance links (Travis Scott tracker)
+    "sources": "sources",
+    "source": "sources",
+    "source(s)": "sources",
+
     # Type variants
     "type": "type",
     "track type": "type",          # XXXTENTACION
