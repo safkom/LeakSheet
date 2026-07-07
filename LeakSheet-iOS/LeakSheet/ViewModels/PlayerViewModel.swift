@@ -30,6 +30,14 @@ final class PlayerViewModel {
     /// Time value for display: shows seekValue while dragging, currentTime otherwise.
     var displayTime: TimeInterval { seeking ? seekValue : currentTime }
 
+    /// Two-way projection for seek sliders: reads the display time, writes
+    /// the scrub target. Lets views bind `$player.scrubPosition` instead of
+    /// allocating a `Binding(get:set:)` closure on every body evaluation.
+    var scrubPosition: TimeInterval {
+        get { displayTime }
+        set { seekValue = newValue }
+    }
+
     private init() {}
 
     func playTrack(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {

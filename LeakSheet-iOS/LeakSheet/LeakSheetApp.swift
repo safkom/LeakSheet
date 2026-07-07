@@ -1,9 +1,12 @@
 import SwiftUI
 import AVFoundation
+import OSLog
 
 @main
 struct LeakSheetApp: App {
     @Environment(\.scenePhase) private var scenePhase
+
+    private static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "App")
 
     init() {
         configureAudioSession()
@@ -29,7 +32,7 @@ struct LeakSheetApp: App {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [])
         } catch {
-            print("Failed to configure audio session: \(error)")
+            Self.log.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

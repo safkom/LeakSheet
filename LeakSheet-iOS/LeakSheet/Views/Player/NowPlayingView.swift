@@ -54,11 +54,9 @@ struct NowPlayingView: View {
 
                 // Progress bar
                 VStack(spacing: 4) {
+                    @Bindable var player = player
                     Slider(
-                        value: Binding(
-                            get: { player.displayTime },
-                            set: { player.seekValue = $0 }
-                        ),
+                        value: $player.scrubPosition,
                         in: 0...(player.duration > 0 ? player.duration : 1),
                         onEditingChanged: { editing in
                             player.seeking = editing

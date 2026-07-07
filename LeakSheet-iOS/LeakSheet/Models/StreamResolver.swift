@@ -2,34 +2,43 @@ import Foundation
 
 /// Resolves file-sharing links to stream proxy URLs.
 ///
+/// Patterns are compile-checked Swift regex literals — an invalid pattern is
+/// a build error, not a runtime crash. They live inside the match functions
+/// because `Regex` is not `Sendable` and so can't be a nonisolated static.
 enum StreamResolver {
-    nonisolated private static func compile(_ pattern: String) -> NSRegularExpression {
-        do {
-            return try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
-        } catch {
-            fatalError("StreamResolver: invalid regex /\(pattern)/ — \(error)")
-        }
+    nonisolated private static func pillowsID(_ url: String) -> Substring? {
+        url.firstMatch(
+            of: #/^https?://(?:www\.)?(?:pillows\.su|pillowcase\.su)/f/([A-Za-z0-9_-]+)(?:$|[?#/])/#
+                .ignoresCase()
+        )?.1
     }
 
-    nonisolated private static let pillowsPattern = compile(
-        #"^https?://(?:www\.)?(pillows\.su|pillowcase\.su)/f/([A-Za-z0-9_-]+)(?:$|[?#/])"#
-    )
-    nonisolated private static let imgurPattern = compile(
-        #"^https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)(?:$|[?#/])"#
-    )
-    nonisolated private static let frostePattern = compile(
-        #"^https?://music\.froste\.lol/song/([a-f0-9]+)(?:$|[?#/])"#
-    )
-    nonisolated private static let krakenPattern = compile(
-        #"^https?://(?:www\.)?krakenfiles\.com/view/[A-Za-z0-9_-]+/file\.html(?:$|[?#])"#
-    )
+    nonisolated private static func imgurID(_ url: String) -> Substring? {
+        url.firstMatch(
+            of: #/^https?://(?:www\.)?(?:temp\.)?imgur\.gg/f/([A-Za-z0-9_-]+)(?:$|[?#/])/#
+                .ignoresCase()
+        )?.1
+    }
+
+    nonisolated private static func frosteHash(_ url: String) -> Substring? {
+        url.firstMatch(
+            of: #/^https?://music\.froste\.lol/song/([a-f0-9]+)(?:$|[?#/])/#
+                .ignoresCase()
+        )?.1
+    }
+
+    nonisolated private static func isKrakenView(_ url: String) -> Bool {
+        url.firstMatch(
+            of: #/^https?://(?:www\.)?krakenfiles\.com/view/[A-Za-z0-9_-]+/file\.html(?:$|[?#])/#
+                .ignoresCase()
+        ) != nil
+    }
 
     nonisolated static func isStreamableURL(_ url: String) -> Bool {
-        let range = NSRange(url.startIndex..., in: url)
-        return pillowsPattern.firstMatch(in: url, range: range) != nil
-            || imgurPattern.firstMatch(in: url, range: range) != nil
-            || frostePattern.firstMatch(in: url, range: range) != nil
-            || krakenPattern.firstMatch(in: url, range: range) != nil
+        pillowsID(url) != nil
+            || imgurID(url) != nil
+            || frosteHash(url) != nil
+            || isKrakenView(url)
     }
 
     /// Returns the proxied stream URL for a file-sharing link.
@@ -42,23 +51,19 @@ enum StreamResolver {
 
     /// Returns the original-quality download URL for a file-sharing link.
     nonisolated static func originalQualityURL(for originalLink: String) -> URL? {
-        let range = NSRange(originalLink.startIndex..., in: originalLink)
-
-        if let m = pillowsPattern.firstMatch(in: originalLink, range: range),
-           let idRange = Range(m.range(at: 2), in: originalLink) {
-            return URL(string: "https://api.pillows.su/api/download/\(originalLink[idRange])")
+        if let id = pillowsID(originalLink) {
+            return URL(string: "https://api.pillows.su/api/download/\(id)")
         }
 
-        if let m = frostePattern.firstMatch(in: originalLink, range: range),
-           let hashRange = Range(m.range(at: 1), in: originalLink) {
-            return URL(string: "https://music.froste.lol/song/\(originalLink[hashRange])/download")
+        if let hash = frosteHash(originalLink) {
+            return URL(string: "https://music.froste.lol/song/\(hash)/download")
         }
 
-        if imgurPattern.firstMatch(in: originalLink, range: range) != nil {
+        if imgurID(originalLink) != nil {
             return URL(string: originalLink)
         }
 
-        if krakenPattern.firstMatch(in: originalLink, range: range) != nil {
+        if isKrakenView(originalLink) {
             // The view URL is an HTML page — AVPlayer can't play it directly.
             // The backend proxy scrapes the CDN URL and streams the original
             // file bytes, so "original quality" IS the proxied stream here.

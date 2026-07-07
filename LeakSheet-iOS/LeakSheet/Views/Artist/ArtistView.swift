@@ -26,7 +26,7 @@ struct ArtistView: View {
                     // Notices
                     if let notices = artist.notices, !notices.isEmpty {
                         VStack(spacing: 4) {
-                            ForEach(Array(notices.enumerated()), id: \.offset) { _, notice in
+                            ForEach(notices, id: \.text) { notice in
                                 NoticeBannerView(notice: notice)
                             }
                         }
@@ -95,7 +95,7 @@ struct ArtistView: View {
         // where they end up behind the mini player (safeAreaBar) — the drawer
         // is the one placement that can never collide with it.
         .searchable(
-            text: Binding(get: { vm.searchQuery }, set: { vm.searchQuery = $0 }),
+            text: $vm.searchQuery,
             placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "Search songs…"
         )

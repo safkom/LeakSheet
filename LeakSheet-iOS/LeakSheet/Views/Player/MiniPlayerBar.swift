@@ -10,11 +10,9 @@ struct MiniPlayerBar: View {
             VStack(spacing: 0) {
                 // Progress slider
                 if player.duration > 0 {
+                    @Bindable var player = player
                     Slider(
-                        value: Binding(
-                            get: { player.displayTime },
-                            set: { player.seekValue = $0 }
-                        ),
+                        value: $player.scrubPosition,
                         in: 0...(player.duration > 0 ? player.duration : 1),
                         onEditingChanged: { editing in
                             player.seeking = editing
