@@ -1,6 +1,6 @@
-# Census — Ye Tracker PUBLIC
+# Census — Ye
 
-- Source: `https://yetracker.net/` (live)
+- Source: `tests/fixtures/snapshots/yetracker.html.gz` (snapshot)
 - Eras **44** · Songs **3949** · Versions **9105** · Misc entries **0** · Notices **2**
 - Links **8380**, app-streamable **6471** (77.2%)
 
@@ -144,6 +144,8 @@
 | leak_date | 5657 | 62.1% |
 | quality | 9105 | 100.0% |
 | available_length | 9105 | 100.0% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 

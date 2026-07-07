@@ -1,8 +1,8 @@
 {
   "artist": "Drake",
   "slug": "drake",
-  "source": "https://docs.google.com/spreadsheets/d/1v55XAPLzw1iuWxH1OQKajCIYPhW2BXcLoV4mXDZ55DI/htmlview",
-  "origin": "live",
+  "source": "tests/fixtures/snapshots/tracker-1v55.html.gz",
+  "origin": "snapshot",
   "totals": {
     "eras": 29,
     "songs": 793,
@@ -550,6 +550,14 @@
     "available_length": {
       "count": 994,
       "pct": 99.6
+    },
+    "sources": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "rating": {
+      "count": 0,
+      "pct": 0.0
     }
   },
   "parse_signals": {
@@ -862,6 +870,5 @@
     ],
     "era_like_song_names": [],
     "over_long_names": []
-  },
-  "snapshot": "tests/fixtures/snapshots/tracker-1v55.html.gz"
+  }
 }

@@ -1,8 +1,8 @@
 {
-  "artist": "Playboi Carti Tracker [Official]",
-  "slug": "playboi-carti-tracker-official",
-  "source": "https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/htmlview",
-  "origin": "live",
+  "artist": "Playboi Carti",
+  "slug": "playboi-carti",
+  "source": "tests/fixtures/snapshots/tracker-1Irt.html.gz",
+  "origin": "snapshot",
   "totals": {
     "eras": 29,
     "songs": 1182,
@@ -310,6 +310,7 @@
         "Full",
         "Features",
         "OG Files for Released Songs + Alternate Mixes",
+        "Full LQs",
         "Snippets",
         "Unavailable",
         "Unknown Collaborations"
@@ -375,7 +376,7 @@
       "has_art": true,
       "has_description": true,
       "has_stats": true,
-      "timeline_events": 5
+      "timeline_events": 6
     },
     {
       "name": "Ye - DONDA",
@@ -716,21 +717,26 @@
     "available_length": {
       "count": 1602,
       "pct": 99.9
+    },
+    "sources": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "rating": {
+      "count": 0,
+      "pct": 0.0
     }
   },
   "parse_signals": {
     "total_rows": 1859,
     "song_rows": 1603,
-    "skipped_rows": 2,
-    "skipped_ratio_pct": 0.11,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
     "footer_rows": 42,
     "fuzzy_matched_rows": 22,
     "dropped_columns": [],
-    "unmatched_rows": [
-      "Row 898: Full LQs\nnote: check the remasters tab for hq remasters of these songs",
-      "Row 1031: (December 25, 2020 - March, 2021) - Carti continues to record music without a clear idea on what to aim for"
-    ],
-    "unmatched_rows_total": 2
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
   },
   "suspicions": {
     "zero_song_eras": [],
@@ -1314,6 +1320,5 @@
     "placeholder_groups": [],
     "era_like_song_names": [],
     "over_long_names": []
-  },
-  "snapshot": "tests/fixtures/snapshots/tracker-1Irt.html.gz"
+  }
 }

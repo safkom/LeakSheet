@@ -1,8 +1,8 @@
 {
   "artist": "Baby Keem",
   "slug": "baby-keem",
-  "source": "https://docs.google.com/spreadsheets/d/1_SNZQS-AAXVleukgKlraegaozkLOu8WMHbUwmPm61hc/htmlview",
-  "origin": "live",
+  "source": "tests/fixtures/snapshots/tracker-1_SN.html.gz",
+  "origin": "snapshot",
   "totals": {
     "eras": 6,
     "songs": 197,
@@ -220,6 +220,14 @@
     "available_length": {
       "count": 286,
       "pct": 100.0
+    },
+    "sources": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "rating": {
+      "count": 0,
+      "pct": 0.0
     }
   },
   "parse_signals": {
@@ -274,6 +282,5 @@
     "placeholder_groups": [],
     "era_like_song_names": [],
     "over_long_names": []
-  },
-  "snapshot": "tests/fixtures/snapshots/tracker-1_SN.html.gz"
+  }
 }

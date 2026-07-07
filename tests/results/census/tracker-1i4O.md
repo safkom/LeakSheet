@@ -1,6 +1,6 @@
 # Census — Kendrick Lamar
 
-- Source: `https://docs.google.com/spreadsheets/d/1i4OQglDHiiqMDthqfUFPutGmpZzK7n63LaoWApqhQXI/htmlview` (live)
+- Source: `tests/fixtures/snapshots/tracker-1i4O.html.gz` (snapshot)
 - Eras **19** · Songs **735** · Versions **974** · Misc entries **0** · Notices **2**
 - Links **826**, app-streamable **570** (69.0%)
 
@@ -119,6 +119,8 @@
 | leak_date | 560 | 57.5% |
 | quality | 974 | 100.0% |
 | available_length | 974 | 100.0% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 

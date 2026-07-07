@@ -432,6 +432,14 @@
     "available_length": {
       "count": 863,
       "pct": 100.0
+    },
+    "sources": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "rating": {
+      "count": 0,
+      "pct": 0.0
     }
   },
   "parse_signals": {

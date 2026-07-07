@@ -1,7 +1,7 @@
 # Census — Travis Scott
 
-- Source: `https://docs.google.com/spreadsheets/d/1gJqbQrb3dIWF-PLMsKkNUrftpQb8zxsZFDAIpSvT5Fo/htmlview#gid=1807066929` (live)
-- Eras **15** · Songs **1165** · Versions **1306** · Misc entries **0** · Notices **0**
+- Source: `tests/fixtures/snapshots/tracker-1gJq.html.gz` (snapshot)
+- Eras **15** · Songs **1165** · Versions **1306** · Misc entries **0** · Notices **1**
 - Links **842**, app-streamable **822** (97.6%)
 
 ## Eras
@@ -53,27 +53,32 @@
 | V8 | 1 |
 | V14 | 1 |
 
+## Quality
+
+| Value | Count |
+|---|---|
+| High Quality | 734 |
+| Low Quality | 192 |
+
 ## Availability
 
 | Value | Count |
 |---|---|
-| Full - HQ | 540 |
+| Full | 555 |
 | N/A | 306 |
-| Snippet - LQ | 137 |
-| Snippet - HQ | 87 |
+| Snippet | 224 |
+| Full (Unofficial) | 56 |
 | Unconfirmed | 50 |
-| Full - HQ (Unofficial)
-⭐⭐⭐⭐⭐ | 25 |
-| Partial - LQ | 17 |
-| Full - HQ (Unofficial)
-⭐⭐⭐⭐☆ | 16 |
-| Instrumental - HQ | 11 |
-| Full - LQ | 10 |
-| ~Full - LQ | 9 |
-| Unconfirmed (Snippet - LQ) | 9 |
+| Partial | 20 |
+| Instrumental | 11 |
+| ~Full | 11 |
+| Unconfirmed (Snippet) | 11 |
 | Rumoured | 8 |
-| Full - HQ (Unofficial) | 8 |
 | Unconfirmed / Unrecorded | 7 |
+| Multiple | 4 |
+| Full (Tagged) | 3 |
+| Snippet (Unofficial) | 3 |
+| Incomplete (Unofficial) | 3 |
 
 ## Link hosts
 
@@ -103,18 +108,16 @@
 | track_length | 641 | 49.1% |
 | file_date | 420 | 32.2% |
 | leak_date | 609 | 46.6% |
-| quality | 0 | 0.0% |
+| quality | 926 | 70.9% |
 | available_length | 1305 | 99.9% |
+| sources | 508 | 38.9% |
+| rating | 55 | 4.2% |
 
 ## Parse signals
 
-- Rows: total **1382**, song **1306**, footer **0**, skipped **1** (0.07%)
+- Rows: total **1382**, song **1306**, footer **0**, skipped **0** (0.0%)
 - Fuzzy era matches: **0**
-- Dropped columns: Sources
-
-### Unmatched rows
-
-- `Row 1: | Last Updated: July 6, 2026 | Hover over the headers (Era, Title, etc.) for info |`
+- Dropped columns: none
 
 ## Suspicions
 

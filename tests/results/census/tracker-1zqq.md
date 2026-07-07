@@ -1,6 +1,6 @@
 # Census — Lil Uzi Vert
 
-- Source: `https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview` (live)
+- Source: `tests/fixtures/snapshots/tracker-1zqq.html.gz` (snapshot)
 - Eras **30** · Songs **2225** · Versions **2459** · Misc entries **0** · Notices **1**
 - Links **2218**, app-streamable **2199** (99.1%)
 
@@ -145,6 +145,8 @@
 | leak_date | 2335 | 95.0% |
 | quality | 2459 | 100.0% |
 | available_length | 2459 | 100.0% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 

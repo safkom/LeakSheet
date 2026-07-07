@@ -1,14 +1,14 @@
 {
   "artist": "Travis Scott",
   "slug": "travis-scott",
-  "source": "https://docs.google.com/spreadsheets/d/1gJqbQrb3dIWF-PLMsKkNUrftpQb8zxsZFDAIpSvT5Fo/htmlview#gid=1807066929",
-  "origin": "live",
+  "source": "tests/fixtures/snapshots/tracker-1gJq.html.gz",
+  "origin": "snapshot",
   "totals": {
     "eras": 15,
     "songs": 1165,
     "versions": 1306,
     "misc_entries": 0,
-    "notices": 0,
+    "notices": 1,
     "links": 842,
     "streamable_links": 822,
     "streamable_pct": 97.6
@@ -300,28 +300,31 @@
       "V21": 1,
       "V20": 1
     },
-    "quality": {},
+    "quality": {
+      "High Quality": 734,
+      "Low Quality": 192
+    },
     "availability": {
-      "Full - HQ": 540,
+      "Full": 555,
       "N/A": 306,
-      "Snippet - LQ": 137,
-      "Snippet - HQ": 87,
+      "Snippet": 224,
+      "Full (Unofficial)": 56,
       "Unconfirmed": 50,
-      "Full - HQ (Unofficial)\n⭐⭐⭐⭐⭐": 25,
-      "Partial - LQ": 17,
-      "Full - HQ (Unofficial)\n⭐⭐⭐⭐☆": 16,
-      "Instrumental - HQ": 11,
-      "Full - LQ": 10,
-      "~Full - LQ": 9,
-      "Unconfirmed (Snippet - LQ)": 9,
+      "Partial": 20,
+      "Instrumental": 11,
+      "~Full": 11,
+      "Unconfirmed (Snippet)": 11,
       "Rumoured": 8,
-      "Full - HQ (Unofficial)": 8,
       "Unconfirmed / Unrecorded": 7,
-      "Full - HQ (Unofficial)\n⭐⭐⭐☆☆": 5,
-      "Full - ~HQ": 5,
-      "Multiple - HQ": 4,
-      "Full - HQ\n(Tagged)": 3,
-      "Unrecorded": 3
+      "Multiple": 4,
+      "Full (Tagged)": 3,
+      "Snippet (Unofficial)": 3,
+      "Incomplete (Unofficial)": 3,
+      "Unrecorded": 3,
+      "Full (Essentially)": 2,
+      "Full (Various)": 2,
+      "Near Full": 2,
+      "Instrumental Snippet": 2
     },
     "type": {},
     "link_hosts": {
@@ -373,28 +376,32 @@
       "pct": 46.6
     },
     "quality": {
-      "count": 0,
-      "pct": 0.0
+      "count": 926,
+      "pct": 70.9
     },
     "available_length": {
       "count": 1305,
       "pct": 99.9
+    },
+    "sources": {
+      "count": 508,
+      "pct": 38.9
+    },
+    "rating": {
+      "count": 55,
+      "pct": 4.2
     }
   },
   "parse_signals": {
     "total_rows": 1382,
     "song_rows": 1306,
-    "skipped_rows": 1,
-    "skipped_ratio_pct": 0.07,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
     "footer_rows": 0,
     "fuzzy_matched_rows": 0,
-    "dropped_columns": [
-      "Sources"
-    ],
-    "unmatched_rows": [
-      "Row 1: | Last Updated: July 6, 2026 | Hover over the headers (Era, Title, etc.) for info |"
-    ],
-    "unmatched_rows_total": 1
+    "dropped_columns": [],
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
   },
   "suspicions": {
     "zero_song_eras": [],
@@ -551,6 +558,5 @@
     "placeholder_groups": [],
     "era_like_song_names": [],
     "over_long_names": []
-  },
-  "snapshot": "tests/fixtures/snapshots/tracker-1gJq.html.gz"
+  }
 }

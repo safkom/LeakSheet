@@ -1,6 +1,6 @@
 # Census — Drake
 
-- Source: `https://docs.google.com/spreadsheets/d/1v55XAPLzw1iuWxH1OQKajCIYPhW2BXcLoV4mXDZ55DI/htmlview` (live)
+- Source: `tests/fixtures/snapshots/tracker-1v55.html.gz` (snapshot)
 - Eras **29** · Songs **793** · Versions **998** · Misc entries **0** · Notices **4**
 - Links **572**, app-streamable **400** (69.9%)
 
@@ -127,6 +127,8 @@
 | leak_date | 666 | 66.7% |
 | quality | 994 | 99.6% |
 | available_length | 994 | 99.6% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 

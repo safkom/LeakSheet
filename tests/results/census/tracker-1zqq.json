@@ -1,8 +1,8 @@
 {
   "artist": "Lil Uzi Vert",
   "slug": "lil-uzi-vert",
-  "source": "https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview",
-  "origin": "live",
+  "source": "tests/fixtures/snapshots/tracker-1zqq.html.gz",
+  "origin": "snapshot",
   "totals": {
     "eras": 30,
     "songs": 2225,
@@ -719,6 +719,14 @@
     "available_length": {
       "count": 2459,
       "pct": 100.0
+    },
+    "sources": {
+      "count": 0,
+      "pct": 0.0
+    },
+    "rating": {
+      "count": 0,
+      "pct": 0.0
     }
   },
   "parse_signals": {
@@ -1521,6 +1529,5 @@
       }
     ],
     "over_long_names": []
-  },
-  "snapshot": "tests/fixtures/snapshots/tracker-1zqq.html.gz"
+  }
 }

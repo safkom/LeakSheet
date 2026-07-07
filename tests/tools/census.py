@@ -170,7 +170,8 @@ def census_artist(artist: Artist, source: str, origin: str) -> dict:
                     host_hist[_host(link)] += 1
                 for field in ("notes", "samples", "og_filenames", "featuring",
                               "producers", "track_length", "file_date",
-                              "leak_date", "quality", "available_length"):
+                              "leak_date", "quality", "available_length",
+                              "sources", "rating"):
                     if getattr(v, field):
                         cov[field] += 1
 
@@ -184,7 +185,8 @@ def census_artist(artist: Artist, source: str, origin: str) -> dict:
     coverage = {
         field: {"count": cov[field], "pct": round(100 * cov[field] / n_versions, 1) if n_versions else 0.0}
         for field in ("notes", "samples", "og_filenames", "featuring", "producers",
-                      "track_length", "file_date", "leak_date", "quality", "available_length")
+                      "track_length", "file_date", "leak_date", "quality",
+                      "available_length", "sources", "rating")
     }
     streamable = sum(c for h, c in host_hist.items() if h in STREAMABLE_HOSTS)
     total_links = sum(host_hist.values())
@@ -361,6 +363,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Tracker census generator")
     ap.add_argument("--live", action="store_true", help="census the locked live tracker URLs")
     ap.add_argument("--fixtures", action="store_true", help="census the local Trackers/ fixtures")
+    ap.add_argument("--snapshots", action="store_true",
+                    help="census the committed tests/fixtures/snapshots/*.html.gz "
+                         "(no network — used to diff parser changes at a gate)")
     ap.add_argument("--all", action="store_true", help="both --live and --fixtures")
     ap.add_argument("--fresh", action="store_true",
                     help="clear .cache/ before live fetches (fetch fresh but keep "
@@ -373,10 +378,41 @@ def main() -> int:
 
     do_live = args.live or args.all
     do_fixtures = args.fixtures or args.all
-    if not (do_live or do_fixtures):
-        ap.error("pick --live, --fixtures, or --all")
+    if not (do_live or do_fixtures or args.snapshots):
+        ap.error("pick --live, --fixtures, --snapshots, or --all")
 
     summary: list[dict] = []
+
+    if args.snapshots:
+        import gzip
+
+        from src.fetcher import TITLE_PATTERN, _infer_artist_name
+        from src.parser import parse_sheet
+
+        for path in sorted(args.snapshot_dir.glob("*.html.gz")):
+            slug = path.name.removesuffix(".html.gz")
+            if args.only and args.only.lower() not in slug.lower():
+                continue
+            t0 = time.time()
+            print(f"[snap]    {slug:<30} ", end="", flush=True)
+            html = gzip.open(path, "rt", encoding="utf-8").read()
+            title_m = TITLE_PATTERN.search(html)
+            artist_name = _infer_artist_name(title_m.group(1)) if title_m else slug
+            try:
+                artist = parse_sheet(html, artist_name)
+            except Exception as exc:
+                print(f"💥 {type(exc).__name__}: {exc}")
+                summary.append({"slug": slug, "status": f"ERROR: {type(exc).__name__}"})
+                continue
+            c = census_artist(artist, source=str(path.relative_to(ROOT)), origin="snapshot")
+            _write_outputs(c, slug, args.out)
+            print(f"eras={c['totals']['eras']} songs={c['totals']['songs']} "
+                  f"versions={c['totals']['versions']} skipped={c['parse_signals']['skipped_rows']} "
+                  f"({time.time()-t0:.1f}s)")
+            summary.append({"slug": slug, "status": "OK", "artist": c["artist"], **c["totals"],
+                            "skipped": c["parse_signals"]["skipped_rows"],
+                            "fuzzy": c["parse_signals"]["fuzzy_matched_rows"],
+                            "dropped_columns": c["parse_signals"]["dropped_columns"]})
 
     if do_fixtures:
         for artist_name, sheet_path in discover_trackers():

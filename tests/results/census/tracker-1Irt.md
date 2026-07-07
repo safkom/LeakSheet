@@ -1,6 +1,6 @@
-# Census — Playboi Carti Tracker [Official]
+# Census — Playboi Carti
 
-- Source: `https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/htmlview` (live)
+- Source: `tests/fixtures/snapshots/tracker-1Irt.html.gz` (snapshot)
 - Eras **29** · Songs **1182** · Versions **1603** · Misc entries **0** · Notices **4**
 - Links **1363**, app-streamable **1200** (88.0%)
 
@@ -24,7 +24,7 @@
 | Die Lit | Full, Features, OG Files for Released Songs + Alternate Mixes, OG Files for Released Features + Alternate Mixes, Snippets, Unavailable, Unknown Collaborations | 129 | 206 | ✓ | ✓ | ✓ |
 | Whole Lotta Red [V1] | Full, Features, OG Files for Released Songs + Alternate Mixes, Snippets, Unavailable, Unknown Collaborations, Full, Features, OG Files for Released Songs + Alternate Mixes, Stem Edits, Snippets, Festival Remixes, Unavailable, Unknown | 97 | 146 | ✓ | ✓ | ✓ |
 | WE DON'T DIAL 911 | Full, Snippets, Unavailable, Unknown Collaborations | 5 | 6 | ✓ | ✓ | ✓ |
-| Whole Lotta Red [V2] | Full, Features, OG Files for Released Songs + Alternate Mixes, Snippets, Unavailable, Unknown Collaborations | 70 | 84 | ✓ | ✓ | ✓ |
+| Whole Lotta Red [V2] | Full, Features, OG Files for Released Songs + Alternate Mixes, Full LQs, Snippets, Unavailable, Unknown Collaborations | 70 | 84 | ✓ | ✓ | ✓ |
 | Whole Lotta Red [V3] | Full, OG Files for Released Songs + Alternate Mixes, Snippets, Unavailable | 15 | 20 | ✓ | ✓ | ✓ |
 | Whole Lotta Red [V4] | Full, Features, OG Files for Released Songs + Alternate Mixes, Snippets, Unavailable, Unknown Collaborations | 27 | 38 | ✓ | ✓ | ✓ |
 | Whole Lotta Red (Deluxe) | Full, OG Files for Released Songs + Alternate Mixes, Snippets, OG Files for Released Songs + Alternate Mixes, Unavailable, Unknown Collaborations | 37 | 47 | ✓ | ✓ | ✓ |
@@ -154,18 +154,14 @@
 | leak_date | 1602 | 99.9% |
 | quality | 1602 | 99.9% |
 | available_length | 1602 | 99.9% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 
-- Rows: total **1859**, song **1603**, footer **42**, skipped **2** (0.11%)
+- Rows: total **1859**, song **1603**, footer **42**, skipped **0** (0.0%)
 - Fuzzy era matches: **22**
 - Dropped columns: none
-
-### Unmatched rows
-
-- `Row 898: Full LQs
-note: check the remasters tab for hq remasters of these songs`
-- `Row 1031: (December 25, 2020 - March, 2021) - Carti continues to record music without a clear idea on what to aim for`
 
 ## Suspicions
 

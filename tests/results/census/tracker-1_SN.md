@@ -1,6 +1,6 @@
 # Census — Baby Keem
 
-- Source: `https://docs.google.com/spreadsheets/d/1_SNZQS-AAXVleukgKlraegaozkLOu8WMHbUwmPm61hc/htmlview` (live)
+- Source: `tests/fixtures/snapshots/tracker-1_SN.html.gz` (snapshot)
 - Eras **6** · Songs **197** · Versions **286** · Misc entries **0** · Notices **2**
 - Links **233**, app-streamable **213** (91.4%)
 
@@ -101,6 +101,8 @@
 | leak_date | 212 | 74.1% |
 | quality | 286 | 100.0% |
 | available_length | 286 | 100.0% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 

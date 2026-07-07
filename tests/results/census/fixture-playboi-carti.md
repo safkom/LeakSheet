@@ -152,6 +152,8 @@
 | leak_date | 1366 | 99.9% |
 | quality | 1367 | 100.0% |
 | available_length | 1367 | 100.0% |
+| sources | 0 | 0.0% |
+| rating | 0 | 0.0% |
 
 ## Parse signals
 
