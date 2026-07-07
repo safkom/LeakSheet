@@ -105,11 +105,7 @@ final class FavouritesManager {
 
     /// Check if a version is favourited by deriving its base name.
     func isFavouritedByVersion(_ version: SongVersion, artistSlug: String, eraName: String) -> Bool {
-        var baseName = version.name
-        if let tag = version.versionTag, baseName.hasSuffix(" [\(tag)]") {
-            baseName = String(baseName.dropLast(tag.count + 3))
-        }
-        return isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: baseName)
+        isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: version.derivedBaseName)
     }
 
     func favouritesForArtist(_ slug: String) -> [FavouriteEntry] {
@@ -165,12 +161,7 @@ final class FavouritesManager {
     /// Derives `baseName` by stripping the version tag suffix from the version name.
     @discardableResult
     func toggleFromVersion(version: SongVersion, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
-        // Derive base name by stripping trailing " [Vx]" tag
-        var baseName = version.name
-        if let tag = version.versionTag, baseName.hasSuffix(" [\(tag)]") {
-            baseName = String(baseName.dropLast(tag.count + 3))
-        }
-
+        let baseName = version.derivedBaseName
         let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName)
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
@@ -226,29 +217,62 @@ final class FavouritesManager {
 
     var groupedByArtist: [GroupedArtist] {
         if let cached = _groupedCache { return cached }
-        let result = computeGrouped()
+        let result = Self.grouped(from: entries)
         _groupedCache = result
         return result
     }
 
-    private func computeGrouped() -> [GroupedArtist] {
-        var artistMap: [String: (name: String, slug: String, url: String?, eras: [String: (art: String?, entries: [FavouriteEntry])])] = [:]
+    /// Group entries by artist → era with a DETERMINISTIC order: artists by
+    /// their most recently added favourite (newest first), eras likewise,
+    /// entries in stored order (newest first — inserts happen at index 0).
+    /// Dictionary iteration order previously shuffled the favourites panel
+    /// on every recompute.
+    static func grouped(from entries: [FavouriteEntry]) -> [GroupedArtist] {
+        struct EraBucket {
+            let art: String?
+            var entries: [FavouriteEntry] = []
+            var newest: Date = .distantPast
+        }
+        struct ArtistBucket {
+            let name: String
+            let slug: String
+            let url: String?
+            var eraOrder: [String] = []
+            var eras: [String: EraBucket] = [:]
+            var newest: Date = .distantPast
+        }
+
+        var order: [String] = []
+        var buckets: [String: ArtistBucket] = [:]
         for entry in entries {
-            if artistMap[entry.artistSlug] == nil {
-                artistMap[entry.artistSlug] = (entry.artistName, entry.artistSlug, entry.sourceUrl, [:])
+            if buckets[entry.artistSlug] == nil {
+                buckets[entry.artistSlug] = ArtistBucket(
+                    name: entry.artistName, slug: entry.artistSlug, url: entry.sourceUrl
+                )
+                order.append(entry.artistSlug)
             }
-            if var artistEntry = artistMap[entry.artistSlug] {
-                if artistEntry.eras[entry.eraName] == nil {
-                    artistEntry.eras[entry.eraName] = (entry.eraArt, [])
-                }
-                artistEntry.eras[entry.eraName]!.entries.append(entry)
-                artistMap[entry.artistSlug] = artistEntry
+            guard var artist = buckets[entry.artistSlug] else { continue }
+            var era = artist.eras[entry.eraName] ?? {
+                artist.eraOrder.append(entry.eraName)
+                return EraBucket(art: entry.eraArt)
+            }()
+            era.entries.append(entry)
+            era.newest = max(era.newest, entry.addedAt)
+            artist.eras[entry.eraName] = era
+            artist.newest = max(artist.newest, entry.addedAt)
+            buckets[entry.artistSlug] = artist
+        }
+
+        return order
+            .compactMap { buckets[$0] }
+            .sorted { $0.newest > $1.newest }
+            .map { artist in
+                let eras = artist.eraOrder
+                    .compactMap { name in artist.eras[name].map { (name, $0) } }
+                    .sorted { $0.1.newest > $1.1.newest }
+                    .map { (eraName: $0.0, eraArt: $0.1.art, entries: $0.1.entries) }
+                return (artistName: artist.name, artistSlug: artist.slug, sourceUrl: artist.url, eras: eras)
             }
-        }
-        return artistMap.values.map { a in
-            let eras = a.eras.map { (eraName: $0.key, eraArt: $0.value.art, entries: $0.value.entries) }
-            return (artistName: a.name, artistSlug: a.slug, sourceUrl: a.url, eras: eras)
-        }
     }
 
     // MARK: - Persistence (file-backed JSON at Library/Application Support/leaksheet/)
@@ -282,7 +306,11 @@ final class FavouritesManager {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: Self.storageFile, options: .atomic)
+        do {
+            let data = try JSONEncoder().encode(entries)
+            try data.write(to: Self.storageFile, options: .atomic)
+        } catch {
+            Self.log.error("Failed to save favourites: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

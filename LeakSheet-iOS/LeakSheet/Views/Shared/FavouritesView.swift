@@ -20,7 +20,7 @@ struct FavouritesView: View {
                 } else {
                     List {
                         let grouped = favourites.grouped()
-                        ForEach(Array(grouped.enumerated()), id: \.offset) { _, artistGroup in
+                        ForEach(grouped, id: \.artistSlug) { artistGroup in
                             SwiftUI.Section {
                                 ForEach(artistGroup.eras, id: \.eraName) { eraGroup in
                                     ForEach(eraGroup.entries) { entry in

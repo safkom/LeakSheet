@@ -236,6 +236,23 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         return links.first { StreamResolver.isStreamableURL($0) }
     }
 
+    /// Base song name with the version tag stripped — matches the parser's
+    /// `Song.base_name` so favourites keyed from a bare version (player,
+    /// description sheet) agree with keys written from song rows. Tolerates
+    /// trailing whitespace and tag-case differences.
+    var derivedBaseName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard let tag = versionTag else { return trimmed }
+        let suffix = " [\(tag)]"
+        if trimmed.hasSuffix(suffix) {
+            return String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        if trimmed.lowercased().hasSuffix(suffix.lowercased()) {
+            return String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return trimmed
+    }
+
     /// All OG filenames — prefers the plural field, falls back to the legacy
     /// singular one for responses from older backends.
     var allOgFilenames: [String] {
