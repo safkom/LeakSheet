@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		E3AA00052F8D29B40029C2D5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E300458B2F8D29B40029C2D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E30045922F8D29B40029C2D5;
+			remoteInfo = LeakSheet;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		E30045932F8D29B40029C2D5 /* LeakSheet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LeakSheet.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E3AA00012F8D29B40029C2D5 /* LeakSheetTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LeakSheetTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -29,10 +40,22 @@
 			path = LeakSheet;
 			sourceTree = "<group>";
 		};
+		E3AA00022F8D29B40029C2D5 /* LeakSheetTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LeakSheetTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		E30045902F8D29B40029C2D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E3AA000A2F8D29B40029C2D5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				E30045952F8D29B40029C2D5 /* LeakSheet */,
+				E3AA00022F8D29B40029C2D5 /* LeakSheetTests */,
 				E30045942F8D29B40029C2D5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				E30045932F8D29B40029C2D5 /* LeakSheet.app */,
+				E3AA00012F8D29B40029C2D5 /* LeakSheetTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +108,28 @@
 			productReference = E30045932F8D29B40029C2D5 /* LeakSheet.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E3AA00032F8D29B40029C2D5 /* LeakSheetTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E3AA00082F8D29B40029C2D5 /* Build configuration list for PBXNativeTarget "LeakSheetTests" */;
+			buildPhases = (
+				E3AA00092F8D29B40029C2D5 /* Sources */,
+				E3AA000A2F8D29B40029C2D5 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E3AA00042F8D29B40029C2D5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E3AA00022F8D29B40029C2D5 /* LeakSheetTests */,
+			);
+			name = LeakSheetTests;
+			packageProductDependencies = (
+			);
+			productName = LeakSheetTests;
+			productReference = E3AA00012F8D29B40029C2D5 /* LeakSheetTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -95,6 +142,10 @@
 				TargetAttributes = {
 					E30045922F8D29B40029C2D5 = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					E3AA00032F8D29B40029C2D5 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = E30045922F8D29B40029C2D5;
 					};
 				};
 			};
@@ -113,6 +164,7 @@
 			projectRoot = "";
 			targets = (
 				E30045922F8D29B40029C2D5 /* LeakSheet */,
+				E3AA00032F8D29B40029C2D5 /* LeakSheetTests */,
 			);
 		};
 /* End PBXProject section */
@@ -135,7 +187,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E3AA00092F8D29B40029C2D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E3AA00042F8D29B40029C2D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E30045922F8D29B40029C2D5 /* LeakSheet */;
+			targetProxy = E3AA00052F8D29B40029C2D5 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		E300459C2F8D29B50029C2D5 /* Debug */ = {
@@ -335,6 +402,48 @@
 			};
 			name = Release;
 		};
+		E3AA00062F8D29B40029C2D5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MBC498J62R;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = si.safko.LeakSheetTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LeakSheet.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LeakSheet";
+			};
+			name = Debug;
+		};
+		E3AA00072F8D29B40029C2D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MBC498J62R;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = si.safko.LeakSheetTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LeakSheet.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/LeakSheet";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -352,6 +461,15 @@
 			buildConfigurations = (
 				E300459F2F8D29B50029C2D5 /* Debug */,
 				E30045A02F8D29B50029C2D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E3AA00082F8D29B40029C2D5 /* Build configuration list for PBXNativeTarget "LeakSheetTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E3AA00062F8D29B40029C2D5 /* Debug */,
+				E3AA00072F8D29B40029C2D5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
