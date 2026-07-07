@@ -28,7 +28,9 @@ BASELINES = {
     ),
     "tracker-1gJq": dict(  # Travis Scott
         eras=15, songs=1165, versions=1306,
-        total_rows=1382, song_rows=1306, skipped=1, footer=0, other_rows=75,
+        # skipped 1→0, other 75→76 (2026-07-06): the '| Last Updated: … |'
+        # banner row is now captured as a notice instead of dropped.
+        total_rows=1382, song_rows=1306, skipped=0, footer=0, other_rows=76,
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "tracker-1i4O": dict(
@@ -180,6 +182,19 @@ class TestCartiOfficialStructuralRows:
 
     def test_no_unmatched_rows_remain(self, parsed):
         assert parsed["tracker-1Irt"].parse_metadata.skipped_rows == 0
+
+
+class TestTravisBannerNotice:
+    """Snapshot row 1 (right after the header) is a meta banner —
+    '| Last Updated: July 6, 2026 | Hover over the headers … |' — sitting
+    alone in the era column. It is a notice, not an unmatched data row."""
+
+    def test_banner_becomes_notice(self, parsed):
+        artist = parsed["tracker-1gJq"]
+        assert any("Last Updated" in n.text for n in artist.notices), (
+            f"notices: {[n.text[:60] for n in artist.notices]}"
+        )
+        assert artist.parse_metadata.skipped_rows == 0
 
 
 class TestTravisSources:

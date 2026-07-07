@@ -1410,6 +1410,21 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         if _is_empty_row(row):
             continue
 
+        # Meta banner between the header and the first era (Travis Scott:
+        # '| Last Updated: … | Hover over the headers … |') → notice.
+        if current_era is None:
+            filled = [c for c in row if c.text.strip()]
+            if (
+                len(filled) == 1
+                and not filled[0].links
+                and re.search(
+                    r"last updated|hover over|how to use", filled[0].text, re.IGNORECASE
+                )
+            ):
+                text = filled[0].text.strip().strip("|").strip()
+                notices.append(Notice(text=text, link=None, kind="info"))
+                continue
+
         # Section separators → capture as named sections within current era
         if _is_section_separator(row):
             if current_era is not None:
