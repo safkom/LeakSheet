@@ -182,6 +182,13 @@ def _normalize_url(url: str) -> str:
         if sheet_id:
             parsed = urlparse(url)
             url = f"{parsed.scheme}://{parsed.netloc}/spreadsheets/d/{sheet_id}/htmlview"
+    else:
+        # Non-Google hosts (yetracker.net): 'host' and 'host/' are the same
+        # resource but hash to different cache keys — canonicalize the bare
+        # host-root form to a trailing slash.
+        parsed = urlparse(url)
+        if not parsed.path and not parsed.query and not parsed.fragment:
+            url = url + "/"
 
     return url
 
@@ -448,7 +455,10 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
             if time.time() - meta.get("timestamp", 0) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.parse_obj(data)
-        except (json.JSONDecodeError, OSError, Exception) as e:
+        except Exception as e:
+            # Any unreadable/invalid cache entry (corrupt JSON, IO error,
+            # pydantic schema drift after a model change) is a cache miss —
+            # never let cache corruption break a request.
             logger.warning("Parsed cache read failed for %s: %s", url[:80], e)
     return None
 
@@ -1342,8 +1352,9 @@ async def async_fetch_and_parse(
                                 )
                             if art_map:
                                 apply_art_tab_images(best_artist, art_map)
-                except Exception:
-                    pass  # Art tab optional — keep existing art_url on failure
+                except Exception as e:
+                    # Art tab optional — keep existing art_url on failure
+                    logger.debug("Art tab load failed for %s: %s", url_norm[:80], e)
 
             misc_results: dict[str, list] = {}
 
@@ -1357,8 +1368,9 @@ async def async_fetch_and_parse(
                             misc_results[gid_val] = await asyncio.to_thread(
                                 parse_misc_tab, misc_html, kind
                             )
-                except Exception:
-                    pass  # Misc tabs optional
+                except Exception as e:
+                    # Misc tabs optional
+                    logger.debug("Misc tab %s load failed: %s", gid_val, e)
 
             secondary = [_load_misc(g, k) for g, k in misc_tabs]
             if art_gid:

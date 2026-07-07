@@ -5,7 +5,80 @@ Covers ETag parsing per RFC 7232 §2.3 (strong and weak forms).
 
 import pytest
 
-from src.api import _parse_if_none_match
+from src.api import _parse_if_none_match, _plan_synthesized_range, _RangePlan
+
+
+@pytest.mark.parametrize(
+    ("header", "total", "expected"),
+    [
+        # No header / ignored headers → full 200
+        (None, 1000, _RangePlan("full")),
+        ("", 1000, _RangePlan("full")),
+        ("bytes=abc", 1000, _RangePlan("full")),           # malformed → ignore
+        ("bytes=0-1,5-9", 1000, _RangePlan("full")),       # multi-part → ignore
+        ("items=0-5", 1000, _RangePlan("full")),           # non-bytes unit
+        ("bytes=5-2", 1000, _RangePlan("full")),           # end < start → ignore
+        # Closed ranges
+        ("bytes=0-499", 1000, _RangePlan("partial", 0, 499)),
+        ("bytes=500-999", 1000, _RangePlan("partial", 500, 999)),
+        ("bytes=0-999999999", 1000, _RangePlan("partial", 0, 999)),   # clamp to total
+        ("bytes=0-499", None, _RangePlan("partial", 0, 499)),         # unknown total OK
+        # Open-ended ranges
+        ("bytes=0-", 1000, _RangePlan("partial", 0, 999)),
+        ("bytes=200-", 1000, _RangePlan("partial", 200, 999)),
+        ("bytes=200-", None, _RangePlan("full")),          # unknown total → 200
+        # Suffix ranges (AVPlayer reads trailing MP4 metadata this way)
+        ("bytes=-500", 1000, _RangePlan("partial", 500, 999)),
+        ("bytes=-2000", 1000, _RangePlan("partial", 0, 999)),  # suffix > total
+        ("bytes=-500", None, _RangePlan("full")),          # unknown total → 200
+        ("bytes=-0", 1000, _RangePlan("unsatisfiable")),   # names no bytes
+        # Unsatisfiable starts
+        ("bytes=1000-", 1000, _RangePlan("unsatisfiable")),
+        ("bytes=1000-2000", 1000, _RangePlan("unsatisfiable")),
+        ("bytes=999-", 1000, _RangePlan("partial", 999, 999)),  # last byte OK
+    ],
+)
+def test_plan_synthesized_range(header, total, expected):
+    assert _plan_synthesized_range(header, total) == expected
+
+
+class TestNormalizeUrlCacheKeys:
+    """URL variants of the same tracker must canonicalize identically —
+    the cache key is sha256(normalized URL), so every variant that doesn't
+    is a needless cold parse (and a stale-serving split brain)."""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            # Google Sheets variants of the same sheet
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "https://docs.google.com/spreadsheets/d/ABC123/edit#gid=0"),
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "https://docs.google.com/spreadsheets/d/ABC123/edit?usp=sharing"),
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "docs.google.com/spreadsheets/d/ABC123/view"),
+            # Non-Google host: bare vs trailing slash vs missing scheme
+            ("https://yetracker.net/", "https://yetracker.net"),
+            ("https://yetracker.net/", "yetracker.net"),
+        ],
+    )
+    def test_variants_share_a_key(self, a, b):
+        from src.fetcher import _cache_key, _normalize_url
+
+        assert _cache_key(_normalize_url(a)) == _cache_key(_normalize_url(b))
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "https://docs.google.com/spreadsheets/d/XYZ789/htmlview"),
+            ("https://yetracker.net/", "https://yetracker.net/other"),
+        ],
+    )
+    def test_distinct_resources_get_distinct_keys(self, a, b):
+        from src.fetcher import _cache_key, _normalize_url
+
+        assert _cache_key(_normalize_url(a)) != _cache_key(_normalize_url(b))
 
 
 @pytest.mark.parametrize(

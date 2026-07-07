@@ -694,6 +694,79 @@ async def proxy_metadata(
 # GET /api/stream — proxy audio (CORS bypass) with range request support
 # ---------------------------------------------------------------------------
 
+class _RangePlan:
+    """Decision for serving a client Range when upstream ignored it.
+
+    kind:
+      'full'          — serve the whole body as HTTP 200 (no/ignored Range)
+      'partial'       — synthesise HTTP 206 for bytes [start, end]
+      'unsatisfiable' — HTTP 416 with Content-Range: bytes */total
+    """
+
+    __slots__ = ("kind", "start", "end")
+
+    def __init__(self, kind: str, start: int = 0, end: int | None = None):
+        self.kind = kind
+        self.start = start
+        self.end = end
+
+    def __eq__(self, other):
+        return (self.kind, self.start, self.end) == (other.kind, other.start, other.end)
+
+    def __repr__(self):
+        return f"_RangePlan({self.kind!r}, {self.start}, {self.end})"
+
+
+_RANGE_SPEC = re.compile(r"^bytes=(?:(\d+)-(\d*)|-(\d+))$")
+
+
+def _plan_synthesized_range(range_header: str | None, total_size: int | None) -> _RangePlan:
+    """Map a client Range header onto a serving plan (RFC 7233 semantics).
+
+    Only single-part byte ranges are synthesised. Malformed or multi-part
+    headers are ignored (serve 200 full) rather than rejected — per RFC 7233
+    a server MAY ignore the Range header. Suffix ranges ('bytes=-N', which
+    AVPlayer uses to read trailing MP4 metadata) resolve against the total
+    size when known.
+    """
+    if not range_header:
+        return _RangePlan("full")
+    m = _RANGE_SPEC.match(range_header.strip())
+    if not m:
+        return _RangePlan("full")
+
+    first, last, suffix = m.groups()
+    if suffix is not None:
+        n = int(suffix)
+        if n == 0:
+            return _RangePlan("unsatisfiable")  # 'bytes=-0' names no bytes
+        if total_size is None:
+            # Suffix against an unknown total → can't synthesise a valid
+            # Content-Range; fall back to the full body.
+            return _RangePlan("full")
+        start = max(0, total_size - n)
+        return _RangePlan("partial", start, total_size - 1)
+
+    start = int(first)
+    if total_size is not None and start >= total_size:
+        return _RangePlan("unsatisfiable")
+    if not last:
+        # Open-ended 'bytes=start-'
+        if total_size is None:
+            # Unknown total: a synthesised 206 needs a Content-Range end.
+            # Serve 200 from byte 0 — signals "Range unsupported" without
+            # corrupting Safari's byte→timestamp mapping.
+            return _RangePlan("full")
+        return _RangePlan("partial", start, total_size - 1)
+
+    end = int(last)
+    if end < start:
+        return _RangePlan("full")  # malformed → ignore the header
+    if total_size is not None:
+        end = min(end, total_size - 1)
+    return _RangePlan("partial", start, end)
+
+
 async def _slice_byte_stream(source, range_start: int, range_end: int):
     """Yield only bytes [range_start, range_end] (inclusive) from a chunked stream.
 
@@ -738,15 +811,22 @@ async def proxy_stream(
     if not _is_allowed_domain(stream_url, _STREAM_ALLOWED_DOMAINS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
 
-    # Forward Range header from client if present
+    # Forward Range header from client if present. Malformed or multi-part
+    # headers are ignored per RFC 7233 (serve 200 full) rather than being
+    # forwarded — upstreams turn garbage Range values into hard errors.
     range_header = request.headers.get("range")
+    if range_header and not _RANGE_SPEC.match(range_header.strip()):
+        range_header = None
 
-    # Parse range_start early — needed for MIME sniffing decision below.
+    # Parse range shape early — needed for the MIME sniffing decision below.
     _range_start = 0
+    _is_suffix_range = False
     if range_header:
         _rs_m = re.match(r"bytes=(\d+)-", range_header)
         if _rs_m:
             _range_start = int(_rs_m.group(1))
+        else:
+            _is_suffix_range = bool(re.match(r"bytes=-\d+", range_header))
 
     try:
         resp = await stream_audio(stream_url, range_header=range_header)
@@ -756,6 +836,16 @@ async def proxy_stream(
     except Exception as e:
         logger.exception("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
+
+    # Upstream judged the (valid) range unsatisfiable — relay it faithfully
+    # instead of collapsing it into a generic 502.
+    if resp.status_code == 416:
+        cr = resp.headers.get("content-range")
+        await resp.aclose()
+        return Response(
+            status_code=416,
+            headers={"Content-Range": cr} if cr else {"Content-Range": "bytes */*"},
+        )
 
     raw_ct = resp.headers.get("content-type")
     raw_cd = resp.headers.get("content-disposition")
@@ -775,7 +865,13 @@ async def proxy_stream(
     _stream_iter = resp.aiter_bytes(chunk_size=65536)
     _prepend_chunk: bytes = b""
 
-    if _range_start == 0:
+    # The first body byte is file byte 0 when upstream ignored the Range
+    # (200), or honored a range that starts at 0. A 206 to a suffix range
+    # ('bytes=-N') starts at the file TAIL — never sniff those bytes.
+    _body_starts_at_zero = resp.status_code == 200 or (
+        _range_start == 0 and not _is_suffix_range
+    )
+    if _body_starts_at_zero:
         try:
             _prepend_chunk = await _stream_iter.__anext__()
         except StopAsyncIteration:
@@ -857,18 +953,18 @@ async def proxy_stream(
             media_type=ct or "application/octet-stream",
         )
 
-    # Client requested Range but upstream ignored it — synthesise 206.
-    m = re.match(r"bytes=(\d+)-(\d*)", range_header)
-    if not m:
-        await resp.aclose()
-        raise HTTPException(status_code=416, detail="Malformed Range header")
+    # Client requested Range but upstream ignored it — plan the response.
+    # (Suffix ranges resolve against total size; malformed headers are
+    # ignored per RFC 7233; unsatisfiable starts get a proper 416.)
+    plan = _plan_synthesized_range(range_header, total_size)
 
-    range_start = int(m.group(1))
-    range_end = int(m.group(2)) if m.group(2) else (total_size - 1 if total_size else None)
-
-    if total_size and range_start >= total_size:
+    if plan.kind == "unsatisfiable":
         await resp.aclose()
-        raise HTTPException(status_code=416, detail="Range start beyond file size")
+        cr_total = str(total_size) if total_size is not None else "*"
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{cr_total}"},
+        )
 
     # Build a unified source iterator (prepend chunk + rest of stream).
     # The slice logic below must operate on the FULL byte-offset stream,
@@ -879,13 +975,13 @@ async def proxy_stream(
         async for chunk in _stream_iter:
             yield chunk
 
-    if range_end is None:
-        # Unknown total size — cannot synthesise a valid 206 without knowing the
-        # Content-Range end byte. Return the full stream from byte 0 as HTTP 200,
-        # which correctly signals to the browser that Range is not supported for
-        # this response. iOS Safari interprets HTTP 200 to a Range request as
-        # "full file from byte 0"; returning partial data starting at range_start
-        # here would corrupt its byte-offset-to-timestamp mapping.
+    if plan.kind == "full":
+        # Cannot synthesise a valid 206 (unknown total, or header ignored).
+        # Return the full stream from byte 0 as HTTP 200, which correctly
+        # signals that Range is not supported for this response. iOS Safari
+        # interprets HTTP 200 to a Range request as "full file from byte 0";
+        # returning partial data here would corrupt its byte-offset-to-
+        # timestamp mapping.
         async def _iter_full_unknown():
             try:
                 async for chunk in _source_iter():
@@ -907,7 +1003,9 @@ async def proxy_stream(
             media_type=ct or "application/octet-stream",
         )
 
-    # Known total — return proper 206 with Content-Range
+    # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233
+    # when the complete length is unknown).
+    range_start, range_end = plan.start, plan.end
     content_length = range_end - range_start + 1
 
     async def _iter_range():
@@ -926,7 +1024,10 @@ async def proxy_stream(
             "Accept-Ranges": "bytes",
             "Content-Type": ct or "application/octet-stream",
             "Content-Length": str(content_length),
-            "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
+            "Content-Range": (
+                f"bytes {range_start}-{range_end}/"
+                f"{total_size if total_size is not None else '*'}"
+            ),
         },
         media_type=ct or "application/octet-stream",
     )
