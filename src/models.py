@@ -105,6 +105,7 @@ class SongVersion(BaseModel):
     leak_date: str | None = Field(None, description="Date the version leaked")
     available_length: str | None = Field(None, description="Full/Partial/Snippet/etc.")
     quality: str | None = Field(None, description="CD Quality/High Quality/etc.")
+    rating: int | None = Field(None, description="Fan star rating 1-5 (Travis-style ⭐ suffix in the availability cell)")
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
     # Spreadsheet cell background colors (hex, e.g. "#4caf50") for quality/availability.
     # Only set when the tracker uses custom non-neutral cell colors.

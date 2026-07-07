@@ -197,6 +197,50 @@ class TestTravisBannerNotice:
         assert artist.parse_metadata.skipped_rows == 0
 
 
+class TestCompoundAvailability:
+    """Travis-style trackers have no Quality column; quality (HQ/LQ) and a
+    fan star rating are folded into the availability value. Value grammar
+    inventoried from the raw snapshot on 2026-07-06."""
+
+    @pytest.mark.parametrize(
+        ("raw", "avail", "quality", "rating"),
+        [
+            ("Full - HQ", "Full", "High Quality", None),
+            ("Snippet - LQ", "Snippet", "Low Quality", None),
+            ("~Full - LQ", "~Full", "Low Quality", None),
+            ("Full - ~HQ", "Full", "High Quality", None),
+            ("Full - HQ (Unofficial)\n⭐⭐⭐⭐⭐", "Full (Unofficial)", "High Quality", 5),
+            ("Full - HQ (Unofficial)\n⭐⭐⭐⭐☆", "Full (Unofficial)", "High Quality", 4),
+            ("Snippet - HQ (Unofficial)\n⭐☆☆☆☆", "Snippet (Unofficial)", "High Quality", 1),
+            ("Unconfirmed (Snippet - LQ)", "Unconfirmed (Snippet)", "Low Quality", None),
+            ("Full - HQ\n(Tagged)", "Full (Tagged)", "High Quality", None),
+            ("Instrumental Snippet - HQ", "Instrumental Snippet", "High Quality", None),
+            # No marker → untouched
+            ("N/A", "N/A", None, None),
+            ("Unconfirmed", "Unconfirmed", None, None),
+            ("Unconfirmed / Unrecorded", "Unconfirmed / Unrecorded", None, None),
+            ("Rumoured", "Rumoured", None, None),
+        ],
+    )
+    def test_split(self, raw, avail, quality, rating):
+        from src.parser import _split_compound_availability
+
+        assert _split_compound_availability(raw) == (avail, quality, rating)
+
+    def test_travis_quality_coverage(self, parsed):
+        versions = [
+            v for era in parsed["tracker-1gJq"].eras
+            for song in era.songs for v in song.versions
+        ]
+        with_quality = sum(1 for v in versions if v.quality)
+        assert with_quality >= 800, f"quality populated on {with_quality}/{len(versions)}"
+        assert not any(
+            "- HQ" in (v.available_length or "") or "- LQ" in (v.available_length or "")
+            for v in versions
+        ), "compound markers remain in availability"
+        assert any(v.rating == 5 for v in versions), "no 5-star ratings extracted"
+
+
 class TestTravisSources:
     """The Travis Scott tracker's 'Sources' column carries labeled evidence
     links ('First Mention (Screenshot)', 'Trailer (YouTube)') — 513 rows.

@@ -1829,6 +1829,37 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     return None
 
 
+# Compound availability grammar (Travis Scott tracker — no Quality column):
+# '<avail> - HQ', 'Unconfirmed (Snippet - LQ)', 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
+_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ)\b")
+_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★]+)[☆]*\s*$")
+_COMPOUND_QUALITY_NAMES = {"HQ": "High Quality", "LQ": "Low Quality"}
+
+
+def _split_compound_availability(text: str) -> tuple[str, str | None, int | None]:
+    """Split a compound availability value into (availability, quality, rating).
+
+    Only used when the tracker has no dedicated Quality column. Returns the
+    input unchanged (with None quality/rating) when no marker is present.
+    """
+    rating = None
+    m = _STAR_RATING_PATTERN.search(text)
+    if m:
+        rating = min(len(m.group(1)), 5)
+        text = text[: m.start()].rstrip()
+
+    quality = None
+    qm = _COMPOUND_QUALITY_PATTERN.search(text)
+    if qm:
+        quality = _COMPOUND_QUALITY_NAMES[qm.group(2)]
+        text = (text[: qm.start()] + text[qm.end():])
+        # Collapse artifacts left by the removal: '()' and stray whitespace
+        text = re.sub(r"\(\s*\)", "", text)
+        text = re.sub(r"[ \t]+", " ", text.replace("\n", " ")).strip()
+
+    return text, quality, rating
+
+
 def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
     """Parse a song data row into a SongVersion."""
     name_idx = col_map.get("name", 1)
@@ -1909,6 +1940,15 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
             seen.add(lnk)
             merged_links.append(lnk)
 
+    avail_text = _get_cell_text(row, col_map.get("available_length", -1))
+    quality_text = _get_cell_text(row, col_map.get("quality", -1))
+    rating = None
+    if avail_text and "quality" not in col_map:
+        # Travis-style trackers fold quality (and a fan star rating) into the
+        # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
+        avail_text, split_quality, rating = _split_compound_availability(avail_text)
+        quality_text = quality_text or split_quality or ""
+
     version = SongVersion(
         name=title,
         version_tag=version_tag,
@@ -1926,8 +1966,9 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
         file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
         leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,
-        available_length=_get_cell_text(row, col_map.get("available_length", -1)) or None,
-        quality=_get_cell_text(row, col_map.get("quality", -1)) or None,
+        available_length=avail_text or None,
+        quality=quality_text or None,
+        rating=rating,
         links=merged_links,
         quality_color=_get_cell(row, col_map.get("quality", -1)).bg_color if col_map.get("quality") is not None else None,
         available_length_color=_get_cell(row, col_map.get("available_length", -1)).bg_color if col_map.get("available_length") is not None else None,
