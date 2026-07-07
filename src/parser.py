@@ -836,10 +836,17 @@ def _is_dynamic_section_label(row: list[_Cell], col_map: dict[str, int]) -> str 
     non_empty = [(i, c) for i, c in enumerate(row) if c.text.strip()]
     if not (1 <= len(non_empty) <= 2):
         return None
-    # The text cell must be short and single-line
+    # The text cell must be a short label — either single-line, or a short
+    # first line whose remaining lines are all 'note: …' annotations
+    # (Carti official: 'Full LQs\nnote: check the remasters tab…').
     text_cell = max(non_empty, key=lambda x: len(x[1].text.strip()))
     label = text_cell[1].text.strip()
-    if len(label) > 60 or "\n" in label:
+    if "\n" in label:
+        first, *rest = (ln.strip() for ln in label.split("\n"))
+        if not all(re.match(r"^\(?note\b[:\s]", ln, re.IGNORECASE) for ln in rest if ln):
+            return None
+        label = first
+    if len(label) > 60:
         return None
     # Must not have links (would be a song row)
     if any(c.links for _, c in non_empty):
@@ -1680,6 +1687,16 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         # that could be a section label (e.g. Carti's "WLR Higher Bitrate Files"
         # in the Notes column with empty Era and Name).
         if current_era is not None and not row_era and not name_val:
+            # Timeline continuation row: the era header's timeline column
+            # spills into a following row holding only '(date) - event' text
+            # (Carti official: '(December 25, 2020 - March, 2021) - …').
+            filled = [c.text.strip() for c in row if c.text.strip()]
+            if len(filled) == 1 and filled[0].startswith("("):
+                spill_events = parse_timeline(filled[0])
+                if spill_events:
+                    current_era.timeline = list(current_era.timeline or []) + spill_events
+                    continue
+
             dyn_label = _is_dynamic_section_label(row, col_map)
             if dyn_label:
                 current_era.sections.append(Section(name=dyn_label))

@@ -53,7 +53,10 @@ BASELINES = {
     ),
     "tracker-1Irt": dict(  # Playboi Carti [Official]
         eras=29, songs=1182, versions=1603,
-        total_rows=1859, song_rows=1603, skipped=2, footer=42, other_rows=212,
+        # skipped 2→0, other 212→214 (2026-07-06): the 'Full LQs' note-annotated
+        # section label and a timeline continuation row are now classified as
+        # structural rows instead of being dropped as unmatched.
+        total_rows=1859, song_rows=1603, skipped=0, footer=42, other_rows=214,
         fuzzy=22, songs_with_10plus_versions=4,
     ),
 }
@@ -62,7 +65,10 @@ BASELINES = {
 # removes the entry here in the same commit.
 KNOWN_DROPPED_COLUMNS: dict[str, set[str]] = {}
 KNOWN_EMPTY_ERAS = {
-    "tracker-1v55": {"unknown"},  # finding: era header captured, contents lost?
+    # Verified 2026-07-06: the Drake sheet itself has an empty trailing
+    # 'Unknown' era (all-zero stats, footer follows immediately). Parser is
+    # faithful to the sheet — tracker content, not a defect.
+    "tracker-1v55": {"unknown"},
 }
 
 MAX_SKIPPED_RATIO = 0.01
@@ -142,6 +148,38 @@ class TestSnapshotAccuracy:
         md = parsed[name].parse_metadata
         unknown = [c for c in md.dropped_columns if c.lower() not in allowed]
         assert unknown == [], f"unmapped header columns dropping data: {unknown}"
+
+
+class TestCartiOfficialStructuralRows:
+    """Two rows the 2026-07-06 census left unmatched on the official Carti
+    tracker, verified against raw snapshot rows 898/1031:
+
+    - 'Full LQs\\nnote: check the remasters tab…' is a section label with an
+      attached note line; skipping it misfiled the following songs (Bitch
+      Boy, Eastside, …) into the previous section.
+    - '(December 25, 2020 - March, 2021) - Carti continues to record…' is a
+      timeline continuation row under the 'Whole Lotta Red (Deluxe)' era
+      header; skipping it dropped a timeline event.
+    """
+
+    def test_full_lqs_section_label_with_note(self, parsed):
+        artist = parsed["tracker-1Irt"]
+        era = next(e for e in artist.eras if e.name == "Whole Lotta Red [V2]")
+        sec = next((s for s in era.sections if s.name == "Full LQs"), None)
+        assert sec is not None, f"sections: {[s.name for s in era.sections]}"
+        assert any("Bitch Boy" in song.base_name for song in sec.songs), (
+            f"songs in 'Full LQs': {[s.base_name for s in sec.songs][:8]}"
+        )
+
+    def test_timeline_continuation_row_appended(self, parsed):
+        artist = parsed["tracker-1Irt"]
+        era = next(e for e in artist.eras if e.name == "Whole Lotta Red (Deluxe)")
+        assert any(
+            "continues to record" in ev.event for ev in era.timeline
+        ), f"timeline: {[(ev.date, ev.event[:40]) for ev in era.timeline]}"
+
+    def test_no_unmatched_rows_remain(self, parsed):
+        assert parsed["tracker-1Irt"].parse_metadata.skipped_rows == 0
 
 
 class TestTravisSources:
