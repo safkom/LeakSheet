@@ -180,6 +180,13 @@ extension Song {
 
 // MARK: - SongVersion
 
+/// A labeled evidence link from a tracker's Sources column — provenance for
+/// how a leak is known ("First Mention (Screenshot)"), distinct from listen links.
+nonisolated struct SourceRef: Codable, Hashable, Sendable {
+    let label: String
+    let url: String
+}
+
 nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let name: String
     let versionTag: String?
@@ -203,6 +210,11 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let availableLengthColor: String?
     let dateOfRecording: String?
     let type: String?
+    /// Labeled evidence links (Sources column, Travis-style trackers).
+    /// Optional so payloads persisted before the field existed still decode.
+    let sources: [SourceRef]?
+    /// Fan star rating 1-5 extracted from the availability cell.
+    let rating: Int?
 
     var id: String { "\(name)::\(versionTag ?? "")" }
 
@@ -262,7 +274,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, links, type
+        case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, links, type, sources, rating
         case versionTag = "version_tag"
         case altTitles = "alt_titles"
         case ogFilename = "og_filename"
@@ -327,7 +339,9 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
             qualityColor: nil,
             availableLengthColor: nil,
             dateOfRecording: nil,
-            type: entryType
+            type: entryType,
+            sources: nil,
+            rating: nil
         )
     }
 

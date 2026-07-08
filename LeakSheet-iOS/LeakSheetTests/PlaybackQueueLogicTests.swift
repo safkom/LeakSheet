@@ -11,7 +11,7 @@ private func version(_ name: String, tag: String? = nil, notes: String? = nil) -
         collaboration: nil, refs: nil, altTitles: nil, notes: notes, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
         availableLength: nil, quality: nil, links: nil, qualityColor: nil,
-        availableLengthColor: nil, dateOfRecording: nil, type: nil
+        availableLengthColor: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
