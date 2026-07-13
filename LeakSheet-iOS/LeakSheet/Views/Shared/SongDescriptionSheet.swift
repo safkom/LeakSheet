@@ -142,8 +142,8 @@ struct SongDescriptionSheet: View {
                         // Credits section
                         creditsSection
 
-                        // Status badges (quality + availability) — prominent
-                        if payload.version.quality != nil || payload.version.availableLength != nil {
+                        // Status badges (quality + availability + fan rating) — prominent
+                        if payload.version.quality != nil || payload.version.availableLength != nil || payload.version.rating != nil {
                             FlowLayout(spacing: 6) {
                                 if let q = payload.version.quality, !q.isEmpty {
                                     let variant = qualityVariant(q)
@@ -153,11 +153,31 @@ struct SongDescriptionSheet: View {
                                     let variant = availabilityVariant(a)
                                     badgePill(text: a, variant: variant)
                                 }
+                                if let rating = payload.version.rating {
+                                    ratingPill(rating)
+                                }
                             }
                         }
 
                         // Detail grid (2-column)
                         detailGrid
+
+                        // Story — the tracker's notes are the main learning
+                        // content; they read directly after the facts.
+                        if let notes = payload.version.notes, !notes.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Notes")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(notes)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.lsCard)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
 
                         // Alt titles (remaining, after subtitle)
                         if let alts = payload.version.altTitles, alts.count > 1 {
@@ -193,20 +213,11 @@ struct SongDescriptionSheet: View {
                             }
                         }
 
-                        // Notes
-                        if let notes = payload.version.notes, !notes.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Notes")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(notes)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                                    .padding(12)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color.lsCard)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
+                        // Evidence — labeled provenance links from the
+                        // tracker's Sources column ('First Mention
+                        // (Screenshot)', 'Trailer (YouTube)').
+                        if let sources = payload.version.sources, !sources.isEmpty {
+                            EvidenceSection(sources: sources)
                         }
 
                         // Links — filter to valid URLs first so the header
@@ -460,6 +471,23 @@ struct SongDescriptionSheet: View {
             .clipShape(Capsule())
     }
 
+    /// Fan star rating (1-5) from the tracker's availability cell.
+    private func ratingPill(_ rating: Int) -> some View {
+        HStack(spacing: 2) {
+            ForEach(1...5, id: \.self) { star in
+                Image(systemName: star <= rating ? "star.fill" : "star")
+                    .font(.caption2)
+                    .foregroundStyle(star <= rating ? Color.yellow : Color.lsDim)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.lsCard)
+        .clipShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Fan rating \(rating) of 5 stars")
+    }
+
     @ViewBuilder
     private func cardSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -473,6 +501,49 @@ struct SongDescriptionSheet: View {
     private func linkDomain(_ urlString: String) -> String {
         guard let url = URL(string: urlString), let host = url.host else { return urlString }
         return host.replacingOccurrences(of: "www.", with: "")
+    }
+}
+
+// MARK: - Evidence section
+
+/// Labeled provenance links from the tracker's Sources column. Separate View
+/// type so the (potentially long) link list is its own invalidation boundary.
+private struct EvidenceSection: View {
+    let sources: [SourceRef]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Evidence")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(sources, id: \.url) { source in
+                if let url = URL(string: source.url) {
+                    Link(destination: url) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.caption2)
+                            Text(source.label.isEmpty ? shortHost(source.url) : source.label)
+                                .font(.caption)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .foregroundStyle(Color.lsAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.lsCard)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+    }
+
+    private func shortHost(_ urlString: String) -> String {
+        URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
     }
 }
 

@@ -88,5 +88,6 @@ struct ThreeDotMenu: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Song options")
     }
 }

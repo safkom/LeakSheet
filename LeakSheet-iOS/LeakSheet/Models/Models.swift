@@ -144,6 +144,31 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
         versions.count > 1
     }
 
+    /// Ranks used to pick the version whose badges best summarize a collapsed
+    /// multi-version row (highest quality wins, availability breaks ties).
+    private static let qualityRank: [String: Int] = [
+        "Lossless": 6, "CD Quality": 5, "High Quality": 4,
+        "Recording": 3, "Low Quality": 2, "Not Available": 0,
+    ]
+    private static let availabilityRank: [String: Int] = [
+        "OG File": 8, "Full": 7, "Tagged": 6, "Partial": 5,
+        "Snippet": 4, "Stem Bounce": 3, "Beat Only": 2, "Confirmed": 1,
+    ]
+
+    /// The version with the best quality (availability breaks ties) — what a
+    /// collapsed multi-version row shows so the song can be judged at a
+    /// glance without expanding.
+    var bestVersion: SongVersion? {
+        versions.max { a, b in
+            let qa = Self.qualityRank[a.quality ?? ""] ?? 1
+            let qb = Self.qualityRank[b.quality ?? ""] ?? 1
+            if qa != qb { return qa < qb }
+            let aa = Self.availabilityRank[a.availableLength ?? ""] ?? 0
+            let ab = Self.availabilityRank[b.availableLength ?? ""] ?? 0
+            return aa < ab
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case versions, badge, quality
         case baseName = "base_name"

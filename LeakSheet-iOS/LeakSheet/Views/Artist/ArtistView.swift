@@ -94,9 +94,13 @@ struct ArtistView: View {
         // toolbar search item's minimized form) both live in the bottom slot,
         // where they end up behind the mini player (safeAreaBar) — the drawer
         // is the one placement that can never collide with it.
+        // displayMode .always: the .automatic drawer minimizes into a bare
+        // black capsule behind the Dynamic Island once content scrolls
+        // (audited 2026-07-13) — keeping the field visible avoids the
+        // glitch-looking pill and makes search discoverable.
         .searchable(
             text: $vm.searchQuery,
-            placement: .navigationBarDrawer(displayMode: .automatic),
+            placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search songs…"
         )
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
@@ -481,11 +485,17 @@ struct FilterChip: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .foregroundStyle(isActive ? .white : .secondary)
-                .glassEffect(.regular.tint(isActive ? tintColor : .clear).interactive())
+                // Tint via opacity keeps the glass effect structurally
+                // identical across states — switching between .clear and a
+                // color changed the effect identity and tripped the
+                // "glassEffect() tried to update multiple times per frame"
+                // fault on toggle.
+                .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }
         .buttonStyle(.plain)
         .frame(minHeight: 44)
         .contentShape(Capsule())
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 }
 

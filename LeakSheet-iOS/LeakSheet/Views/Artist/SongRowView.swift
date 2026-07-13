@@ -55,6 +55,20 @@ struct SongRowView: View {
                     BadgeRowView(version: v)
                 }
 
+                // Collapsed multi-version rows: summarize with the BEST
+                // version's badges + a version count, so the song can be
+                // judged at a glance without expanding.
+                if hasMultiple && !showVersionBadge {
+                    HStack(spacing: 6) {
+                        if let best = song.bestVersion {
+                            BadgeRowView(version: best)
+                        }
+                        Text("\(song.versions.count) versions")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
                 // Credits
                 if (!hasMultiple || showVersionBadge), let v = version {
                     CreditTagsView(version: v)
