@@ -283,11 +283,11 @@ struct NowPlayingView: View {
             }
             .task(id: player.artUrl) {
                 guard !player.artUrl.isEmpty,
-                      let url = APIClient.shared.imageProxyURL(for: player.artUrl) else {
+                      let url = APIClient.shared.imageProxyURL(for: player.artUrl, width: 128) else {
                     accentColor = nil
                     return
                 }
-                accentColor = await EraColorExtractor.shared.extractColor(from: url, eraName: player.eraName)
+                accentColor = await EraColorExtractor.shared.extractColor(from: url, cacheKey: player.artUrl)
             }
         }
     }
@@ -295,7 +295,7 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var artworkView: some View {
         if !player.artUrl.isEmpty {
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl)) {
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1280)) {
                 artPlaceholder
             }
         } else {

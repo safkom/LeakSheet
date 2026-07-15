@@ -6,10 +6,11 @@ struct EraCardView: View {
     let era: Era
     let expanded: Bool
     let stats: ArtistViewModel.Stats
+    /// Precomputed display colors (derived once per era when the dominant
+    /// color is extracted) — nil until the first extraction lands.
+    var displayColors: EraDisplayColors?
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
-
-    @State private var dominantColor: Color?
 
     private let cornerRadius: CGFloat = 16
 
@@ -69,9 +70,9 @@ struct EraCardView: View {
 
     private var coverArt: some View {
         Group {
-            if let artUrl = era.artUrl, let url = APIClient.shared.imageProxyURL(for: artUrl) {
-                CachedEraImage(url: url, eraName: era.name) { color in
-                    dominantColor = color
+            if let artUrl = era.artUrl,
+               let url = APIClient.shared.imageProxyURL(for: artUrl, width: 320) {
+                CachedEraImage(url: url, cacheKey: artUrl) { color in
                     onColorExtracted?(color)
                 }
             } else {
@@ -126,31 +127,25 @@ struct EraCardView: View {
         )
     }
 
-    // MARK: - Colors
+    // MARK: - Colors (precomputed in EraDisplayColors — plain reads here)
 
     private var titleColor: Color {
-        guard let color = dominantColor else { return .primary }
-        let (r, g, b) = color.rgbComponents
-        let effective = Color(red: r * 0.48, green: g * 0.48, blue: b * 0.48)
-        return Color.preferredText(on: effective)
+        displayColors?.title ?? .primary
     }
 
     private var bodyColor: Color {
-        titleColor.opacity(0.78)
+        displayColors?.body ?? .primary.opacity(0.78)
     }
 
     private var borderColor: Color {
-        titleColor.opacity(0.18)
+        displayColors?.border ?? .primary.opacity(0.18)
     }
 
     private var eraBackground: some ShapeStyle {
-        if let color = dominantColor {
-            let (r, g, b) = color.rgbComponents
-            let d1 = Color(red: r * 0.55, green: g * 0.55, blue: b * 0.55).opacity(0.95)
-            let d2 = Color(red: r * 0.40, green: g * 0.40, blue: b * 0.40).opacity(0.90)
+        if let colors = displayColors {
             return AnyShapeStyle(
                 LinearGradient(
-                    colors: [d1, d2],
+                    colors: [colors.gradientTop, colors.gradientBottom],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -210,7 +205,8 @@ private struct EraCardBorder: Shape {
 /// Triggers color extraction once the image is available.
 private struct CachedEraImage: View {
     let url: URL
-    let eraName: String
+    /// The era's raw (unproxied) art URL — unique per image, unlike era name.
+    let cacheKey: String
     var onColorExtracted: (Color) -> Void
 
     @State private var image: UIImage?
@@ -226,12 +222,12 @@ private struct CachedEraImage: View {
             }
         }
         .task(id: url) {
-            if let cached = await ImageCache.shared.cachedImage(for: url) {
+            if let cached = await ImageCache.shared.cachedImage(for: url, maxPixelSize: 320) {
                 image = cached
                 extractColor(from: cached)
                 return
             }
-            if let loaded = await ImageCache.shared.loadImage(from: url) {
+            if let loaded = await ImageCache.shared.loadImage(from: url, maxPixelSize: 320) {
                 image = loaded
                 extractColor(from: loaded)
             }
@@ -240,7 +236,7 @@ private struct CachedEraImage: View {
 
     private func extractColor(from img: UIImage) {
         Task {
-            if let color = await EraColorExtractor.shared.extractColor(fromImage: img, eraName: eraName) {
+            if let color = await EraColorExtractor.shared.extractColor(fromImage: img, cacheKey: cacheKey) {
                 await MainActor.run { onColorExtracted(color) }
             }
         }

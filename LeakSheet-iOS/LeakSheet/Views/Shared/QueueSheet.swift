@@ -20,7 +20,7 @@ struct QueueSheet: View {
                             HStack(spacing: 10) {
                                 // Era art thumbnail
                                 if !item.artUrl.isEmpty {
-                                    CachedImage(url: APIClient.shared.imageProxyURL(for: item.artUrl)) {
+                                    CachedImage(url: APIClient.shared.imageProxyURL(for: item.artUrl, width: 128), maxPixelSize: 128) {
                                         queueArtPlaceholder
                                     }
                                     .frame(width: 40, height: 40)

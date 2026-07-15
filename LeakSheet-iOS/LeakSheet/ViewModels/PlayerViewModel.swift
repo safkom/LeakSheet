@@ -23,6 +23,8 @@ final class PlayerViewModel {
     var error: String { engine.error }
     var queue: [QueueItem] { engine.queue }
     var originalQuality: Bool { engine.originalQuality }
+    /// Live-captured stream format for the current track — File Info fallback.
+    var streamFormat: StreamFormatInfo? { engine.streamFormat }
 
     /// Shared seeking state — set `seeking = true` on drag start, false on commit.
     var seeking: Bool = false

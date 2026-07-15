@@ -35,7 +35,7 @@ struct MiniPlayerBar: View {
                         HStack(spacing: 10) {
                             // Art
                             if !player.artUrl.isEmpty {
-                                CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl)) {
+                                CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 128), maxPixelSize: 128) {
                                     artPlaceholder
                                 }
                                 .frame(width: 40, height: 40)

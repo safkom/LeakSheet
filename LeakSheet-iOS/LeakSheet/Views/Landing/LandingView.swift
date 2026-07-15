@@ -41,11 +41,11 @@ struct LandingView: View {
                 }
                 .padding(.horizontal, 20)
 
-                // Browse artists button
+                // Explore trackers button
                 Button {
                     onBrowseTapped()
                 } label: {
-                    Label("Browse Artists", systemImage: "music.note.list")
+                    Label("Explore Trackers", systemImage: "music.note.list")
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)

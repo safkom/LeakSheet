@@ -32,7 +32,7 @@ struct FavouritesView: View {
                                             HStack(spacing: 10) {
                                                 // Era art thumbnail
                                                 if let artStr = entry.eraArt, !artStr.isEmpty {
-                                                    CachedImage(url: APIClient.shared.imageProxyURL(for: artStr)) {
+                                                    CachedImage(url: APIClient.shared.imageProxyURL(for: artStr, width: 128), maxPixelSize: 128) {
                                                         favArtPlaceholder
                                                     }
                                                     .frame(width: 40, height: 40)

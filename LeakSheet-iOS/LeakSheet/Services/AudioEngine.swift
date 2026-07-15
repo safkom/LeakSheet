@@ -31,13 +31,21 @@ final class AudioEngine {
     var streamUrl = ""
     var volume: Float = 1.0
     var originalQuality = false
+    /// Format info read from the live AVPlayerItem once playback is ready —
+    /// the fallback source for File Info when a provider has no metadata API.
+    private(set) var streamFormat: StreamFormatInfo?
 
     /// Playback-ordering decisions (queue, era rollover, ad-hoc lists) live
     /// in a pure value type so they are unit-testable; the engine executes
     /// its decisions against AVPlayer.
     private var logic = PlaybackQueueLogic()
 
-    var queue: [QueueItem] { logic.queue }
+    /// Cached from `logic.queue` after every mutation — reading `logic.queue`
+    /// directly here would make every view that reads `queue` depend on the
+    /// whole `PlaybackQueueLogic` struct (era/list cursors included), so era
+    /// rollover or list bookkeeping unrelated to the visible queue would
+    /// invalidate the queue sheet too.
+    private(set) var queue: [QueueItem] = []
 
     // MARK: - Private
 
@@ -75,6 +83,7 @@ final class AudioEngine {
         buffered = 0
         error = ""
         originalQuality = false
+        streamFormat = nil
         duration = Self.parseDuration(version?.trackLength)
 
         guard let version, let link = version.streamableLink else {
@@ -154,6 +163,7 @@ final class AudioEngine {
     }
 
     func stopTrack() {
+        streamFormat = nil
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = nil
         observations.forEach { $0.invalidate() }
@@ -185,6 +195,13 @@ final class AudioEngine {
         clearNowPlayingInfo()
     }
 
+    /// Refreshes the cached `queue` after a `logic` mutation that could have
+    /// changed it. QueueItem is Equatable, so the @Observable setter skips
+    /// the invalidation when the queue didn't actually change.
+    private func syncQueue() {
+        queue = logic.queue
+    }
+
     func setVolume(_ vol: Float) {
         volume = max(0, min(1, vol))
         player?.volume = volume
@@ -212,6 +229,9 @@ final class AudioEngine {
         loading = true
         originalQuality = true
         error = ""
+        // The new item is a different file for the same track — trackKey
+        // alone can't tell captureStreamFormat this is stale.
+        streamFormat = nil
 
         let asset = AVURLAsset(url: downloadURL)
         let item = AVPlayerItem(asset: asset)
@@ -230,6 +250,9 @@ final class AudioEngine {
         originalQuality = false
         streamUrl = url.absoluteString
         error = ""
+        // The new item is a different file for the same track — trackKey
+        // alone can't tell captureStreamFormat this is stale.
+        streamFormat = nil
 
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
@@ -242,22 +265,27 @@ final class AudioEngine {
 
     func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "") {
         logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl)
+        syncQueue()
     }
 
     func removeFromQueue(at index: Int) {
         logic.removeFromQueue(at: index)
+        syncQueue()
     }
 
     func clearQueue() {
         logic.clearQueue()
+        syncQueue()
     }
 
     func moveInQueue(from source: IndexSet, to destination: Int) {
         logic.moveInQueue(from: source, to: destination)
+        syncQueue()
     }
 
     func playFromQueue(at index: Int) {
         guard let target = logic.playFromQueue(at: index) else { return }
+        syncQueue()
         play(target)
     }
 
@@ -371,6 +399,12 @@ final class AudioEngine {
                     if dur.isValid && !dur.isIndefinite {
                         self.duration = dur.seconds
                     }
+                    // Read format info from the (MainActor-held) current item
+                    // rather than the KVO-captured one — AVPlayerItem is not
+                    // Sendable, and a stale item is caught by the track guard.
+                    if let currentItem = self.player?.currentItem {
+                        Task { await self.captureStreamFormat(for: currentItem) }
+                    }
                     // Restore position for quality-switch scenarios
                     if restoreTime > 0 {
                         self.seekTo(restoreTime)
@@ -448,6 +482,76 @@ final class AudioEngine {
         }
     }
 
+    // MARK: - Stream format capture
+
+    /// Reads codec/sample-rate/channel info from the item's asset and the
+    /// access log's indicated bitrate, then publishes it for the version
+    /// that is still current. AVFoundation objects never leave the MainActor;
+    /// only the value-type result is stored.
+    private func captureStreamFormat(for item: AVPlayerItem) async {
+        guard let trackKey = currentTrack?.id else { return }
+        if streamFormat?.trackKey == trackKey { return }
+
+        var codec: String?
+        var sampleRate: Double?
+        var channels: Int?
+        var bitrateBps: Double?
+        if let tracks = try? await item.asset.load(.tracks),
+           let audioTrack = tracks.first(where: { $0.mediaType == .audio }) {
+            if let descriptions = try? await audioTrack.load(.formatDescriptions),
+               let description = descriptions.first {
+                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description)?.pointee {
+                    sampleRate = asbd.mSampleRate > 0 ? asbd.mSampleRate : nil
+                    channels = asbd.mChannelsPerFrame > 0 ? Int(asbd.mChannelsPerFrame) : nil
+                }
+                codec = Self.codecName(CMFormatDescriptionGetMediaSubType(description))
+            }
+            // estimatedDataRate reflects the container's own bitrate metadata
+            // and is available for progressive downloads right away — unlike
+            // accessLog's indicatedBitrate, which is an HLS-transfer metric
+            // that's typically empty for the plain HTTP files every supported
+            // host serves.
+            if let rate = try? await audioTrack.load(.estimatedDataRate), rate > 0 {
+                bitrateBps = Double(rate)
+            }
+        }
+        if bitrateBps == nil {
+            let indicated = item.accessLog()?.events.last?.indicatedBitrate ?? -1
+            bitrateBps = indicated > 0 ? indicated : nil
+        }
+
+        // The track may have advanced while the asset loaded.
+        guard currentTrack?.id == trackKey else { return }
+        streamFormat = StreamFormatInfo(
+            codec: codec,
+            sampleRateHz: sampleRate,
+            channels: channels,
+            indicatedBitrateBps: bitrateBps,
+            trackKey: trackKey
+        )
+    }
+
+    // Internal (not private) so the unit tests can exercise the mapping.
+    nonisolated static func codecName(_ fourCC: FourCharCode) -> String? {
+        switch fourCC {
+        case kAudioFormatMPEGLayer3: return "MP3"
+        case kAudioFormatMPEG4AAC: return "AAC"
+        case kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2: return "AAC (HE)"
+        case kAudioFormatFLAC: return "FLAC"
+        case kAudioFormatAppleLossless: return "ALAC"
+        case kAudioFormatLinearPCM: return "PCM"
+        case kAudioFormatOpus: return "Opus"
+        default:
+            // Render the FourCC itself (e.g. "mp4a") when it's printable.
+            let bytes = [
+                UInt8((fourCC >> 24) & 0xFF), UInt8((fourCC >> 16) & 0xFF),
+                UInt8((fourCC >> 8) & 0xFF), UInt8(fourCC & 0xFF),
+            ]
+            guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else { return nil }
+            return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces).uppercased()
+        }
+    }
+
     // MARK: - Audio Session
 
     /// Re-setting the category on an already-active session is a slow,
@@ -487,7 +591,11 @@ final class AudioEngine {
     }
 
     func playNext() {
-        switch logic.next() {
+        // logic.next() may dequeue from the user queue (it wins over era/list
+        // advance), so the cached queue can change here too.
+        let advance = logic.next()
+        syncQueue()
+        switch advance {
         case .play(let target):
             play(target)
         case .restart:
@@ -647,9 +755,9 @@ final class AudioEngine {
         guard !targetUrl.isEmpty else { return }
         var fullURL = targetUrl
         if fullURL.hasPrefix("//") { fullURL = "https:" + fullURL }
-        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL) else { return }
+        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL, width: 1280) else { return }
 
-        guard let image = await ImageCache.shared.loadImage(from: proxyURL) else { return }
+        guard let image = await ImageCache.shared.loadImage(from: proxyURL, maxPixelSize: 1280) else { return }
         // Guard against races: if the user advanced tracks while we were loading,
         // don't overwrite the newer track's artwork with the old one.
         guard artUrl == targetUrl else { return }
@@ -692,7 +800,19 @@ final class AudioEngine {
 
 // MARK: - Supporting Types
 
-struct QueueItem: Identifiable, Sendable {
+/// Format info captured from a live AVPlayerItem — the player-side fallback
+/// for File Info when a stream host has no metadata API (e.g. krakenfiles).
+nonisolated struct StreamFormatInfo: Equatable, Sendable {
+    let codec: String?
+    let sampleRateHz: Double?
+    let channels: Int?
+    let indicatedBitrateBps: Double?
+    /// SongVersion.id this info was captured for — consumers match it
+    /// against the version they display.
+    let trackKey: String
+}
+
+struct QueueItem: Identifiable, Equatable, Sendable {
     let id: Int
     let version: SongVersion
     let artistName: String
@@ -712,7 +832,7 @@ struct EraSongContext: Sendable {
 
 /// One entry of an ad-hoc playback list — each item carries its own era
 /// metadata because such lists (recents, search results) span eras.
-struct PlaybackListItem: Sendable {
+nonisolated struct PlaybackListItem: Equatable, Sendable {
     let version: SongVersion
     let artistName: String
     let eraName: String

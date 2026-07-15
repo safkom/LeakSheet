@@ -2,8 +2,11 @@ import SwiftUI
 
 /// General-purpose cached image view using ImageCache.
 /// Loads from memory cache instantly, falls back to network.
+/// `maxPixelSize` bounds the decode (see ImageCache.sizeBuckets) — pass the
+/// bucket matching the display size so full-res bitmaps never materialize.
 struct CachedImage<Placeholder: View>: View {
     let url: URL?
+    var maxPixelSize: Int = 1280
     @ViewBuilder var placeholder: () -> Placeholder
 
     @State private var image: UIImage?
@@ -23,11 +26,11 @@ struct CachedImage<Placeholder: View>: View {
                 image = nil
                 return
             }
-            if let cached = await ImageCache.shared.cachedImage(for: url) {
+            if let cached = await ImageCache.shared.cachedImage(for: url, maxPixelSize: maxPixelSize) {
                 image = cached
                 return
             }
-            if let loaded = await ImageCache.shared.loadImage(from: url) {
+            if let loaded = await ImageCache.shared.loadImage(from: url, maxPixelSize: maxPixelSize) {
                 image = loaded
             } else {
                 // Network/load failed — surface the placeholder instead of
@@ -39,8 +42,9 @@ struct CachedImage<Placeholder: View>: View {
 }
 
 extension CachedImage where Placeholder == DefaultCachedImagePlaceholder {
-    init(url: URL?) {
+    init(url: URL?, maxPixelSize: Int = 1280) {
         self.url = url
+        self.maxPixelSize = maxPixelSize
         self.placeholder = { DefaultCachedImagePlaceholder() }
     }
 }

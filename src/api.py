@@ -13,10 +13,16 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
+import os
 import re
+import tempfile
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 
@@ -31,6 +37,7 @@ from starlette.responses import StreamingResponse
 
 from src.fetcher import (
     AccessDeniedError,
+    CACHE_DIR,
     async_fetch_and_parse,
     async_get_cached_age,
     async_get_cached_etag,
@@ -294,8 +301,12 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
     audio stream, not the gzip-compressed one.
     """
 
+    # /image-proxy is skipped too: image bytes are already compressed, so
+    # gzip only burns CPU and delays time-to-first-byte.
+    _GZIP_EXEMPT_PATHS = {"/stream", "/image-proxy"}
+
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope.get("path", "").rstrip("/") == "/stream":
+        if scope["type"] == "http" and scope.get("path", "").rstrip("/") in self._GZIP_EXEMPT_PATHS:
             await self.app(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
@@ -499,15 +510,172 @@ async def clear_fetch_cache():
 
 
 # ---------------------------------------------------------------------------
-# GET /api/image-proxy — proxy images with CORS headers
+# GET /api/image-proxy — proxy images with CORS headers, optional resizing
 # ---------------------------------------------------------------------------
 
+# Width buckets bound the cache cardinality; clients snap to the next bucket.
+_IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280)
+_IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
+_IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
+_IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
+# Compressed-byte size says nothing about decoded size (a small, highly
+# compressible image can unpack to hundreds of MB) — cap decoded pixels too,
+# checked from the header before the full-frame load() below.
+_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA on the 512MB box
+
+# Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and
+# docs.google.com/sheets-images 302s to login for N>0 (see web
+# enhanceGoogleImageUrl) — those fall through to the Pillow path.
+_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
+# Google's sizing suffix is a "="-prefixed, "-"-joined list of option tokens,
+# not just w/h/s: "no" (don't upscale), "c" (crop), "p" (padding), etc. all
+# appear with no following digits, so a token is letters + *optional* digits
+# rather than one of {s,w,h} + required digits.
+_GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
+
+
+def _snap_image_width(w: int) -> int:
+    for bucket in _IMAGE_SIZE_BUCKETS:
+        if w <= bucket:
+            return bucket
+    return _IMAGE_SIZE_BUCKETS[-1]
+
+
+def _rewrite_google_size(url: str, w: int) -> str | None:
+    """Rewrite an lh3-lh6 googleusercontent URL to request width ``w`` from
+    Google's CDN directly (free resize, no local decode). Returns None when
+    the host doesn't support arbitrary sizing. Never changes host or path,
+    so the SSRF allowlist verdict on the original URL still holds.
+    """
+    from urllib.parse import urlparse
+    hostname = urlparse(url).hostname or ""
+    if not _GOOGLE_RESIZABLE_HOST_RE.match(hostname):
+        return None
+    return _GOOGLE_SIZE_SUFFIX_RE.sub("", url) + f"=s{w}"
+
+
+def _image_cache_key(url: str, w: int | None) -> str:
+    return hashlib.sha256(f"{url}|{w or 0}".encode()).hexdigest()
+
+
+def _image_cache_paths(key: str):
+    return CACHE_DIR / f"img_{key}.bin", CACHE_DIR / f"img_{key}.meta.json"
+
+
+def _read_image_cache(key: str) -> tuple[bytes, str] | None:
+    """Blocking read of a cached resized image — call via asyncio.to_thread."""
+    bin_path, meta_path = _image_cache_paths(key)
+    try:
+        meta = json.loads(meta_path.read_text())
+        if time.time() - meta["timestamp"] > _IMAGE_CACHE_TTL:
+            return None
+        return bin_path.read_bytes(), meta["content_type"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write via a same-directory temp file + rename, so a concurrent
+    reader never observes a truncated/partial file mid-write."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _write_image_cache(key: str, data: bytes, content_type: str) -> None:
+    """Blocking write + size-cap eviction — call via asyncio.to_thread."""
+    try:
+        CACHE_DIR.mkdir(exist_ok=True)
+        bin_path, meta_path = _image_cache_paths(key)
+        meta_bytes = json.dumps({
+            "content_type": content_type,
+            "timestamp": time.time(),
+        }).encode()
+        _atomic_write_bytes(bin_path, data)
+        _atomic_write_bytes(meta_path, meta_bytes)
+        _evict_image_cache()
+    except OSError as e:
+        logger.warning("Image cache write failed: %s", e)
+
+
+def _evict_image_cache() -> None:
+    """Drop oldest resized images (by mtime) once the cache exceeds the cap."""
+    entries = []
+    total = 0
+    for bin_path in CACHE_DIR.glob("img_*.bin"):
+        try:
+            stat = bin_path.stat()
+        except OSError:
+            continue
+        entries.append((stat.st_mtime, stat.st_size, bin_path))
+        total += stat.st_size
+    entries.sort()
+    while entries and total > _IMAGE_CACHE_MAX_BYTES:
+        _, size, victim = entries.pop(0)
+        total -= size
+        meta = victim.with_name(victim.name[:-4] + ".meta.json")
+        for p in (victim, meta):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
+def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, str]:
+    """Blocking Pillow downscale to max width ``w`` — call via asyncio.to_thread.
+
+    Returns the original bytes when the image is already small enough, too
+    large to decode safely, or not decodable.
+    """
+    if len(data) > _IMAGE_RESIZE_INPUT_CAP:
+        return data, content_type
+    import io
+
+    from PIL import Image
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        if img.width * img.height > _IMAGE_MAX_DECODE_PIXELS:
+            return data, content_type
+        img.load()
+    except Exception:
+        return data, content_type
+    if img.width <= w:
+        return data, content_type
+
+    img.thumbnail((w, 10 * w))
+    has_alpha = "A" in img.getbands() or (
+        img.mode == "P" and "transparency" in img.info
+    )
+    buf = io.BytesIO()
+    if has_alpha:
+        img.convert("RGBA").save(buf, format="PNG", optimize=True)
+        return buf.getvalue(), "image/png"
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=82)
+    return buf.getvalue(), "image/jpeg"
+
+
 @app.get("/image-proxy")
-async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
+async def proxy_image(
+    request: Request,
+    url: str = Query(..., description="Image URL to proxy"),
+    w: int | None = Query(None, ge=32, le=1600, description="Max width in pixels"),
+):
     """Proxy an image through the backend to avoid CORS issues.
 
-    Used by the frontend to load era cover art images from Google CDN
-    which don't serve Access-Control-Allow-Origin headers.
+    With ``w`` the image is downscaled — via Google's CDN when the host
+    supports ``=sNNN`` sizing, else locally with Pillow (result disk-cached
+    in CACHE_DIR as flat ``img_*`` files, cleared by /cache/clear).
     """
     # Fix protocol-relative URLs
     if url.startswith("//"):
@@ -519,6 +687,27 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     if not _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
         raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
 
+    width = _snap_image_width(w) if w else None
+    base_headers = {
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+    }
+
+    # Only width-bounded requests are disk-cached, so only they can carry an
+    # ETag — one that reflects a real, still-live cache entry rather than a
+    # pure hash of the request, otherwise an expired or /cache/clear'd entry
+    # (or an unsized request, which is never cached at all) would revalidate
+    # as unchanged forever.
+    cache_key = None
+    cached = None
+    if width is not None:
+        cache_key = _image_cache_key(url, width)
+        cached = await asyncio.to_thread(_read_image_cache, cache_key)
+        if cached is not None:
+            base_headers["ETag"] = f'"{cache_key}"'
+            if _parse_if_none_match(request.headers.get("if-none-match", "")) == cache_key:
+                return Response(status_code=304, headers=base_headers)
+
     # Conditional headers — send browser-like headers for Google domains
     is_google = any(h in url for h in (
         'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
@@ -528,16 +717,43 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
         headers["Referer"] = "https://docs.google.com/"
 
     try:
+        if width is not None:
+            if cached is not None:
+                data, ct = cached
+                return Response(
+                    content=data, media_type=ct,
+                    headers={**base_headers, "X-Cache-Status": "hit"},
+                )
+
+            # Prefer Google-side resizing — no local decode, no disk cache
+            # needed (the CDN did the work).
+            google_url = _rewrite_google_size(url, width)
+            if google_url is not None:
+                try:
+                    resp = await _get_proxy_client().get(google_url, headers=headers)
+                    ct = resp.headers.get("content-type", "")
+                    if resp.status_code == 200 and ct.startswith("image/"):
+                        return Response(
+                            content=resp.content, media_type=ct,
+                            headers={**base_headers, "X-Cache-Status": "origin"},
+                        )
+                except httpx.HTTPError:
+                    pass  # fall through to the original URL + Pillow path
+
         resp = await _get_proxy_client().get(url, headers=headers)
         ct = resp.headers.get("content-type", "")
         if resp.status_code == 200 and ct.startswith("image/"):
+            data = resp.content
+            if width is not None:
+                data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
+                await asyncio.to_thread(_write_image_cache, cache_key, data, ct)
+                base_headers["ETag"] = f'"{cache_key}"'
+                status = "miss"
+            else:
+                status = "origin"
             return Response(
-                content=resp.content,
-                media_type=ct,
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "Access-Control-Allow-Origin": "*",
-                },
+                content=data, media_type=ct,
+                headers={**base_headers, "X-Cache-Status": status},
             )
 
         raise HTTPException(
@@ -556,6 +772,36 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
 # ---------------------------------------------------------------------------
 
 _METADATA_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+
+
+class _TTLCache:
+    """In-memory TTL cache with a size cap (oldest-inserted eviction)."""
+
+    def __init__(self, ttl: float, max_entries: int) -> None:
+        self.ttl = ttl
+        self.max_entries = max_entries
+        self._data: dict[str, tuple[float, object]] = {}
+
+    def get(self, key: str) -> object | None:
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if time.monotonic() - ts > self.ttl:
+            self._data.pop(key, None)
+            return None
+        return value
+
+    def set(self, key: str, value: object) -> None:
+        if key not in self._data and len(self._data) >= self.max_entries:
+            oldest = min(self._data, key=lambda k: self._data[k][0])
+            self._data.pop(oldest, None)
+        self._data[key] = (time.monotonic(), value)
+
+
+# Provider metadata rarely changes for a given file — cache parsed results so
+# repeated description-sheet opens don't re-hit provider APIs.
+_metadata_cache = _TTLCache(ttl=3600.0, max_entries=500)
 
 
 # Known fields in pillows.su metadata — longer multi-word keys first to avoid
@@ -654,6 +900,17 @@ async def proxy_metadata(
     meta_url = meta_info["url"]
     provider = meta_info["provider"]
 
+    cached = _metadata_cache.get(meta_url)
+    if cached is not None:
+        return Response(
+            content=cached,
+            media_type="application/json",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Cache-Status": "hit",
+            },
+        )
+
     headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
     if provider == "pillows":
         headers["Referer"] = "https://pillows.su/"
@@ -678,16 +935,160 @@ async def proxy_metadata(
         else:
             result = {"provider": provider}
 
+        payload = json.dumps(result)
+        _metadata_cache.set(meta_url, payload)
         return Response(
-            content=json.dumps(result),
+            content=payload,
             media_type="application/json",
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Cache-Status": "miss",
+            },
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Metadata proxy error: %s", e)
         raise HTTPException(status_code=502, detail="Metadata fetch failed")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/trackers — artist tracker discovery from the TrackerHub sheet
+# ---------------------------------------------------------------------------
+
+
+class TrackerEntry(BaseModel):
+    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
+
+    name: str
+    url: str
+    credit: str | None = None
+    best: bool = False
+    up_to_date: bool | None = None
+    working_links: bool | None = None
+
+
+def _unwrap_google_redirect(url: str) -> str:
+    """Resolve a google.com/url?q=… redirect to its target URL."""
+    from urllib.parse import parse_qs, urlparse
+    try:
+        parsed = urlparse(url)
+        if parsed.hostname in ("www.google.com", "google.com") and parsed.path == "/url":
+            target = parse_qs(parsed.query).get("q")
+            if target:
+                return target[0]
+    except (ValueError, TypeError):
+        pass
+    return url
+
+
+def _parse_yes_no(text: str) -> bool | None:
+    t = text.strip().lower()
+    if t.startswith("yes"):
+        return True
+    if t.startswith("no"):
+        return False
+    return None
+
+
+_TRACKER_STAR_CHARS = "⭐️ "  # ⭐ + variation selector + space
+
+
+def _parse_trackerhub(html: str) -> list[TrackerEntry]:
+    """Parse the TrackerHub sheet into tracker entries.
+
+    Rows: [Trackers (name + link, ⭐ prefix = featured), Credits,
+    Up To Date?, Working Links?]. Banner/header rows carry no credit and
+    no Yes/No flags, which is what filters them out.
+    """
+    from src.parser import extract_table
+
+    entries: list[TrackerEntry] = []
+    for row in extract_table(html):
+        if not row:
+            continue
+        name_cell = row[0]
+        raw_name = name_cell.text.strip()
+        if not raw_name or not name_cell.links:
+            continue
+        credit = row[1].text.strip() if len(row) > 1 else ""
+        up_to_date = _parse_yes_no(row[2].text) if len(row) > 2 else None
+        working_links = _parse_yes_no(row[3].text) if len(row) > 3 else None
+        # Banner rows (rules text, discord invites) have a name/link but
+        # neither credits nor status flags — real tracker rows always have
+        # at least one of them.
+        if not credit and up_to_date is None and working_links is None:
+            continue
+        best = raw_name.startswith("⭐")
+        name = raw_name.lstrip(_TRACKER_STAR_CHARS).strip()
+        if not name:
+            continue
+        entries.append(TrackerEntry(
+            name=name,
+            url=_unwrap_google_redirect(name_cell.links[0]),
+            credit=credit or None,
+            best=best,
+            up_to_date=up_to_date,
+            working_links=working_links,
+        ))
+    entries.sort(key=lambda e: (not e.best, e.name.lower()))
+    return entries
+
+
+_trackers_cache = _TTLCache(ttl=3600.0, max_entries=1)
+# Last successful payload, kept indefinitely as a fallback for upstream errors.
+_trackers_stale: str | None = None
+
+
+@app.get("/trackers")
+async def list_trackers():
+    """List artist trackers from the TrackerHub master sheet (cached 1h)."""
+    global _trackers_stale
+
+    cached = _trackers_cache.get("trackers")
+    if cached is not None:
+        return Response(
+            content=cached,
+            media_type="application/json",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Cache-Status": "hit",
+            },
+        )
+
+    from src.config import TRACKERHUB_URL
+    try:
+        resp = await _get_proxy_client().get(
+            TRACKERHUB_URL, headers={"Accept": "text/html"}
+        )
+        if resp.status_code != 200:
+            raise NetworkError(f"TrackerHub returned {resp.status_code}")
+        entries = await asyncio.to_thread(_parse_trackerhub, resp.text)
+        if not entries:
+            raise ParseError("No tracker rows parsed from TrackerHub")
+        payload = json.dumps([e.model_dump() for e in entries])
+        _trackers_cache.set("trackers", payload)
+        _trackers_stale = payload
+        return Response(
+            content=payload,
+            media_type="application/json",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Cache-Status": "miss",
+            },
+        )
+    except Exception as e:
+        logger.exception("TrackerHub fetch failed: %s", e)
+        if _trackers_stale is not None:
+            return Response(
+                content=_trackers_stale,
+                media_type="application/json",
+                headers={
+                    "Cache-Control": "public, max-age=600",
+                    "X-Cache-Status": "stale",
+                },
+            )
+        raise HTTPException(status_code=502, detail="TrackerHub fetch failed")
 
 
 # ---------------------------------------------------------------------------

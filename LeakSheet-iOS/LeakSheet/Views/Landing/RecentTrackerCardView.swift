@@ -11,7 +11,7 @@ struct RecentTrackerCardView: View {
                 // Thumbnail
                 Group {
                     if let artUrl = entry.artUrl {
-                        CachedImage(url: APIClient.shared.imageProxyURL(for: artUrl)) {
+                        CachedImage(url: APIClient.shared.imageProxyURL(for: artUrl, width: 320), maxPixelSize: 320) {
                             initialsPlaceholder
                         }
                     } else {

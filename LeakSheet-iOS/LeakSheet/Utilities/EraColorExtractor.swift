@@ -6,7 +6,10 @@ import UIKit
 actor EraColorExtractor {
     static let shared = EraColorExtractor()
 
-    // Cache: eraName → [r, g, b] in 0-1 range
+    // Cache: cacheKey → [r, g, b] in 0-1 range. Keyed by the era's raw art
+    // URL, NOT era name — era names like "Unreleased" or "Singles" repeat
+    // across different artists, and a bare-name key would let one artist's
+    // cached color leak onto another artist's same-named era.
     private var cache: [String: [Double]]
     private static let cacheKey = "leaksheet_era_rgb_v3"
 
@@ -17,25 +20,40 @@ actor EraColorExtractor {
     // MARK: - Public API
 
     /// Extract from an already-loaded UIImage (no download). Used during prefetch.
-    func extractColor(fromImage image: UIImage, eraName: String) async -> Color? {
-        if let cached = cache[eraName] {
+    /// `cacheKey` should be the era's raw art URL, unique per image.
+    func extractColor(fromImage image: UIImage, cacheKey: String) async -> Color? {
+        if let cached = cache[cacheKey] {
             return color(from: cached)
         }
         // Run pixel sampling off the actor so concurrent extractions don't serialize.
         guard let rgb = await Self.dominantRGBOffActor(from: image) else { return nil }
-        cache(rgb, forKey: eraName)
+        cache(rgb, forKey: cacheKey)
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
-    /// Extract from a URL — uses ImageCache to avoid re-downloading.
-    func extractColor(from url: URL, eraName: String) async -> Color? {
-        if let cached = cache[eraName] {
+    /// Extract from a URL — uses ImageCache to avoid re-downloading. A 128px
+    /// thumbnail is plenty: the algorithm samples at ≤100×100 anyway.
+    /// `cacheKey` should be the era's raw art URL, unique per image — not the
+    /// resolved/proxied fetch URL passed via `url`, which varies by requested
+    /// width and would otherwise fragment the cache per caller.
+    func extractColor(from url: URL, cacheKey: String) async -> Color? {
+        if let cached = cache[cacheKey] {
             return color(from: cached)
         }
-        guard let image = await ImageCache.shared.loadImage(from: url) else { return nil }
+        guard let image = await ImageCache.shared.loadImage(from: url, maxPixelSize: 128) else { return nil }
         guard let rgb = await Self.dominantRGBOffActor(from: image) else { return nil }
-        cache(rgb, forKey: eraName)
+        cache(rgb, forKey: cacheKey)
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    /// Synchronous snapshot of the persisted color cache — lets view models
+    /// seed era colors at init without a network fetch or actor hop.
+    nonisolated static func cachedColors() -> [String: Color] {
+        let raw = UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: [Double]] ?? [:]
+        return raw.compactMapValues { rgb in
+            guard rgb.count == 3 else { return nil }
+            return Color(red: rgb[0], green: rgb[1], blue: rgb[2])
+        }
     }
 
     /// Bridges `dominantRGB` onto a detached task so multiple eras can extract

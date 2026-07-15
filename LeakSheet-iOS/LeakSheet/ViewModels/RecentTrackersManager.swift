@@ -8,12 +8,15 @@ final class RecentTrackersManager {
     static let shared = RecentTrackersManager()
 
     private static let storageKey = "leaksheet_recent_trackers"
-    private static let maxEntries = 20
+    private nonisolated static let maxEntries = 20
 
     var trackers: [RecentTracker] = []
 
     nonisolated struct RecentTracker: Codable, Identifiable, Sendable {
-        var id: String { sourceUrl }
+        // Identity is the normalized tracker URL so URL variants of the same
+        // tracker (edit vs htmlview, gid fragments, share params) collapse to
+        // one entry. Entries without a URL fall back to the artist slug.
+        var id: String { RecentTrackersManager.identityKey(sourceUrl: sourceUrl, slug: slug) }
         let name: String
         let slug: String
         let sourceUrl: String
@@ -45,7 +48,7 @@ final class RecentTrackersManager {
             confirmedCount: stats.confirmed
         )
 
-        trackers.removeAll { $0.sourceUrl == entry.sourceUrl }
+        trackers.removeAll { $0.id == entry.id }
         trackers.insert(entry, at: 0)
         if trackers.count > Self.maxEntries {
             trackers = Array(trackers.prefix(Self.maxEntries))
@@ -53,9 +56,36 @@ final class RecentTrackersManager {
         save()
     }
 
-    func remove(sourceUrl: String) {
-        trackers.removeAll { $0.sourceUrl == sourceUrl }
+    /// Removes the entry with the given identity (`RecentTracker.id`) —
+    /// matching on `id` directly, rather than recomputing a normalized key
+    /// from a raw sourceUrl, keeps this in lockstep with `saveTracker` and
+    /// `deduplicated`, which both key on `id` too.
+    func remove(id: String) {
+        trackers.removeAll { $0.id == id }
         save()
+    }
+
+    // MARK: - Identity & dedup
+
+    nonisolated static func identityKey(sourceUrl: String, slug: String) -> String {
+        let trimmed = sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "slug:\(slug)" }
+        return TrackerURLNormalizer.normalize(trimmed)
+    }
+
+    /// Keeps the first occurrence per identity key (the list is newest-first,
+    /// so first = most recent) and enforces the entry cap.
+    nonisolated static func deduplicated(
+        _ entries: [RecentTracker], cap: Int = RecentTrackersManager.maxEntries
+    ) -> [RecentTracker] {
+        var seen = Set<String>()
+        var result: [RecentTracker] = []
+        for entry in entries {
+            guard seen.insert(entry.id).inserted else { continue }
+            result.append(entry)
+            if result.count == cap { break }
+        }
+        return result
     }
 
     func clearAll() {
@@ -84,7 +114,14 @@ final class RecentTrackersManager {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey) else { return }
-        trackers = (try? JSONDecoder().decode([RecentTracker].self, from: data)) ?? []
+        let decoded = (try? JSONDecoder().decode([RecentTracker].self, from: data)) ?? []
+        // One-time migration: collapse duplicates persisted before identity
+        // moved to the normalized URL. Must happen before first render so
+        // ForEach ids stay unique.
+        trackers = Self.deduplicated(decoded)
+        if trackers.count != decoded.count {
+            save()
+        }
     }
 
     private func save() {

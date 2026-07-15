@@ -2,13 +2,96 @@ import Foundation
 import SwiftUI
 import Observation
 
+// MARK: - Filter pipeline value types
+
+/// The complete set of filter inputs. Content is computed off-main for a
+/// specific FilterState; views compare against it to know what they render.
+nonisolated struct FilterState: Equatable, Sendable {
+    var query: String = ""
+    var bestOf = false
+    var recents = false
+    var noSnippets = false
+    var misc = false
+}
+
+/// One era with its filtered songs/sections and (unfiltered) display stats.
+nonisolated struct FilteredEra: Identifiable, Equatable, Sendable {
+    let era: Era
+    /// Filtered sections — empty when the era has no section structure.
+    let sections: [Section]
+    /// Filtered flat song list (used when `sections` is empty).
+    let songs: [Song]
+    /// Unfiltered era totals — cards always show the whole era's numbers.
+    let stats: ArtistViewModel.Stats
+
+    var id: String { era.name }
+
+    /// Streamable versions in filtered order — playback context for the era.
+    var streamableVersions: [SongVersion] {
+        let source = sections.isEmpty ? songs : sections.flatMap(\.songs)
+        return source.flatMap(\.versions).filter(\.isStreamable)
+    }
+}
+
+/// Everything the artist screen renders for one FilterState, computed in a
+/// single off-main pass. Only the branch matching the state is populated.
+nonisolated struct FilteredContent: Equatable, Sendable {
+    let state: FilterState
+    let eras: [FilteredEra]
+    let searchResults: [ArtistViewModel.SearchResult]
+    let recentResults: [ArtistViewModel.RecentResult]
+    /// Streamable recents prebuilt as a playback list (tap → play without
+    /// mapping the whole result set again).
+    let recentPlaybackItems: [PlaybackListItem]
+    /// RecentResult.id → index into `recentPlaybackItems`.
+    let recentStreamIndex: [String: Int]
+    let miscResults: [MiscEntry]
+}
+
+/// One row of the flattened era list. All rows render as direct children of
+/// the screen's single LazyVStack so every song row is lazily materialized —
+/// nested non-lazy per-era stacks were the chip-toggle freeze.
+nonisolated enum EraRow: Identifiable, Equatable, Sendable {
+    case card(FilteredEra, expanded: Bool)
+    case divider(eraName: String)
+    case groupHeader(text: String, eraName: String)
+    case sectionHeader(name: String, eraName: String, group: String?)
+    case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool)
+    case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool)
+    case eraGap(eraName: String)
+
+    var id: String {
+        switch self {
+        case .card(let filtered, _): return "card::\(filtered.era.name)"
+        case .divider(let era): return "div::\(era)"
+        case .groupHeader(let text, let era): return "grp::\(era)::\(text)"
+        // Group is part of section identity (Section.id is name+group) —
+        // same-named sections under different groups must not collide.
+        case .sectionHeader(let name, let era, let group): return "sec::\(era)::\(group ?? "")::\(name)"
+        case .song(let song, let era, _, _, _, _): return "song::\(era)::\(song.baseName)"
+        case .version(let version, let index, let song, let era, _, _):
+            return "ver::\(era)::\(song.baseName)::\(version.id)::\(index)"
+        case .eraGap(let era): return "gap::\(era)"
+        }
+    }
+}
+
 /// ViewModel for artist detail screen — search, filter, era state.
+///
+/// All filtering runs through one pipeline: flag/search changes call
+/// `applyFilters()`, which computes a full `FilteredContent` on a detached
+/// task and publishes it back on the main actor. Views never filter in body.
 @MainActor
 @Observable
 final class ArtistViewModel {
     // MARK: - Input
 
     let artist: Artist
+
+    /// Unfiltered tracker totals — the artist is immutable per screen, so
+    /// these are computed exactly once.
+    let artistStats: Stats
+    private let eraStatsByName: [String: Stats]
 
     // MARK: - Search
 
@@ -28,56 +111,108 @@ final class ArtistViewModel {
     /// with era songs; the other chips (and search) filter within them.
     var misc: Bool = false
     var expandedEra: String? = nil
+    /// Expanded multi-version songs, keyed "eraName::baseName". Lives here
+    /// (not view @State) because lazy containers discard offscreen state.
+    private(set) var expandedSongs: Set<String> = []
 
-    // MARK: - State
+    // MARK: - Pipeline output
+
+    private(set) var content: FilteredContent
+    /// True while a filter change is being computed off-main. Chips flip
+    /// instantly; the list keeps the previous content until the new one lands.
+    private(set) var isFiltering = false
+    private var filterTask: Task<Void, Never>?
+
+    /// Flattened rows for the eras branch — rebuilt on content/expansion
+    /// changes so `body` only iterates.
+    private(set) var eraRows: [EraRow] = []
+
+    // MARK: - Recents windowing
+
+    private(set) var visibleRecents: [RecentResult] = []
+    private static let recentsPageSize = 60
+
+    // MARK: - Era display colors
+
+    /// Derived display colors per era, computed once per extracted color.
+    private(set) var eraDisplay: [String: EraDisplayColors] = [:]
+    /// Colors derived since the last flush — buffered so a burst of cards
+    /// finishing extraction in the same runloop turn (cold cache, first
+    /// scroll into a section) lands as one `eraDisplay` assignment instead
+    /// of one observer invalidation per card, which trips SwiftUI's
+    /// "glassEffect() tried to update multiple times per frame" fault.
+    private var pendingEraColors: [String: EraDisplayColors] = [:]
+    private var eraColorFlushScheduled = false
 
     var isSearching: Bool { !debouncedQuery.isEmpty }
 
-    // MARK: - Image prefetch
-
-    private(set) var imagesReady: Bool = false
-    /// Per-era extracted colors, populated during prefetch.
-    private(set) var prefetchedColors: [String: Color] = [:]
-
-    func prefetchEraImages() async {
-        let urls: [(eraName: String, url: URL)] = artist.eras.compactMap { era in
-            guard let artUrl = era.artUrl,
-                  let url = APIClient.shared.imageProxyURL(for: artUrl) else { return nil }
-            return (era.name, url)
-        }
-        guard !urls.isEmpty else {
-            imagesReady = true
-            return
-        }
-        // Download all images + extract colors in parallel
-        var colors: [String: Color] = [:]
-        await withTaskGroup(of: (String, Color?).self) { group in
-            for (eraName, url) in urls {
-                group.addTask {
-                    guard let image = await ImageCache.shared.loadImage(from: url) else {
-                        return (eraName, nil)
-                    }
-                    let color = await EraColorExtractor.shared.extractColor(fromImage: image, eraName: eraName)
-                    return (eraName, color)
-                }
-            }
-            for await (eraName, color) in group {
-                if let color { colors[eraName] = color }
-            }
-        }
-        prefetchedColors = colors
-        imagesReady = true
+    var hasMiscEntries: Bool {
+        !(artist.miscEntries ?? []).isEmpty
     }
-
-    // MARK: - Recents cache
-
-    private(set) var cachedRecentResults: [RecentResult] = []
-    private(set) var recentsLoading: Bool = false
 
     // MARK: - Init
 
     init(artist: Artist) {
         self.artist = artist
+
+        var statsByName: [String: Stats] = [:]
+        var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+        for era in artist.eras {
+            let s = Self.computeEraStats(era)
+            statsByName[era.name] = s
+            total += s.total
+            available += s.available
+            snippets += s.snippets
+            confirmed += s.confirmed
+            fullHQ += s.fullHQ
+        }
+        self.eraStatsByName = statsByName
+        self.artistStats = Stats(
+            total: total, available: available, snippets: snippets,
+            confirmed: confirmed, fullHQ: fullHQ
+        )
+
+        // First frame renders synchronously from the unfiltered state — one
+        // cheap pass, no filtering allocations.
+        self.content = Self.computeContent(artist: artist, state: FilterState(), eraStats: statsByName)
+
+        // Seed era colors from the persisted extraction cache so cards and
+        // headers are tinted on first paint without any image download.
+        // Keyed by the era's raw art URL (unique per image) rather than era
+        // name, which repeats across different artists' eras.
+        let cached = EraColorExtractor.cachedColors()
+        for era in artist.eras {
+            guard let artUrl = era.artUrl, let color = cached[artUrl] else { continue }
+            eraDisplay[era.name] = EraDisplayColors.derive(from: color)
+        }
+
+        rebuildEraRows()
+    }
+
+    // MARK: - Era colors
+
+    /// Idempotent — extraction is deterministic and cached, so the first
+    /// derivation per era wins and later callbacks are no-ops. Buffers into
+    /// `pendingEraColors` and coalesces same-turn callbacks into a single
+    /// `eraDisplay` write on the next runloop tick.
+    func setEraColor(eraName: String, dominant: Color) {
+        guard eraDisplay[eraName] == nil, pendingEraColors[eraName] == nil else { return }
+        pendingEraColors[eraName] = EraDisplayColors.derive(from: dominant)
+        scheduleEraColorFlush()
+    }
+
+    private func scheduleEraColorFlush() {
+        guard !eraColorFlushScheduled else { return }
+        eraColorFlushScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.eraColorFlushScheduled = false
+            guard !self.pendingEraColors.isEmpty else { return }
+            var merged = self.eraDisplay
+            for (name, colors) in self.pendingEraColors { merged[name] = colors }
+            self.eraDisplay = merged
+            self.pendingEraColors.removeAll()
+        }
     }
 
     // MARK: - Debounce
@@ -87,81 +222,316 @@ final class ArtistViewModel {
         let q = searchQuery.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             debouncedQuery = ""
-            invalidateRecentsCache()
+            applyFilters()
             return
         }
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             self?.debouncedQuery = q
-            self?.invalidateRecentsCache()
+            self?.applyFilters()
         }
     }
 
-    // MARK: - Filtered eras
+    // MARK: - Filter pipeline
 
-    var filteredEras: [Era] {
-        var result = artist.eras.filter { !$0.allSongs.isEmpty }
-        if bestOf {
-            result = result.filter { era in
-                era.allSongs.contains { song in
-                    song.versions.contains { v in
-                        guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
-                        return Self.bestOfBadges.contains(badge)
+    private var currentFilterState: FilterState {
+        FilterState(
+            query: debouncedQuery.lowercased(),
+            bestOf: bestOf,
+            recents: recents,
+            noSnippets: noSnippets,
+            misc: misc
+        )
+    }
+
+    private func applyFilters() {
+        filterTask?.cancel()
+        let state = currentFilterState
+        guard state != content.state else {
+            isFiltering = false
+            return
+        }
+        isFiltering = true
+        let artist = self.artist
+        let eraStats = self.eraStatsByName
+        filterTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                // Stale guard — a newer toggle may have superseded this
+                // compute even if cancellation missed it.
+                guard self.currentFilterState == state else { return }
+                self.content = result
+                self.isFiltering = false
+                self.resetRecentsWindow()
+                self.rebuildEraRows()
+            }
+        }
+    }
+
+    // MARK: - Recents windowing
+
+    private func resetRecentsWindow() {
+        visibleRecents = Array(content.recentResults.prefix(Self.recentsPageSize))
+    }
+
+    var hasMoreRecents: Bool {
+        visibleRecents.count < content.recentResults.count
+    }
+
+    func loadMoreRecents() {
+        guard hasMoreRecents else { return }
+        let next = min(visibleRecents.count + Self.recentsPageSize, content.recentResults.count)
+        visibleRecents = Array(content.recentResults.prefix(next))
+    }
+
+    /// Playback list + start index for a tapped recents row.
+    func recentPlayback(for resultId: String) -> (items: [PlaybackListItem], startAt: Int)? {
+        guard let idx = content.recentStreamIndex[resultId] else { return nil }
+        return (content.recentPlaybackItems, idx)
+    }
+
+    // MARK: - Era expand/collapse
+
+    func toggleEra(_ name: String) {
+        if bestOf { return }
+        expandedEra = expandedEra == name ? nil : name
+        rebuildEraRows()
+    }
+
+    func isEraExpanded(_ name: String) -> Bool {
+        if bestOf { return true }
+        return expandedEra == name
+    }
+
+    func isSongExpanded(eraName: String, baseName: String) -> Bool {
+        expandedSongs.contains("\(eraName)::\(baseName)")
+    }
+
+    func toggleSongExpansion(eraName: String, baseName: String) {
+        let key = "\(eraName)::\(baseName)"
+        if expandedSongs.contains(key) {
+            expandedSongs.remove(key)
+        } else {
+            expandedSongs.insert(key)
+        }
+        rebuildEraRows()
+    }
+
+    /// The filtered era backing a row — era-scoped playback context.
+    func filteredEra(named name: String) -> FilteredEra? {
+        content.eras.first { $0.era.name == name }
+    }
+
+    func toggleBestOf() {
+        bestOf.toggle()
+        if !bestOf && !recents { expandedEra = nil }
+        // No synchronous rebuildEraRows() here: isEraExpanded treats bestOf
+        // as "every era expanded", so rebuilding against the still-stale
+        // (unfiltered) `content` would briefly render every song in every
+        // era. applyFilters()'s completion rebuilds once `content` actually
+        // matches the new bestOf state.
+        applyFilters()
+    }
+
+    func toggleRecents() {
+        recents.toggle()
+        if !recents {
+            if !bestOf { expandedEra = nil }
+            rebuildEraRows()
+        }
+        applyFilters()
+    }
+
+    func toggleNoSnippets() {
+        noSnippets.toggle()
+        applyFilters()
+    }
+
+    func toggleMisc() {
+        misc.toggle()
+        if !misc && !bestOf && !recents {
+            expandedEra = nil
+            rebuildEraRows()
+        }
+        applyFilters()
+    }
+
+    // MARK: - Row building (main thread, cheap appends only)
+
+    private func rebuildEraRows() {
+        var rows: [EraRow] = []
+        rows.reserveCapacity(content.eras.count * 3)
+        for filtered in content.eras {
+            let eraName = filtered.era.name
+            let eraArt = filtered.era.artUrl
+            let expanded = isEraExpanded(eraName)
+            rows.append(.card(filtered, expanded: expanded))
+            if expanded {
+                rows.append(.divider(eraName: eraName))
+                let startCount = rows.count
+                if filtered.sections.isEmpty {
+                    appendSongRows(&rows, songs: filtered.songs, eraName: eraName, eraArt: eraArt)
+                } else {
+                    for section in filtered.sections {
+                        if let group = section.group {
+                            rows.append(.groupHeader(text: group, eraName: eraName))
+                        }
+                        if !section.name.isEmpty {
+                            rows.append(.sectionHeader(
+                                name: section.name, eraName: eraName,
+                                group: section.group
+                            ))
+                        }
+                        appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt)
                     }
                 }
-            }
-        }
-        let q = debouncedQuery.lowercased()
-        guard !q.isEmpty else { return result }
-        return result.filter { era in
-            if era.name.lowercased().contains(q) { return true }
-            if era.altNames?.contains(where: { $0.lowercased().contains(q) }) == true { return true }
-            return era.allSongs.contains { songMatchesQuery($0, query: q) }
-        }
-    }
-
-    // MARK: - Filtered songs for a given era
-
-    func filteredSongs(for era: Era) -> [Song] {
-        var songs = era.allSongs
-        if bestOf { songs = filterToBestOf(songs) }
-        if noSnippets { songs = filterNoSnippets(songs) }
-        let q = debouncedQuery.lowercased()
-        guard !q.isEmpty else { return songs }
-        let eraMatch = era.name.lowercased().contains(q) ||
-            era.altNames?.contains(where: { $0.lowercased().contains(q) }) == true
-        if eraMatch { return songs }
-        return songs.filter { songMatchesQuery($0, query: q) }
-    }
-
-    // MARK: - Filtered sections for a given era
-
-    func filteredSections(for era: Era) -> [Section] {
-        guard let sections = era.sections else { return [] }
-        let q = debouncedQuery.lowercased()
-        let filtering = bestOf || !q.isEmpty || noSnippets
-        guard filtering else { return sections }
-
-        return sections.compactMap { sec in
-            var songs = sec.songs
-            if bestOf { songs = filterToBestOf(songs) }
-            if noSnippets { songs = filterNoSnippets(songs) }
-            if !q.isEmpty {
-                let eraMatch = era.name.lowercased().contains(q) ||
-                    era.altNames?.contains(where: { $0.lowercased().contains(q) }) == true
-                if !eraMatch {
-                    songs = songs.filter { songMatchesQuery($0, query: q) }
+                // Mark the era's final content row for bottom-corner rounding.
+                if rows.count > startCount {
+                    rows[rows.count - 1] = markedLast(rows[rows.count - 1])
                 }
             }
-            guard !songs.isEmpty else { return nil }
-            return Section(name: sec.name, group: sec.group, songs: songs)
+            rows.append(.eraGap(eraName: eraName))
+        }
+        eraRows = rows
+    }
+
+    private func appendSongRows(_ rows: inout [EraRow], songs: [Song], eraName: String, eraArt: String?) {
+        for song in songs {
+            let hasMultiple = song.versions.count > 1
+            let expanded = hasMultiple && isSongExpanded(eraName: eraName, baseName: song.baseName)
+            rows.append(.song(
+                song, eraName: eraName, eraArt: eraArt,
+                expanded: expanded, hasMultiple: hasMultiple, isLast: false
+            ))
+            if expanded {
+                for (idx, version) in song.versions.enumerated() {
+                    rows.append(.version(
+                        version, index: idx, song: song,
+                        eraName: eraName, eraArt: eraArt, isLast: false
+                    ))
+                }
+            }
+        }
+    }
+
+    private func markedLast(_ row: EraRow) -> EraRow {
+        switch row {
+        case .song(let song, let eraName, let eraArt, let expanded, let hasMultiple, _):
+            return .song(song, eraName: eraName, eraArt: eraArt,
+                         expanded: expanded, hasMultiple: hasMultiple, isLast: true)
+        case .version(let version, let index, let song, let eraName, let eraArt, _):
+            return .version(version, index: index, song: song,
+                            eraName: eraName, eraArt: eraArt, isLast: true)
+        default:
+            return row
+        }
+    }
+
+    // MARK: - Content computation (pure, runs off-main)
+
+    nonisolated static func computeContent(
+        artist: Artist,
+        state: FilterState,
+        eraStats: [String: Stats]
+    ) -> FilteredContent {
+        let empty = FilteredContent(
+            state: state, eras: [], searchResults: [], recentResults: [],
+            recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
+        )
+
+        if state.misc {
+            return FilteredContent(
+                state: state, eras: [], searchResults: [], recentResults: [],
+                recentPlaybackItems: [], recentStreamIndex: [:],
+                miscResults: computeMiscResults(artist: artist, state: state)
+            )
+        }
+
+        if !state.query.isEmpty {
+            return FilteredContent(
+                state: state, eras: [],
+                searchResults: computeSearchResults(artist: artist, state: state),
+                recentResults: [], recentPlaybackItems: [], recentStreamIndex: [:],
+                miscResults: []
+            )
+        }
+
+        if state.recents {
+            let results = computeRecentResults(artist: artist, state: state)
+            var playbackItems: [PlaybackListItem] = []
+            var streamIndex: [String: Int] = [:]
+            for result in results where result.version.isStreamable {
+                streamIndex[result.id] = playbackItems.count
+                playbackItems.append(PlaybackListItem(
+                    version: result.version,
+                    artistName: artist.name,
+                    eraName: result.era.name,
+                    artUrl: result.era.artUrl ?? "",
+                    artistSlug: artist.slug
+                ))
+            }
+            return FilteredContent(
+                state: state, eras: [], searchResults: [],
+                recentResults: results,
+                recentPlaybackItems: playbackItems,
+                recentStreamIndex: streamIndex,
+                miscResults: []
+            )
+        }
+
+        // Eras branch
+        var eras: [FilteredEra] = []
+        eras.reserveCapacity(artist.eras.count)
+        for era in artist.eras {
+            if Task.isCancelled { return empty }
+            let allSongs = era.allSongs
+            guard !allSongs.isEmpty else { continue }
+
+            if state.bestOf {
+                let hasBest = allSongs.contains { song in
+                    song.versions.contains { isBestOfVersion($0) }
+                }
+                guard hasBest else { continue }
+            }
+
+            let sections = (era.sections ?? []).compactMap { section -> Section? in
+                let songs = filterSongs(section.songs, state: state)
+                guard !songs.isEmpty else { return nil }
+                return Section(name: section.name, group: section.group, songs: songs)
+            }
+            let songs = filterSongs(allSongs, state: state)
+            guard !songs.isEmpty else { continue }
+
+            eras.append(FilteredEra(
+                era: era,
+                sections: sections,
+                songs: songs,
+                stats: eraStats[era.name] ?? Stats(total: 0, available: 0, snippets: 0, confirmed: 0, fullHQ: 0)
+            ))
+        }
+        return FilteredContent(
+            state: state, eras: eras, searchResults: [], recentResults: [],
+            recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
+        )
+    }
+
+    private nonisolated static func filterSongs(_ songs: [Song], state: FilterState) -> [Song] {
+        guard state.bestOf || state.noSnippets else { return songs }
+        return songs.compactMap { song in
+            song.withFilteredVersions { version in
+                if state.bestOf && !isBestOfVersion(version) { return false }
+                if state.noSnippets && shouldFilterForNoSnippets(version) { return false }
+                return true
+            }
         }
     }
 
     // MARK: - Flat search results (ranked)
 
-    struct SearchResult: Identifiable, Hashable {
+    nonisolated struct SearchResult: Identifiable, Hashable, Sendable {
         let song: Song
         let version: SongVersion
         let era: Era
@@ -172,22 +542,18 @@ final class ArtistViewModel {
         var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
     }
 
-    /// Search against an explicit query string — does NOT affect filteredEras.
-    /// Used by the search overlay so the background era list stays unfiltered.
-    func searchResults(for rawQuery: String) -> [SearchResult] {
-        let q = rawQuery.trimmingCharacters(in: .whitespaces).lowercased()
+    private nonisolated static func computeSearchResults(artist: Artist, state: FilterState) -> [SearchResult] {
+        let q = state.query
         guard !q.isEmpty else { return [] }
         var results: [SearchResult] = []
         for era in artist.eras {
+            if Task.isCancelled { return [] }
             for song in era.allSongs {
                 let score = scoreSong(song, query: q)
                 guard score > 0 else { continue }
                 for version in song.versions {
-                    if bestOf {
-                        guard let vBadge = version.badge.flatMap({ Badge(rawValue: $0) }),
-                              Self.bestOfBadges.contains(vBadge) else { continue }
-                    }
-                    if noSnippets && isSnippet(version) { continue }
+                    if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     results.append(SearchResult(song: song, version: version, era: era, score: score))
                 }
             }
@@ -196,9 +562,9 @@ final class ArtistViewModel {
         return results
     }
 
-    // MARK: - Recents (sorted by leak date, cached)
+    // MARK: - Recents
 
-    struct RecentResult: Identifiable {
+    nonisolated struct RecentResult: Identifiable, Equatable, Sendable {
         let song: Song
         let version: SongVersion
         let era: Era
@@ -211,62 +577,18 @@ final class ArtistViewModel {
         var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
     }
 
-    private var recentsTask: Task<Void, Never>?
-
-    private func invalidateRecentsCache() {
-        guard recents else { return }
-        computeRecentsAsync()
-    }
-
-    private func computeRecentsAsync() {
-        recentsTask?.cancel()
-        recentsLoading = true
-        let artist = self.artist
-        let bestOf = self.bestOf
-        let noSnippets = self.noSnippets
-        let query = self.debouncedQuery.lowercased()
-        let bestOfBadges = Self.bestOfBadges
-        recentsTask = Task.detached(priority: .userInitiated) {
-            let results = Self.buildRecentResults(
-                artist: artist, bestOf: bestOf,
-                noSnippets: noSnippets, query: query,
-                bestOfBadges: bestOfBadges
-            )
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                self?.cachedRecentResults = results
-                self?.recentsLoading = false
-            }
-        }
-    }
-
-    private nonisolated static func buildRecentResults(
-        artist: Artist,
-        bestOf: Bool,
-        noSnippets: Bool,
-        query: String,
-        bestOfBadges: Set<Badge>
-    ) -> [RecentResult] {
+    private nonisolated static func computeRecentResults(artist: Artist, state: FilterState) -> [RecentResult] {
         var results: [RecentResult] = []
         for era in artist.eras {
+            if Task.isCancelled { return [] }
             for song in era.allSongs {
-                if bestOf {
-                    let hasBestVersion = song.versions.contains { v in
-                        guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
-                        return bestOfBadges.contains(badge)
-                    }
+                if state.bestOf {
+                    let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
                     if !hasBestVersion { continue }
                 }
-                if !query.isEmpty {
-                    let searchText = buildSearchTextStatic(song)
-                    if !searchText.contains(query) { continue }
-                }
                 for version in song.versions {
-                    if bestOf {
-                        guard let badge = version.badge.flatMap({ Badge(rawValue: $0) }),
-                              bestOfBadges.contains(badge) else { continue }
-                    }
-                    if noSnippets && shouldFilterForNoSnippets(version) { continue }
+                    if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     let dateStr = version.leakDate ?? version.fileDate
                     guard let dateStr, !dateStr.isEmpty else { continue }
                     results.append(RecentResult(
@@ -280,81 +602,29 @@ final class ArtistViewModel {
         return results
     }
 
-    private nonisolated static func buildSearchTextStatic(_ song: Song) -> String {
-        var parts = [song.baseName.lowercased()]
-        for v in song.versions {
-            parts.append(v.name.lowercased())
-            if let alts = v.altTitles {
-                parts.append(contentsOf: alts.map { $0.lowercased() })
-            }
-        }
-        return parts.joined(separator: "\0")
-    }
-
-    // MARK: - Era expand/collapse
-
-    func toggleEra(_ name: String) {
-        if bestOf { return }
-        expandedEra = expandedEra == name ? nil : name
-    }
-
-    func isEraExpanded(_ name: String) -> Bool {
-        if bestOf { return true }
-        return expandedEra == name
-    }
-
-    func toggleBestOf() {
-        bestOf.toggle()
-        if !bestOf && !recents { expandedEra = nil }
-        invalidateRecentsCache()
-    }
-
-    func toggleRecents() {
-        recents.toggle()
-        if !recents {
-            cachedRecentResults = []
-            if !bestOf { expandedEra = nil }
-        } else {
-            computeRecentsAsync()
-        }
-    }
-
-    func toggleNoSnippets() {
-        noSnippets.toggle()
-        invalidateRecentsCache()
-    }
-
-    func toggleMisc() {
-        misc.toggle()
-        if !misc && !bestOf && !recents { expandedEra = nil }
-    }
-
-    var hasMiscEntries: Bool {
-        !(artist.miscEntries ?? []).isEmpty
-    }
+    // MARK: - Misc entries
 
     /// Misc entries after in-mode filters: No Snippets drops unavailable
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
-    var miscResults: [MiscEntry] {
-        guard misc else { return [] }
+    private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
         var entries = artist.miscEntries ?? []
-        if noSnippets {
+        if state.noSnippets {
             entries = entries.filter { e in
                 let al = (e.available ?? "").lowercased()
                 let q = (e.quality ?? "").lowercased()
                 return !(al.contains("snippet") || al.contains("unavailable") || q.contains("not available"))
             }
         }
-        if bestOf {
+        if state.bestOf {
             let starred = entries.filter { e in
                 Badge.allCases.contains { e.name.contains($0.emoji) }
             }
             if !starred.isEmpty { entries = starred }
         }
-        if isSearching {
-            let q = debouncedQuery.lowercased()
+        if !state.query.isEmpty {
+            let q = state.query
             entries = entries.filter { e in
                 e.name.lowercased().contains(q)
                     || (e.notes ?? "").lowercased().contains(q)
@@ -362,7 +632,7 @@ final class ArtistViewModel {
                     || (e.entryType ?? "").lowercased().contains(q)
             }
         }
-        if recents {
+        if state.recents {
             entries = entries.sorted {
                 Self.parseLeakDate($0.date ?? "") > Self.parseLeakDate($1.date ?? "")
             }
@@ -372,7 +642,7 @@ final class ArtistViewModel {
 
     // MARK: - Stats
 
-    struct Stats {
+    nonisolated struct Stats: Equatable, Sendable {
         let total: Int
         let available: Int
         let snippets: Int
@@ -380,20 +650,7 @@ final class ArtistViewModel {
         let fullHQ: Int
     }
 
-    var artistStats: Stats {
-        var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
-        for era in artist.eras {
-            let s = eraStats(era)
-            total += s.total
-            available += s.available
-            snippets += s.snippets
-            confirmed += s.confirmed
-            fullHQ += s.fullHQ
-        }
-        return Stats(total: total, available: available, snippets: snippets, confirmed: confirmed, fullHQ: fullHQ)
-    }
-
-    func eraStats(_ era: Era) -> Stats {
+    nonisolated static func computeEraStats(_ era: Era) -> Stats {
         var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
         for song in era.allSongs {
             for v in song.versions {
@@ -414,21 +671,14 @@ final class ArtistViewModel {
     // MARK: - Private helpers
 
     // Matches web's BEST_OF_BADGES = new Set(['best', 'special'])
-    private static let bestOfBadges: Set<Badge> = [.best, .special]
+    private nonisolated static let bestOfBadges: Set<Badge> = [.best, .special]
 
-    private func isBestOfSong(_ song: Song) -> Bool {
-        song.versions.contains { v in
-            guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
-            return Self.bestOfBadges.contains(badge)
-        }
+    private nonisolated static func isBestOfVersion(_ v: SongVersion) -> Bool {
+        guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
+        return bestOfBadges.contains(badge)
     }
 
-    private func songMatchesQuery(_ song: Song, query: String) -> Bool {
-        let searchText = buildSearchText(song)
-        return searchText.contains(query)
-    }
-
-    private func scoreSong(_ song: Song, query: String) -> Int {
+    private nonisolated static func scoreSong(_ song: Song, query: String) -> Int {
         let bn = song.baseName.lowercased()
         var alts: [String] = []
         for v in song.versions {
@@ -446,36 +696,6 @@ final class ArtistViewModel {
         }
         if alts.contains(where: { $0.contains(query) }) { return 20 }
         return 0
-    }
-
-    private func buildSearchText(_ song: Song) -> String {
-        var parts = [song.baseName.lowercased()]
-        for v in song.versions {
-            parts.append(v.name.lowercased())
-            if let alts = v.altTitles {
-                parts.append(contentsOf: alts.map { $0.lowercased() })
-            }
-        }
-        return parts.joined(separator: "\0")
-    }
-
-    private func filterToBestOf(_ songs: [Song]) -> [Song] {
-        songs.compactMap { song in
-            song.withFilteredVersions { v in
-                guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
-                return Self.bestOfBadges.contains(badge)
-            }
-        }
-    }
-
-    private func filterNoSnippets(_ songs: [Song]) -> [Song] {
-        songs.compactMap { song in
-            song.withFilteredVersions { !isSnippet($0) }
-        }
-    }
-
-    private func isSnippet(_ v: SongVersion) -> Bool {
-        Self.shouldFilterForNoSnippets(v)
     }
 
     private nonisolated static func shouldFilterForNoSnippets(_ v: SongVersion) -> Bool {

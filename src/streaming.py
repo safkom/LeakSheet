@@ -129,6 +129,8 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
             "provider": "imgur",
         }
 
+    # krakenfiles has no metadata API (the view page only yields a filename);
+    # clients fall back to player-derived format info for kraken links.
     return None
 
 

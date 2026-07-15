@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Browse artists panel — loads from discovery NDJSON endpoint.
+/// Explore trackers panel — loads the tracker list from the backend
+/// /trackers endpoint (TrackerHub sheet).
 struct BrowseArtistsView: View {
     /// Called with (url, curated artist name) — the name overrides the
     /// backend's sheet-title inference, which trips on joke tracker titles.
@@ -11,8 +12,6 @@ struct BrowseArtistsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var loadingUrl = ""
-
-    private static let discoveryURL = "https://assets.artistgrid.cx/artists.ndjson"
 
     private var filtered: [DiscoveryArtist] {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -66,11 +65,18 @@ struct BrowseArtistsView: View {
                                                     .accessibilityLabel("Best of")
                                             }
                                         }
-                                        if let credit = artist.credit, !credit.isEmpty {
-                                            Text("by \(credit)")
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-                                                .lineLimit(1)
+                                        HStack(spacing: 6) {
+                                            if let credit = artist.credit, !credit.isEmpty {
+                                                Text("by \(credit)")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.tertiary)
+                                                    .lineLimit(1)
+                                            }
+                                            if artist.upToDate == false {
+                                                Text("outdated")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.orange)
+                                            }
                                         }
                                     }
 
@@ -96,7 +102,7 @@ struct BrowseArtistsView: View {
                 }
             }
             .background(Color.lsBackground)
-            .navigationTitle("Browse Artists")
+            .navigationTitle("Explore Trackers")
             .navigationBarTitleDisplayMode(.inline)
         }
         .task { await loadArtists() }
@@ -109,26 +115,15 @@ struct BrowseArtistsView: View {
         error = nil
         defer { loading = false }
 
-        guard let url = URL(string: Self.discoveryURL) else {
-            error = "Invalid discovery URL"
-            return
-        }
-
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let text = String(data: data, encoding: .utf8) ?? ""
-            let decoder = JSONDecoder()
-            let parsed: [DiscoveryArtist] = text
-                .split(separator: "\n")
-                .compactMap { line in
-                    try? decoder.decode(DiscoveryArtist.self, from: Data(line.utf8))
-                }
+            // Server sorts best-first then by name; re-sort locally so the
+            // order survives a backend that doesn't.
+            artists = try await APIClient.shared.fetchTrackers()
                 .sorted { a, b in
                     if a.best == true && b.best != true { return true }
                     if a.best != true && b.best == true { return false }
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
-            artists = parsed
         } catch {
             self.error = error.localizedDescription
         }

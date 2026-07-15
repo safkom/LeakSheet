@@ -191,7 +191,8 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
 
 extension Song {
     /// Returns a copy of this song with only versions matching `filter`, or nil if none match.
-    func withFilteredVersions(_ filter: (SongVersion) -> Bool) -> Song? {
+    /// Nonisolated: called from the off-main filter pipeline.
+    nonisolated func withFilteredVersions(_ filter: (SongVersion) -> Bool) -> Song? {
         let kept = versions.filter(filter)
         guard !kept.isEmpty else { return nil }
         // Uses the synthesized memberwise initializer
@@ -338,6 +339,23 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     }
 
     var isStreamable: Bool { streamableLink != nil }
+
+    /// Every link, classified by content kind — lets a row show the right
+    /// affordance per link and, when there's more than one, let the user
+    /// choose explicitly instead of guessing which one to open.
+    var mediaLinks: [MiscLink] {
+        links.map { url in
+            let kind = MiscLinkClassifier.classify(url)
+            return MiscLink(url: url, kind: kind, label: MiscLinkClassifier.label(for: url, kind: kind))
+        }
+    }
+
+    /// Best available preview image across this entry's links — a direct
+    /// image file, or a derivable video thumbnail (YouTube). Nil when
+    /// nothing can be previewed without fetching the linked page.
+    var previewImageURL: String? {
+        mediaLinks.lazy.compactMap { MiscLinkClassifier.thumbnailURL(for: $0.url, kind: $0.kind) }.first
+    }
 
     /// Minimal SongVersion so misc entries flow through the existing playback
     /// and description-sheet machinery unchanged.
@@ -515,18 +533,20 @@ nonisolated struct TimelineEvent: Codable, Identifiable, Hashable, Sendable {
 
 // MARK: - DiscoveryArtist
 
+/// One entry of the backend /trackers discovery feed (TrackerHub sheet).
 nonisolated struct DiscoveryArtist: Codable, Identifiable, Sendable {
     let name: String
     let url: String
     let credit: String?
-    let linksWork: Int?
-    let updated: Int?
     let best: Bool?
+    let upToDate: Bool?
+    let workingLinks: Bool?
 
     var id: String { url }
 
     enum CodingKeys: String, CodingKey {
-        case name, url, credit, best, updated
-        case linksWork = "links_work"
+        case name, url, credit, best
+        case upToDate = "up_to_date"
+        case workingLinks = "working_links"
     }
 }

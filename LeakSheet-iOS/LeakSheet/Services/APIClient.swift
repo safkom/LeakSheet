@@ -103,17 +103,27 @@ actor APIClient {
 
     // MARK: - Image Proxy
 
-    nonisolated func imageProxyURL(for imageURL: String) -> URL? {
+    /// Proxy URL for an art image. Pass `width` (a pixel bucket) to have the
+    /// backend downscale — sized requests decode dramatically faster on
+    /// device and cache better.
+    nonisolated func imageProxyURL(for imageURL: String, width: Int? = nil) -> URL? {
         guard var components = URLComponents(string: "\(Self.baseURL)/image-proxy") else { return nil }
         var fullURL = imageURL
         if fullURL.hasPrefix("//") { fullURL = "https:" + fullURL }
-        components.queryItems = [URLQueryItem(name: "url", value: fullURL)]
+        var items = [URLQueryItem(name: "url", value: fullURL)]
+        if let width {
+            items.append(URLQueryItem(name: "w", value: String(width)))
+        }
+        components.queryItems = items
         return components.url
     }
 
     // MARK: - Metadata
 
-    func fetchMetadata(for url: String) async throws -> [String: Any] {
+    /// Fetch stream file metadata (codec, bitrate, …) for a file-sharing link.
+    /// Returns nil when the provider has no metadata API (e.g. krakenfiles) —
+    /// callers fall back to player-derived format info.
+    func fetchMetadata(for url: String) async throws -> FileMetadata? {
         guard var components = URLComponents(string: "\(Self.baseURL)/metadata") else {
             throw APIError.invalidURL
         }
@@ -125,14 +135,40 @@ actor APIClient {
             throw APIError.httpError(status: 0, message: "Unexpected response type")
         }
 
+        if httpResponse.statusCode == 404 {
+            return nil
+        }
         guard httpResponse.statusCode == 200 else {
             throw APIError.httpError(status: httpResponse.statusCode, message: "Metadata fetch failed")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw APIError.decodingError
+        return try Self.decodeMetadata(from: data)
+    }
+
+    private nonisolated static func decodeMetadata(from data: Data) throws -> FileMetadata {
+        try JSONDecoder().decode(FileMetadata.self, from: data)
+    }
+
+    // MARK: - Trackers (discovery)
+
+    /// Fetch the artist-tracker discovery list from the backend /trackers
+    /// endpoint (TrackerHub sheet, server-cached).
+    func fetchTrackers() async throws -> [DiscoveryArtist] {
+        guard let url = URL(string: "\(Self.baseURL)/trackers") else {
+            throw APIError.invalidURL
         }
-        return json
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.httpError(status: 0, message: "Unexpected response type")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw APIError.httpError(status: httpResponse.statusCode, message: "Tracker list fetch failed")
+        }
+        return try Self.decodeTrackers(from: data)
+    }
+
+    private nonisolated static func decodeTrackers(from data: Data) throws -> [DiscoveryArtist] {
+        try JSONDecoder().decode([DiscoveryArtist].self, from: data)
     }
 
     // MARK: - Stream URL
@@ -208,4 +244,74 @@ enum APIError: LocalizedError, Sendable {
 
 nonisolated struct ErrorResponse: Codable, Sendable {
     let detail: String
+}
+
+// MARK: - FileMetadata
+
+/// Stream file metadata from the backend /metadata endpoint. Field presence
+/// varies by provider: pillows carries full format info, froste an estimated
+/// bitrate analysis, imgur only file facts.
+nonisolated struct FileMetadata: Codable, Sendable {
+    let provider: String?
+    let container: String?
+    let codec: String?
+    let codecProfile: String?
+    let bitrate: String?
+    let sampleRate: String?
+    let bitsPerSample: String?
+    let lossless: Bool?
+    let channels: Int?
+    let duration: String?
+    let artist: String?
+    let title: String?
+    // froste analyze-quality
+    let estimatedBitrate: Int?
+    let frequencyCutoff: Double?
+    let qualityMismatch: Bool?
+    // imgur file API
+    let fileSize: Int?
+    let mimeType: String?
+    let filename: String?
+
+    enum CodingKeys: String, CodingKey {
+        case provider, container, codec, bitrate, lossless, channels
+        case duration, artist, title, filename
+        case codecProfile = "codec_profile"
+        case sampleRate = "sample_rate"
+        case bitsPerSample = "bits_per_sample"
+        case estimatedBitrate = "estimated_bitrate"
+        case frequencyCutoff = "frequency_cutoff"
+        case qualityMismatch = "quality_mismatch"
+        case fileSize = "file_size"
+        case mimeType = "mime_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decodeIfPresent(String.self, forKey: .provider)
+        container = try c.decodeIfPresent(String.self, forKey: .container)
+        codec = try c.decodeIfPresent(String.self, forKey: .codec)
+        codecProfile = try c.decodeIfPresent(String.self, forKey: .codecProfile)
+        bitrate = try c.decodeIfPresent(String.self, forKey: .bitrate)
+        sampleRate = try c.decodeIfPresent(String.self, forKey: .sampleRate)
+        bitsPerSample = try c.decodeIfPresent(String.self, forKey: .bitsPerSample)
+        lossless = try c.decodeIfPresent(Bool.self, forKey: .lossless)
+        // Backend emits channels as Int when numeric, String otherwise.
+        if let numeric = try? c.decodeIfPresent(Int.self, forKey: .channels) {
+            channels = numeric
+        } else if let text = try? c.decodeIfPresent(String.self, forKey: .channels) {
+            channels = Int(text)
+        } else {
+            channels = nil
+        }
+        duration = try c.decodeIfPresent(String.self, forKey: .duration)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        estimatedBitrate = try c.decodeIfPresent(Int.self, forKey: .estimatedBitrate)
+        frequencyCutoff = try c.decodeIfPresent(Double.self, forKey: .frequencyCutoff)
+        qualityMismatch = try c.decodeIfPresent(Bool.self, forKey: .qualityMismatch)
+        fileSize = try c.decodeIfPresent(Int.self, forKey: .fileSize)
+        mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
+        filename = try c.decodeIfPresent(String.self, forKey: .filename)
+    }
 }

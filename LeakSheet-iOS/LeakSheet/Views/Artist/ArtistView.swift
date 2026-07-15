@@ -1,76 +1,136 @@
 import SwiftUI
 
 /// Artist detail screen — stats, search/filter, era cards, song lists.
+///
+/// All list content renders as direct children of ONE LazyVStack: era cards,
+/// song rows, and version rows are flattened into `vm.eraRows` so every row
+/// materializes lazily. Filtering runs off-main in the view model; the body
+/// only iterates prepared arrays.
+///
+/// Each content branch (search/misc/recents/eras) is its own `View` type with
+/// narrow inputs — not a computed property — so toggling one doesn't share an
+/// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
 
     @State private var vm: ArtistViewModel
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
-    @State private var eraColors: [String: Color] = [:]
     @State private var activeEraColor: Color?
-    @State private var recentsDisplayCount = 60
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// era name (lowercased) → art URL, first occurrence wins — mirrors the
+    /// case-insensitive `.first { }` lookup misc entries used to do directly
+    /// against `artist.eras`. Precomputed once so MiscListView takes a small
+    /// dictionary instead of the artist's whole (potentially large) era tree.
+    private let eraArtByLowercasedName: [String: String?]
+
     init(artist: Artist) {
         self.artist = artist
         self._vm = State(initialValue: ArtistViewModel(artist: artist))
+        var eraArt: [String: String?] = [:]
+        for era in artist.eras {
+            let key = era.name.lowercased()
+            if eraArt[key] == nil { eraArt[key] = era.artUrl }
+        }
+        self.eraArtByLowercasedName = eraArt
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    // Notices
-                    if let notices = artist.notices, !notices.isEmpty {
-                        VStack(spacing: 4) {
-                            ForEach(notices, id: \.text) { notice in
-                                NoticeBannerView(notice: notice)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                // Notices
+                if let notices = artist.notices, !notices.isEmpty {
+                    VStack(spacing: 4) {
+                        ForEach(notices, id: \.text) { notice in
+                            NoticeBannerView(notice: notice)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                }
+
+                // Stats bar
+                ArtistStatsBarView(stats: vm.artistStats)
+
+                // Filter toggles
+                FilterTogglesView(vm: vm)
+                    .padding(.bottom, 8)
+
+                // Content branches follow the COMPUTED state (content.state),
+                // not the live chip flags — the chips flip instantly while
+                // the previous content stays up until the new one lands,
+                // so a branch never renders data computed for another mode.
+                let contentState = vm.content.state
+                if contentState.misc {
+                    MiscListView(
+                        vm: vm,
+                        artistName: artist.name,
+                        artistSlug: artist.slug,
+                        eraArtByLowercasedName: eraArtByLowercasedName,
+                        onShowDescription: { showDescription = $0 }
+                    )
+                } else if !contentState.query.isEmpty {
+                    SearchResultsListView(
+                        vm: vm,
+                        artistName: artist.name,
+                        artistSlug: artist.slug,
+                        sourceUrl: artist.sourceUrl,
+                        onShowDescription: { showDescription = $0 }
+                    )
+                } else if contentState.recents {
+                    RecentsListView(
+                        vm: vm,
+                        artistName: artist.name,
+                        artistSlug: artist.slug,
+                        sourceUrl: artist.sourceUrl,
+                        onShowDescription: { showDescription = $0 }
+                    )
+                } else {
+                    ErasListView(
+                        vm: vm,
+                        artistName: artist.name,
+                        artistSlug: artist.slug,
+                        sourceUrl: artist.sourceUrl,
+                        onShowDescription: { showDescription = $0 },
+                        onColorExtracted: { color in
+                            if activeEraColor == nil {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
+                                    activeEraColor = color
+                                }
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 2)
-                    }
-
-                    // Stats bar
-                    ArtistStatsBarView(stats: vm.artistStats)
-
-                    // Filter toggles
-                    filterToggles
-                        .padding(.bottom, 8)
-
-                    // Content: Misc is a strict mode (never mixed with era
-                    // songs; search/chips filter within it), then search
-                    // results take priority over eras/recents.
-                    if vm.misc {
-                        miscList
-                    } else if vm.isSearching {
-                        searchResultsList
-                    } else if vm.recents {
-                        recentsList
-                    } else {
-                        erasList(proxy: proxy)
-                    }
+                    )
                 }
             }
-            .background(
-                ZStack {
-                    Color.lsBackground
-                    if let color = activeEraColor {
-                        LinearGradient(
-                            colors: [color.opacity(0.15), Color.clear],
-                            startPoint: .top,
-                            endPoint: UnitPoint(x: 0.5, y: 0.7)
-                        )
-                        .ignoresSafeArea()
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: activeEraColor)
-                    }
-                }
-            )
-            .swipeActionsContainer()
         }
+        .background(
+            ZStack {
+                Color.lsBackground
+                if let color = activeEraColor {
+                    LinearGradient(
+                        colors: [color.opacity(0.15), Color.clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.7)
+                    )
+                    .ignoresSafeArea()
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: activeEraColor)
+                }
+            }
+        )
+        .overlay(alignment: .top) {
+            if vm.isFiltering {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(8)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(.top, 4)
+                    .transition(.opacity)
+            }
+        }
+        .swipeActionsContainer()
         .navigationTitle(artist.name)
         .navigationSubtitle("\(vm.artistStats.total) tracks")
         .toolbarTitleDisplayMode(.large)
@@ -111,15 +171,6 @@ struct ArtistView: View {
             QueueSheet()
         }
         .task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await self.vm.prefetchEraImages() }
-                group.addTask { try? await Task.sleep(for: .seconds(5)) }
-                await group.next()
-                group.cancelAll()
-            }
-            // Single assignment — per-key writes invalidate every visible
-            // era card's glass effect once per key, all in the same frame.
-            eraColors = eraColors.merging(vm.prefetchedColors) { _, new in new }
             // Register ordered era list with the engine so playback auto-continues
             // to the next era when the current one runs out.
             let eraContexts = artist.eras.map { era in
@@ -132,89 +183,27 @@ struct ArtistView: View {
                 )
             }
             player.setArtistEras(eraContexts)
+            // Seeded colors (from the persisted extraction cache) give the
+            // background tint immediately; otherwise the first per-card
+            // extraction callback sets it.
             if activeEraColor == nil {
-                if let first = artist.eras.first(where: { vm.prefetchedColors[$0.name] != nil }),
-                   let color = vm.prefetchedColors[first.name] {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
-                        activeEraColor = color
-                    }
+                if let first = artist.eras.first(where: { vm.eraDisplay[$0.name] != nil }) {
+                    activeEraColor = vm.eraDisplay[first.name]?.dominant
                 }
             }
         }
     }
+}
 
-    // MARK: - Search results
+// MARK: - Filter toggles
 
-    @ViewBuilder
-    private var searchResultsList: some View {
-        let results = vm.searchResults(for: vm.debouncedQuery)
-        if results.isEmpty {
-            ContentUnavailableView.search(text: vm.debouncedQuery)
-                .padding(.top, 40)
-        } else {
-            Text("\(results.count) result\(results.count == 1 ? "" : "s")")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 4)
+/// @Observable reference input — the narrow-inputs rule for value types
+/// doesn't apply here; per-property observation tracking already scopes
+/// this view's invalidation to exactly the flags it reads.
+private struct FilterTogglesView: View {
+    let vm: ArtistViewModel
 
-            ForEach(results) { result in
-                SongRowView(
-                    song: result.song,
-                    version: result.version,
-                    artistName: artist.name,
-                    artistSlug: artist.slug,
-                    sourceUrl: artist.sourceUrl,
-                    eraName: result.era.name,
-                    eraArt: result.era.artUrl,
-                    showVersionBadge: true,
-                    onShowDescription: { payload in showDescription = payload }
-                )
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture {
-                    if result.version.isStreamable {
-                        Haptics.light()
-                        playWithinList(
-                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
-                            tappedId: result.id
-                        )
-                    } else {
-                        showDescription = DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artist.name, artistSlug: artist.slug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        )
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-    }
-
-    /// Start playback of the tapped entry inside its visible ordered list, so
-    /// auto-advance continues down the list (search results, recents) instead
-    /// of stopping after one track.
-    private func playWithinList(_ entries: [(version: SongVersion, era: Era, id: String)], tappedId: String) {
-        let streamable = entries.filter { $0.version.isStreamable }
-        guard let idx = streamable.firstIndex(where: { $0.id == tappedId }) else { return }
-        let items = streamable.map {
-            PlaybackListItem(
-                version: $0.version,
-                artistName: artist.name,
-                eraName: $0.era.name,
-                artUrl: $0.era.artUrl ?? "",
-                artistSlug: artist.slug
-            )
-        }
-        player.playInList(items, startAt: idx)
-    }
-
-    // MARK: - Filter toggles
-
-    private var filterToggles: some View {
+    var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             // Sibling glass elements belong in one container — standalone
             // effects re-resolve independently and can trip the
@@ -226,7 +215,6 @@ struct ArtistView: View {
                     }
                     FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
                         vm.toggleRecents()
-                        recentsDisplayCount = 60
                     }
                     FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
                         vm.toggleNoSnippets()
@@ -241,84 +229,188 @@ struct ArtistView: View {
             .padding(.horizontal, 16)
         }
     }
+}
 
-    // MARK: - Eras list
+// MARK: - Search results
 
-    @ViewBuilder
-    private func erasList(proxy: ScrollViewProxy) -> some View {
-        ForEach(vm.filteredEras, id: \.name) { era in
-            let eraColor = eraColors[era.name]
-            let isExpanded = vm.isEraExpanded(era.name)
+private struct SearchResultsListView: View {
+    let vm: ArtistViewModel
+    let artistName: String
+    let artistSlug: String
+    let sourceUrl: String?
+    let onShowDescription: (DescriptionSheet.Payload) -> Void
 
-            VStack(spacing: 0) {
-                // Era card — 16pt inset from screen edges
-                EraCardView(
-                    era: era,
-                    expanded: isExpanded,
-                    stats: vm.eraStats(era),
-                    onTap: {
-                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                            vm.toggleEra(era.name)
-                        }
-                    },
-                    onColorExtracted: { color in
-                        eraColors[era.name] = color
-                        if activeEraColor == nil {
-                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
-                                activeEraColor = color
-                            }
-                        }
-                    }
-                )
+    @Environment(PlayerViewModel.self) private var player
+
+    var body: some View {
+        let results = vm.content.searchResults
+        if results.isEmpty {
+            ContentUnavailableView.search(text: vm.content.state.query)
+                .padding(.top, 40)
+        } else {
+            Text("\(results.count) result\(results.count == 1 ? "" : "s")")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
-                .id("era-\(era.name)")
+                .padding(.top, 4)
+                .padding(.bottom, 4)
 
-                if isExpanded {
-                    // 2pt accent divider — same width as card
-                    Rectangle()
-                        .fill(eraColor ?? Color.lsAccent)
-                        .frame(height: 2)
-                        .padding(.horizontal, 16)
-
-                    // Songs panel — exactly same horizontal position as era card
-                    SongListView(
-                        era: era,
-                        sections: vm.filteredSections(for: era),
-                        songs: vm.filteredSongs(for: era),
-                        artistName: artist.name,
-                        artistSlug: artist.slug,
-                        sourceUrl: artist.sourceUrl,
-                        eraColor: eraColor,
-                        onShowDescription: { payload in showDescription = payload }
-                    )
-                    .background(eraColor?.opacity(0.08) ?? Color.clear)
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            bottomLeadingRadius: 16,
-                            bottomTrailingRadius: 16
+            ForEach(results) { result in
+                SongRowView(
+                    song: result.song,
+                    version: result.version,
+                    artistName: artistName,
+                    artistSlug: artistSlug,
+                    sourceUrl: sourceUrl,
+                    eraName: result.era.name,
+                    eraArt: result.era.artUrl,
+                    showVersionBadge: true,
+                    onShowDescription: onShowDescription
+                )
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .onTapGesture {
+                    if result.version.isStreamable {
+                        Haptics.light()
+                        playWithinList(
+                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
+                            tappedId: result.id
                         )
-                    )
-                    .padding(.horizontal, 16)
+                    } else {
+                        onShowDescription(DescriptionSheet.Payload(
+                            song: result.song, version: result.version,
+                            artistName: artistName, artistSlug: artistSlug,
+                            eraName: result.era.name, eraArt: result.era.artUrl
+                        ))
+                    }
                 }
+                .padding(.horizontal, 16)
             }
-            // Gap between eras
-            .padding(.bottom, 12)
         }
     }
 
-    // MARK: - Misc entries
+    /// Start playback of the tapped entry inside its visible ordered list, so
+    /// auto-advance continues down the list (search results) instead of
+    /// stopping after one track.
+    private func playWithinList(_ entries: [(version: SongVersion, era: Era, id: String)], tappedId: String) {
+        let streamable = entries.filter { $0.version.isStreamable }
+        guard let idx = streamable.firstIndex(where: { $0.id == tappedId }) else { return }
+        let items = streamable.map {
+            PlaybackListItem(
+                version: $0.version,
+                artistName: artistName,
+                eraName: $0.era.name,
+                artUrl: $0.era.artUrl ?? "",
+                artistSlug: artistSlug
+            )
+        }
+        player.playInList(items, startAt: idx)
+    }
+}
 
-    @ViewBuilder
-    private var miscList: some View {
-        let entries = vm.miscResults
+// MARK: - Eras list (flattened lazy rows)
+
+private struct ErasListView: View {
+    let vm: ArtistViewModel
+    let artistName: String
+    let artistSlug: String
+    let sourceUrl: String?
+    let onShowDescription: (DescriptionSheet.Payload) -> Void
+    let onColorExtracted: (Color) -> Void
+
+    @Environment(PlayerViewModel.self) private var player
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ForEach(vm.eraRows) { row in
+            EraRowView(
+                row: row,
+                displayColors: vm.eraDisplay[row.eraName],
+                artistName: artistName,
+                artistSlug: artistSlug,
+                sourceUrl: sourceUrl,
+                onCardTap: { eraName in
+                    withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
+                        vm.toggleEra(eraName)
+                    }
+                },
+                onColorExtracted: { eraName, color in
+                    vm.setEraColor(eraName: eraName, dominant: color)
+                    onColorExtracted(color)
+                },
+                onSongTap: handleSongTap,
+                onPlayVersion: playWithEraContext,
+                onShowDescription: onShowDescription
+            )
+        }
+    }
+
+    /// Multi-version songs expand/collapse; single-version songs play (or
+    /// show the description when not streamable).
+    private func handleSongTap(_ song: Song, eraName: String, eraArt: String?) {
+        if song.versions.count > 1 {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                vm.toggleSongExpansion(eraName: eraName, baseName: song.baseName)
+            }
+        } else if let v = song.versions.first {
+            if v.isStreamable {
+                Haptics.light()
+                playWithEraContext(v, eraName: eraName)
+            } else {
+                onShowDescription(DescriptionSheet.Payload(
+                    song: song, version: v,
+                    artistName: artistName, artistSlug: artistSlug,
+                    eraName: eraName, eraArt: eraArt
+                ))
+            }
+        }
+    }
+
+    /// Era-scoped playback: the filtered era's streamable versions are the
+    /// auto-advance context (filtered-out versions are excluded, as before).
+    private func playWithEraContext(_ version: SongVersion, eraName: String) {
+        guard let filtered = vm.filteredEra(named: eraName) else { return }
+        player.playInEra(
+            version,
+            eraName: eraName,
+            artistName: artistName,
+            artUrl: filtered.era.artUrl ?? "",
+            versions: filtered.streamableVersions,
+            artistSlug: artistSlug
+        )
+    }
+}
+
+// MARK: - Misc entries
+
+private struct MiscListView: View {
+    let vm: ArtistViewModel
+    let artistName: String
+    let artistSlug: String
+    /// era name (lowercased) → art URL, precomputed once by the parent so
+    /// this view doesn't need the artist's whole (potentially large) era tree.
+    let eraArtByLowercasedName: [String: String?]
+    let onShowDescription: (DescriptionSheet.Payload) -> Void
+
+    @Environment(PlayerViewModel.self) private var player
+
+    var body: some View {
+        let entries = vm.content.miscResults
 
         if entries.isEmpty {
-            ContentUnavailableView(
-                "No Misc Entries",
-                systemImage: "film.stack",
-                description: Text("Nothing matches the current filters.")
-            )
-            .padding(.top, 40)
+            if vm.isFiltering {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+            } else {
+                ContentUnavailableView(
+                    "No Misc Entries",
+                    systemImage: "film.stack",
+                    description: Text("Nothing matches the current filters.")
+                )
+                .padding(.top, 40)
+            }
         } else {
             ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
                 // Era group header — shown when the era changes
@@ -326,7 +418,7 @@ struct ArtistView: View {
                     HStack(spacing: 8) {
                         Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle((eraColors[entry.eraName] ?? .secondary).ensureReadable(against: .lsBackground))
+                            .foregroundStyle(vm.eraDisplay[entry.eraName]?.readableHeader ?? .secondary)
                         Rectangle()
                             .fill(Color.lsBorder)
                             .frame(height: 1)
@@ -336,64 +428,99 @@ struct ArtistView: View {
                     .padding(.bottom, 2)
                 }
 
-                MiscEntryRowView(entry: entry) { payload in
-                    showDescription = payload
-                }
+                MiscEntryRowView(
+                    entry: entry,
+                    onShowDescription: onShowDescription,
+                    onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture {
-                    handleMiscTap(entry, in: entries)
+                    handleRowTap(entry, in: entries)
                 }
                 .padding(.horizontal, 16)
             }
         }
     }
 
-    /// Streamable entries play with continuation across the misc list;
-    /// non-streamable entries open their link externally, and link-less
-    /// entries show the description sheet.
-    private func handleMiscTap(_ entry: MiscEntry, in entries: [MiscEntry]) {
-        if entry.isStreamable {
+    /// A single link is unambiguous, so the row's own tap performs it
+    /// directly. Zero or multiple links have no one obvious action — the
+    /// description sheet is the safe default, and the row's menu (built from
+    /// `entry.mediaLinks`) lets the user pick a specific link explicitly.
+    private func handleRowTap(_ entry: MiscEntry, in entries: [MiscEntry]) {
+        let links = entry.mediaLinks
+        if links.count == 1 {
+            handleLinkSelection(links[0], for: entry, in: entries)
+        } else {
+            onShowDescription(DescriptionSheet.Payload(
+                song: nil, version: entry.asSongVersion,
+                artistName: artistName, artistSlug: artistSlug,
+                eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
+            ))
+        }
+    }
+
+    /// Stream-kind links play with continuation across every other
+    /// stream-kind entry in the visible list, matching era/song playback;
+    /// everything else (image, video, archive, generic link) opens
+    /// externally — the OS decides how to handle it (Safari, a video app, a
+    /// zip download).
+    private func handleLinkSelection(_ link: MiscLink, for entry: MiscEntry, in entries: [MiscEntry]) {
+        switch link.kind {
+        case .stream:
             Haptics.light()
             let streamable = entries.filter(\.isStreamable)
             guard let idx = streamable.firstIndex(where: { $0.id == entry.id }) else { return }
             let items = streamable.map {
                 PlaybackListItem(
                     version: $0.asSongVersion,
-                    artistName: artist.name,
+                    artistName: artistName,
                     eraName: $0.eraName,
                     artUrl: eraArtUrl(for: $0.eraName) ?? "",
-                    artistSlug: artist.slug
+                    artistSlug: artistSlug
                 )
             }
             player.playInList(items, startAt: idx)
-        } else if let link = entry.links.first, let url = URL(string: link) {
-            UIApplication.shared.open(url)
-        } else {
-            showDescription = DescriptionSheet.Payload(
-                song: nil, version: entry.asSongVersion,
-                artistName: artist.name, artistSlug: artist.slug,
-                eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
-            )
+        case .image, .video, .archive, .link:
+            if let url = URL(string: link.url) {
+                UIApplication.shared.open(url)
+            }
         }
     }
 
     /// Era art for a misc entry — matched against the main-tab eras by name.
     private func eraArtUrl(for eraName: String) -> String? {
-        artist.eras.first { $0.name.caseInsensitiveCompare(eraName) == .orderedSame }?.artUrl
+        eraArtByLowercasedName[eraName.lowercased()] ?? nil
     }
+}
 
-    // MARK: - Recents
+// MARK: - Recents
 
-    @ViewBuilder
-    private var recentsList: some View {
-        let allResults = vm.cachedRecentResults
-        let visible = Array(allResults.prefix(recentsDisplayCount))
+private struct RecentsListView: View {
+    let vm: ArtistViewModel
+    let artistName: String
+    let artistSlug: String
+    let sourceUrl: String?
+    let onShowDescription: (DescriptionSheet.Payload) -> Void
 
-        if vm.recentsLoading && visible.isEmpty {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
+    @Environment(PlayerViewModel.self) private var player
+
+    var body: some View {
+        let visible = vm.visibleRecents
+
+        if visible.isEmpty {
+            if vm.isFiltering {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+            } else {
+                ContentUnavailableView(
+                    "No Recent Leaks",
+                    systemImage: "clock",
+                    description: Text("No versions carry a leak or file date.")
+                )
+                .padding(.top, 40)
+            }
         } else {
             ForEach(Array(visible.enumerated()), id: \.element.id) { idx, result in
                 // Era group header — show when era changes
@@ -401,7 +528,7 @@ struct ArtistView: View {
                     HStack(spacing: 8) {
                         Text(result.era.name.uppercased())
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle((eraColors[result.era.name] ?? .secondary).ensureReadable(against: .lsBackground))
+                            .foregroundStyle(vm.eraDisplay[result.era.name]?.readableHeader ?? .secondary)
                         Rectangle()
                             .fill(Color.lsBorder)
                             .frame(height: 1)
@@ -431,40 +558,178 @@ struct ArtistView: View {
                 SongRowView(
                     song: result.song,
                     version: result.version,
-                    artistName: artist.name,
-                    artistSlug: artist.slug,
-                    sourceUrl: artist.sourceUrl,
+                    artistName: artistName,
+                    artistSlug: artistSlug,
+                    sourceUrl: sourceUrl,
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
-                    onShowDescription: { payload in showDescription = payload }
+                    onShowDescription: onShowDescription
                 )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture {
                     if result.version.isStreamable {
                         Haptics.light()
-                        // Continue down the full recents list, not just the
-                        // currently rendered prefix.
-                        playWithinList(
-                            allResults.map { (version: $0.version, era: $0.era, id: $0.id) },
-                            tappedId: result.id
-                        )
+                        // Prebuilt playback list continues down the FULL
+                        // recents list, not just the rendered window.
+                        if let (items, idx) = vm.recentPlayback(for: result.id) {
+                            player.playInList(items, startAt: idx)
+                        }
                     } else {
-                        showDescription = DescriptionSheet.Payload(
+                        onShowDescription(DescriptionSheet.Payload(
                             song: result.song, version: result.version,
-                            artistName: artist.name, artistSlug: artist.slug,
+                            artistName: artistName, artistSlug: artistSlug,
                             eraName: result.era.name, eraArt: result.era.artUrl
-                        )
+                        ))
                     }
                 }
                 .padding(.horizontal, 16)
                 .onAppear {
-                    if idx == visible.count - 1 && recentsDisplayCount < allResults.count {
-                        recentsDisplayCount += 60
+                    if idx == visible.count - 1 {
+                        vm.loadMoreRecents()
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Era row (flattened list)
+
+/// Renders ONE row of the flattened era list. The body wraps its switch in a
+/// single-root container so the row is unary — LazyVStack can template row
+/// identity from the ForEach ids without evaluating every row's body.
+private struct EraRowView: View {
+    let row: EraRow
+    let displayColors: EraDisplayColors?
+    let artistName: String
+    let artistSlug: String
+    let sourceUrl: String?
+    let onCardTap: (String) -> Void
+    let onColorExtracted: (String, Color) -> Void
+    let onSongTap: (Song, String, String?) -> Void
+    let onPlayVersion: (SongVersion, String) -> Void
+    let onShowDescription: (DescriptionSheet.Payload) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch row {
+            case .card(let filtered, let expanded):
+                EraCardView(
+                    era: filtered.era,
+                    expanded: expanded,
+                    stats: filtered.stats,
+                    displayColors: displayColors,
+                    onTap: { onCardTap(filtered.era.name) },
+                    onColorExtracted: { color in onColorExtracted(filtered.era.name, color) }
+                )
+                .padding(.horizontal, 16)
+
+            case .divider:
+                Rectangle()
+                    .fill(displayColors?.dominant ?? Color.lsAccent)
+                    .frame(height: 2)
+                    .padding(.horizontal, 16)
+
+            case .groupHeader(let text, _):
+                panel(isLast: false) {
+                    Text(text)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .padding(.top, 14)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+            case .sectionHeader(let name, _, let group):
+                panel(isLast: false) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(displayColors?.dominant ?? .secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Rectangle()
+                            .fill((displayColors?.dominant ?? Color.lsBorder).opacity(0.3))
+                            .frame(height: 1)
+                            .padding(.horizontal, 12)
+                    }
+                    .padding(.top, group == nil ? 14 : 6)
+                }
+
+            case .song(let song, let eraName, let eraArt, _, _, let isLast):
+                panel(isLast: isLast) {
+                    SongRowView(
+                        song: song,
+                        version: song.versions.first,
+                        artistName: artistName,
+                        artistSlug: artistSlug,
+                        sourceUrl: sourceUrl,
+                        eraName: eraName,
+                        eraArt: eraArt,
+                        onPlay: { onPlayVersion($0, eraName) },
+                        onShowDescription: onShowDescription
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
+                    .onTapGesture {
+                        onSongTap(song, eraName, eraArt)
+                    }
+                }
+
+            case .version(let version, let index, let song, let eraName, let eraArt, let isLast):
+                panel(isLast: isLast) {
+                    VersionRowView(
+                        version: version,
+                        versionIndex: index,
+                        artistName: artistName,
+                        artistSlug: artistSlug,
+                        sourceUrl: sourceUrl,
+                        eraName: eraName,
+                        eraArt: eraArt,
+                        onPlay: { onPlayVersion($0, eraName) },
+                        onShowDescription: onShowDescription
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+            case .eraGap:
+                Color.clear.frame(height: 12)
+            }
+        }
+    }
+
+    /// The tinted songs-panel treatment the per-era container used to apply:
+    /// row-width tint, bottom corners rounded on the era's final row, 16pt
+    /// screen inset.
+    private func panel<Content: View>(isLast: Bool, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity)
+            .background(displayColors?.dominant.opacity(0.08) ?? Color.clear)
+            .clipShape(
+                UnevenRoundedRectangle(
+                    bottomLeadingRadius: isLast ? 16 : 0,
+                    bottomTrailingRadius: isLast ? 16 : 0
+                )
+            )
+            .padding(.horizontal, 16)
+    }
+}
+
+private extension EraRow {
+    var eraName: String {
+        switch self {
+        case .card(let filtered, _): return filtered.era.name
+        case .divider(let era), .eraGap(let era): return era
+        case .groupHeader(_, let era): return era
+        case .sectionHeader(_, let era, _): return era
+        case .song(_, let era, _, _, _, _): return era
+        case .version(_, _, _, let era, _, _): return era
         }
     }
 }

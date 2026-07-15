@@ -506,13 +506,17 @@ async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
 
 
 def clear_cache() -> int:
-    """Remove all cached files. Returns number of files deleted."""
+    """Remove all cached files (sheet HTML/parsed JSON and resized images).
+
+    Returns number of files deleted.
+    """
     if not CACHE_DIR.exists():
         return 0
     count = 0
     for f in CACHE_DIR.iterdir():
-        f.unlink()
-        count += 1
+        if f.is_file():
+            f.unlink()
+            count += 1
     return count
 
 
@@ -809,32 +813,6 @@ def fetch_and_parse(
             cached_artist.source_url = url
             return cached_artist
 
-    # If a specific GID was requested, try it first.
-    # If it produces 0 eras, fall through to GID discovery.
-    if gid:
-        try:
-            html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
-                                            cache_ttl=cache_ttl, use_cache=use_cache)
-            name = _resolve_artist_name(html, title, artist_name)
-            artist = parse_sheet(html, name)
-            if artist.eras:
-                # Before returning, check if this page reveals a better
-                # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
-                # The GID-specific HTML embeds all tab names via items.push() JS,
-                # so no extra request is needed.
-                named_tabs = _discover_named_tabs(html)
-                unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
-                if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                    artist.source_url = url
-                    if use_cache:
-                        _set_cached_parsed(url_norm, artist)
-                    return artist
-                # A better "Unreleased" tab exists — fall through to full discovery
-            # GID produced 0 eras — fall through to GID discovery below
-        except (FetchError, httpx.HTTPError, ValueError):
-            pass  # GID failed — fall through to GID discovery
-
-    # No specific GID — discover all GIDs and try them.
     # The first GID with tables might be a landing page (Doja Cat, Sabrina
     # Carpenter, etc.), so we try multiple GIDs and pick the best result.
     client = httpx.Client(
@@ -844,6 +822,47 @@ def fetch_and_parse(
     )
 
     try:
+        # If a specific GID was requested, try it first.
+        # If it produces 0 eras, fall through to GID discovery.
+        if gid:
+            try:
+                html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
+                                                cache_ttl=cache_ttl, use_cache=use_cache)
+                # Per-GID sub-pages don't embed the workbook's tab listing
+                # (only the base /htmlview page does), so a link straight to
+                # the Misc/Music-Videos tab (e.g. copied from the browser
+                # while viewing it) can only be told apart from the main tab
+                # by asking the base page. This matters because parse_sheet's
+                # Era/Name/Available/Quality columns are similar enough to
+                # the misc-tab grammar that it can extract a plausible-
+                # looking but wrong "eras" list from that tab.
+                named_tabs: dict[str, str] = {}
+                try:
+                    base_resp = client.get(url_norm)
+                    base_resp.raise_for_status()
+                    named_tabs = _discover_named_tabs(base_resp.text)
+                except httpx.HTTPError:
+                    pass  # Can't tell — fall back to trusting parse_sheet below
+                gid_is_misc_tab = gid in {g for g, _kind in _get_misc_tabs(named_tabs)}
+                if not gid_is_misc_tab:
+                    name = _resolve_artist_name(html, title, artist_name)
+                    artist = parse_sheet(html, name)
+                    if artist.eras:
+                        # Before returning, check if this page reveals a better
+                        # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
+                        unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
+                        if not unreleased_tab_gid or unreleased_tab_gid == gid:
+                            artist.source_url = url
+                            if use_cache:
+                                _set_cached_parsed(url_norm, artist)
+                            return artist
+                        # A better "Unreleased" tab exists — fall through to full discovery
+                    # GID produced 0 eras — fall through to GID discovery below
+                # else: gid is the Misc/Music-Videos tab itself — skip
+                # straight to full discovery below.
+            except (FetchError, httpx.HTTPError, ValueError):
+                pass  # GID failed — fall through to GID discovery
+
         # Step 1: Fetch the base page to discover GIDs
         r = client.get(url_norm)
         r.raise_for_status()
@@ -1206,34 +1225,54 @@ async def async_fetch_and_parse(
 
     # If a specific GID was requested, try it first.
     # If it produces 0 eras, fall through to GID discovery.
+    client = _get_sheets_client()
     if gid:
         try:
             with t.phase("gid_fetch"):
                 html, title = await async_fetch_sheet_html(
                     url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
                 )
-            name = _resolve_artist_name(html, title, artist_name)
-            with t.phase("parse"):
-                artist = await asyncio.to_thread(parse_sheet, html, name)
-            if artist.eras:
-                # Before returning, check if this page reveals a better
-                # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
-                # The GID-specific HTML embeds all tab names via items.push() JS,
-                # so no extra request is needed.
-                named_tabs = _discover_named_tabs(html)
-                unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
-                if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                    artist.source_url = url
-                    if use_cache:
-                        await _async_set_cached_parsed(url_norm, artist)
-                    return artist
-                # A better "Unreleased" tab exists — fall through to full discovery
-            # GID produced 0 eras — fall through to GID discovery below
+            # Per-GID sub-pages don't embed the workbook's tab listing (only
+            # the base /htmlview page does), so a link straight to the
+            # Misc/Music-Videos tab (e.g. copied from the browser while
+            # viewing it) can only be told apart from the main tab by asking
+            # the base page. This matters because parse_sheet's Era/Name/
+            # Available/Quality columns are similar enough to the misc-tab
+            # grammar that it can extract a plausible-looking but wrong
+            # "eras" list from that tab, which would then short-circuit
+            # discovery of the real main tab and skip parsing this tab as
+            # misc entries entirely.
+            named_tabs: dict[str, str] = {}
+            try:
+                with t.phase("base_fetch"):
+                    base_resp = await client.get(url_norm, timeout=timeout)
+                    base_resp.raise_for_status()
+                named_tabs = _discover_named_tabs(base_resp.text)
+            except httpx.HTTPError:
+                pass  # Can't tell — fall back to trusting parse_sheet below
+            gid_is_misc_tab = gid in {g for g, _kind in _get_misc_tabs(named_tabs)}
+            if not gid_is_misc_tab:
+                name = _resolve_artist_name(html, title, artist_name)
+                with t.phase("parse"):
+                    artist = await asyncio.to_thread(parse_sheet, html, name)
+                if artist.eras:
+                    # Before returning, check if this page reveals a better
+                    # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
+                    unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
+                    if not unreleased_tab_gid or unreleased_tab_gid == gid:
+                        artist.source_url = url
+                        if use_cache:
+                            await _async_set_cached_parsed(url_norm, artist)
+                        return artist
+                    # A better "Unreleased" tab exists — fall through to full discovery
+                # GID produced 0 eras — fall through to GID discovery below
+            # else: gid is the Misc/Music-Videos tab itself — skip straight to
+            # full discovery below, which finds the real main tab and parses
+            # this tab correctly via parse_misc_tab.
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
-    client = _get_sheets_client()
     try:
         with t.phase("base_fetch"):
             r = await client.get(url_norm, timeout=timeout)

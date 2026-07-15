@@ -1,14 +1,29 @@
 import SwiftUI
 
-/// Row for one Misc / Music Videos entry — name, type capsule, and metadata.
+/// Row for one Misc / Music Videos entry — thumbnail (when the content is an
+/// image or video), name, type capsule, metadata, and a per-link affordance.
 /// Misc entries are separate from the era/song tree, so this row doesn't
 /// reuse SongRowView (which requires a Song).
+///
+/// The Link(s) column mixes audio streams, images, videos, and zip/archive
+/// downloads with no structured type — `MiscEntry.mediaLinks` classifies each
+/// one so the trailing control matches what tapping it actually does: a
+/// single link gets one plain icon (the row's own tap performs it directly),
+/// multiple links get a menu labeled by kind and host so choosing one is
+/// never a guess.
 struct MiscEntryRowView: View {
     let entry: MiscEntry
     var onShowDescription: (DescriptionSheet.Payload) -> Void
+    var onSelectLink: (MiscLink) -> Void
+
+    private var links: [MiscLink] { entry.mediaLinks }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
+            if let previewURL = entry.previewImageURL, let url = URL(string: previewURL) {
+                thumbnail(url: url)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
                     .font(.subheadline.weight(.medium))
@@ -43,20 +58,68 @@ struct MiscEntryRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if entry.isStreamable {
-                Image(systemName: "play.circle")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            } else if !entry.links.isEmpty {
-                Image(systemName: "arrow.up.right.square")
-                    .font(.body)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
+            trailingAffordance
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Thumbnail
+
+    private func thumbnail(url: URL) -> some View {
+        CachedImage(url: url, maxPixelSize: 128) {
+            Color.lsCard
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .bottomTrailing) {
+            // Video thumbnails come from a still frame — badge them so it
+            // reads as playable, not just a photo.
+            if links.contains(where: { $0.kind == .video }) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.white)
+                    .padding(3)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(2)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    // MARK: - Trailing affordance
+
+    /// One plain icon when there's a single link (the row's own tap already
+    /// performs it); a labeled menu when there's more than one, so picking
+    /// among a stream/archive/video/link never has to be a guess.
+    @ViewBuilder
+    private var trailingAffordance: some View {
+        switch links.count {
+        case 0:
+            EmptyView()
+        case 1:
+            Image(systemName: links[0].kind.systemImage)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        default:
+            Menu {
+                ForEach(links) { link in
+                    Button {
+                        onSelectLink(link)
+                    } label: {
+                        Label(link.label, systemImage: link.kind.systemImage)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Choose link")
+        }
     }
 
     // MARK: - Pieces

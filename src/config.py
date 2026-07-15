@@ -8,6 +8,15 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 # Default trackers directory
 TRACKERS_DIR = ROOT_DIR / "Trackers"
 
+# TrackerHub — community-maintained master sheet listing artist trackers.
+# Backs the GET /trackers discovery endpoint. The gid pins the single tab
+# that holds the tracker list, so the page contains exactly one table.
+TRACKERHUB_URL = (
+    "https://docs.google.com/spreadsheets/u/0/d/"
+    "1Z8aANbxXbnUGoZPRvJfWL3gz6jrzPPrwVt3d0c1iJ_4/htmlview/sheet"
+    "?headers=true&gid=1884837542"
+)
+
 # Known tracker files and their artist names
 KNOWN_TRACKERS: dict[str, str] = {
     "Baby Keem Music Tracker - Google Drive": "Baby Keem",
