@@ -113,7 +113,7 @@ struct SongRowView: View {
             if canStream {
                 Button {
                     if let v = version {
-                        player.addToQueue(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
+                        player.addToQueue(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
                         Haptics.light()
                     }
                 } label: {

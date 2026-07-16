@@ -246,7 +246,8 @@ final class ArtistViewModel {
     }
 
     private func applyFilters() {
-        filterTask?.cancel()
+        let previousTask = filterTask
+        previousTask?.cancel()
         let state = currentFilterState
         guard state != content.state else {
             isFiltering = false
@@ -255,7 +256,15 @@ final class ArtistViewModel {
         isFiltering = true
         let artist = self.artist
         let eraStats = self.eraStatsByName
+        // Single-flight: wait for the previous detached pass to actually
+        // stop before starting the next one. Overlapping passes would race
+        // on the shared static DateFormatters in parseDate (DateFormatter
+        // isn't safe for concurrent use), and serializing here also means a
+        // burst of chip/search changes only ever has one compute in flight
+        // instead of piling up wasted work.
         filterTask = Task.detached(priority: .userInitiated) { [weak self] in
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
             let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in

@@ -22,7 +22,13 @@ SNAPSHOT_DIR = Path(__file__).parent / "fixtures" / "snapshots"
 # Pinned 2026-07-06 from the census run (pre-fix parser state).
 BASELINES = {
     "yetracker": dict(
-        eras=44, songs=3949, versions=9105,
+        # songs 3949→3951 (2026-07-16): the WAR era no longer starves — its
+        # song rows previously misrouted to DONDA 2 [V1] because the "War"
+        # section label registered the "war" key first. Fixed by routing
+        # section-label/speculative era aliases to the fallback dict so the
+        # genuine WAR header claims the primary key. WAR now parses 39 songs;
+        # net +2 distinct song groups vs. when they were merged under DONDA 2.
+        eras=44, songs=3951, versions=9105,
         total_rows=9314, song_rows=9105, skipped=0, footer=115, other_rows=94,
         fuzzy=4, songs_with_10plus_versions=142,
     ),
@@ -127,6 +133,24 @@ class TestSnapshotAccuracy:
             and e.name.strip().lower() not in allowed
         ]
         assert empty == [], f"empty eras: {empty}"
+
+    def test_no_starved_eras(self, parsed, name):
+        """An era whose own stats block claims songs must parse at least one.
+
+        Catches the registration-priority bug class (a section label or a
+        speculative row-era registers an era key first, so the genuine era
+        header declared later can't claim it and every song row routes to the
+        wrong era). ``test_no_empty_eras`` misses this because a starved era
+        still has a description/timeline.
+        """
+        allowed = KNOWN_EMPTY_ERAS.get(name, set())
+        starved = [
+            e.name for e in parsed[name].eras
+            if e.song_count == 0
+            and e.stats is not None and e.stats.total > 0
+            and e.name.strip().lower() not in allowed
+        ]
+        assert starved == [], f"eras claim stats but parsed 0 songs: {starved}"
 
     def test_fuzzy_matches_pinned(self, parsed, name):
         assert parsed[name].parse_metadata.fuzzy_matched_rows == BASELINES[name]["fuzzy"]

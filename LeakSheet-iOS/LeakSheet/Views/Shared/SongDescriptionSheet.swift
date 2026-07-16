@@ -339,7 +339,7 @@ struct SongDescriptionSheet: View {
                                 Label("Play", systemImage: "play.fill")
                             }
                             Button {
-                                player.addToQueue(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "")
+                                player.addToQueue(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
                                 Haptics.light()
                             } label: {
                                 Label("Add to Queue", systemImage: "text.append")
@@ -413,18 +413,22 @@ struct SongDescriptionSheet: View {
         if !credits.isEmpty {
             FlowLayout(spacing: 6) {
                 ForEach(credits, id: \.0) { label, value in
-                    HStack(spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(label)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.tertiary)
                         Text(value)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
+                            // Allow the value to wrap to multiple lines when the
+                            // pill is width-constrained (long producer lists),
+                            // instead of forcing a single line that overflows.
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.lsCard)
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
@@ -742,6 +746,7 @@ struct FlowLayout: Layout {
     struct Cache {
         var width: CGFloat = .nan
         var offsets: [CGPoint] = []
+        var sizes: [CGSize] = []
         var size: CGSize = .zero
     }
 
@@ -760,7 +765,16 @@ struct FlowLayout: Layout {
         let proposed = ProposedViewSize(width: bounds.width, height: bounds.height)
         let result = ensureLayout(proposal: proposed, subviews: subviews, cache: &cache)
         for (index, offset) in result.offsets.enumerated() where index < subviews.count {
-            subviews[index].place(at: CGPoint(x: bounds.minX + offset.x, y: bounds.minY + offset.y), proposal: .unspecified)
+            // Place each subview with the same (clamped) size it was measured
+            // at — NOT .unspecified. An unspecified placement proposal lets a
+            // wrap-capable pill re-expand to its full single-line intrinsic
+            // width and clip off the trailing edge; proposing the measured
+            // size makes its inner Text actually wrap to the rows we sized for.
+            let placedSize = index < result.sizes.count ? result.sizes[index] : nil
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + offset.x, y: bounds.minY + offset.y),
+                proposal: placedSize.map { ProposedViewSize(width: $0.width, height: $0.height) } ?? .unspecified
+            )
         }
     }
 
@@ -770,26 +784,35 @@ struct FlowLayout: Layout {
             return cache
         }
         let result = layout(proposal: proposal, subviews: subviews)
-        cache = Cache(width: width, offsets: result.offsets, size: result.size)
+        cache = Cache(width: width, offsets: result.offsets, sizes: result.sizes, size: result.size)
         return cache
     }
 
-    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (offsets: [CGPoint], size: CGSize) {
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (offsets: [CGPoint], sizes: [CGSize], size: CGSize) {
         let maxWidth = proposal.width ?? .infinity
         var offsets: [CGPoint] = []
+        var sizes: [CGSize] = []
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         var maxX: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            // Measure against maxWidth, not .unspecified — an .unspecified
+            // proposal gives Text its full intrinsic (single-line) width, so
+            // a long credit pill placed first in a row would report a size
+            // wider than the container and never trigger the wrap check
+            // below. Clamping the proposal lets wrap-capable subviews (Text)
+            // report a narrower, multi-line size instead.
+            var size = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            size.width = min(size.width, maxWidth)
             if x + size.width > maxWidth && x > 0 {
                 x = 0
                 y += rowHeight + spacing
                 rowHeight = 0
             }
             offsets.append(CGPoint(x: x, y: y))
+            sizes.append(size)
             rowHeight = max(rowHeight, size.height)
             x += size.width + spacing
             maxX = max(maxX, x - spacing)
@@ -799,6 +822,6 @@ struct FlowLayout: Layout {
         // (especially LazyVStack) don't receive an inflated size when a single
         // child is wider than the proposal (e.g. a very long credit tag).
         let clampedWidth = maxWidth < .infinity ? min(maxX, maxWidth) : maxX
-        return (offsets, CGSize(width: clampedWidth, height: y + rowHeight))
+        return (offsets, sizes, CGSize(width: clampedWidth, height: y + rowHeight))
     }
 }

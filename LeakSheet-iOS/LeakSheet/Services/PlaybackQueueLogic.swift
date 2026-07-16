@@ -98,7 +98,7 @@ nonisolated struct PlaybackQueueLogic {
 
     // MARK: - Queue
 
-    mutating func addToQueue(_ version: SongVersion, artistName: String, eraName: String, artUrl: String) {
+    mutating func addToQueue(_ version: SongVersion, artistName: String, eraName: String, artUrl: String, artistSlug: String = "") {
         guard queue.count < 200 else { return }
         queueIdCounter += 1
         queue.append(QueueItem(
@@ -106,7 +106,8 @@ nonisolated struct PlaybackQueueLogic {
             version: version,
             artistName: artistName,
             eraName: eraName,
-            artUrl: artUrl
+            artUrl: artUrl,
+            artistSlug: artistSlug
         ))
     }
 
@@ -145,7 +146,7 @@ nonisolated struct PlaybackQueueLogic {
             artistName: item.artistName,
             eraName: item.eraName,
             artUrl: item.artUrl,
-            artistSlug: ""
+            artistSlug: item.artistSlug
         )
     }
 
@@ -203,15 +204,20 @@ nonisolated struct PlaybackQueueLogic {
     }
 
     /// Next era after the current one that has any versions. Prefers the
-    /// recorded position (survives duplicate era names); falls back to a
-    /// name match when the position is unset (setArtistEras ran after
-    /// setEraSongs).
+    /// recorded position (survives duplicate era names); falls back to the
+    /// same 4-field match `setEraSongs` uses (name+artist+artUrl+versionCount)
+    /// when the position is unset (setArtistEras ran after setEraSongs) —
+    /// matching on name+artist alone would misroute auto-advance when two
+    /// eras share a name.
     private mutating func advanceToNextEra(after current: EraSongContext) -> EraSongContext? {
         let startIdx: Int
         if let idx = eraIndex, artistEras.indices.contains(idx) {
             startIdx = idx + 1
         } else if let idx = artistEras.firstIndex(where: {
-            $0.eraName == current.eraName && $0.artistName == current.artistName
+            $0.eraName == current.eraName
+                && $0.artistName == current.artistName
+                && $0.artUrl == current.artUrl
+                && $0.versions.count == current.versions.count
         }) {
             startIdx = idx + 1
         } else {

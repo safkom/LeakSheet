@@ -242,7 +242,9 @@ _STREAM_ALLOWED_DOMAINS = {
     "temp.imgur.gg",
     "music.froste.lol",
     "krakenfiles.com",
-    "cdn.krakenfiles.com",
+    # Note: the krakenfiles CDN host is *.krakencloud.net (constrained by
+    # _KRAKEN_CDN_AUDIO_PATTERN in streaming.py), not cdn.krakenfiles.com —
+    # that stale entry never matched and was removed.
 }
 
 
@@ -468,6 +470,9 @@ async def parse_sheet(
             artist_name=req.artist_name,
             cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
             use_cache=use_cache,
+            # A force-refresh skips cache reads but must still repopulate it,
+            # otherwise the next normal request pays another full cold fetch.
+            write_cache=req.use_cache,
             timer=timer,
         )
     except InvalidURLError as e:

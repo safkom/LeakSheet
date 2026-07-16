@@ -237,7 +237,7 @@ struct NowPlayingView: View {
                     Menu {
                         if let track = player.currentTrack {
                             Button {
-                                player.addToQueue(track, artistName: player.artistName, eraName: player.eraName, artUrl: player.artUrl)
+                                player.addToQueue(track, artistName: player.artistName, eraName: player.eraName, artUrl: player.artUrl, artistSlug: player.artistSlug)
                                 Haptics.light()
                             } label: {
                                 Label("Add to Queue", systemImage: "text.append")

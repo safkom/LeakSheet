@@ -264,9 +264,13 @@ class Era(BaseModel):
         return sum(len(s.versions) for sec in self.sections for s in sec.songs)
 
     def dict(self, **kwargs):
+        # Exclude ``sections`` from the native dump — it's rebuilt below, so
+        # letting the native pass serialize the song/version subtree first is
+        # pure waste (see Artist.dict for the same optimization).
+        kwargs = _with_excluded(kwargs, "sections")
         d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
         d["sections"] = [
-            {"name": sec.name, "group": sec.group, "songs": [s.dict(**kwargs) for s in sec.songs]}
+            {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}
             for sec in self.sections
         ]
         d["song_count"] = self.song_count
@@ -285,6 +289,12 @@ class ParseMetadata(BaseModel):
     unmatched_rows: list[str] = Field(default_factory=list, description="First 50 unmatched row summaries")
     unmatched_rows_total: int = Field(0, description="Total unmatched rows encountered (uncapped)")
     footer_rows: int = Field(0, description="Rows detected as footer content")
+    other_rows: int = Field(
+        0,
+        description="Structural rows (era headers, section labels, separators) "
+        "that are neither songs, skipped, nor footer. Lets clients verify the "
+        "row-accounting identity total == song + skipped + footer + other.",
+    )
     fuzzy_matched_rows: int = Field(0, description="Rows matched via fuzzy era matching")
     dropped_columns: list[str] = Field(
         default_factory=list,
@@ -341,14 +351,33 @@ class Artist(BaseModel):
         return sum(e.version_count for e in self.eras)
 
     def dict(self, **kwargs):
+        # Exclude ``eras`` from the native dump so the era subtree isn't
+        # serialized twice (once natively here, then discarded and rebuilt via
+        # ``era.dict()``). On a large tracker that redundant pass was real CPU.
+        kwargs = _with_excluded(kwargs, "eras")
         d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
-        d["eras"] = [era.dict(**kwargs) for era in self.eras]
+        d["eras"] = [era.dict() for era in self.eras]
         d["total_songs"] = self.total_songs
         d["total_versions"] = self.total_versions
         return d
 
     def model_dump(self, **kwargs):
         return self.dict(**kwargs)
+
+
+def _with_excluded(kwargs: dict, field: str) -> dict:
+    """Return kwargs with *field* added to any caller-supplied ``exclude`` set."""
+    kwargs = dict(kwargs)
+    existing = kwargs.get("exclude")
+    if existing is None:
+        kwargs["exclude"] = {field}
+    elif isinstance(existing, set):
+        kwargs["exclude"] = existing | {field}
+    elif isinstance(existing, dict):
+        kwargs["exclude"] = {**existing, field: True}
+    else:  # list/tuple/other iterable
+        kwargs["exclude"] = set(existing) | {field}
+    return kwargs
 
 
 def extract_badge(name: str) -> tuple[Badge | None, str]:

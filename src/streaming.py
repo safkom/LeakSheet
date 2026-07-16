@@ -20,12 +20,46 @@ direct audio stream URLs.  Supported hosts:
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
 import re
+import socket
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+# imgur.gg returns a `cdnUrl` in its file-metadata JSON that we then fetch
+# server-side. That value is attacker-influenceable if the imgur API is ever
+# compromised or cache-poisoned, so it must not be trusted blindly: a crafted
+# `cdnUrl` pointing at a cloud metadata endpoint (169.254.169.254) or an
+# internal service would turn this proxy into an SSRF pivot. We require https
+# and reject any destination that resolves to a non-public address. (The
+# krakenfiles path is already constrained by _KRAKEN_CDN_AUDIO_PATTERN.)
+def _assert_public_https_url(url: str, *, source: str) -> None:
+    """Raise ValueError unless *url* is https and resolves only to public IPs."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"{source} returned non-https URL: {url[:80]}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"{source} returned URL with no host: {url[:80]}")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"{source} host does not resolve: {host}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ):
+            raise ValueError(
+                f"{source} resolved to non-public address {ip} for host {host}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +315,11 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     f"imgur.gg API response missing cdnUrl: {url}"
                 )
                 continue
+            # The cdnUrl is attacker-influenceable — validate the destination
+            # is a public https host before the caller streams from it (SSRF).
+            await asyncio.to_thread(
+                _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
+            )
             return cdn_url
         except httpx.HTTPError as exc:
             last_err = ValueError(f"imgur.gg API request failed: {exc}")

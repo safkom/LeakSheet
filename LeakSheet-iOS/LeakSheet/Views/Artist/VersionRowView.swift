@@ -87,7 +87,7 @@ struct VersionRowView: View {
         .swipeActions(edge: .trailing) {
             if canStream {
                 Button {
-                    player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
+                    player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
                     Haptics.light()
                 } label: {
                     Image(systemName: "text.append")

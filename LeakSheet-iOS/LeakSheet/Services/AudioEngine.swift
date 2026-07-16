@@ -263,8 +263,8 @@ final class AudioEngine {
 
     // MARK: - Queue
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "") {
-        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl)
+    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
+        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
         syncQueue()
     }
 
@@ -818,6 +818,9 @@ struct QueueItem: Identifiable, Equatable, Sendable {
     let artistName: String
     let eraName: String
     let artUrl: String
+    /// Canonical API slug — favourites key material once this item plays.
+    /// Optional call sites fall back to a slugified artist name.
+    let artistSlug: String
 }
 
 struct EraSongContext: Sendable {

@@ -37,7 +37,7 @@ nonisolated struct MiscLink: Identifiable, Sendable, Equatable {
 nonisolated enum MiscLinkClassifier {
     private static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic"]
     private static let archiveExtensions: Set<String> = ["zip", "rar", "7z", "tar", "gz"]
-    private static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "webm"]
+    private static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "webm", "mkv", "avi"]
 
     private static let videoHosts: Set<String> = [
         "youtube.com", "m.youtube.com", "youtu.be", "vimeo.com",
@@ -49,16 +49,22 @@ nonisolated enum MiscLinkClassifier {
         "i.imgur.com", "ibb.co", "i.ibb.co", "postimg.cc", "i.postimg.cc",
     ]
 
-    /// Classifies a raw link URL. Checks the existing streamable-host list
-    /// first — pillows.su/imgur.gg/froste.lol/krakenfiles links always play
-    /// through the app's audio player regardless of what they actually host.
+    /// Classifies a raw link URL. A video file extension wins over the
+    /// streamable-host shortcut below — a .mp4/.mov/.m4v/.webm/.mkv/.avi
+    /// file hosted on e.g. pillows.su is still a video, not an audio stream,
+    /// and must not be silently routed into the audio-only player. Only
+    /// after that check do we fall back to the streamable-host list —
+    /// pillows.su/imgur.gg/froste.lol/krakenfiles links with no video
+    /// extension always play through the app's audio player regardless of
+    /// what they actually host.
     static func classify(_ urlString: String) -> MiscLinkKind {
-        if StreamResolver.isStreamableURL(urlString) { return .stream }
         guard let url = URL(string: urlString), let host = normalizedHost(url) else { return .link }
-
         let ext = url.pathExtension.lowercased()
+
+        if videoExtensions.contains(ext) { return .video }
+        if StreamResolver.isStreamableURL(urlString) { return .stream }
         if archiveExtensions.contains(ext) || archiveHosts.contains(host) { return .archive }
-        if videoExtensions.contains(ext) || videoHosts.contains(host) { return .video }
+        if videoHosts.contains(host) { return .video }
         if imageExtensions.contains(ext) || imageHosts.contains(host) { return .image }
         return .link
     }

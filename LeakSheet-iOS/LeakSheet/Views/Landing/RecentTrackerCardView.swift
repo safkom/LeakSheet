@@ -8,7 +8,10 @@ struct RecentTrackerCardView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Thumbnail
+                // Thumbnail — force a 1:1 crop explicitly rather than relying
+                // on the frame alone: source art can be any aspect ratio, and
+                // without an aspectRatio pin here the row was rendering a
+                // non-square 48×56.7 thumbnail (see U-6).
                 Group {
                     if let artUrl = entry.artUrl {
                         CachedImage(url: APIClient.shared.imageProxyURL(for: artUrl, width: 320), maxPixelSize: 320) {
@@ -18,8 +21,10 @@ struct RecentTrackerCardView: View {
                         initialsPlaceholder
                     }
                 }
+                .aspectRatio(1, contentMode: .fill)
                 .frame(width: 48, height: 48)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipped()
 
                 // Info
                 VStack(alignment: .leading, spacing: 3) {
@@ -53,8 +58,13 @@ struct RecentTrackerCardView: View {
         .buttonStyle(.plain)
     }
 
+    // "N tracks" here matches the artist header's navigationSubtitle exactly
+    // (both count total versions, i.e. ArtistViewModel.artistStats.total) —
+    // previously this showed totalSongs (unique song count), which reads as
+    // the same kind of number as the header's count but disagrees with it
+    // for any tracker with multi-version songs (see U-4).
     private var statLine: String {
-        var parts = ["\(entry.totalSongs) songs"]
+        var parts = ["\(entry.totalVersions) tracks"]
         if entry.availableCount > 0 { parts.append("\(entry.availableCount) available") }
         if entry.snippetCount > 0 { parts.append("\(entry.snippetCount) snippets") }
         return parts.joined(separator: " · ")

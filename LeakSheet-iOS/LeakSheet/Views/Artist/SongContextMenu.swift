@@ -27,7 +27,7 @@ struct SongContextMenu: View {
                 Label("Play", systemImage: "play.fill")
             }
             Button {
-                player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
+                player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
             } label: {
                 Label("Add to Queue", systemImage: "text.append")
             }
