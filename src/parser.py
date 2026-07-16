@@ -1556,8 +1556,12 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                         if _has_song_data(version):
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
-                            # Register this era name variant for future rows
-                            era_by_key.setdefault(_era_match_key(row_era), current_era)
+                            # Register this era name variant for future rows —
+                            # into the fallback dict, not the authoritative one,
+                            # so a genuine era header with the same name declared
+                            # later still claims the primary key (otherwise this
+                            # speculative mapping starves that real era).
+                            era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
                         else:
                             new_era = Era(name=row_era, sections=[Section()])
                             eras.append(new_era)
@@ -1685,10 +1689,15 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     current_era.sections.append(Section(name=name_first_line))
                     # Register the section name as an era alias so song rows
                     # that reference this label in their era column route here
-                    # via exact match instead of fuzzy-matching to an unrelated
-                    # era (e.g. "Drake vs. Kendrick Lamar" fuzzy-matching to
-                    # "The Kendrick Lamar EP" due to shared words).
-                    _register_era_keys(current_era, name_first_line, era_by_key)
+                    # instead of fuzzy-matching to an unrelated era (e.g. "Drake
+                    # vs. Kendrick Lamar" fuzzy-matching to "The Kendrick Lamar
+                    # EP" due to shared words). Register into the fallback dict:
+                    # it's consulted before fuzzy matching but after the
+                    # authoritative era_by_key, so a real era header sharing this
+                    # name (declared later) still wins the primary key — a
+                    # section label must never starve a genuine era (e.g. the
+                    # "War" label inside DONDA 2 vs. the standalone WAR era).
+                    _register_era_keys(current_era, name_first_line, era_by_key_fallback)
                 else:
                     # No current era — create one from the name column.
                     # This handles Yung Lean style trackers.
@@ -1757,6 +1766,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         unmatched_rows=unmatched_rows,
         unmatched_rows_total=unmatched_total,
         footer_rows=footer_rows,
+        other_rows=max(0, total_rows - song_rows - skipped_rows - footer_rows),
         fuzzy_matched_rows=fuzzy_matched_rows,
         dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
     )

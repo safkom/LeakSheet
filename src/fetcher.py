@@ -787,6 +787,7 @@ def fetch_and_parse(
     timeout: float = DEFAULT_TIMEOUT,
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
+    write_cache: bool | None = None,
 ) -> Artist:
     """Fetch a tracker URL and parse it into an Artist model.
 
@@ -796,11 +797,16 @@ def fetch_and_parse(
         gid: Specific sheet GID (if None, auto-discovered).
         timeout: HTTP timeout in seconds.
         cache_ttl: Cache TTL in seconds.
-        use_cache: Whether to use file-based caching.
+        use_cache: Whether to read from the file-based cache.
+        write_cache: Whether to write to the cache; defaults to ``use_cache``.
+            Force-refresh sets ``use_cache=False`` but ``write_cache=True`` so
+            the fresh parse still repopulates the cache for the next reader.
 
     Returns:
         Parsed Artist object.
     """
+    if write_cache is None:
+        write_cache = use_cache
     # Extract GID from original URL BEFORE normalization strips query/fragment
     if not gid:
         gid = _extract_gid_from_url(url)
@@ -853,7 +859,7 @@ def fetch_and_parse(
                         unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                         if not unreleased_tab_gid or unreleased_tab_gid == gid:
                             artist.source_url = url
-                            if use_cache:
+                            if write_cache:
                                 _set_cached_parsed(url_norm, artist)
                             return artist
                         # A better "Unreleased" tab exists — fall through to full discovery
@@ -876,7 +882,7 @@ def fetch_and_parse(
             artist = parse_sheet(base_html, name)
             if artist.eras:
                 artist.source_url = url
-                if use_cache:
+                if write_cache:
                     _set_cache(url_norm, base_html, title)
                     _set_cached_parsed(url_norm, artist)
                 return artist
@@ -975,9 +981,9 @@ def fetch_and_parse(
                 except (httpx.HTTPError, ValueError, KeyError):
                     pass  # Art tab fetch failed — not critical, keep existing art_url
             # Cache the best result under the original URL
-            if use_cache and best_html:
+            if write_cache and best_html:
                 _set_cache(url_norm, best_html, title)
-            if use_cache:
+            if write_cache:
                 _set_cached_parsed(url_norm, best_artist)
             return best_artist
 
@@ -987,7 +993,7 @@ def fetch_and_parse(
         name = _resolve_artist_name(html, title)
         artist = parse_sheet(html, name)
         artist.source_url = url
-        if use_cache:
+        if write_cache:
             _set_cached_parsed(url_norm, artist)
         return artist
 
@@ -1202,13 +1208,22 @@ async def async_fetch_and_parse(
     timeout: float = DEFAULT_TIMEOUT,
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
+    write_cache: bool | None = None,
     timer: PhaseTimer | None = None,
 ) -> Artist:
     """Async version of fetch_and_parse.
 
     Like the sync version, tries multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
+
+    ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes*
+    and defaults to ``use_cache`` when unset. A force-refresh passes
+    ``use_cache=False`` (skip the stale copy) but ``write_cache=True`` so the
+    fresh parse still populates the cache for the next reader — otherwise every
+    request after a force-refresh pays a full cold fetch.
     """
+    if write_cache is None:
+        write_cache = use_cache
     t = timer if timer is not None else PhaseTimer()
     # Extract GID from original URL BEFORE normalization strips query/fragment
     if not gid:
@@ -1261,7 +1276,7 @@ async def async_fetch_and_parse(
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                     if not unreleased_tab_gid or unreleased_tab_gid == gid:
                         artist.source_url = url
-                        if use_cache:
+                        if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
                         return artist
                     # A better "Unreleased" tab exists — fall through to full discovery
@@ -1288,8 +1303,9 @@ async def async_fetch_and_parse(
                 artist = await asyncio.to_thread(parse_sheet, base_html, name)
             if artist.eras:
                 artist.source_url = url
-                if use_cache:
+                if write_cache:
                     await _async_set_cache(url_norm, base_html, title)
+                    await _async_set_cached_parsed(url_norm, artist)
                 return artist
 
         gids = _discover_gids(base_html)
@@ -1421,9 +1437,10 @@ async def async_fetch_and_parse(
                 best_artist.misc_entries.extend(misc_results.get(gid_val, []))
 
             with t.phase("cache_write"):
-                if use_cache and best_html:
+                if write_cache and best_html:
                     await _async_set_cache(url_norm, best_html, title)
-                await _async_set_cached_parsed(url_norm, best_artist)
+                if write_cache:
+                    await _async_set_cached_parsed(url_norm, best_artist)
             return best_artist
 
         # Fallback
@@ -1433,7 +1450,8 @@ async def async_fetch_and_parse(
         name = _resolve_artist_name(html, title, artist_name)
         artist = await asyncio.to_thread(parse_sheet, html, name)
         artist.source_url = url
-        await _async_set_cached_parsed(url_norm, artist)
+        if write_cache:
+            await _async_set_cached_parsed(url_norm, artist)
         return artist
 
     except httpx.TimeoutException as e:

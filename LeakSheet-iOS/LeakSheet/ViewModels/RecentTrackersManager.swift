@@ -21,10 +21,50 @@ final class RecentTrackersManager {
         let slug: String
         let sourceUrl: String
         let totalSongs: Int
+        /// Total playable versions across the tracker — this is what the
+        /// artist header's "N tracks" subtitle counts, so the card shows the
+        /// same number under the same "tracks" label instead of a
+        /// same-looking-but-different song count (see U-4).
+        let totalVersions: Int
         let artUrl: String?
         let availableCount: Int
         let snippetCount: Int
         let confirmedCount: Int
+
+        init(
+            name: String, slug: String, sourceUrl: String,
+            totalSongs: Int, totalVersions: Int? = nil, artUrl: String?,
+            availableCount: Int, snippetCount: Int, confirmedCount: Int
+        ) {
+            self.name = name
+            self.slug = slug
+            self.sourceUrl = sourceUrl
+            self.totalSongs = totalSongs
+            // Defaults to the song count when a caller (e.g. older code paths
+            // or tests) doesn't distinguish versions from songs.
+            self.totalVersions = totalVersions ?? totalSongs
+            self.artUrl = artUrl
+            self.availableCount = availableCount
+            self.snippetCount = snippetCount
+            self.confirmedCount = confirmedCount
+        }
+
+        // Custom decode: totalVersions was added after this type started
+        // persisting to UserDefaults, so older entries on disk won't have
+        // it — fall back to totalSongs rather than dropping the whole
+        // decode (and silently wiping the user's recents list).
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            slug = try c.decode(String.self, forKey: .slug)
+            sourceUrl = try c.decode(String.self, forKey: .sourceUrl)
+            totalSongs = try c.decode(Int.self, forKey: .totalSongs)
+            totalVersions = try c.decodeIfPresent(Int.self, forKey: .totalVersions) ?? totalSongs
+            artUrl = try c.decodeIfPresent(String.self, forKey: .artUrl)
+            availableCount = try c.decode(Int.self, forKey: .availableCount)
+            snippetCount = try c.decode(Int.self, forKey: .snippetCount)
+            confirmedCount = try c.decode(Int.self, forKey: .confirmedCount)
+        }
     }
 
     private init() {
@@ -42,6 +82,7 @@ final class RecentTrackersManager {
             slug: artist.slug,
             sourceUrl: artist.sourceUrl ?? "",
             totalSongs: artist.computedTotalSongs,
+            totalVersions: artist.computedTotalVersions,
             artUrl: artUrl,
             availableCount: stats.available,
             snippetCount: stats.snippets,

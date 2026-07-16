@@ -68,7 +68,13 @@ struct MiscEntryRowView: View {
 
     private func thumbnail(url: URL) -> some View {
         CachedImage(url: url, maxPixelSize: 128) {
-            Color.lsCard
+            // Bare lsCard (#0f0f0f) reads as a broken black square while
+            // loading or after a failed load — a subtle icon keeps it
+            // legible as a placeholder (see U-5).
+            Image(systemName: "music.note")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.lsCard)
         }
         .frame(width: 44, height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 6))

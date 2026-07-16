@@ -23,8 +23,21 @@ struct TrackerInputView: View {
                 .focused($focused)
                 .disabled(loading)
                 .onSubmit {
+                    normalizeIfConcatenated()
                     Task { await onSubmit() }
                 }
+
+            if !url.isEmpty {
+                Button {
+                    url = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                }
+                .disabled(loading)
+                .accessibilityLabel("Clear URL")
+            }
 
             if url.trimmingCharacters(in: .whitespaces).isEmpty {
                 Button {
@@ -37,6 +50,7 @@ struct TrackerInputView: View {
                 .foregroundStyle(.secondary)
             } else {
                 Button {
+                    normalizeIfConcatenated()
                     Task { await onSubmit() }
                 } label: {
                     if loading {
@@ -61,5 +75,23 @@ struct TrackerInputView: View {
         if let text = UIPasteboard.general.string {
             url = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+    }
+
+    /// SwiftUI's TextField has no public API to select-all on focus, so
+    /// retyping into an already-filled field can append rather than replace
+    /// (the clear button above is the primary fix for that). As a backstop
+    /// against a concatenated result actually reaching submit — e.g.
+    /// "https://a.com/xhttps://b.com/y" from a partial retype — keep only
+    /// the last "http" occurrence, which is the URL the user most recently
+    /// typed or pasted.
+    private func normalizeIfConcatenated() {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = url.startIndex
+        while let match = url.range(of: "http", range: searchStart..<url.endIndex) {
+            ranges.append(match)
+            searchStart = match.upperBound
+        }
+        guard ranges.count > 1, let last = ranges.last else { return }
+        url = String(url[last.lowerBound...])
     }
 }

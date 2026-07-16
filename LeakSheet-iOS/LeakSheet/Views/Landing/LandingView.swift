@@ -142,6 +142,15 @@ struct LandingView: View {
                     await CacheService.shared.removeTracker(for: trimmed)
                     do {
                         let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
+                        if let etag = result.etag {
+                            await CacheService.shared.cacheTracker(
+                                url: trimmed,
+                                artist: result.artist,
+                                etag: etag,
+                                totalSongs: result.artist.computedTotalSongs,
+                                totalVersions: result.artist.computedTotalVersions
+                            )
+                        }
                         recents.saveTracker(artist: result.artist)
                         onArtistLoaded(result.artist)
                     } catch {

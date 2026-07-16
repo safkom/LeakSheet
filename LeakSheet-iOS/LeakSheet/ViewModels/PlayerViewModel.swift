@@ -62,8 +62,8 @@ final class PlayerViewModel {
         engine.setVolume(v)
     }
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "") {
-        engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl)
+    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
+        engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
     }
 
     func removeFromQueue(at index: Int) {
