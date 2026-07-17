@@ -35,14 +35,20 @@ actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
 
-    private init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 90
-        config.httpAdditionalHeaders = [
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        ]
-        self.session = URLSession(configuration: config)
+    /// Pass a session (e.g. URLProtocol-stubbed) for tests; nil builds the
+    /// production configuration.
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 90
+            config.httpAdditionalHeaders = [
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            ]
+            self.session = URLSession(configuration: config)
+        }
 
         self.decoder = JSONDecoder()
     }
@@ -58,12 +64,23 @@ actor APIClient {
         let unchanged: Bool
     }
 
+    /// Cold-load progress for the landing screen. `expectedBytes` is the
+    /// wire Content-Length when the server sent one (nil for chunked/gzip
+    /// responses without it) — the UI shows a fraction when it's known and
+    /// a byte counter otherwise.
+    nonisolated enum LoadPhase: Equatable, Sendable {
+        case connecting
+        case downloading(receivedBytes: Int64, expectedBytes: Int64?)
+        case preparing
+    }
+
     func parseSheet(
         url: String,
         artistName: String? = nil,
         useCache: Bool = true,
         forceRefresh: Bool = false,
-        cachedEtag: String? = nil
+        cachedEtag: String? = nil,
+        onProgress: (@Sendable (LoadPhase) -> Void)? = nil
     ) async throws -> ParseResult {
         var request = URLRequest(url: Self.sheetEndpoint)
         request.httpMethod = "POST"
@@ -80,7 +97,8 @@ actor APIClient {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        onProgress?(.connecting)
+        let (bytes, response) = try await session.bytes(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.httpError(status: 0, message: "Unexpected response type")
         }
@@ -92,6 +110,21 @@ actor APIClient {
             throw APIError.notModified(etag: etag)
         }
 
+        let expected = httpResponse.expectedContentLength > 0
+            ? httpResponse.expectedContentLength : nil
+        var data = Data()
+        if let expected { data.reserveCapacity(Int(expected)) }
+        var lastReport = 0
+        for try await byte in bytes {
+            data.append(byte)
+            // Throttle progress callbacks to every 256 KB of body.
+            if data.count - lastReport >= 262_144 {
+                lastReport = data.count
+                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+            }
+        }
+        onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+
         guard httpResponse.statusCode == 200 else {
             let detail = Self.decodeErrorResponse(from: data)
             throw APIError.httpError(
@@ -100,6 +133,7 @@ actor APIClient {
             )
         }
 
+        onProgress?(.preparing)
         let artist = try Self.decodeArtist(from: data)
         return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
     }
