@@ -566,10 +566,11 @@ def _split_alt_aliases(text: str) -> list[str]:
     """Split a comma-separated alias list into individual aliases.
 
     Trackers write alt-name lines like "(Mollyworld, Balaclava Era)" meaning
-    two aliases. Returns the parts only when every comma-part looks like a
-    standalone alias: >=3 chars, contains a letter, and is not a title
-    continuation like "Vol. 2" — otherwise returns [text] unchanged (e.g.
-    "Meet The Woo, Vol. 2", "10,000 Days").
+    two aliases. Returns the parts only when the list looks like genuine
+    aliases: every part >=3 chars and not a title continuation like "Vol. 2",
+    and at least one part contains a letter — otherwise returns [text]
+    unchanged. Keeps "Meet The Woo, Vol. 2" and "10,000 Days" whole while
+    splitting numeric-alias lists like "14*29, 1429, Trippie Redd EP".
     """
     if "," not in text:
         return [text]
@@ -579,10 +580,10 @@ def _split_alt_aliases(text: str) -> list[str]:
     for p in parts:
         if len(p) < 3:
             return [text]
-        if not any(c.isalpha() for c in p):
-            return [text]
         if _ALIAS_CONTINUATION_RE.match(p):
             return [text]
+    if not any(c.isalpha() for p in parts for c in p):
+        return [text]
     return parts
 
 

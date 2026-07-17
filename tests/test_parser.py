@@ -1342,6 +1342,19 @@ class TestCommaAltNameRegistration:
         self._register("Era", ["10,000 Days"], primary, fallback)
         assert "000 days" not in fallback
 
+    def test_numeric_alias_in_mixed_list_splits(self):
+        """Real Carti case: WE DON'T DIAL 911 declares "14*29, 1429,
+        Trippie Redd EP" — numeric aliases are genuine and must register,
+        as long as the list has at least one lettered alias."""
+        primary: dict = {}
+        fallback: dict = {}
+        era = self._register(
+            "WE DON'T DIAL 911", ["14*29, 1429, Trippie Redd EP"], primary, fallback
+        )
+        assert fallback.get("1429") is era
+        assert fallback.get("trippie redd ep") is era
+        assert fallback.get("14*29") is era
+
     def test_single_alias_row_routes_to_declaring_era(self):
         """End-to-end: a row referencing one alias of a comma list lands in
         the era that declared the alias, not the positional current era."""
