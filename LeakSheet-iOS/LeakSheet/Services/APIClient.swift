@@ -51,6 +51,9 @@ actor APIClient {
 
     struct ParseResult {
         let artist: Artist
+        /// Raw response bytes — cached verbatim so the disk copy always
+        /// matches the server payload (no re-encode pass).
+        let rawData: Data
         let etag: String?
         let unchanged: Bool
     }
@@ -98,7 +101,7 @@ actor APIClient {
         }
 
         let artist = try Self.decodeArtist(from: data)
-        return ParseResult(artist: artist, etag: etag, unchanged: false)
+        return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
     }
 
     // MARK: - Image Proxy

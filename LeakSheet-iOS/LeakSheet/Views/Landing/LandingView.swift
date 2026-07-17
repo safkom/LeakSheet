@@ -121,13 +121,7 @@ struct LandingView: View {
         do {
             let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName, cachedEtag: cachedEtag)
             if let etag = result.etag {
-                await CacheService.shared.cacheTracker(
-                    url: trimmed,
-                    artist: result.artist,
-                    etag: etag,
-                    totalSongs: result.artist.computedTotalSongs,
-                    totalVersions: result.artist.computedTotalVersions
-                )
+                await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
             onArtistLoaded(result.artist)
@@ -143,13 +137,7 @@ struct LandingView: View {
                     do {
                         let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
                         if let etag = result.etag {
-                            await CacheService.shared.cacheTracker(
-                                url: trimmed,
-                                artist: result.artist,
-                                etag: etag,
-                                totalSongs: result.artist.computedTotalSongs,
-                                totalVersions: result.artist.computedTotalVersions
-                            )
+                            await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
                         }
                         recents.saveTracker(artist: result.artist)
                         onArtistLoaded(result.artist)
