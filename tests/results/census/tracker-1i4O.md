@@ -176,7 +176,7 @@
 
 ### Placeholder groups (2)
 
-- 3× **Untitled** (Tu Pimp A Caterpillar [V1]) alt-titles: Validation And Promise, Real Good, Get It
+- 3× **Untitled** (Tu Pimp A Caterpillar [V1]) alt-titles: Get It, Real Good, Validation And Promise
 - 2× **???** (GNX) alt-titles: gnx
 
 ### Era-like song names (0)

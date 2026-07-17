@@ -193,13 +193,18 @@ class TestColumnDetection:
         assert "links" in col_map
 
     def test_carti_columns(self, carti):
-        """Carti tracker should have extra columns for type and date_of_recording."""
+        """Carti tracker's extra columns are detected.
+
+        2026-07-17 (fresh fixture data): the live tracker dropped its
+        "Date of Recording" column in favour of "Track Length"; the Type
+        column remains.
+        """
         sheet_path = TRACKERS_DIR / "Playboi Carti Tracker [Currently in Use] - Google Drive_files" / "sheet.html"
         html = sheet_path.read_text(encoding="utf-8")
         rows = extract_table(html)
         col_map = detect_columns(rows[0])
-        assert "date_of_recording" in col_map
         assert "type" in col_map
+        assert "track_length" in col_map
         assert "notes" in col_map  # The prefix-match fallback should find "Notes"
 
 
@@ -348,20 +353,18 @@ class TestCartiTracker:
         assert carti.total_songs >= 400
 
     def test_carti_specific_fields(self, carti):
-        """Carti tracker has 'type' and 'date_of_recording' columns."""
-        has_type = False
-        has_recording_date = False
-        for era in carti.eras:
-            for song in era.songs:
-                for v in song.versions:
-                    if v.type:
-                        has_type = True
-                    if v.date_of_recording:
-                        has_recording_date = True
-                    if has_type and has_recording_date:
-                        break
+        """Carti tracker's 'type' column populates SongVersion.type.
+
+        2026-07-17 (fresh fixture data): 'date_of_recording' no longer
+        asserted — the live tracker removed that column.
+        """
+        has_type = any(
+            v.type
+            for era in carti.eras
+            for song in era.songs
+            for v in song.versions
+        )
         assert has_type, "No Carti song has a 'type' field"
-        assert has_recording_date, "No Carti song has a 'date_of_recording' field"
 
     def test_wlr_era_exists(self, carti):
         era_names = [e.name for e in carti.eras]
@@ -429,32 +432,37 @@ class TestVersionTagGrouping:
     """Ensure new version tag patterns group songs correctly."""
 
     def test_carti_master_grouped_with_v1(self, carti):
-        """Location [MASTER] and Location [V1] belong to the same base song."""
+        """Differently-tagged versions of one title group under one Song.
+
+        2026-07-17 (fresh fixture data): the live tracker no longer labels a
+        [MASTER] on Location; it now carries [V1] and [V2], which must still
+        group under a single base song.
+        """
         song = None
         for era in carti.eras:
             for s in era.songs:
-                if "Location" in s.base_name:
-                    # Find the Location produced by Harry Fraud
-                    if any(
-                        v.producers and "Harry Fraud" in v.producers
-                        for v in s.versions
-                    ):
-                        song = s
-                        break
-        assert song is not None, "Location (prod. Harry Fraud) not found in Carti tracker"
+                if s.base_name == "Location" and len(s.versions) >= 2:
+                    song = s
+                    break
+        assert song is not None, "multi-version Location not found in Carti tracker"
         version_tags = {v.version_tag for v in song.versions}
         assert "V1" in version_tags, f"Expected V1 in {version_tags}"
-        assert "MASTER" in version_tags, f"Expected MASTER in {version_tags}"
+        assert "V2" in version_tags, f"Expected V2 in {version_tags}"
 
     def test_carti_cd_version_tag_parsed(self, carti):
-        """CD VERSION tag should be recognized and stored as version_tag."""
-        has_cd = any(
-            v.version_tag and v.version_tag.upper() == "CD VERSION"
+        """Non-numeric word tags are recognized and stored as version_tag.
+
+        2026-07-17 (fresh fixture data): the live tracker no longer has any
+        [CD VERSION] row; [Clean] (Tyler, The Creator - EARFQUAKE, WLR [V1])
+        is the surviving word-tag example.
+        """
+        has_word_tag = any(
+            v.version_tag and v.version_tag.upper() == "CLEAN"
             for era in carti.eras
             for s in era.songs
             for v in s.versions
         )
-        assert has_cd, "No song with CD VERSION tag found in Carti tracker"
+        assert has_word_tag, "No song with Clean tag found in Carti tracker"
 
     def test_carti_unknown_version_tag(self, carti):
         """V? tag (unknown version number) should be recognized."""
@@ -850,14 +858,20 @@ class TestSongCreditsOnParsedData:
         assert songs_with_feat > 50, f"Expected >50 songs with featuring, got {songs_with_feat}"
 
     def test_ye_10_in_a_benz_credits(self, ye):
-        """Verify 10 in a Benz has correct structured credits."""
+        """Structured credits extract into featuring/producers/collab/alts.
+
+        2026-07-17 (fresh fixture data): "10 in a Benz" no longer exists in
+        the live Ye tracker; re-pinned to "Hey Mama" (feat/prod/alt title)
+        and "Baby's Coming" (with-collaboration).
+        """
         era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
-        song = next(s for s in era.songs if s.base_name == "10 in a Benz")
+        song = next(s for s in era.songs if s.base_name == "Hey Mama")
         v = song.versions[0]
-        assert v.featuring == "Rhymefest"
-        assert v.producers == "Kanye West & Andy C."
-        assert v.collaboration == "Go Getters"
-        assert "10 in a Benz" in v.alt_titles[0]
+        assert v.featuring == "John Legend"
+        assert v.producers == "Kanye West"
+        assert "Hey Ma" in v.alt_titles
+        collab_song = next(s for s in era.songs if s.base_name == "Baby's Coming")
+        assert collab_song.versions[0].collaboration == "Go Getters"
 
     def test_kendrick_songs_have_producers(self, kendrick):
         songs_with_prod = sum(
@@ -874,9 +888,13 @@ class TestSongCreditsOnParsedData:
         assert songs_with_prod > 100
 
     def test_song_name_is_clean_title(self, ye):
-        """SongVersion.name should be the clean title line, not multi-line blob."""
+        """SongVersion.name should be the clean title line, not multi-line blob.
+
+        2026-07-17: re-pinned from "10 in a Benz" (gone from the live
+        tracker) to "Hey Mama".
+        """
         era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
-        song = next(s for s in era.songs if s.base_name == "10 in a Benz")
+        song = next(s for s in era.songs if s.base_name == "Hey Mama")
         v = song.versions[0]
         assert "\n" not in v.name, f"version.name should not contain newlines: {v.name!r}"
         assert "(prod." not in v.name, "version.name should not contain producer credits"
@@ -1012,8 +1030,10 @@ def test_notes_column_section_label():
         for label in (sec.name, sec.group)
         if label
     }
-    assert "WLR Higher Bitrate Files" in all_labels, (
-        f"'WLR Higher Bitrate Files' not found in section labels/groups: {sorted(all_labels)}"
+    # 2026-07-17: "WLR Higher Bitrate Files" no longer exists in the live
+    # tracker; "Full LQs" is the surviving Notes-column label example.
+    assert "Full LQs" in all_labels, (
+        f"'Full LQs' not found in section labels/groups: {sorted(all_labels)}"
     )
     assert "Festival Remixes" in all_labels, (
         f"'Festival Remixes' not found in section labels/groups: {sorted(all_labels)}"

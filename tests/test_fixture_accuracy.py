@@ -22,7 +22,15 @@ from src.parser import parse_file
 VERBOSE = os.environ.get("LEAKSHEET_ACCURACY_VERBOSE") == "1"
 
 # ---------------------------------------------------------------------------
-# Pinned baselines (recorded 2026-07-05, after the placeholder-grouping fix).
+# Pinned baselines (re-recorded 2026-07-17 against freshly downloaded fixture
+# data — the previous Trackers/ snapshots from ~2026-07-05 were deliberately
+# deleted as stale and re-fetched from the live trackers, so every count moved
+# because the trackers grew, not because parser behavior changed; the same
+# parser build stayed green on the unchanged tests/fixtures/snapshots corpus).
+# Notable data-side deltas: Kendrick's skipped row (a row-1 group-buy banner)
+# no longer exists in the live sheet → skipped 1→0; Carti fuzzy 13→22 matches
+# the live-snapshot profile (two verified CORRECT-FUZZY clusters: "THC: The
+# High Chronical$" and "Digital Nas Collab").
 #
 # `other_rows` = era headers + section labels + pre-footer decorations —
 # rows that are neither songs, skips, nor footer. It completes the row
@@ -30,24 +38,24 @@ VERBOSE = os.environ.get("LEAKSHEET_ACCURACY_VERBOSE") == "1"
 # ---------------------------------------------------------------------------
 BASELINES = {
     "Baby Keem": dict(
-        eras=6, songs=187, versions=271,
-        total_rows=316, song_rows=271, skipped=0, footer=20, other_rows=25,
+        eras=6, songs=198, versions=287,
+        total_rows=335, song_rows=287, skipped=0, footer=19, other_rows=29,
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "Kendrick Lamar": dict(
-        eras=19, songs=668, versions=863,
-        total_rows=931, song_rows=863, skipped=1, footer=23, other_rows=44,
+        eras=19, songs=738, versions=977,
+        total_rows=1045, song_rows=977, skipped=0, footer=22, other_rows=46,
         fuzzy=0, songs_with_10plus_versions=1,
     ),
     "Playboi Carti": dict(
-        eras=28, songs=1004, versions=1367,
-        total_rows=1561, song_rows=1367, skipped=0, footer=22, other_rows=172,
-        fuzzy=13, songs_with_10plus_versions=4,
+        eras=29, songs=1193, versions=1616,
+        total_rows=1872, song_rows=1616, skipped=0, footer=42, other_rows=214,
+        fuzzy=22, songs_with_10plus_versions=4,
     ),
     "Ye": dict(
-        eras=42, songs=3586, versions=8105,
-        total_rows=8299, song_rows=8105, skipped=0, footer=108, other_rows=86,
-        fuzzy=5, songs_with_10plus_versions=123,
+        eras=44, songs=3977, versions=9141,
+        total_rows=9350, song_rows=9141, skipped=0, footer=115, other_rows=94,
+        fuzzy=4, songs_with_10plus_versions=143,
     ),
 }
 

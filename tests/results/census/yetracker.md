@@ -1,7 +1,7 @@
 # Census — Ye
 
 - Source: `tests/fixtures/snapshots/yetracker.html.gz` (snapshot)
-- Eras **44** · Songs **3949** · Versions **9105** · Misc entries **0** · Notices **2**
+- Eras **44** · Songs **3951** · Versions **9105** · Misc entries **0** · Notices **2**
 - Links **8380**, app-streamable **6471** (77.2%)
 
 ## Eras
@@ -37,8 +37,8 @@
 | DONDA [V1] | July 2020, Election Day, New Years | 188 | 536 | ✓ | ✓ | ✓ |
 | Donda [V2] | March-May 2021, June-July 2021 | 203 | 348 | ✓ | ✓ | ✓ |
 | Donda [V3] | Las Vegas / LP1, Mercedes-Benz Sessions / Release | 110 | 590 | ✓ | ✓ | ✓ |
-| DONDA 2 [V1] | War, 2.22.22 Sessions, Post-2.22.22 | 324 | 942 | ✓ | ✓ | ✓ |
-| WAR | (default) | 0 | 0 | ✓ | ✓ | ✓ |
+| DONDA 2 [V1] | War, 2.22.22 Sessions, Post-2.22.22 | 287 | 869 | ✓ | ✓ | ✓ |
+| WAR | (default) | 39 | 73 | ✓ | ✓ | ✓ |
 | YEBU | Ye 3, YEBU, Beach House 4 | 117 | 181 | ✓ | ✓ | ✓ |
 | ¥$ | Italy Sessions, Pre-"Vultures" Saudi Sessions | 135 | 319 | ✓ | ✓ | ✓ |
 | VULTURES 1 | Post-"Vultures" Saudi Sessions, Post-12.15 | 115 | 320 | ✓ | ✓ | ✓ |
@@ -155,9 +155,8 @@
 
 ## Suspicions
 
-### Zero-song eras (1)
+### Zero-song eras (0)
 
-- **WAR** (desc=True, timeline=True)
 
 ### Single-song eras (0)
 
@@ -196,7 +195,7 @@
 - 21× **GET LOST** (DONDA 2 [V1])
 - … 112 more
 
-### Duplicate song titles across eras (455)
+### Duplicate song titles across eras (456)
 
 - **2 rihannas** in: SWISH; So Help Me God
 - **24** in: DONDA [V1]; Donda [V2]; Donda [V3]; God's Country
@@ -211,11 +210,11 @@
 - **alive** in: CARTI YE; IN A PERFECT WORLD
 - **all day** in: So Help Me God; Yeezus 2
 - **all dreams real** in: JESUS IS KING; Yandhi [V2]
-- **all in love** in: DONDA 2 [V1]; IN A PERFECT WORLD; YEBU
+- **all in love** in: IN A PERFECT WORLD; WAR; YEBU
 - **all the love** in: BULLY [V2]; CUCK; IN A PERFECT WORLD
 - **all the time** in: Cruel Winter [V1]; Watch The Throne
 - **amazing** in: 808s & Heartbreak; SWISH; Yandhi [V2]; ¥$
-- **and they came back / this one here** in: DONDA 2 [V1]; ¥$
+- **and they came back / this one here** in: WAR; ¥$
 - **anxiety** in: Good Ass Job (2018); SWISH
 - **aperol spritz** in: VULTURES 2; ¥$
 - **awesome** in: DONDA 2 [V1]; So Help Me God; Watch The Throne; Yeezus; Yeezus 2
@@ -228,11 +227,11 @@
 - **believe what i say** in: DONDA [V1]; Donda [V2]; Donda [V3]
 - **bianca** in: CUCK; IN A PERFECT WORLD
 - **big sean - way out** in: 808s & Heartbreak; Good Ass Job
-- … 425 more
+- … 426 more
 
 ### Placeholder groups (24)
 
-- 2× **???** (Good Ass Job) alt-titles: Ye Beat 5, Classic Beat
+- 2× **???** (Good Ass Job) alt-titles: Classic Beat, Ye Beat 5
 - 2× **???** (So Help Me God) alt-titles: You Know It
 - 6× **???** (So Help Me God) alt-titles: ???. Bon Iver, Time2Time
 - 2× **???** (Cruel Winter [V2]) alt-titles: Champions, Round and Round
@@ -252,8 +251,8 @@
 - 2× **???** (VULTURES 2) alt-titles: PAY PER VIEW
 - 2× **???** (VULTURES 2) alt-titles: EVERY WAY, GONE, STARLIGHT
 - 2× **???** (BULLY [V1]) alt-titles: DARK MATTER, LIQUOR BLUES
-- 2× **???** (BULLY [V1]) alt-titles: ONE OF ONE, LIL DEMON
-- 2× **???** (BULLY [V1]) alt-titles: SEAN JOHN, MAGIC DON JUAN (PRINCESS DIANA)
+- 2× **???** (BULLY [V1]) alt-titles: LIL DEMON, ONE OF ONE
+- 2× **???** (BULLY [V1]) alt-titles: MAGIC DON JUAN (PRINCESS DIANA), SEAN JOHN
 - 2× **???** (BULLY [V1]) alt-titles: 60/60
 - 2× **???** (CUCK) alt-titles: GO
 
