@@ -491,10 +491,14 @@ async def parse_sheet(
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
+    # Serialize + hash cost ~600ms on a Ye-sized artist — run off the event
+    # loop so concurrent requests aren't stalled during a cold miss.
+    def _serialize_and_hash() -> tuple[dict, str]:
+        d = artist.model_dump()
+        return d, compute_content_hash(d)
+
     with timer.phase("serialize"):
-        data = artist.model_dump()
-    with timer.phase("etag"):
-        etag = compute_content_hash(data)
+        data, etag = await asyncio.to_thread(_serialize_and_hash)
     response.headers["ETag"] = f'"{etag}"'
     response.headers["X-Cache-Status"] = "miss"
     response.headers["Cache-Control"] = "public, max-age=300"
