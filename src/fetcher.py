@@ -27,7 +27,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from src.models import Artist
+from src.models import Artist, TabSection
 from src.parser import apply_art_tab_images, parse_art_tab, parse_misc_tab, parse_sheet, _era_match_key
 
 
@@ -107,6 +107,29 @@ _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", 
 _MISC_TAB_NAMES = frozenset({"misc", "misc.", "miscellaneous"})
 _MUSIC_VIDEO_TAB_NAMES = frozenset({"music videos", "music video", "videos", "mvs"})
 
+# Extra content tabs parsed into Artist.tabs (2026-07-17, from a live tab
+# census of the Ye / Travis / Kendrick / Carti trackers). Released tabs use
+# the Misc-tab grammar; Best Of / Worst Of / Stems and the "other" set use
+# the Unreleased-tab grammar — both parse via parse_misc_tab's alias table.
+_RELEASED_TAB_NAMES = frozenset({"released"})
+_BEST_OF_TAB_NAMES = frozenset({"best of"})
+_WORST_OF_TAB_NAMES = frozenset({"worst of"})
+_STEMS_TAB_NAMES = frozenset({"stems"})
+
+# Content-bearing tabs without a dedicated kind — parsed generically and
+# exposed with kind="other" plus the tab's display name.
+_OTHER_CONTENT_TAB_NAMES = frozenset({
+    "grails", "wanted", "grails / wanted", "grails/wanted",
+    "special", "notable", "fakes",
+    "live performances", "performances",
+    "ai tracks", "remixes", "edits (wip)", "edits/remasters", "edits / remasters",
+})
+
+# Deliberately NOT parsed (census 2026-07-17): "recent" duplicates the main
+# tab; tracklists / album copies / groupbuys / buys / compilations / tours /
+# samples / og files (wip) / og snippets have bespoke non-song grammars; key /
+# socials / bpm & keys are lookup tables.
+
 # Tab names that identify the main unreleased/leaks tracker sheet.
 # When discovered, this tab is tried first before any other GIDs so that
 # trackers with a "Recent" landing tab (e.g. Travis Scott 2.0) don't fool
@@ -141,9 +164,11 @@ TITLE_SUFFIXES = [
     " Leaks Tracker",
 ]
 
-# Emoji pattern for stripping decorative emoji from tab names
+# Emoji pattern for stripping decorative emoji from tab names.
+# Ranges include Enclosed Alphanumeric Supplement (\ud83c\udd95 U+1F195) and
+# Miscellaneous Technical (\u23ed U+23ED) \u2014 both appear in real tab names.
 _EMOJI_RE = re.compile(
-    r"[\U0001f300-\U0001f9ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
+    r"[\U0001f170-\U0001f9ff\U00002300-\U000023ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
 )
 
 # Minimum era count required before accepting a GID as the primary tracker tab.
@@ -318,16 +343,39 @@ def _discover_gids(html: str) -> list[str]:
     return unique
 
 
+_JS_ESCAPE_RE = re.compile(r"\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\.")
+
+
+def _decode_js_string(s: str) -> str:
+    """Decode JS string-literal escapes in captured tab names.
+
+    Real tab names arrive escaped inside the htmlview JS: "Grails \\/ Wanted",
+    "BPM \\x26 Keys" (\\x26 == "&"), emoji as \\uD83C\\uDFC6 surrogate pairs.
+    Without decoding, these names never match any keyword set.
+    """
+
+    def _sub(m: re.Match) -> str:
+        esc = m.group(0)
+        if esc.startswith("\\u") or esc.startswith("\\x"):
+            return chr(int(esc[2:], 16))
+        return esc[1]  # \/ \u2192 /, \\ \u2192 \, \" \u2192 "
+
+    decoded = _JS_ESCAPE_RE.sub(_sub, s)
+    # Recombine UTF-16 surrogate pairs produced by \ud83c\udfc6-style emoji
+    return decoded.encode("utf-16", "surrogatepass").decode("utf-16")
+
+
 def _discover_named_tabs(html: str) -> dict[str, str]:
     """Extract {gid: tab_name} mapping from htmlview page HTML/JS.
 
     Google Sheets htmlview embeds tab metadata as JS items.push() calls:
       items.push({name: "Art", pageUrl: "...", gid: "1234", ...});
-    Tab names may contain leading emoji (e.g. "\U0001f5bc\ufe0f Art").
+    Tab names may contain leading emoji (e.g. "\U0001f5bc\ufe0f Art") and
+    JS string escapes, which are decoded before use.
     """
     result: dict[str, str] = {}
     for name, gid in _TAB_ITEMS_PATTERN.findall(html):
-        name = name.strip()
+        name = _decode_js_string(name).strip()
         if name and gid:
             result.setdefault(gid, name)
     return result
@@ -376,6 +424,39 @@ def _get_misc_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str]]:
         elif clean in _MUSIC_VIDEO_TAB_NAMES:
             tabs.append((gid, "music_videos"))
     tabs.sort(key=lambda pair: 0 if pair[1] == "misc" else 1)
+    return tabs
+
+
+# Kind resolution order for content tabs; earlier entries sort first in the
+# API's tabs list (misc keeps its historical first position).
+_CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
+    (_MISC_TAB_NAMES, "misc"),
+    (_MUSIC_VIDEO_TAB_NAMES, "music_videos"),
+    (_RELEASED_TAB_NAMES, "released"),
+    (_BEST_OF_TAB_NAMES, "best_of"),
+    (_WORST_OF_TAB_NAMES, "worst_of"),
+    (_STEMS_TAB_NAMES, "stems"),
+    (_OTHER_CONTENT_TAB_NAMES, "other"),
+]
+
+
+def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
+    """Return [(gid, kind, display_name)] for every parseable content tab.
+
+    Supersets :func:`_get_misc_tabs` with the extra tab kinds (released,
+    best_of, worst_of, stems, other). Tabs not in any keyword set — the main
+    tracker, Art, and the deliberately-excluded non-song tabs — are omitted.
+    Sorted by kind resolution order (misc first), then by gid for stability.
+    """
+    order = {kind: i for i, (_, kind) in enumerate(_CONTENT_TAB_KINDS)}
+    tabs: list[tuple[str, str, str]] = []
+    for gid, name in named_tabs.items():
+        clean = _clean_tab_name(name)
+        for names, kind in _CONTENT_TAB_KINDS:
+            if clean in names:
+                tabs.append((gid, kind, name))
+                break
+    tabs.sort(key=lambda t: (order[t[1]], t[0]))
     return tabs
 
 
@@ -637,23 +718,24 @@ def _resolve_artist_name(html: str, title: str, artist_name_override: str | None
 
 def _prioritize_gids(
     base_html: str, gids: list[str]
-) -> tuple[list[str], str | None, str | None, list[tuple[str, str]]]:
+) -> tuple[list[str], str | None, str | None, list[tuple[str, str, str]]]:
     """Reorder GIDs so the main tracker tab is tried first.
 
-    Returns (reordered_gids, art_gid, unreleased_gid, misc_tabs) where
-    misc_tabs is [(gid, kind)] for Misc / Music Videos tabs.
-    Moves the identified "Unreleased" tab GID to the front when found,
-    so trackers with a landing/recent tab (e.g. Travis Scott 2.0) don't
-    get stuck on the wrong sheet. Art and Misc/MV tabs are removed from
-    the candidate list — they are secondary content, never the main
+    Returns (reordered_gids, art_gid, unreleased_gid, content_tabs) where
+    content_tabs is [(gid, kind, display_name)] for every parseable
+    secondary tab (misc, music_videos, released, best_of, worst_of, stems,
+    other). Moves the identified "Unreleased" tab GID to the front when
+    found, so trackers with a landing/recent tab (e.g. Travis Scott 2.0)
+    don't get stuck on the wrong sheet. Art and content tabs are removed
+    from the candidate list — they are secondary content, never the main
     tracker, and fetching them as candidates wastes bandwidth.
     """
     named_tabs = _discover_named_tabs(base_html)
     art_gid = _get_art_tab_gid(named_tabs)
     unreleased_gid = _get_unreleased_tab_gid(named_tabs)
-    misc_tabs = _get_misc_tabs(named_tabs)
+    content_tabs = _get_content_tabs(named_tabs)
 
-    exclude = {gid for gid, _ in misc_tabs}
+    exclude = {gid for gid, _, _ in content_tabs}
     if art_gid:
         exclude.add(art_gid)
     filtered = [g for g in gids if g not in exclude]
@@ -663,7 +745,7 @@ def _prioritize_gids(
     if unreleased_gid and unreleased_gid in gids:
         logger.debug("Unreleased tab detected (gid=%s) — trying first", unreleased_gid)
         gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
-    return gids, art_gid, unreleased_gid, misc_tabs
+    return gids, art_gid, unreleased_gid, content_tabs
 
 
 # ---------------------------------------------------------------------------
@@ -849,7 +931,7 @@ def fetch_and_parse(
                     named_tabs = _discover_named_tabs(base_resp.text)
                 except httpx.HTTPError:
                     pass  # Can't tell — fall back to trusting parse_sheet below
-                gid_is_misc_tab = gid in {g for g, _kind in _get_misc_tabs(named_tabs)}
+                gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
                 if not gid_is_misc_tab:
                     name = _resolve_artist_name(html, title, artist_name)
                     artist = parse_sheet(html, name)
@@ -892,9 +974,9 @@ def fetch_and_parse(
         if not gids:
             gids = ["0"]
 
-        # Misc/MV tabs are only fetched on the async path; the sync path
+        # Content tabs are only fetched on the async path; the sync path
         # (offline tools, tests) skips them.
-        gids, art_gid, unreleased_gid, _misc_tabs = _prioritize_gids(base_html, gids)
+        gids, art_gid, unreleased_gid, _content_tabs = _prioritize_gids(base_html, gids)
 
         # Step 3: Try each GID, pick the one that produces the most eras
         best_artist: Artist | None = None
@@ -1200,6 +1282,117 @@ async def _verify_art_images_async(
     return filtered
 
 
+async def _fetch_gid_page(
+    url_norm: str,
+    gid_val: str,
+    title: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+    t: PhaseTimer,
+) -> tuple[str, str] | None:
+    """Fetch a single GID sheet page. Returns (gid, html) or None."""
+    try:
+        with t.phase("gid_fetch"):
+            sheet_url = _build_sheet_html_url(url_norm, gid_val)
+            if use_cache and cache_ttl > 0:
+                cached = await _async_get_cached(sheet_url, cache_ttl)
+                if cached is not None:
+                    return (gid_val, cached[0])
+            resp = await client.get(sheet_url, timeout=timeout)
+            if resp.status_code != 200 or "<table" not in resp.text.lower():
+                return None
+            if use_cache and cache_ttl > 0:
+                await _async_set_cache(sheet_url, resp.text, title)
+            return (gid_val, resp.text)
+    except (httpx.HTTPError, ValueError, KeyError):
+        return None
+
+
+async def _load_secondary_tabs(
+    artist: Artist,
+    art_gid: str | None,
+    content_tabs: list[tuple[str, str, str]],
+    url_norm: str,
+    title: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+    t: PhaseTimer,
+) -> None:
+    """Fetch + parse the Art tab and all content tabs into *artist*.
+
+    Everything here is optional — a failure never fails the request. Called
+    from both the explicit-GID fast path and the full-discovery path, so the
+    returned content no longer depends on which URL shape the client used.
+    Misc/MV entries stay in the flat ``misc_entries`` list for backward
+    compatibility; every non-empty tab also lands in ``Artist.tabs``.
+    """
+    if not art_gid and not content_tabs:
+        return
+
+    async def _fetch(gid_val: str) -> tuple[str, str] | None:
+        return await _fetch_gid_page(
+            url_norm, gid_val, title,
+            client=client, timeout=timeout, cache_ttl=cache_ttl,
+            use_cache=use_cache, t=t,
+        )
+
+    async def _load_art() -> None:
+        try:
+            with t.phase("art_fetch"):
+                art_result = await _fetch(art_gid)
+            if art_result:
+                _, art_html = art_result
+                with t.phase("art_parse"):
+                    art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                if art_map:
+                    with t.phase("art_verify"):
+                        art_map = await _verify_art_images_async(
+                            artist, art_map, client
+                        )
+                    if art_map:
+                        apply_art_tab_images(artist, art_map)
+        except Exception as e:
+            # Art tab optional — keep existing art_url on failure
+            logger.debug("Art tab load failed for %s: %s", url_norm[:80], e)
+
+    tab_results: dict[str, list] = {}
+
+    async def _load_tab(gid_val: str, kind: str) -> None:
+        try:
+            with t.phase("misc_fetch"):
+                result = await _fetch(gid_val)
+            if result:
+                _, tab_html = result
+                with t.phase("misc_parse"):
+                    tab_results[gid_val] = await asyncio.to_thread(
+                        parse_misc_tab, tab_html, kind
+                    )
+        except Exception as e:
+            # Content tabs optional
+            logger.debug("Content tab %s load failed: %s", gid_val, e)
+
+    secondary = [_load_tab(g, k) for g, k, _n in content_tabs]
+    if art_gid:
+        secondary.append(_load_art())
+    if secondary:
+        await asyncio.gather(*secondary)
+    # Extend in declared tab order (misc first) for stable output.
+    for gid_val, kind, display_name in content_tabs:
+        entries = tab_results.get(gid_val, [])
+        if kind in ("misc", "music_videos"):
+            artist.misc_entries.extend(entries)
+        if entries:
+            artist.tabs.append(
+                TabSection(kind=kind, name=display_name, entries=entries)
+            )
+
+
 async def async_fetch_and_parse(
     url: str,
     *,
@@ -1265,7 +1458,7 @@ async def async_fetch_and_parse(
                 named_tabs = _discover_named_tabs(base_resp.text)
             except httpx.HTTPError:
                 pass  # Can't tell — fall back to trusting parse_sheet below
-            gid_is_misc_tab = gid in {g for g, _kind in _get_misc_tabs(named_tabs)}
+            gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
             if not gid_is_misc_tab:
                 name = _resolve_artist_name(html, title, artist_name)
                 with t.phase("parse"):
@@ -1276,6 +1469,17 @@ async def async_fetch_and_parse(
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                     if not unreleased_tab_gid or unreleased_tab_gid == gid:
                         artist.source_url = url
+                        # Load Art + content tabs here too — without this,
+                        # a URL carrying the main tab's gid returned less
+                        # content than the same tracker via discovery.
+                        await _load_secondary_tabs(
+                            artist,
+                            _get_art_tab_gid(named_tabs),
+                            _get_content_tabs(named_tabs),
+                            url_norm, title,
+                            client=client, timeout=timeout,
+                            cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                        )
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
                         return artist
@@ -1312,32 +1516,16 @@ async def async_fetch_and_parse(
         if not gids:
             gids = ["0"]
 
-        # Prioritize the "Unreleased" tab; identify Art and Misc/MV tab GIDs
-        gids, art_gid, unreleased_gid, misc_tabs = _prioritize_gids(base_html, gids)
+        # Prioritize the "Unreleased" tab; identify Art and content-tab GIDs
+        gids, art_gid, unreleased_gid, content_tabs = _prioritize_gids(base_html, gids)
 
         # --- Fetch all GID pages concurrently, then parse to pick best ---
         async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
-            """Fetch a single GID sheet page. Returns (gid, html) or None."""
-            try:
-                with t.phase("gid_fetch"):
-                    sheet_url = _build_sheet_html_url(url_norm, gid_val)
-                    if use_cache and cache_ttl > 0:
-                        cached = await _async_get_cached(sheet_url, cache_ttl)
-                        if cached is not None:
-                            return (gid_val, cached[0])
-                        resp = await client.get(sheet_url, timeout=timeout)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            return None
-                        if use_cache:
-                            await _async_set_cache(sheet_url, resp.text, title)
-                        return (gid_val, resp.text)
-                    else:
-                        resp = await client.get(sheet_url, timeout=timeout)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            return None
-                        return (gid_val, resp.text)
-            except (httpx.HTTPError, ValueError, KeyError):
-                return None
+            return await _fetch_gid_page(
+                url_norm, gid_val, title,
+                client=client, timeout=timeout, cache_ttl=cache_ttl,
+                use_cache=use_cache, t=t,
+            )
 
         # Start every GID fetch concurrently but consume them in priority
         # order, parsing each as it lands and cancelling the rest once a
@@ -1390,51 +1578,13 @@ async def async_fetch_and_parse(
         if best_artist and best_eras > 0:
             best_artist.source_url = url
 
-            # Secondary tabs (Art + Misc/Music Videos) — fetched concurrently,
+            # Secondary tabs (Art + content tabs) — fetched concurrently,
             # all optional: a failure never fails the request.
-            async def _load_art() -> None:
-                try:
-                    with t.phase("art_fetch"):
-                        art_result = await _fetch_gid(art_gid)
-                    if art_result:
-                        _, art_html = art_result
-                        with t.phase("art_parse"):
-                            art_map = await asyncio.to_thread(parse_art_tab, art_html)
-                        if art_map:
-                            with t.phase("art_verify"):
-                                art_map = await _verify_art_images_async(
-                                    best_artist, art_map, client
-                                )
-                            if art_map:
-                                apply_art_tab_images(best_artist, art_map)
-                except Exception as e:
-                    # Art tab optional — keep existing art_url on failure
-                    logger.debug("Art tab load failed for %s: %s", url_norm[:80], e)
-
-            misc_results: dict[str, list] = {}
-
-            async def _load_misc(gid_val: str, kind: str) -> None:
-                try:
-                    with t.phase("misc_fetch"):
-                        result = await _fetch_gid(gid_val)
-                    if result:
-                        _, misc_html = result
-                        with t.phase("misc_parse"):
-                            misc_results[gid_val] = await asyncio.to_thread(
-                                parse_misc_tab, misc_html, kind
-                            )
-                except Exception as e:
-                    # Misc tabs optional
-                    logger.debug("Misc tab %s load failed: %s", gid_val, e)
-
-            secondary = [_load_misc(g, k) for g, k in misc_tabs]
-            if art_gid:
-                secondary.append(_load_art())
-            if secondary:
-                await asyncio.gather(*secondary)
-            # Extend in declared tab order (misc first) for stable output.
-            for gid_val, _kind in misc_tabs:
-                best_artist.misc_entries.extend(misc_results.get(gid_val, []))
+            await _load_secondary_tabs(
+                best_artist, art_gid, content_tabs, url_norm, title,
+                client=client, timeout=timeout, cache_ttl=cache_ttl,
+                use_cache=use_cache, t=t,
+            )
 
             with t.phase("cache_write"):
                 if write_cache and best_html:

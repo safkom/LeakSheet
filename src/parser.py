@@ -2097,13 +2097,17 @@ def _add_version_to_era(
 _MISC_COLUMN_ALIASES = {
     "era": "era",
     "name": "name",
+    "title": "name",  # Stems tabs (Travis) use "Title"
     "notes": "notes",
     "length": "length",
     "media length": "length",
     "date": "date",
     "release date": "date",
+    "leak date": "date",  # Best Of / Worst Of / Stems tabs
     "type": "entry_type",
     "available": "available",
+    "available length": "available",
+    "currently available": "available",
     "quality": "quality",
     "streaming": "streaming",
     "links": "links",

@@ -323,7 +323,31 @@ class MiscEntry(BaseModel):
     quality: str | None = Field(None, description="Quality column (Misc tab)")
     streaming: bool | None = Field(None, description="Streaming Yes/No (Music Videos tab)")
     links: list[str] = Field(default_factory=list, description="Entry URLs")
-    source_tab: str = Field(..., description="'misc' or 'music_videos'")
+    source_tab: str = Field(
+        ...,
+        description=(
+            "Tab kind the entry came from: 'misc', 'music_videos', "
+            "'released', 'best_of', 'worst_of', 'stems', or 'other'"
+        ),
+    )
+
+
+class TabSection(BaseModel):
+    """One parsed secondary tab, exposed as a switchable content mode.
+
+    ``misc`` / ``music_videos`` entries also remain in the flat
+    ``Artist.misc_entries`` list for backward compatibility — clients that
+    understand ``tabs`` should prefer it as the uniform surface.
+    """
+    kind: str = Field(
+        ...,
+        description=(
+            "Tab kind: 'misc' | 'music_videos' | 'released' | 'best_of' | "
+            "'worst_of' | 'stems' | 'other'"
+        ),
+    )
+    name: str = Field(..., description="Original tab display name (may include emoji)")
+    entries: list[MiscEntry] = Field(default_factory=list)
 
 
 class Notice(BaseModel):
@@ -345,6 +369,13 @@ class Artist(BaseModel):
     misc_entries: list[MiscEntry] = Field(
         default_factory=list,
         description="Entries from secondary Misc / Music Videos tabs (separate from eras)",
+    )
+    tabs: list[TabSection] = Field(
+        default_factory=list,
+        description=(
+            "All parsed secondary tabs (misc, music_videos, released, "
+            "best_of, worst_of, stems, other) as switchable content modes"
+        ),
     )
 
     @property
