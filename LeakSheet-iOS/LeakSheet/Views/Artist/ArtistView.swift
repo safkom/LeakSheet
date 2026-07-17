@@ -42,6 +42,8 @@ private struct ArtistContentView: View {
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
     @State private var activeEraColor: Color?
+    @State private var safariItem: SafariItem?
+    @State private var embedItem: EmbedItem?
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -63,6 +65,18 @@ private struct ArtistContentView: View {
         self.eraArtByLowercasedName = eraArt
     }
 
+    /// Routes a non-stream link tap: embeddable hosts get their official
+    /// in-app player, everything else opens in the in-app Safari sheet —
+    /// the user is never bounced out of the app.
+    private func openLink(_ link: MiscLink) {
+        guard let url = URL(string: link.url) else { return }
+        if link.kind == .embed, let embedURL = MiscLinkClassifier.embedURL(for: link.url) {
+            embedItem = EmbedItem(originalURL: url, embedURL: embedURL, title: link.label)
+        } else {
+            safariItem = SafariItem(url: url)
+        }
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
@@ -70,7 +84,9 @@ private struct ArtistContentView: View {
                 if let notices = artist.notices, !notices.isEmpty {
                     VStack(spacing: 4) {
                         ForEach(notices, id: \.text) { notice in
-                            NoticeBannerView(notice: notice)
+                            NoticeBannerView(notice: notice) { url in
+                                safariItem = SafariItem(url: url)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -95,7 +111,8 @@ private struct ArtistContentView: View {
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         eraArtByLowercasedName: eraArtByLowercasedName,
-                        onShowDescription: { showDescription = $0 }
+                        onShowDescription: { showDescription = $0 },
+                        onOpenLink: { openLink($0) }
                     )
                 } else if !contentState.query.isEmpty {
                     SearchResultsListView(
@@ -196,6 +213,13 @@ private struct ArtistContentView: View {
         }
         .sheet(isPresented: $showQueue) {
             QueueSheet()
+        }
+        .sheet(item: $safariItem) { item in
+            SafariView(url: item.url)
+                .ignoresSafeArea()
+        }
+        .sheet(item: $embedItem) { item in
+            EmbedPlayerView(item: item)
         }
         .task {
             // Register ordered era list with the engine so playback auto-continues
@@ -419,6 +443,9 @@ private struct MiscListView: View {
     /// this view doesn't need the artist's whole (potentially large) era tree.
     let eraArtByLowercasedName: [String: String?]
     let onShowDescription: (DescriptionSheet.Payload) -> Void
+    /// Non-stream link taps route up to the parent, which owns the Safari
+    /// and embed-player sheets.
+    let onOpenLink: (MiscLink) -> Void
 
     @Environment(PlayerViewModel.self) private var player
 
@@ -508,10 +535,8 @@ private struct MiscListView: View {
                 )
             }
             player.playInList(items, startAt: idx)
-        case .image, .video, .archive, .link:
-            if let url = URL(string: link.url) {
-                UIApplication.shared.open(url)
-            }
+        case .image, .video, .embed, .archive, .link:
+            onOpenLink(link)
         }
     }
 
@@ -795,6 +820,8 @@ struct FilterChip: View {
 
 struct NoticeBannerView: View {
     let notice: Notice
+    /// Parent owns the presentation (in-app Safari sheet).
+    var onOpenLink: (URL) -> Void
 
     private var isAlert: Bool { notice.kind == "alert" }
     private var tintColor: Color { isAlert ? .orange : Color(hex: 0x94A3B8) }
@@ -803,7 +830,7 @@ struct NoticeBannerView: View {
     var body: some View {
         Button {
             if let link = notice.link, let url = URL(string: link) {
-                UIApplication.shared.open(url)
+                onOpenLink(url)
             }
         } label: {
             HStack(spacing: 8) {
