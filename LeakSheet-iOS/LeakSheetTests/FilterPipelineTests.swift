@@ -29,7 +29,7 @@ struct FilterPipelineTests {
 
     private func song(_ baseName: String, versions: [SongVersion]) -> Song {
         Song(
-            baseName: baseName, versions: versions, badge: nil,
+            baseName: baseName, songKey: nil, versions: versions, badge: nil,
             availableLength: nil, quality: nil, trackLength: nil,
             leakDate: nil, fileDate: nil
         )
@@ -62,7 +62,8 @@ struct FilterPipelineTests {
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
             eras: [eraA, eraB], trackerStats: nil, parseMetadata: nil,
-            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil
+            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            tabs: nil
         )
     }
 

@@ -272,6 +272,9 @@ nonisolated struct FileMetadata: Codable, Sendable {
     let fileSize: Int?
     let mimeType: String?
     let filename: String?
+    /// Backend-derived "audio" | "video" | "unknown" — the only video signal
+    /// for opaque stream-host URLs (pillows always reports audio/mp4).
+    let mediaKind: String?
 
     enum CodingKeys: String, CodingKey {
         case provider, container, codec, bitrate, lossless, channels
@@ -284,6 +287,7 @@ nonisolated struct FileMetadata: Codable, Sendable {
         case qualityMismatch = "quality_mismatch"
         case fileSize = "file_size"
         case mimeType = "mime_type"
+        case mediaKind = "media_kind"
     }
 
     init(from decoder: Decoder) throws {
@@ -313,5 +317,6 @@ nonisolated struct FileMetadata: Codable, Sendable {
         fileSize = try c.decodeIfPresent(Int.self, forKey: .fileSize)
         mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
         filename = try c.decodeIfPresent(String.self, forKey: .filename)
+        mediaKind = try c.decodeIfPresent(String.self, forKey: .mediaKind)
     }
 }

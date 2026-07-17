@@ -15,6 +15,9 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     /// Entries from secondary Misc / Music Videos tabs — optional so older
     /// cached responses and servers decode fine (ogFilenames precedent).
     let miscEntries: [MiscEntry]?
+    /// All parsed secondary tabs (misc, music_videos, released, best_of,
+    /// worst_of, stems, other) — the uniform switchable-mode surface.
+    let tabs: [TabSection]?
 
     var id: String { slug }
 
@@ -27,7 +30,7 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, slug, eras, notices
+        case name, slug, eras, notices, tabs
         case sourceUrl = "source_url"
         case trackerStats = "tracker_stats"
         case parseMetadata = "parse_metadata"
@@ -116,6 +119,9 @@ nonisolated struct Section: Codable, Identifiable, Hashable, Sendable {
 
 nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     let baseName: String
+    /// Stable normalized identity shared by the same song across eras;
+    /// empty/nil for unidentified placeholder tracks and older payloads.
+    let songKey: String?
     let versions: [SongVersion]
     let badge: String?
     let availableLength: String?
@@ -172,6 +178,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case versions, badge, quality
         case baseName = "base_name"
+        case songKey = "song_key"
         case availableLength = "available_length"
         case trackLength = "track_length"
         case leakDate = "leak_date"
@@ -197,7 +204,7 @@ extension Song {
         guard !kept.isEmpty else { return nil }
         // Uses the synthesized memberwise initializer
         return Song(
-            baseName: baseName, versions: kept, badge: badge,
+            baseName: baseName, songKey: songKey, versions: kept, badge: badge,
             availableLength: availableLength, quality: quality,
             trackLength: trackLength, leakDate: leakDate, fileDate: fileDate
         )
@@ -394,6 +401,20 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
         case entryType = "entry_type"
         case sourceTab = "source_tab"
     }
+}
+
+// MARK: - TabSection
+
+/// One parsed secondary tab (Released / Best Of / Worst Of / Stems / Misc /
+/// Music Videos / other) — the uniform switchable-mode surface. Misc/MV
+/// entries also remain in the flat `Artist.miscEntries` for backward compat.
+nonisolated struct TabSection: Codable, Identifiable, Hashable, Sendable {
+    let kind: String
+    /// Original tab display name from the spreadsheet (may include emoji).
+    let name: String
+    let entries: [MiscEntry]
+
+    var id: String { "\(kind)::\(name)" }
 }
 
 // MARK: - Badge
