@@ -5,10 +5,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-import pydantic
 from pydantic import BaseModel, Field
-
-_PYDANTIC_V2 = int(pydantic.VERSION.split(".")[0]) >= 2
 
 
 class Badge(str, Enum):
@@ -143,7 +140,7 @@ class Song(BaseModel):
         return self.versions[0] if self.versions else None
 
     def dict(self, **kwargs):
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["badge"] = self.badge.value if self.badge else None
         # Surface primary version metadata at Song level for convenience
         p = self.primary
@@ -188,7 +185,7 @@ class EraStats(BaseModel):
         )
 
     def dict(self, **kwargs):
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["total"] = self.total
         return d
 
@@ -276,7 +273,7 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["sections"] = [
             {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}
             for sec in self.sections
@@ -363,7 +360,7 @@ class Artist(BaseModel):
         # serialized twice (once natively here, then discarded and rebuilt via
         # ``era.dict()``). On a large tracker that redundant pass was real CPU.
         kwargs = _with_excluded(kwargs, "eras")
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["eras"] = [era.dict() for era in self.eras]
         d["total_songs"] = self.total_songs
         d["total_versions"] = self.total_versions

@@ -454,7 +454,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
             meta = json.loads(meta_file.read_text())
             if time.time() - meta.get("timestamp", 0) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
-                return Artist.parse_obj(data)
+                return Artist.model_validate(data)
         except Exception as e:
             # Any unreadable/invalid cache entry (corrupt JSON, IO error,
             # pydantic schema drift after a model change) is a cache miss —
@@ -468,7 +468,7 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
     try:
-        data = artist.dict()
+        data = artist.model_dump()
         (CACHE_DIR / f"{key}.parsed.json").write_text(
             json.dumps(data, ensure_ascii=False),
             encoding="utf-8",
