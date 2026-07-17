@@ -119,6 +119,14 @@ class SongVersion(BaseModel):
 class Song(BaseModel):
     """A logical song that may have multiple versions."""
     base_name: str = Field(..., description="Song name without version tags or badges")
+    song_key: str = Field(
+        default="",
+        description=(
+            "Stable normalized identity key (case/diacritics/punctuation "
+            "collapsed) shared by the same song across eras; empty for "
+            "unidentified placeholder tracks"
+        ),
+    )
     versions: list[SongVersion] = Field(default_factory=list)
 
     @property
@@ -549,6 +557,35 @@ _WITH_PATTERN = re.compile(r"\(with\s+(.+?)\)", re.IGNORECASE)
 _REF_PATTERN = re.compile(r"\(ref\.?\s+(.+?)\)", re.IGNORECASE)
 
 
+# Title continuations like "Vol. 2" / "Pt. 3" — a comma before these is part
+# of one title ("Meet The Woo, Vol. 2"), not an alias separator.
+_ALIAS_CONTINUATION_RE = re.compile(r"^(?:vol|pt|part|no)\.?\s*\d+$", re.IGNORECASE)
+
+
+def _split_alt_aliases(text: str) -> list[str]:
+    """Split a comma-separated alias list into individual aliases.
+
+    Trackers write alt-name lines like "(Mollyworld, Balaclava Era)" meaning
+    two aliases. Returns the parts only when every comma-part looks like a
+    standalone alias: >=3 chars, contains a letter, and is not a title
+    continuation like "Vol. 2" — otherwise returns [text] unchanged (e.g.
+    "Meet The Woo, Vol. 2", "10,000 Days").
+    """
+    if "," not in text:
+        return [text]
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) < 2:
+        return [text]
+    for p in parts:
+        if len(p) < 3:
+            return [text]
+        if not any(c.isalpha() for c in p):
+            return [text]
+        if _ALIAS_CONTINUATION_RE.match(p):
+            return [text]
+    return parts
+
+
 def parse_song_credits(
     raw_name: str,
 ) -> tuple[str, str | None, str | None, str | None, str | None, list[str]]:
@@ -585,9 +622,10 @@ def parse_song_credits(
         line = line.strip()
         if not line:
             continue
-        # Strip wrapping parens: "(All I Have)" → "All I Have"
+        # Strip wrapping parens: "(All I Have)" → "All I Have".
+        # Parenthetical lines may list several aliases: "(A, B)" → two alts.
         if line.startswith("(") and line.endswith(")"):
-            alt_titles.append(line[1:-1].strip())
+            alt_titles.extend(_split_alt_aliases(line[1:-1].strip()))
         else:
             alt_titles.append(line)
 

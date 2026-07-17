@@ -29,6 +29,7 @@ from src.models import (
     SourceRef,
     TrackerStats,
     VERSION_TAG_PATTERN,
+    _split_alt_aliases,
     extract_badge,
     extract_og_filenames,
     extract_samples,
@@ -1110,6 +1111,22 @@ def _era_match_key(full_era_name: str) -> str:
     return key
 
 
+def _song_match_key(name: str) -> str:
+    """Stable normalized song identity key for cross-era version linkage.
+
+    Same normalization recipe as era keys (diacritics, case, version tags,
+    punctuation, whitespace) applied to a song base name, so "THIS ONE HERE"
+    in WAR and "This One Here" in DONDA 2 share one key. Exposed to clients
+    as ``Song.song_key``.
+    """
+    key = _normalize_unicode(name)
+    key = VERSION_TAG_PATTERN.sub("", key)
+    key = key.lower()
+    key = _PUNCT_STRIP_RE.sub(" ", key)
+    key = _WHITESPACE_COLLAPSE_RE.sub(" ", key).strip()
+    return key
+
+
 def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     """Fuzzy match a row's era key against known era keys.
 
@@ -1207,6 +1224,17 @@ def _register_era_keys(
         alt_key = _era_match_key(alt)
         if alt_key:
             era_by_key.setdefault(alt_key, era)
+        # Comma-separated alias lists ("Mollyworld, Balaclava Era"): register
+        # each alias in the fallback dict only — same shadowing rationale as
+        # slash parts, so a genuine standalone era declared elsewhere still
+        # claims the primary key.
+        parts = _split_alt_aliases(alt)
+        if len(parts) > 1:
+            target = fallback_keys if fallback_keys is not None else era_by_key
+            for part in parts:
+                part_key = _era_match_key(part)
+                if part_key:
+                    target.setdefault(part_key, era)
     # Slash-separated: "38 Baby / Ay Ay" → register both parts
     if " / " in era_name:
         target = fallback_keys if fallback_keys is not None else era_by_key
@@ -2023,6 +2051,7 @@ def _add_version_to_era(
     if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
         alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
         if not alts:
+            # No fan-made identity — song_key stays empty (no cross-era link).
             era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
             return
         # Group by fan-made alt title instead of the placeholder name. Any
@@ -2031,7 +2060,11 @@ def _add_version_to_era(
         alt_keys = [(id(era), f"alt::{a}") for a in alts]
         song = next((song_index[k] for k in alt_keys if k in song_index), None)
         if song is None:
-            song = Song(base_name=base_key, versions=[version])
+            song = Song(
+                base_name=base_key,
+                song_key=_song_match_key(alts[0]),
+                versions=[version],
+            )
             era.sections[-1].songs.append(song)
         else:
             song.versions.append(version)
@@ -2046,7 +2079,11 @@ def _add_version_to_era(
         return
 
     # Create new song in the last (current) section
-    song = Song(base_name=base_key, versions=[version])
+    song = Song(
+        base_name=base_key,
+        song_key=_song_match_key(base_key),
+        versions=[version],
+    )
     era.sections[-1].songs.append(song)
     song_index[key] = song
 

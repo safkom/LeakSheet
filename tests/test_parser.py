@@ -775,7 +775,10 @@ class TestSongCreditParsing:
         title, feat, prod, collab, refs, alts = parse_song_credits(raw)
         assert title == "I'm Him"
         assert prod == "Hykeem Carter"
-        assert alts == ["I'm The Man, Thank God"]
+        # 2026-07-17: comma-separated parenthetical aliases now split into
+        # individual alt titles (was one composite string) — see
+        # TestCommaAltTitles for the guard cases that stay whole.
+        assert alts == ["I'm The Man", "Thank God"]
 
     def test_no_credits(self):
         from src.models import parse_song_credits
@@ -1263,6 +1266,166 @@ class TestSlashEraRegistration:
         _register_era_keys(era, era.name, primary)
         assert primary.get("a") is era
         assert primary.get("b") is era
+
+
+class TestCommaAltNameRegistration:
+    """Comma-separated aliases inside one parenthetical alt line must register
+    as individual fallback keys.
+
+    Era headers like "Narcissist\\n(Mollyworld, Balaclava Era)" keep the whole
+    parenthetical as ONE alt name, so only the composite key
+    "mollyworld balaclava era" is registered. A song row that references a
+    single alias ("Mollyworld") then misses every lookup tier and gets
+    positionally mis-assigned. Parts must resolve via the fallback dict —
+    never the primary map, so a genuine standalone era keeps priority.
+    """
+
+    @staticmethod
+    def _register(era_name: str, alt_names: list, primary: dict, fallback: dict):
+        from src.parser import _register_era_keys
+        from src.models import Era, Section
+        era = Era(name=era_name, alt_names=alt_names, sections=[Section()])
+        _register_era_keys(era, era_name, primary, fallback)
+        return era
+
+    def test_comma_alt_parts_go_to_fallback_not_primary(self):
+        primary: dict = {}
+        fallback: dict = {}
+        era = self._register("Narcissist", ["Mollyworld, Balaclava Era"], primary, fallback)
+        # Composite key keeps its primary registration (existing behavior)
+        assert primary.get("mollyworld balaclava era") is era
+        # Individual aliases resolve via fallback only
+        assert fallback.get("mollyworld") is era
+        assert fallback.get("balaclava era") is era
+        assert primary.get("mollyworld") is None
+        assert primary.get("balaclava era") is None
+
+    def test_genuine_era_wins_over_comma_part(self):
+        primary: dict = {}
+        fallback: dict = {}
+        era_a = self._register("Narcissist", ["Mollyworld, Whole Lotta Red"], primary, fallback)
+        era_b = self._register("Whole Lotta Red", [], primary, fallback)
+        assert primary.get("whole lotta red") is era_b
+        assert fallback.get("whole lotta red") is era_a
+
+    def test_volume_continuation_not_split(self):
+        primary: dict = {}
+        fallback: dict = {}
+        self._register("Faith", ["Meet The Woo, Vol. 2"], primary, fallback)
+        # "Vol. 2" is a title continuation, not a second alias — no split
+        assert "vol 2" not in fallback
+        assert "meet the woo" not in fallback
+
+    def test_numeric_comma_not_split(self):
+        primary: dict = {}
+        fallback: dict = {}
+        self._register("Era", ["10,000 Days"], primary, fallback)
+        assert "000 days" not in fallback
+
+    def test_single_alias_row_routes_to_declaring_era(self):
+        """End-to-end: a row referencing one alias of a comma list lands in
+        the era that declared the alias, not the positional current era."""
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>2 Full</td><td>Narcissist<br>(Mollyworld, Balaclava Era)</td><td></td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Other Era</td><td></td><td></td></tr>"
+            "<tr><td>Mollyworld</td><td>Test Song</td><td>note</td>"
+            "<td><a href='https://pillows.su/f/x'>l</a></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        narcissist = next(e for e in artist.eras if e.name == "Narcissist")
+        other = next(e for e in artist.eras if e.name == "Other Era")
+        assert [s.base_name for s in narcissist.songs] == ["Test Song"]
+        assert other.songs == []
+
+
+class TestCommaAltTitles:
+    """Song-level alt-title lines with comma-separated aliases must split."""
+
+    def test_comma_separated_alt_titles_split(self):
+        from src.models import parse_song_credits
+        raw = "???\n(Time2Time, Bon Iver Demo)"
+        _, _, _, _, _, alts = parse_song_credits(raw)
+        assert alts == ["Time2Time", "Bon Iver Demo"]
+
+    def test_volume_continuation_kept_whole(self):
+        from src.models import parse_song_credits
+        raw = "Some Song\n(Meet The Woo, Vol. 2)"
+        _, _, _, _, _, alts = parse_song_credits(raw)
+        assert alts == ["Meet The Woo, Vol. 2"]
+
+    def test_numeric_comma_kept_whole(self):
+        from src.models import parse_song_credits
+        raw = "Some Song\n(10,000 Days)"
+        _, _, _, _, _, alts = parse_song_credits(raw)
+        assert alts == ["10,000 Days"]
+
+    def test_feat_credit_commas_unaffected(self):
+        from src.models import parse_song_credits
+        raw = "Some Song\n(feat. Rhymefest, Kanye West)"
+        _, feat, _, _, _, alts = parse_song_credits(raw)
+        assert feat == "Rhymefest, Kanye West"
+        assert alts == []
+
+
+class TestSongKey:
+    """Songs carry a stable normalized song_key for cross-era linkage."""
+
+    def test_song_match_key_normalizes(self):
+        from src.parser import _song_match_key
+        assert _song_match_key("Café Flow!") == "cafe flow"
+        assert _song_match_key("THIS ONE HERE") == _song_match_key("This One Here")
+        assert _song_match_key("Meet The Woo, Vol. 2") == "meet the woo vol 2"
+
+    def test_songs_share_key_across_eras(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>2 Full</td><td>Donda 2</td><td></td><td></td></tr>"
+            "<tr><td>Donda 2</td><td>This One Here</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Bully</td><td></td><td></td></tr>"
+            "<tr><td>Bully</td><td>THIS ONE HERE</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        keys = [s.song_key for e in artist.eras for s in e.songs]
+        assert len(keys) == 2
+        assert keys[0] == keys[1]
+        assert keys[0] == "this one here"
+
+    def test_placeholder_with_alt_uses_alt_as_key(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Donda 2</td><td></td><td></td></tr>"
+            "<tr><td>Donda 2</td><td>???<br>(Time2Time)</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        song = artist.eras[0].songs[0]
+        assert song.song_key == "time2time"
+
+    def test_placeholder_without_alt_has_no_key(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Donda 2</td><td></td><td></td></tr>"
+            "<tr><td>Donda 2</td><td>???</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        assert artist.eras[0].songs[0].song_key == ""
+
+    def test_song_key_serialized_in_dict(self):
+        from src.models import Song, SongVersion
+        song = Song(base_name="Test", song_key="test", versions=[SongVersion(name="Test")])
+        assert song.dict()["song_key"] == "test"
 
 
 # ---------------------------------------------------------------------------
