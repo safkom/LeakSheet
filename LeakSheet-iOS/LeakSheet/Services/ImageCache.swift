@@ -13,7 +13,9 @@ actor ImageCache {
 
     /// Decode-size buckets. Keeping the set small means a URL is decoded at
     /// most a few times; callers snap their point size to a bucket.
-    static let sizeBuckets = [128, 320, 640, 1280]
+    // 1600 added 2026-07-17 — matches the backend buckets; full-screen
+    // Now Playing art was upscaled from 1280 on ~1290px displays.
+    static let sizeBuckets = [128, 320, 640, 1280, 1600]
 
     private let memCache = NSCache<NSString, UIImage>()
     private let session: URLSession
@@ -66,7 +68,7 @@ actor ImageCache {
     }
 
     /// Returns a cached image synchronously (nil if not in memory cache).
-    func cachedImage(for url: URL, maxPixelSize: Int = 1280) -> UIImage? {
+    func cachedImage(for url: URL, maxPixelSize: Int = 1600) -> UIImage? {
         memCache.object(forKey: Self.cacheKey(url, maxPixelSize))
     }
 

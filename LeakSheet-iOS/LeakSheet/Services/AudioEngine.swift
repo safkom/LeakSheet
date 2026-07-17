@@ -772,9 +772,9 @@ final class AudioEngine {
         guard !targetUrl.isEmpty else { return }
         var fullURL = targetUrl
         if fullURL.hasPrefix("//") { fullURL = "https:" + fullURL }
-        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL, width: 1280) else { return }
+        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL, width: 1600) else { return }
 
-        guard let image = await ImageCache.shared.loadImage(from: proxyURL, maxPixelSize: 1280) else { return }
+        guard let image = await ImageCache.shared.loadImage(from: proxyURL, maxPixelSize: 1600) else { return }
         // Guard against races: if the user advanced tracks while we were loading,
         // don't overwrite the newer track's artwork with the old one.
         guard artUrl == targetUrl else { return }

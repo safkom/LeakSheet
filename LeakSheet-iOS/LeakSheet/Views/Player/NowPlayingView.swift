@@ -300,7 +300,7 @@ struct NowPlayingView: View {
             // player as the audio path.
             VideoSurfaceView(player: avPlayer)
         } else if !player.artUrl.isEmpty {
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1280)) {
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600)) {
                 artPlaceholder
             }
         } else {
