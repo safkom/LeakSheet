@@ -50,6 +50,13 @@ final class AudioEngine {
     // MARK: - Private
 
     private var player: AVPlayer?
+    /// Read-only exposure for the Now Playing video surface — the layer
+    /// binds to the same AVPlayer, so playback state/controls stay unified.
+    var currentPlayer: AVPlayer? { player }
+    /// True when the current item carries a video track (e.g. an .mp4
+    /// behind an opaque pillows id). Set from the asset's track list in
+    /// `captureStreamFormat` — the one signal that works for every host.
+    private(set) var hasVideo = false
     private var timeObserver: Any?
     private var observations: [NSKeyValueObservation] = []
     private var endOfTrackObserver: (any NSObjectProtocol)?
@@ -84,6 +91,7 @@ final class AudioEngine {
         error = ""
         originalQuality = false
         streamFormat = nil
+        hasVideo = false
         duration = Self.parseDuration(version?.trackLength)
 
         guard let version, let link = version.streamableLink else {
@@ -496,7 +504,11 @@ final class AudioEngine {
         var sampleRate: Double?
         var channels: Int?
         var bitrateBps: Double?
-        if let tracks = try? await item.asset.load(.tracks),
+        let loadedTracks = try? await item.asset.load(.tracks)
+        if let loadedTracks, currentTrack?.id == trackKey {
+            hasVideo = loadedTracks.contains { $0.mediaType == .video }
+        }
+        if let tracks = loadedTracks,
            let audioTrack = tracks.first(where: { $0.mediaType == .audio }) {
             if let descriptions = try? await audioTrack.load(.formatDescriptions),
                let description = descriptions.first {

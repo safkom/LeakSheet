@@ -294,7 +294,12 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var artworkView: some View {
-        if !player.artUrl.isEmpty {
+        if player.hasVideo, let avPlayer = player.avPlayer {
+            // Video items (e.g. an .mp4 behind an opaque pillows id) render
+            // their picture in place of the artwork, driven by the same
+            // player as the audio path.
+            VideoSurfaceView(player: avPlayer)
+        } else if !player.artUrl.isEmpty {
             CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1280)) {
                 artPlaceholder
             }
