@@ -12,8 +12,33 @@ import SwiftUI
 /// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
+    @State private var vm: ArtistViewModel?
 
-    @State private var vm: ArtistViewModel
+    var body: some View {
+        Group {
+            if let vm {
+                ArtistContentView(artist: artist, vm: vm)
+            } else {
+                // Sub-second placeholder while the stats/content pass runs
+                // off-main — pushing a huge tracker no longer hitches the
+                // navigation transition.
+                ProgressView("Preparing…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.lsBackground)
+            }
+        }
+        .task(id: artist.slug) {
+            if vm == nil {
+                vm = await ArtistViewModel.make(artist: artist)
+            }
+        }
+    }
+}
+
+private struct ArtistContentView: View {
+    let artist: Artist
+    @Bindable var vm: ArtistViewModel
+
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
     @State private var activeEraColor: Color?
@@ -27,9 +52,9 @@ struct ArtistView: View {
     /// dictionary instead of the artist's whole (potentially large) era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist) {
+    init(artist: Artist, vm: ArtistViewModel) {
         self.artist = artist
-        self._vm = State(initialValue: ArtistViewModel(artist: artist))
+        self.vm = vm
         var eraArt: [String: String?] = [:]
         for era in artist.eras {
             let key = era.name.lowercased()
@@ -120,13 +145,15 @@ struct ArtistView: View {
                 }
             }
         )
-        .overlay(alignment: .top) {
+        // Bottom-anchored so it can't hide behind the nav bar or the search
+        // drawer (the old top anchor sat underneath both).
+        .overlay(alignment: .bottom) {
             if vm.isFiltering {
                 ProgressView()
                     .controlSize(.small)
                     .padding(8)
                     .background(.thinMaterial, in: Capsule())
-                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                     .transition(.opacity)
             }
         }

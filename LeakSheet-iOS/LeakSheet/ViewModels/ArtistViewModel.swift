@@ -152,29 +152,56 @@ final class ArtistViewModel {
 
     // MARK: - Init
 
-    init(artist: Artist) {
-        self.artist = artist
+    /// The heavy startup pass — era stats + the unfiltered content tree —
+    /// computed off-main by `make(artist:)` so pushing a huge tracker
+    /// doesn't hitch the navigation transition.
+    nonisolated struct Precomputed: Sendable {
+        let eraStatsByName: [String: Stats]
+        let artistStats: Stats
+        let content: FilteredContent
 
-        var statsByName: [String: Stats] = [:]
-        var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
-        for era in artist.eras {
-            let s = Self.computeEraStats(era)
-            statsByName[era.name] = s
-            total += s.total
-            available += s.available
-            snippets += s.snippets
-            confirmed += s.confirmed
-            fullHQ += s.fullHQ
+        init(artist: Artist) {
+            var statsByName: [String: Stats] = [:]
+            var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+            for era in artist.eras {
+                let s = ArtistViewModel.computeEraStats(era)
+                statsByName[era.name] = s
+                total += s.total
+                available += s.available
+                snippets += s.snippets
+                confirmed += s.confirmed
+                fullHQ += s.fullHQ
+            }
+            self.eraStatsByName = statsByName
+            self.artistStats = Stats(
+                total: total, available: available, snippets: snippets,
+                confirmed: confirmed, fullHQ: fullHQ
+            )
+            self.content = ArtistViewModel.computeContent(
+                artist: artist, state: FilterState(), eraStats: statsByName
+            )
         }
-        self.eraStatsByName = statsByName
-        self.artistStats = Stats(
-            total: total, available: available, snippets: snippets,
-            confirmed: confirmed, fullHQ: fullHQ
-        )
+    }
 
-        // First frame renders synchronously from the unfiltered state — one
-        // cheap pass, no filtering allocations.
-        self.content = Self.computeContent(artist: artist, state: FilterState(), eraStats: statsByName)
+    /// Preferred construction path: the stats/content pass runs off-main.
+    static func make(artist: Artist) async -> ArtistViewModel {
+        let precomputed = await Task.detached(priority: .userInitiated) {
+            Precomputed(artist: artist)
+        }.value
+        return ArtistViewModel(artist: artist, precomputed: precomputed)
+    }
+
+    /// Synchronous variant — used by tests and previews; computes the
+    /// startup pass inline on the caller's thread.
+    convenience init(artist: Artist) {
+        self.init(artist: artist, precomputed: Precomputed(artist: artist))
+    }
+
+    init(artist: Artist, precomputed: Precomputed) {
+        self.artist = artist
+        self.eraStatsByName = precomputed.eraStatsByName
+        self.artistStats = precomputed.artistStats
+        self.content = precomputed.content
 
         // Seed era colors from the persisted extraction cache so cards and
         // headers are tinted on first paint without any image download.
@@ -224,6 +251,13 @@ final class ArtistViewModel {
             debouncedQuery = ""
             applyFilters()
             return
+        }
+        // Honest indicator: filtering is pending from the moment the query
+        // changes, not only after the debounce fires — previously the
+        // spinner never appeared during the 200ms window, which is most of
+        // a fast query's total latency.
+        if q != debouncedQuery {
+            isFiltering = true
         }
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
