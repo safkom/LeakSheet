@@ -53,6 +53,7 @@ from src.fetcher import (
     STALE_CACHE_TTL,
 )
 from src.streaming import (
+    GdriveInterstitialError,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
@@ -245,6 +246,11 @@ _STREAM_ALLOWED_DOMAINS = {
     # Note: the krakenfiles CDN host is *.krakencloud.net (constrained by
     # _KRAKEN_CDN_AUDIO_PATTERN in streaming.py), not cdn.krakenfiles.com —
     # that stale entry never matched and was removed.
+    "pixeldrain.com",
+    "drive.google.com",
+    # The virus-scan interstitial confirm retry targets this host — see
+    # streaming._fetch_gdrive / _GDRIVE_ALLOWED_HOSTS.
+    "drive.usercontent.google.com",
 }
 
 
@@ -942,6 +948,19 @@ def _parse_imgur_metadata(data: dict) -> dict:
     return result
 
 
+def _parse_pixeldrain_metadata(data: dict) -> dict:
+    """Extract useful fields from pixeldrain.com's /api/file/{id}/info response."""
+    result: dict = {"provider": "pixeldrain"}
+    if data.get("name"):
+        result["filename"] = data["name"]
+    if data.get("size") is not None:
+        result["file_size"] = data["size"]
+    if data.get("mime_type"):
+        result["mime_type"] = data["mime_type"]
+    result["media_kind"] = _media_kind_from_mime(data.get("mime_type"))
+    return result
+
+
 async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
     """Minimal metadata from a HEAD of the pillows stream URL (mime + size).
 
@@ -1035,6 +1054,8 @@ async def proxy_metadata(
             result = _parse_froste_metadata(resp.json())
         elif provider == "imgur":
             result = _parse_imgur_metadata(resp.json())
+        elif provider == "pixeldrain":
+            result = _parse_pixeldrain_metadata(resp.json())
         else:
             result = {"provider": provider}
 
@@ -1334,12 +1355,25 @@ async def proxy_stream(
 
     try:
         resp = await stream_audio(stream_url, range_header=range_header)
+    except GdriveInterstitialError as e:
+        # Google Drive returned (and kept returning, after the confirm
+        # retry) an HTML virus-scan interstitial instead of file bytes.
+        # Never proxy HTML as audio — tell the client to fall back to
+        # opening the original share link in a browser.
+        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except ValueError as e:
         logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.exception("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
+
+    # Permission-required/private gdrive files come back from stream_audio
+    # as a real 403 response object (not raised) — relay it as-is.
+    if resp.status_code == 403:
+        await resp.aclose()
+        raise HTTPException(status_code=403, detail="Provider denied access")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
     # instead of collapsing it into a generic 502.
