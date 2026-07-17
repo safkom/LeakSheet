@@ -12,6 +12,9 @@ nonisolated struct FilterState: Equatable, Sendable {
     var recents = false
     var noSnippets = false
     var misc = false
+    /// Selected TabSection id (Released / Best Of / Stems / …). Routes that
+    /// tab's entries through the misc pipeline; nil = no tab mode active.
+    var tabKey: String? = nil
 }
 
 /// One era with its filtered songs/sections and (unfiltered) display stats.
@@ -109,7 +112,11 @@ final class ArtistViewModel {
     /// Misc mode — a strict switch, not a peer filter: when ON, only entries
     /// from the tracker's Misc / Music Videos tabs are shown, never mixed
     /// with era songs; the other chips (and search) filter within them.
+    /// Legacy path for payloads without `tabs`; superseded by tab chips.
     var misc: Bool = false
+    /// Selected content-tab id (TabSection.id) — same strict-switch
+    /// semantics as misc, one chip per parsed tab.
+    private(set) var selectedTabKey: String? = nil
     var expandedEra: String? = nil
     /// Expanded multi-version songs, keyed "eraName::baseName". Lives here
     /// (not view @State) because lazy containers discard offscreen state.
@@ -148,6 +155,13 @@ final class ArtistViewModel {
 
     var hasMiscEntries: Bool {
         !(artist.miscEntries ?? []).isEmpty
+    }
+
+    /// Parsed content tabs (Misc / Music Videos / Released / Best Of / …) —
+    /// one switchable chip each. Empty for older cached payloads, which
+    /// fall back to the single legacy Misc chip.
+    var availableTabs: [TabSection] {
+        artist.tabs ?? []
     }
 
     // MARK: - Init
@@ -275,7 +289,8 @@ final class ArtistViewModel {
             bestOf: bestOf,
             recents: recents,
             noSnippets: noSnippets,
-            misc: misc
+            misc: misc,
+            tabKey: selectedTabKey
         )
     }
 
@@ -395,7 +410,19 @@ final class ArtistViewModel {
 
     func toggleMisc() {
         misc.toggle()
+        if misc { selectedTabKey = nil }
         if !misc && !bestOf && !recents {
+            expandedEra = nil
+            rebuildEraRows()
+        }
+        applyFilters()
+    }
+
+    /// Selects a content tab (tapping the active chip deselects it).
+    func selectTab(_ key: String?) {
+        selectedTabKey = (selectedTabKey == key) ? nil : key
+        if selectedTabKey != nil { misc = false }
+        if selectedTabKey == nil && !bestOf && !recents {
             expandedEra = nil
             rebuildEraRows()
         }
@@ -485,7 +512,7 @@ final class ArtistViewModel {
             recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
         )
 
-        if state.misc {
+        if state.misc || state.tabKey != nil {
             return FilteredContent(
                 state: state, eras: [], searchResults: [], recentResults: [],
                 recentPlaybackItems: [], recentStreamIndex: [:],
@@ -652,7 +679,14 @@ final class ArtistViewModel {
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
     private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
-        var entries = artist.miscEntries ?? []
+        // A selected tab sources that tab's entries; the legacy misc mode
+        // reads the flat misc/MV list (older cached payloads have no tabs).
+        var entries: [MiscEntry]
+        if let tabKey = state.tabKey {
+            entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
+        } else {
+            entries = artist.miscEntries ?? []
+        }
         if state.noSnippets {
             entries = entries.filter { e in
                 let al = (e.available ?? "").lowercased()

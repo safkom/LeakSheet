@@ -105,7 +105,7 @@ private struct ArtistContentView: View {
                 // the previous content stays up until the new one lands,
                 // so a branch never renders data computed for another mode.
                 let contentState = vm.content.state
-                if contentState.misc {
+                if contentState.misc || contentState.tabKey != nil {
                     MiscListView(
                         vm: vm,
                         artistName: artist.name,
@@ -254,6 +254,18 @@ private struct ArtistContentView: View {
 private struct FilterTogglesView: View {
     let vm: ArtistViewModel
 
+    static func tabIcon(for kind: String) -> String {
+        switch kind {
+        case "misc": return "film.stack"
+        case "music_videos": return "video"
+        case "released": return "music.note.list"
+        case "best_of": return "star.circle"
+        case "worst_of": return "hand.thumbsdown"
+        case "stems": return "waveform.path"
+        default: return "square.grid.2x2"
+        }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             // Sibling glass elements belong in one container — standalone
@@ -270,7 +282,23 @@ private struct FilterTogglesView: View {
                     FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
                         vm.toggleNoSnippets()
                     }
-                    if vm.hasMiscEntries {
+                    if !vm.availableTabs.isEmpty {
+                        // One chip per parsed content tab (Misc, Music
+                        // Videos, Released, Best Of, Stems, …), labeled with
+                        // the tracker's own tab name.
+                        ForEach(vm.availableTabs) { tab in
+                            FilterChip(
+                                label: tab.name,
+                                icon: Self.tabIcon(for: tab.kind),
+                                isActive: vm.selectedTabKey == tab.id,
+                                tintColor: .filterMisc
+                            ) {
+                                vm.selectTab(tab.id)
+                            }
+                        }
+                    } else if vm.hasMiscEntries {
+                        // Older cached payloads without `tabs` keep the
+                        // legacy flat Misc chip.
                         FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .filterMisc) {
                             vm.toggleMisc()
                         }
@@ -448,6 +476,8 @@ private struct MiscListView: View {
     let onOpenLink: (MiscLink) -> Void
 
     @Environment(PlayerViewModel.self) private var player
+    /// Collapsed era groups — presentation-only, keyed on eraName.
+    @State private var collapsedEras: Set<String> = []
 
     var body: some View {
         let entries = vm.content.miscResults
@@ -467,32 +497,50 @@ private struct MiscListView: View {
             }
         } else {
             ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
-                // Era group header — shown when the era changes
+                // Era group header — shown when the era changes; tapping it
+                // collapses/expands the group (presentation-only).
                 if idx == 0 || entries[idx - 1].eraName != entry.eraName {
-                    HStack(spacing: 8) {
-                        Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(vm.eraDisplay[entry.eraName]?.readableHeader ?? .secondary)
-                        Rectangle()
-                            .fill(Color.lsBorder)
-                            .frame(height: 1)
+                    Button {
+                        withAnimation(.default) {
+                            if collapsedEras.contains(entry.eraName) {
+                                collapsedEras.remove(entry.eraName)
+                            } else {
+                                collapsedEras.insert(entry.eraName)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(vm.eraDisplay[entry.eraName]?.readableHeader ?? .secondary)
+                            Rectangle()
+                                .fill(Color.lsBorder)
+                                .frame(height: 1)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .rotationEffect(.degrees(collapsedEras.contains(entry.eraName) ? -90 : 0))
+                        }
                     }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
                     .padding(.top, idx == 0 ? 4 : 12)
                     .padding(.bottom, 2)
                 }
 
-                MiscEntryRowView(
-                    entry: entry,
-                    onShowDescription: onShowDescription,
-                    onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
-                )
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture {
-                    handleRowTap(entry, in: entries)
+                if !collapsedEras.contains(entry.eraName) {
+                    MiscEntryRowView(
+                        entry: entry,
+                        onShowDescription: onShowDescription,
+                        onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
+                    .onTapGesture {
+                        handleRowTap(entry, in: entries)
+                    }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
             }
         }
     }

@@ -485,6 +485,11 @@ final class AudioEngine {
                 guard let self else { return }
                 self.isPlaying = false
                 self.currentTime = 0
+                // Settings → Playback → Autoplay next (default on).
+                let defaults = UserDefaults.standard
+                let autoplay = defaults.object(forKey: SettingsView.autoplayNextKey) == nil
+                    || defaults.bool(forKey: SettingsView.autoplayNextKey)
+                guard autoplay else { return }
                 self.playNext()
             }
         }

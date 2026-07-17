@@ -254,3 +254,67 @@ struct FilterPipelineTests {
         #expect(ImageCache.bucket(forPointSize: points, scale: scale) == expected)
     }
 }
+
+/// Tab-mode routing through the filter pipeline (2026-07-17): a selected
+/// TabSection's entries flow into `miscResults` so the existing misc list
+/// UI renders every parsed tab.
+struct TabModeFilterTests {
+    private func entry(_ name: String, era: String = "Era 1", tab: String) -> MiscEntry {
+        MiscEntry(
+            eraName: era, name: name, notes: nil, entryType: nil, date: nil,
+            length: nil, available: nil, quality: nil, streaming: nil,
+            links: [], sourceTab: tab
+        )
+    }
+
+    private func artistWithTabs() -> Artist {
+        let released = TabSection(
+            kind: "released", name: "📻 Released",
+            entries: [entry("Hurricane", tab: "released"), entry("Moon", tab: "released")]
+        )
+        let stems = TabSection(
+            kind: "stems", name: "🌱 Stems",
+            entries: [entry("Runaway Stems", tab: "stems")]
+        )
+        return Artist(
+            name: "Test", slug: "test", sourceUrl: nil, eras: [],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil,
+            miscEntries: [entry("Old Flat Misc", tab: "misc")],
+            tabs: [released, stems]
+        )
+    }
+
+    @Test func `selected tab routes its entries into miscResults`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = artist.tabs![0].id
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Hurricane", "Moon"])
+    }
+
+    @Test func `tab entries respect the search query`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = artist.tabs![0].id
+        state.query = "moon"
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Moon"])
+    }
+
+    @Test func `unknown tab key yields no entries`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = "missing::tab"
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.isEmpty)
+    }
+
+    @Test func `legacy misc mode still reads the flat list`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.misc = true
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Old Flat Misc"])
+    }
+}

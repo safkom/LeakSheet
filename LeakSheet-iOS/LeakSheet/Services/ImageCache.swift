@@ -45,6 +45,13 @@ actor ImageCache {
         memCache.removeAllObjects()
     }
 
+    /// Full purge (Settings → Clear cache): in-memory images plus the
+    /// URLCache's disk store.
+    func clearAll() {
+        memCache.removeAllObjects()
+        session.configuration.urlCache?.removeAllCachedResponses()
+    }
+
     /// Smallest bucket that covers `points` at the given display scale.
     nonisolated static func bucket(forPointSize points: CGFloat, scale: CGFloat) -> Int {
         let pixels = Int((points * scale).rounded(.up))
