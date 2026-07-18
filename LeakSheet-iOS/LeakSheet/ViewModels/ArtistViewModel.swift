@@ -9,6 +9,7 @@ import Observation
 nonisolated struct FilterState: Equatable, Sendable {
     var query: String = ""
     var bestOf = false
+    var worstOf = false
     var recents = false
     var noSnippets = false
     var misc = false
@@ -107,6 +108,7 @@ final class ArtistViewModel {
     // MARK: - Filters
 
     var bestOf: Bool = false
+    var worstOf: Bool = false
     var recents: Bool = false
     var noSnippets: Bool = false
     /// Misc mode — a strict switch, not a peer filter: when ON, only entries
@@ -157,11 +159,17 @@ final class ArtistViewModel {
         !(artist.miscEntries ?? []).isEmpty
     }
 
-    /// Parsed content tabs (Misc / Music Videos / Released / Best Of / …) —
+    /// Badge-annotation kinds — never pages (the backend stopped emitting
+    /// them 2026-07-18; the filter also hides them in older cached payloads).
+    private static let badgeTabKinds: Set<String> = [
+        "best_of", "worst_of", "special", "grails", "wanted",
+    ]
+
+    /// Parsed content tabs (Misc / Music Videos / Released / Stems / …) —
     /// one switchable chip each. Empty for older cached payloads, which
     /// fall back to the single legacy Misc chip.
     var availableTabs: [TabSection] {
-        artist.tabs ?? []
+        (artist.tabs ?? []).filter { !Self.badgeTabKinds.contains($0.kind) }
     }
 
     // MARK: - Init
@@ -287,6 +295,7 @@ final class ArtistViewModel {
         FilterState(
             query: debouncedQuery.lowercased(),
             bestOf: bestOf,
+            worstOf: worstOf,
             recents: recents,
             noSnippets: noSnippets,
             misc: misc,
@@ -354,13 +363,13 @@ final class ArtistViewModel {
     // MARK: - Era expand/collapse
 
     func toggleEra(_ name: String) {
-        if bestOf { return }
+        if bestOf || worstOf { return }
         expandedEra = expandedEra == name ? nil : name
         rebuildEraRows()
     }
 
     func isEraExpanded(_ name: String) -> Bool {
-        if bestOf { return true }
+        if bestOf || worstOf { return true }
         return expandedEra == name
     }
 
@@ -385,12 +394,20 @@ final class ArtistViewModel {
 
     func toggleBestOf() {
         bestOf.toggle()
+        if bestOf { worstOf = false }  // contradictory highlight filters
         if !bestOf && !recents { expandedEra = nil }
         // No synchronous rebuildEraRows() here: isEraExpanded treats bestOf
         // as "every era expanded", so rebuilding against the still-stale
         // (unfiltered) `content` would briefly render every song in every
         // era. applyFilters()'s completion rebuilds once `content` actually
         // matches the new bestOf state.
+        applyFilters()
+    }
+
+    func toggleWorstOf() {
+        worstOf.toggle()
+        if worstOf { bestOf = false }
+        if !worstOf && !recents { expandedEra = nil }
         applyFilters()
     }
 
@@ -419,9 +436,16 @@ final class ArtistViewModel {
     }
 
     /// Selects a content tab (tapping the active chip deselects it).
+    /// Entering a tab resets the filter chips — except No Snippets, which
+    /// keeps excluding short clips on every page.
     func selectTab(_ key: String?) {
         selectedTabKey = (selectedTabKey == key) ? nil : key
-        if selectedTabKey != nil { misc = false }
+        if selectedTabKey != nil {
+            misc = false
+            bestOf = false
+            worstOf = false
+            recents = false
+        }
         if selectedTabKey == nil && !bestOf && !recents {
             expandedEra = nil
             rebuildEraRows()
@@ -566,6 +590,12 @@ final class ArtistViewModel {
                 }
                 guard hasBest else { continue }
             }
+            if state.worstOf {
+                let hasWorst = allSongs.contains { song in
+                    song.versions.contains { isWorstOfVersion($0) }
+                }
+                guard hasWorst else { continue }
+            }
 
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
@@ -589,10 +619,11 @@ final class ArtistViewModel {
     }
 
     private nonisolated static func filterSongs(_ songs: [Song], state: FilterState) -> [Song] {
-        guard state.bestOf || state.noSnippets else { return songs }
+        guard state.bestOf || state.worstOf || state.noSnippets else { return songs }
         return songs.compactMap { song in
             song.withFilteredVersions { version in
                 if state.bestOf && !isBestOfVersion(version) { return false }
+                if state.worstOf && !isWorstOfVersion(version) { return false }
                 if state.noSnippets && shouldFilterForNoSnippets(version) { return false }
                 return true
             }
@@ -623,6 +654,7 @@ final class ArtistViewModel {
                 guard score > 0 else { continue }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     results.append(SearchResult(song: song, version: version, era: era, score: score))
                 }
@@ -656,8 +688,13 @@ final class ArtistViewModel {
                     let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
                     if !hasBestVersion { continue }
                 }
+                if state.worstOf {
+                    let hasWorstVersion = song.versions.contains { isWorstOfVersion($0) }
+                    if !hasWorstVersion { continue }
+                }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     let dateStr = version.leakDate ?? version.fileDate
                     guard let dateStr, !dateStr.isEmpty else { continue }
@@ -699,6 +736,10 @@ final class ArtistViewModel {
                 Badge.allCases.contains { e.name.contains($0.emoji) }
             }
             if !starred.isEmpty { entries = starred }
+        }
+        if state.worstOf {
+            let flagged = entries.filter { $0.name.contains(Badge.worst.emoji) }
+            if !flagged.isEmpty { entries = flagged }
         }
         if !state.query.isEmpty {
             let q = state.query
@@ -753,6 +794,10 @@ final class ArtistViewModel {
     private nonisolated static func isBestOfVersion(_ v: SongVersion) -> Bool {
         guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
         return bestOfBadges.contains(badge)
+    }
+
+    private nonisolated static func isWorstOfVersion(_ v: SongVersion) -> Bool {
+        v.badge.flatMap { Badge(rawValue: $0) } == .worst
     }
 
     private nonisolated static func scoreSong(_ song: Song, query: String) -> Int {

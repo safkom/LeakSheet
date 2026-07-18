@@ -276,6 +276,9 @@ private struct FilterTogglesView: View {
                     FilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tintColor: .filterBestOf) {
                         vm.toggleBestOf()
                     }
+                    FilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tintColor: .filterBestOf) {
+                        vm.toggleWorstOf()
+                    }
                     FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
                         vm.toggleRecents()
                     }
@@ -476,8 +479,30 @@ private struct MiscListView: View {
     let onOpenLink: (MiscLink) -> Void
 
     @Environment(PlayerViewModel.self) private var player
-    /// Collapsed era groups — presentation-only, keyed on eraName.
-    @State private var collapsedEras: Set<String> = []
+    /// Expanded era groups — presentation-only, keyed on eraName. A live
+    /// search expands everything so results are never hidden.
+    @State private var expandedEras: Set<String> = []
+
+    /// Entries grouped by era in order of first appearance.
+    private struct EraGroup: Identifiable {
+        let eraName: String
+        let entries: [MiscEntry]
+        var id: String { eraName }
+    }
+
+    private func eraGroups(_ entries: [MiscEntry]) -> [EraGroup] {
+        var order: [String] = []
+        var byEra: [String: [MiscEntry]] = [:]
+        for entry in entries {
+            if byEra[entry.eraName] == nil { order.append(entry.eraName) }
+            byEra[entry.eraName, default: []].append(entry)
+        }
+        return order.map { EraGroup(eraName: $0, entries: byEra[$0] ?? []) }
+    }
+
+    private func isExpanded(_ eraName: String) -> Bool {
+        vm.isSearching || expandedEras.contains(eraName)
+    }
 
     var body: some View {
         let entries = vm.content.miscResults
@@ -496,50 +521,72 @@ private struct MiscListView: View {
                 .padding(.top, 40)
             }
         } else {
-            ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
-                // Era group header — shown when the era changes; tapping it
-                // collapses/expands the group (presentation-only).
-                if idx == 0 || entries[idx - 1].eraName != entry.eraName {
-                    Button {
-                        withAnimation(.default) {
-                            if collapsedEras.contains(entry.eraName) {
-                                collapsedEras.remove(entry.eraName)
-                            } else {
-                                collapsedEras.insert(entry.eraName)
+            // Era-card accordion — the same mental model as the main eras
+            // view: one collapsible card per era, entries inside.
+            ForEach(eraGroups(entries)) { group in
+                Button {
+                    withAnimation(.default) {
+                        if expandedEras.contains(group.eraName) {
+                            expandedEras.remove(group.eraName)
+                        } else {
+                            expandedEras.insert(group.eraName)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        if let art = eraArtByLowercasedName[group.eraName.lowercased()] ?? nil {
+                            CachedImage(url: APIClient.shared.imageProxyURL(for: art, width: 128)) {
+                                Color.lsCard
                             }
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.lsCard)
+                                .frame(width: 44, height: 44)
+                                .overlay {
+                                    Image(systemName: "music.note.list")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
                         }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(vm.eraDisplay[entry.eraName]?.readableHeader ?? .secondary)
-                            Rectangle()
-                                .fill(Color.lsBorder)
-                                .frame(height: 1)
-                            Image(systemName: "chevron.down")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                                .rotationEffect(.degrees(collapsedEras.contains(entry.eraName) ? -90 : 0))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.eraName.isEmpty ? "Other" : group.eraName)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(vm.eraDisplay[group.eraName]?.readableHeader ?? .primary)
+                                .lineLimit(1)
+                            Text("\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded(group.eraName) ? 0 : -90))
                     }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.top, idx == 0 ? 4 : 12)
-                    .padding(.bottom, 2)
+                    .padding(12)
+                    .background(Color.lsCard.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
 
-                if !collapsedEras.contains(entry.eraName) {
-                    MiscEntryRowView(
-                        entry: entry,
-                        onShowDescription: onShowDescription,
-                        onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
-                    )
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    .onTapGesture {
-                        handleRowTap(entry, in: entries)
+                if isExpanded(group.eraName) {
+                    ForEach(group.entries) { entry in
+                        MiscEntryRowView(
+                            entry: entry,
+                            onShowDescription: onShowDescription,
+                            onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                        )
+                        .contentShape(Rectangle())
+                        .accessibilityAddTraits(.isButton)
+                        .onTapGesture {
+                            handleRowTap(entry, in: entries)
+                        }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                 }
             }
         }

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 from src.config import COLUMN_ALIASES
 from src.models import (
     Artist,
+    Badge,
     Era,
     EraStats,
     MiscEntry,
@@ -2086,6 +2087,63 @@ def _add_version_to_era(
     )
     era.sections[-1].songs.append(song)
     song_index[key] = song
+
+
+# ---------------------------------------------------------------------------
+# Badge tabs — Best Of / Worst Of / Special / Grails / Wanted annotate songs
+# ---------------------------------------------------------------------------
+
+_BADGE_BY_TAB_KIND = {
+    "best_of": Badge.BEST,
+    "worst_of": Badge.WORST,
+    "special": Badge.SPECIAL,
+    "grails": Badge.GRAIL,
+    "wanted": Badge.WANTED,
+}
+
+
+def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
+    """Stamp the badge for a highlight tab onto matching main-tab songs.
+
+    Matches era-scoped first (normalized era + song keys), then falls back to
+    a name-only match when the song key is unique across the tracker. Songs
+    that already carry any badge (inline emoji from the main tab) are left
+    untouched. Returns the number of songs annotated.
+    """
+    badge = _BADGE_BY_TAB_KIND.get(kind)
+    if badge is None:
+        return 0
+
+    by_era_and_name: dict[tuple[str, str], Song] = {}
+    by_name: dict[str, list[Song]] = {}
+    for era in artist.eras:
+        era_key = _era_match_key(era.name)
+        for section in era.sections:
+            for song in section.songs:
+                song_key = _song_match_key(song.base_name)
+                if not song_key:
+                    continue
+                by_era_and_name.setdefault((era_key, song_key), song)
+                by_name.setdefault(song_key, []).append(song)
+
+    applied = 0
+    for entry in entries:
+        _, base_name = extract_version_tag(entry.name)
+        song_key = _song_match_key(base_name)
+        if not song_key:
+            continue
+        song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
+        if song is None:
+            candidates = by_name.get(song_key, [])
+            if len(candidates) == 1:
+                song = candidates[0]
+        if song is None or not song.versions:
+            continue
+        if any(v.badge is not None for v in song.versions):
+            continue
+        song.versions[0].badge = badge
+        applied += 1
+    return applied
 
 
 # ---------------------------------------------------------------------------

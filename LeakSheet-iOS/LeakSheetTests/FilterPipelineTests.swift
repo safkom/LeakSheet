@@ -321,3 +321,71 @@ struct TabModeFilterTests {
         #expect(content.miscResults.map(\.name) == ["Old Flat Misc"])
     }
 }
+
+/// Worst Of filter (2026-07-18): mirrors Best Of for the 🗑 badge.
+struct WorstOfFilterTests {
+    private func artist() -> Artist {
+        let good = SongVersion(
+            name: "Good", versionTag: nil, badge: "best", featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: "High Quality",
+            links: ["https://pillows.su/f/a"], qualityColor: nil,
+            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            sources: nil, rating: nil
+        )
+        let bad = SongVersion(
+            name: "Bad", versionTag: nil, badge: "worst", featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: "Low Quality",
+            links: ["https://pillows.su/f/b"], qualityColor: nil,
+            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            sources: nil, rating: nil
+        )
+        let era = Era(
+            name: "Era A", altNames: nil, description: nil, timeline: nil,
+            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            sections: [Section(name: "", group: nil, songs: [
+                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil,
+                     availableLength: nil, quality: nil, trackLength: nil,
+                     leakDate: nil, fileDate: nil),
+                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil,
+                     availableLength: nil, quality: nil, trackLength: nil,
+                     leakDate: nil, fileDate: nil),
+            ])],
+            songCount: nil, versionCount: nil
+        )
+        return Artist(
+            name: "T", slug: "t", sourceUrl: nil, eras: [era],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+    }
+
+    @Test func `worstOf keeps only worst-badged versions`() {
+        var state = FilterState()
+        state.worstOf = true
+        let content = ArtistViewModel.computeContent(artist: artist(), state: state, eraStats: [:])
+        #expect(content.eras.count == 1)
+        #expect(content.eras[0].songs.map(\.baseName) == ["Bad"])
+    }
+
+    @Test func `badge tab kinds are hidden from available tabs`() async {
+        let tabbed = Artist(
+            name: "T", slug: "t", sourceUrl: nil, eras: [],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            tabs: [
+                TabSection(kind: "released", name: "Released", entries: []),
+                TabSection(kind: "best_of", name: "Best Of", entries: []),
+                TabSection(kind: "grails", name: "Grails", entries: []),
+            ]
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: tabbed) }
+        let kinds = await MainActor.run { vm.availableTabs.map(\.kind) }
+        #expect(kinds == ["released"])
+    }
+}

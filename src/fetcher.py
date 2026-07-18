@@ -28,7 +28,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 from src.models import Artist, TabSection
-from src.parser import apply_art_tab_images, parse_art_tab, parse_misc_tab, parse_sheet, _era_match_key
+from src.parser import (
+    apply_art_tab_images,
+    apply_badge_tab,
+    parse_art_tab,
+    parse_misc_tab,
+    parse_sheet,
+    _era_match_key,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +122,23 @@ _RELEASED_TAB_NAMES = frozenset({"released"})
 _BEST_OF_TAB_NAMES = frozenset({"best of"})
 _WORST_OF_TAB_NAMES = frozenset({"worst of"})
 _STEMS_TAB_NAMES = frozenset({"stems"})
+_SPECIAL_TAB_NAMES = frozenset({"special", "notable"})
+_GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails/wanted"})
+_WANTED_TAB_NAMES = frozenset({"wanted"})
+_FAKES_TAB_NAMES = frozenset({"fakes"})
 
 # Content-bearing tabs without a dedicated kind — parsed generically and
 # exposed with kind="other" plus the tab's display name.
 _OTHER_CONTENT_TAB_NAMES = frozenset({
-    "grails", "wanted", "grails / wanted", "grails/wanted",
-    "special", "notable", "fakes",
     "live performances", "performances",
     "ai tracks", "remixes", "edits (wip)", "edits/remasters", "edits / remasters",
 })
+
+# Tab kinds whose entries duplicate main-tab songs with a highlight (⭐/🗑/✨/
+# 🏆/🥇). These never become switchable pages — their entries are matched
+# against the era tree and stamp the corresponding badge on existing songs,
+# covering trackers that only mark highlights in the dedicated tab.
+_BADGE_TAB_KINDS = frozenset({"best_of", "worst_of", "special", "grails", "wanted"})
 
 # Deliberately NOT parsed (census 2026-07-17): "recent" duplicates the main
 # tab; tracklists / album copies / groupbuys / buys / compilations / tours /
@@ -152,9 +167,11 @@ _URL_GID_PATTERN = re.compile(r"[#?&]gid=(\d+)")
 # Regex to extract title
 TITLE_PATTERN = re.compile(r"<title>([^<]+)</title>", re.IGNORECASE)
 
-# Common title suffixes to strip when inferring artist name
+# Common title suffixes to strip when inferring artist name. Compared
+# case-insensitively — yetracker.net titles itself " - Google disk" (sic).
 TITLE_SUFFIXES = [
     " - Google Drive",
+    " - Google Disk",
     " - Google Sheets",
     " - Google Docs",
     " Music Tracker",
@@ -261,9 +278,10 @@ def _infer_artist_name(title: str) -> str:
     """
     name = title.strip()
 
-    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.)
+    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.),
+    # case-insensitively.
     for suffix in TITLE_SUFFIXES:
-        if name.endswith(suffix):
+        if name.lower().endswith(suffix.lower()):
             name = name[: -len(suffix)].strip()
 
     # Step 1b: Strip "Tracker 2.0" / "Tracker v3" version suffixes and
@@ -435,7 +453,11 @@ _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
     (_RELEASED_TAB_NAMES, "released"),
     (_BEST_OF_TAB_NAMES, "best_of"),
     (_WORST_OF_TAB_NAMES, "worst_of"),
+    (_SPECIAL_TAB_NAMES, "special"),
+    (_GRAILS_TAB_NAMES, "grails"),
+    (_WANTED_TAB_NAMES, "wanted"),
     (_STEMS_TAB_NAMES, "stems"),
+    (_FAKES_TAB_NAMES, "fakes"),
     (_OTHER_CONTENT_TAB_NAMES, "other"),
 ]
 
@@ -1385,12 +1407,21 @@ async def _load_secondary_tabs(
     # Extend in declared tab order (misc first) for stable output.
     for gid_val, kind, display_name in content_tabs:
         entries = tab_results.get(gid_val, [])
+        if not entries:
+            continue
         if kind in ("misc", "music_videos"):
             artist.misc_entries.extend(entries)
-        if entries:
-            artist.tabs.append(
-                TabSection(kind=kind, name=display_name, entries=entries)
+        if kind in _BADGE_TAB_KINDS:
+            # Highlight tabs annotate existing songs; they are not pages.
+            applied = apply_badge_tab(artist, kind, entries)
+            logger.debug(
+                "Badge tab %s: %d/%d entries matched songs",
+                kind, applied, len(entries),
             )
+            continue
+        artist.tabs.append(
+            TabSection(kind=kind, name=display_name, entries=entries)
+        )
 
 
 async def async_fetch_and_parse(

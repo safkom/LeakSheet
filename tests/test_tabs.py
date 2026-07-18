@@ -68,10 +68,17 @@ class TestContentTabClassification:
         kinds = {kind for _, kind, _ in tabs}
         assert kinds == {"best_of", "worst_of", "stems"}
 
-    def test_other_content_tabs_classified(self):
-        tabs = self._tabs(g1="🏆 Grails / 🥇Wanted", g2="✨ Special", g3="Fakes")
-        assert all(kind == "other" for _, kind, _ in tabs)
-        assert len(tabs) == 3
+    def test_badge_tabs_get_dedicated_kinds(self):
+        # 2026-07-18: highlight tabs classify with their own kinds so the
+        # loader can route them to badge annotation instead of pages.
+        tabs = self._tabs(g1="🏆 Grails / 🥇Wanted", g2="✨ Special", g3="Wanted")
+        kinds = {kind for _, kind, _ in tabs}
+        assert kinds == {"grails", "special", "wanted"}
+
+    def test_fakes_and_other_content_tabs_classified(self):
+        tabs = self._tabs(g1="Fakes", g2="🎤 Performances", g3="Remixes")
+        kinds = {kind for _, kind, _ in tabs}
+        assert kinds == {"fakes", "other"}
 
     def test_non_song_tabs_excluded(self):
         tabs = self._tabs(
@@ -143,3 +150,73 @@ class TestExtraTabParsing:
         assert e.date == "Aug 2021"
         assert e.available == "Full"
         assert e.links == ["https://pillows.su/f/abc"]
+
+
+class TestBadgeTabAnnotation:
+    """Highlight tabs (Best Of / Worst Of / Special / Grails / Wanted) stamp
+    badges onto matching main-tab songs instead of becoming pages."""
+
+    @staticmethod
+    def _artist():
+        from src.models import Era, Section, Song, SongVersion
+
+        def song(name, badge=None):
+            return Song(
+                base_name=name,
+                versions=[SongVersion(name=name, badge=badge)],
+            )
+
+        donda = Era(name="Donda", sections=[Section(songs=[
+            song("Hurricane"), song("Jail"),
+        ])])
+        yeezus = Era(name="Yeezus", sections=[Section(songs=[
+            song("New Slaves"), song("Hurricane"), song("Starred", badge="best"),
+        ])])
+        return Artist(name="Test", slug="test", eras=[donda, yeezus])
+
+    @staticmethod
+    def _entry(name, era=""):
+        return MiscEntry(name=name, era_name=era, source_tab="best_of")
+
+    def test_era_scoped_match_stamps_badge(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        applied = apply_badge_tab(artist, "best_of", [self._entry("Hurricane", era="Yeezus")])
+        assert applied == 1
+        yeezus = artist.eras[1]
+        hurricane = next(s for s in yeezus.sections[0].songs if s.base_name == "Hurricane")
+        assert hurricane.versions[0].badge == "best"
+        # The Donda Hurricane is untouched
+        assert artist.eras[0].sections[0].songs[0].versions[0].badge is None
+
+    def test_unique_name_matches_without_era(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        applied = apply_badge_tab(artist, "worst_of", [self._entry("Jail")])
+        assert applied == 1
+        assert artist.eras[0].sections[0].songs[1].versions[0].badge == "worst"
+
+    def test_ambiguous_name_without_era_is_skipped(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        # "Hurricane" exists in two eras — no era given → no guess
+        assert apply_badge_tab(artist, "best_of", [self._entry("Hurricane")]) == 0
+
+    def test_existing_badge_never_overwritten(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        assert apply_badge_tab(artist, "worst_of", [self._entry("Starred", era="Yeezus")]) == 0
+        starred = artist.eras[1].sections[0].songs[2]
+        assert starred.versions[0].badge == "best"
+
+    def test_version_tags_stripped_before_matching(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        applied = apply_badge_tab(artist, "grails", [self._entry("New Slaves [V2]", era="Yeezus")])
+        assert applied == 1
+        assert artist.eras[1].sections[0].songs[0].versions[0].badge == "grail"
+
+    def test_unknown_kind_is_noop(self):
+        from src.parser import apply_badge_tab
+        artist = self._artist()
+        assert apply_badge_tab(artist, "released", [self._entry("Jail")]) == 0
