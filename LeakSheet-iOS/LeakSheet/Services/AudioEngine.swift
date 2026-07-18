@@ -57,6 +57,10 @@ final class AudioEngine {
     /// behind an opaque pillows id). Set from the asset's track list in
     /// `captureStreamFormat` — the one signal that works for every host.
     private(set) var hasVideo = false
+    /// width/height of the current video track (transform-corrected), so
+    /// the Now Playing surface can size itself to the real picture instead
+    /// of letterboxing inside the square artwork frame.
+    private(set) var videoAspectRatio: Double?
     private var timeObserver: Any?
     private var observations: [NSKeyValueObservation] = []
     private var endOfTrackObserver: (any NSObjectProtocol)?
@@ -92,6 +96,7 @@ final class AudioEngine {
         originalQuality = false
         streamFormat = nil
         hasVideo = false
+        videoAspectRatio = nil
         duration = Self.parseDuration(version?.trackLength)
 
         guard let version, let link = version.streamableLink else {
@@ -512,6 +517,16 @@ final class AudioEngine {
         let loadedTracks = try? await item.asset.load(.tracks)
         if let loadedTracks, currentTrack?.id == trackKey {
             hasVideo = loadedTracks.contains { $0.mediaType == .video }
+        }
+        if let videoTrack = loadedTracks?.first(where: { $0.mediaType == .video }),
+           let size = try? await videoTrack.load(.naturalSize),
+           let transform = try? await videoTrack.load(.preferredTransform) {
+            let transformed = size.applying(transform)
+            let width = abs(transformed.width)
+            let height = abs(transformed.height)
+            if width > 0, height > 0, currentTrack?.id == trackKey {
+                videoAspectRatio = width / height
+            }
         }
         if let tracks = loadedTracks,
            let audioTrack = tracks.first(where: { $0.mediaType == .audio }) {

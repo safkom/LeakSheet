@@ -9,6 +9,7 @@ struct NowPlayingView: View {
     @State private var accentColor: Color?
     @State private var showQueue = false
     @State private var showDescription: DescriptionSheet.Payload?
+    @State private var showFullScreenVideo = false
 
     /// Era accent brightened until it reads against the actual backdrop at the
     /// controls' position — the gradient there is roughly the accent fading
@@ -25,9 +26,10 @@ struct NowPlayingView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                // Artwork
+                // Artwork — square for album art; videos break out of the
+                // 1:1 frame and render full-width at their natural aspect
+                // ratio (no letterboxing inside the square).
                 artworkView
-                    .frame(width: 280, height: 280)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: (accentColor ?? .black).opacity(0.4), radius: 20, y: 10)
 
@@ -297,14 +299,37 @@ struct NowPlayingView: View {
         if player.hasVideo, let avPlayer = player.avPlayer {
             // Video items (e.g. an .mp4 behind an opaque pillows id) render
             // their picture in place of the artwork, driven by the same
-            // player as the audio path.
+            // player as the audio path — sized to the video's own aspect
+            // ratio (16:9 fallback until the track reports its size).
             VideoSurfaceView(player: avPlayer)
+                .aspectRatio(player.videoAspectRatio ?? 16.0 / 9.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .padding(24)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { showFullScreenVideo = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Play video full screen")
+                .background(
+                    NativeFullScreenVideoPresenter(
+                        player: avPlayer, isPresented: $showFullScreenVideo
+                    )
+                )
         } else if !player.artUrl.isEmpty {
             CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600)) {
                 artPlaceholder
             }
+            .frame(width: 280, height: 280)
         } else {
             artPlaceholder
+                .frame(width: 280, height: 280)
         }
     }
 

@@ -27,6 +27,7 @@ final class PlayerViewModel {
     /// Live-captured stream format for the current track — File Info fallback.
     var streamFormat: StreamFormatInfo? { engine.streamFormat }
     var hasVideo: Bool { engine.hasVideo }
+    var videoAspectRatio: Double? { engine.videoAspectRatio }
     var avPlayer: AVPlayer? { engine.currentPlayer }
 
     /// Shared seeking state — set `seeking = true` on drag start, false on commit.

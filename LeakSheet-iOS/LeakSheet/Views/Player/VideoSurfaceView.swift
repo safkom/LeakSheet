@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 
 /// AVPlayerLayer host bound to the engine's shared AVPlayer. Shown in place
@@ -25,5 +26,57 @@ struct VideoSurfaceView: UIViewRepresentable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         view.playerLayer.player = player
+    }
+}
+
+/// Presents the native AVPlayerViewController modally when `isPresented`
+/// flips true — a true UIKit presentation, so the player shows its OWN
+/// chrome (Done button, transport controls, AirPlay) with nothing custom
+/// layered on top. Bound to the SAME AVPlayer the inline surface and audio
+/// path drive; dismissing continues playback inline. Attach to any view via
+/// `.background(...)` — it renders nothing itself.
+struct NativeFullScreenVideoPresenter: UIViewControllerRepresentable {
+    let player: AVPlayer?
+    @Binding var isPresented: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+
+    func updateUIViewController(_ host: UIViewController, context: Context) {
+        if isPresented, context.coordinator.playerController == nil {
+            let controller = DismissReportingPlayerViewController()
+            controller.player = player
+            controller.showsPlaybackControls = true
+            controller.videoGravity = .resizeAspect
+            controller.onDismiss = { [weak coordinator = context.coordinator] in
+                coordinator?.playerController = nil
+                isPresented = false
+            }
+            context.coordinator.playerController = controller
+            host.present(controller, animated: true)
+        } else if !isPresented, let controller = context.coordinator.playerController {
+            context.coordinator.playerController = nil
+            controller.presentingViewController?.dismiss(animated: true)
+        }
+    }
+
+    final class Coordinator {
+        var playerController: DismissReportingPlayerViewController?
+    }
+}
+
+/// AVPlayerViewController that reports when its own Done button (or any
+/// other dismissal) removed it, so the SwiftUI binding stays in sync.
+final class DismissReportingPlayerViewController: AVPlayerViewController {
+    var onDismiss: (() -> Void)?
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || presentingViewController == nil {
+            onDismiss?()
+        }
     }
 }
