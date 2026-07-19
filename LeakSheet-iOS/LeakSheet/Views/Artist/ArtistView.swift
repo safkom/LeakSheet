@@ -12,11 +12,38 @@ import SwiftUI
 /// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
+    @State private var vm: ArtistViewModel?
 
-    @State private var vm: ArtistViewModel
+    var body: some View {
+        Group {
+            if let vm {
+                ArtistContentView(artist: artist, vm: vm)
+            } else {
+                // Sub-second placeholder while the stats/content pass runs
+                // off-main — pushing a huge tracker no longer hitches the
+                // navigation transition.
+                ProgressView("Preparing…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.lsBackground)
+            }
+        }
+        .task(id: artist.slug) {
+            if vm == nil {
+                vm = await ArtistViewModel.make(artist: artist)
+            }
+        }
+    }
+}
+
+private struct ArtistContentView: View {
+    let artist: Artist
+    @Bindable var vm: ArtistViewModel
+
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
     @State private var activeEraColor: Color?
+    @State private var safariItem: SafariItem?
+    @State private var embedItem: EmbedItem?
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -27,15 +54,27 @@ struct ArtistView: View {
     /// dictionary instead of the artist's whole (potentially large) era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist) {
+    init(artist: Artist, vm: ArtistViewModel) {
         self.artist = artist
-        self._vm = State(initialValue: ArtistViewModel(artist: artist))
+        self.vm = vm
         var eraArt: [String: String?] = [:]
         for era in artist.eras {
             let key = era.name.lowercased()
             if eraArt[key] == nil { eraArt[key] = era.artUrl }
         }
         self.eraArtByLowercasedName = eraArt
+    }
+
+    /// Routes a non-stream link tap: embeddable hosts get their official
+    /// in-app player, everything else opens in the in-app Safari sheet —
+    /// the user is never bounced out of the app.
+    private func openLink(_ link: MiscLink) {
+        guard let url = URL(string: link.url) else { return }
+        if link.kind == .embed, let embedURL = MiscLinkClassifier.embedURL(for: link.url) {
+            embedItem = EmbedItem(originalURL: url, embedURL: embedURL, title: link.label)
+        } else {
+            safariItem = SafariItem(url: url)
+        }
     }
 
     var body: some View {
@@ -45,7 +84,9 @@ struct ArtistView: View {
                 if let notices = artist.notices, !notices.isEmpty {
                     VStack(spacing: 4) {
                         ForEach(notices, id: \.text) { notice in
-                            NoticeBannerView(notice: notice)
+                            NoticeBannerView(notice: notice) { url in
+                                safariItem = SafariItem(url: url)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -64,14 +105,18 @@ struct ArtistView: View {
                 // the previous content stays up until the new one lands,
                 // so a branch never renders data computed for another mode.
                 let contentState = vm.content.state
-                if contentState.misc {
+                if contentState.misc || contentState.tabKey != nil {
                     MiscListView(
                         vm: vm,
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         eraArtByLowercasedName: eraArtByLowercasedName,
-                        onShowDescription: { showDescription = $0 }
+                        onShowDescription: { showDescription = $0 },
+                        onOpenLink: { openLink($0) }
                     )
+                    // Fresh expansion state per tab — without this the
+                    // @State set bleeds era names across tab switches.
+                    .id(contentState.tabKey ?? "misc")
                 } else if !contentState.query.isEmpty {
                     SearchResultsListView(
                         vm: vm,
@@ -120,13 +165,15 @@ struct ArtistView: View {
                 }
             }
         )
-        .overlay(alignment: .top) {
+        // Bottom-anchored so it can't hide behind the nav bar or the search
+        // drawer (the old top anchor sat underneath both).
+        .overlay(alignment: .bottom) {
             if vm.isFiltering {
                 ProgressView()
                     .controlSize(.small)
                     .padding(8)
                     .background(.thinMaterial, in: Capsule())
-                    .padding(.top, 4)
+                    .padding(.bottom, 12)
                     .transition(.opacity)
             }
         }
@@ -166,9 +213,17 @@ struct ArtistView: View {
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
+                .environment(vm)  // enables the cross-era "Also in" section
         }
         .sheet(isPresented: $showQueue) {
             QueueSheet()
+        }
+        .sheet(item: $safariItem) { item in
+            SafariView(url: item.url)
+                .ignoresSafeArea()
+        }
+        .sheet(item: $embedItem) { item in
+            EmbedPlayerView(item: item)
         }
         .task {
             // Register ordered era list with the engine so playback auto-continues
@@ -203,6 +258,18 @@ struct ArtistView: View {
 private struct FilterTogglesView: View {
     let vm: ArtistViewModel
 
+    static func tabIcon(for kind: String) -> String {
+        switch kind {
+        case "misc": return "film.stack"
+        case "music_videos": return "video"
+        case "released": return "music.note.list"
+        case "best_of": return "star.circle"
+        case "worst_of": return "hand.thumbsdown"
+        case "stems": return "waveform.path"
+        default: return "square.grid.2x2"
+        }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             // Sibling glass elements belong in one container — standalone
@@ -213,13 +280,32 @@ private struct FilterTogglesView: View {
                     FilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tintColor: .filterBestOf) {
                         vm.toggleBestOf()
                     }
+                    FilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tintColor: .filterBestOf) {
+                        vm.toggleWorstOf()
+                    }
                     FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
                         vm.toggleRecents()
                     }
                     FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
                         vm.toggleNoSnippets()
                     }
-                    if vm.hasMiscEntries {
+                    if !vm.availableTabs.isEmpty {
+                        // One chip per parsed content tab (Misc, Music
+                        // Videos, Released, Best Of, Stems, …), labeled with
+                        // the tracker's own tab name.
+                        ForEach(vm.availableTabs) { tab in
+                            FilterChip(
+                                label: tab.name,
+                                icon: Self.tabIcon(for: tab.kind),
+                                isActive: vm.selectedTabKey == tab.id,
+                                tintColor: .filterMisc
+                            ) {
+                                vm.selectTab(tab.id)
+                            }
+                        }
+                    } else if vm.hasMiscEntries {
+                        // Older cached payloads without `tabs` keep the
+                        // legacy flat Misc chip.
                         FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .filterMisc) {
                             vm.toggleMisc()
                         }
@@ -392,8 +478,19 @@ private struct MiscListView: View {
     /// this view doesn't need the artist's whole (potentially large) era tree.
     let eraArtByLowercasedName: [String: String?]
     let onShowDescription: (DescriptionSheet.Payload) -> Void
+    /// Non-stream link taps route up to the parent, which owns the Safari
+    /// and embed-player sheets.
+    let onOpenLink: (MiscLink) -> Void
 
     @Environment(PlayerViewModel.self) private var player
+    /// Expanded era groups — presentation-only, keyed on eraName. A live
+    /// search expands everything so results are never hidden, and a page
+    /// with a single group starts open.
+    @State private var expandedEras: Set<String> = []
+
+    private func isExpanded(_ eraName: String, groupCount: Int) -> Bool {
+        vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
+    }
 
     var body: some View {
         let entries = vm.content.miscResults
@@ -412,33 +509,79 @@ private struct MiscListView: View {
                 .padding(.top, 40)
             }
         } else {
-            ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
-                // Era group header — shown when the era changes
-                if idx == 0 || entries[idx - 1].eraName != entry.eraName {
-                    HStack(spacing: 8) {
-                        Text(entry.eraName.isEmpty ? "OTHER" : entry.eraName.uppercased())
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(vm.eraDisplay[entry.eraName]?.readableHeader ?? .secondary)
-                        Rectangle()
-                            .fill(Color.lsBorder)
-                            .frame(height: 1)
+            // Era-card accordion — the same mental model as the main eras
+            // view: one collapsible card per era, entries inside. Groups are
+            // prebuilt off-main in the filter pipeline (miscEraGroups).
+            let groups = vm.content.miscEraGroups
+            ForEach(groups) { group in
+                Button {
+                    withAnimation(.default) {
+                        if expandedEras.contains(group.eraName) {
+                            expandedEras.remove(group.eraName)
+                        } else {
+                            expandedEras.insert(group.eraName)
+                        }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, idx == 0 ? 4 : 12)
-                    .padding(.bottom, 2)
+                } label: {
+                    HStack(spacing: 12) {
+                        if let art = eraArtByLowercasedName[group.eraName.lowercased()] ?? nil {
+                            CachedImage(url: APIClient.shared.imageProxyURL(for: art, width: 128)) {
+                                Color.lsCard
+                            }
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.lsCard)
+                                .frame(width: 44, height: 44)
+                                .overlay {
+                                    Image(systemName: "music.note.list")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.eraName.isEmpty ? "Other" : group.eraName)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(vm.eraDisplay[group.eraName]?.readableHeader ?? .primary)
+                                .lineLimit(1)
+                            Text("\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded(group.eraName, groupCount: groups.count) ? 0 : -90))
+                    }
+                    .padding(12)
+                    .background(Color.lsCard.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-
-                MiscEntryRowView(
-                    entry: entry,
-                    onShowDescription: onShowDescription,
-                    onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                .buttonStyle(.plain)
+                .accessibilityValue(
+                    isExpanded(group.eraName, groupCount: groups.count)
+                        ? "Expanded" : "Collapsed"
                 )
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture {
-                    handleRowTap(entry, in: entries)
-                }
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if isExpanded(group.eraName, groupCount: groups.count) {
+                    ForEach(group.entries) { entry in
+                        MiscEntryRowView(
+                            entry: entry,
+                            onShowDescription: onShowDescription,
+                            onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                        )
+                        .contentShape(Rectangle())
+                        .accessibilityAddTraits(.isButton)
+                        .onTapGesture {
+                            handleRowTap(entry, in: entries)
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
             }
         }
     }
@@ -481,10 +624,8 @@ private struct MiscListView: View {
                 )
             }
             player.playInList(items, startAt: idx)
-        case .image, .video, .archive, .link:
-            if let url = URL(string: link.url) {
-                UIApplication.shared.open(url)
-            }
+        case .image, .video, .embed, .archive, .link:
+            onOpenLink(link)
         }
     }
 
@@ -768,6 +909,8 @@ struct FilterChip: View {
 
 struct NoticeBannerView: View {
     let notice: Notice
+    /// Parent owns the presentation (in-app Safari sheet).
+    var onOpenLink: (URL) -> Void
 
     private var isAlert: Bool { notice.kind == "alert" }
     private var tintColor: Color { isAlert ? .orange : Color(hex: 0x94A3B8) }
@@ -776,7 +919,7 @@ struct NoticeBannerView: View {
     var body: some View {
         Button {
             if let link = notice.link, let url = URL(string: link) {
-                UIApplication.shared.open(url)
+                onOpenLink(url)
             }
         } label: {
             HStack(spacing: 8) {

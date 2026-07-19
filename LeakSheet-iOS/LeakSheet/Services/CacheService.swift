@@ -1,6 +1,14 @@
+import CryptoKit
 import Foundation
 
-/// Disk-based cache for parsed tracker data with ETag validation.
+/// Disk-based cache for tracker payloads with ETag validation.
+///
+/// v2 (2026-07-17): stores the raw server response bytes instead of a
+/// re-encoded `Artist` (kills a full multi-MB encode pass per load and
+/// guarantees cache == server payload, so new optional API fields survive
+/// the round-trip), and keys files by the full SHA-256 of the URL — the v1
+/// scheme truncated base64(url) to 64 chars, so long URLs sharing a prefix
+/// collided.
 actor CacheService {
     static let shared = CacheService()
 
@@ -10,27 +18,34 @@ actor CacheService {
         let data: Data
         let etag: String
         let timestamp: Date
-        let artistName: String
-        let slug: String
-        let totalSongs: Int
-        let totalVersions: Int
-        var version: Int = 1
+        var version: Int = CacheService.currentVersion
     }
 
-    private static let currentVersion = 1
+    private static let currentVersion = 2
     /// Age after which a cached entry is treated as stale and discarded on read.
     private static let maxAge: TimeInterval = 7 * 24 * 3600
 
-    private init() {
-        cacheDirectory = URL.cachesDirectory.appending(path: "LeakSheet", directoryHint: .isDirectory)
+    init(directory: URL? = nil) {
+        cacheDirectory = directory
+            ?? URL.cachesDirectory.appending(path: "LeakSheet", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        // The `.shared` initializer runs on whichever thread first touches
+        // it (usually main) — sweep legacy files off that thread.
+        let directoryToSweep = cacheDirectory
+        Task.detached(priority: .utility) {
+            Self.sweepLegacyFiles(in: directoryToSweep)
+        }
     }
 
     private func cacheFile(for url: String) -> URL {
-        let hash = Data(url.utf8).base64EncodedString()
-            .replacing("/", with: "_")
-            .prefix(64)
-        return cacheDirectory.appending(path: "tracker_\(hash).json")
+        let digest = SHA256.hash(data: Data(url.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return cacheDirectory.appending(path: "tracker_\(hex).json")
+    }
+
+    /// Test-only accessor for the on-disk location of a URL's entry.
+    func cacheFileForTesting(url: String) -> URL {
+        cacheFile(for: url)
     }
 
     func getCachedTracker(for url: String) -> CachedEntry? {
@@ -59,28 +74,15 @@ actor CacheService {
         try? JSONDecoder().decode(Artist.self, from: data)
     }
 
-    private nonisolated static func encodeArtist(_ artist: Artist) -> Data? {
-        try? JSONEncoder().encode(artist)
-    }
-
     func getCachedEtag(for url: String) -> String? {
         getCachedTracker(for: url)?.etag
     }
 
-    func cacheTracker(url: String, artist: Artist, etag: String, totalSongs: Int, totalVersions: Int) {
-        guard let artistData = Self.encodeArtist(artist) else { return }
-        let entry = CachedEntry(
-            data: artistData,
-            etag: etag,
-            timestamp: .now,
-            artistName: artist.name,
-            slug: artist.slug,
-            totalSongs: totalSongs,
-            totalVersions: totalVersions
-        )
+    /// Store the raw server response bytes for a tracker URL.
+    func cacheTracker(url: String, data: Data, etag: String) {
+        let entry = CachedEntry(data: data, etag: etag, timestamp: .now)
         guard let entryData = try? JSONEncoder().encode(entry) else { return }
-        let file = cacheFile(for: url)
-        try? entryData.write(to: file, options: .atomic)
+        try? entryData.write(to: cacheFile(for: url), options: .atomic)
     }
 
     func removeTracker(for url: String) {
@@ -88,12 +90,45 @@ actor CacheService {
     }
 
     func clearCache() {
+        for file in trackerFiles() {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    /// Total on-disk size of all cached tracker entries (for Settings).
+    func cacheSizeBytes() -> Int64 {
+        trackerFiles().reduce(0) { total, file in
+            let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return total + Int64(size)
+        }
+    }
+
+    /// Remove v1-era files whose base64-derived names don't match the SHA-256
+    /// hex scheme — they would otherwise sit orphaned until manually cleared.
+    /// Runs detached from `init`; exposed for tests to invoke deterministically.
+    func sweepLegacyEntries() {
+        Self.sweepLegacyFiles(in: cacheDirectory)
+    }
+
+    private nonisolated static func sweepLegacyFiles(in directory: URL) {
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: cacheDirectory,
+            at: directory,
             includingPropertiesForKeys: nil
         )) ?? []
         for file in files where file.lastPathComponent.hasPrefix("tracker_") {
-            try? FileManager.default.removeItem(at: file)
+            let stem = file.deletingPathExtension().lastPathComponent.dropFirst("tracker_".count)
+            let isHexKey = stem.count == 64 && stem.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+            if !isHexKey {
+                try? FileManager.default.removeItem(at: file)
+            }
         }
+    }
+
+    private func trackerFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        return files.filter { $0.lastPathComponent.hasPrefix("tracker_") }
     }
 }

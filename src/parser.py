@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 from src.config import COLUMN_ALIASES
 from src.models import (
     Artist,
+    Badge,
     Era,
     EraStats,
     MiscEntry,
@@ -29,6 +30,7 @@ from src.models import (
     SourceRef,
     TrackerStats,
     VERSION_TAG_PATTERN,
+    _split_alt_aliases,
     extract_badge,
     extract_og_filenames,
     extract_samples,
@@ -1110,6 +1112,22 @@ def _era_match_key(full_era_name: str) -> str:
     return key
 
 
+def _song_match_key(name: str) -> str:
+    """Stable normalized song identity key for cross-era version linkage.
+
+    Same normalization recipe as era keys (diacritics, case, version tags,
+    punctuation, whitespace) applied to a song base name, so "THIS ONE HERE"
+    in WAR and "This One Here" in DONDA 2 share one key. Exposed to clients
+    as ``Song.song_key``.
+    """
+    key = _normalize_unicode(name)
+    key = VERSION_TAG_PATTERN.sub("", key)
+    key = key.lower()
+    key = _PUNCT_STRIP_RE.sub(" ", key)
+    key = _WHITESPACE_COLLAPSE_RE.sub(" ", key).strip()
+    return key
+
+
 def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     """Fuzzy match a row's era key against known era keys.
 
@@ -1207,6 +1225,17 @@ def _register_era_keys(
         alt_key = _era_match_key(alt)
         if alt_key:
             era_by_key.setdefault(alt_key, era)
+        # Comma-separated alias lists ("Mollyworld, Balaclava Era"): register
+        # each alias in the fallback dict only — same shadowing rationale as
+        # slash parts, so a genuine standalone era declared elsewhere still
+        # claims the primary key.
+        parts = _split_alt_aliases(alt)
+        if len(parts) > 1:
+            target = fallback_keys if fallback_keys is not None else era_by_key
+            for part in parts:
+                part_key = _era_match_key(part)
+                if part_key:
+                    target.setdefault(part_key, era)
     # Slash-separated: "38 Baby / Ay Ay" → register both parts
     if " / " in era_name:
         target = fallback_keys if fallback_keys is not None else era_by_key
@@ -2023,6 +2052,7 @@ def _add_version_to_era(
     if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
         alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
         if not alts:
+            # No fan-made identity — song_key stays empty (no cross-era link).
             era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
             return
         # Group by fan-made alt title instead of the placeholder name. Any
@@ -2031,7 +2061,11 @@ def _add_version_to_era(
         alt_keys = [(id(era), f"alt::{a}") for a in alts]
         song = next((song_index[k] for k in alt_keys if k in song_index), None)
         if song is None:
-            song = Song(base_name=base_key, versions=[version])
+            song = Song(
+                base_name=base_key,
+                song_key=_song_match_key(alts[0]),
+                versions=[version],
+            )
             era.sections[-1].songs.append(song)
         else:
             song.versions.append(version)
@@ -2046,9 +2080,87 @@ def _add_version_to_era(
         return
 
     # Create new song in the last (current) section
-    song = Song(base_name=base_key, versions=[version])
+    song = Song(
+        base_name=base_key,
+        song_key=_song_match_key(base_key),
+        versions=[version],
+    )
     era.sections[-1].songs.append(song)
     song_index[key] = song
+
+
+# ---------------------------------------------------------------------------
+# Badge tabs — Best Of / Worst Of / Special / Grails / Wanted annotate songs
+# ---------------------------------------------------------------------------
+
+# Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
+# every entry in it — including the wanted section — is stamped GRAIL.
+# Splitting the combined tab by its internal sections is a known follow-up.
+_BADGE_BY_TAB_KIND = {
+    "best_of": Badge.BEST,
+    "worst_of": Badge.WORST,
+    "special": Badge.SPECIAL,
+    "grails": Badge.GRAIL,
+    "wanted": Badge.WANTED,
+}
+
+
+def apply_badge_tabs(
+    artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
+) -> int:
+    """Stamp badges from every highlight tab onto matching main-tab songs.
+
+    Builds the song index ONCE for all tabs (a Ye-size artist can carry up
+    to five badge tabs). Matches era-scoped first (normalized era + song
+    keys), then falls back to a name-only match when the song key is unique
+    across the tracker. Placeholder tracks ("???", "untitled", …) are never
+    badge targets, and songs that already carry any badge (inline emoji from
+    the main tab) are left untouched. Returns the number of songs annotated.
+    """
+    if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
+        return 0
+
+    by_era_and_name: dict[tuple[str, str], Song] = {}
+    by_name: dict[str, list[Song]] = {}
+    for era in artist.eras:
+        era_key = _era_match_key(era.name)
+        for section in era.sections:
+            for song in section.songs:
+                if song.base_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
+                    continue
+                song_key = _song_match_key(song.base_name)
+                if not song_key:
+                    continue
+                by_era_and_name.setdefault((era_key, song_key), song)
+                by_name.setdefault(song_key, []).append(song)
+
+    applied = 0
+    for kind, entries in tabs:
+        badge = _BADGE_BY_TAB_KIND.get(kind)
+        if badge is None:
+            continue
+        for entry in entries:
+            _, base_name = extract_version_tag(entry.name)
+            song_key = _song_match_key(base_name)
+            if not song_key:
+                continue
+            song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
+            if song is None:
+                candidates = by_name.get(song_key, [])
+                if len(candidates) == 1:
+                    song = candidates[0]
+            if song is None or not song.versions:
+                continue
+            if any(v.badge is not None for v in song.versions):
+                continue
+            song.versions[0].badge = badge
+            applied += 1
+    return applied
+
+
+def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
+    """Single-tab convenience wrapper around :func:`apply_badge_tabs`."""
+    return apply_badge_tabs(artist, [(kind, entries)])
 
 
 # ---------------------------------------------------------------------------
@@ -2059,19 +2171,32 @@ def _add_version_to_era(
 # quirks ("Media Length", "Streaming") never perturb main-tab detection.
 _MISC_COLUMN_ALIASES = {
     "era": "era",
+    # Carti's Released tab has BOTH "Rel. Era" and "Rec. Era"; the first
+    # era-mapped column in header order wins (release era — it leads on the
+    # sheet), the second is ignored by the `not in candidate` guard below.
+    "rel. era": "era",
+    "rec. era": "era",
     "name": "name",
+    "title": "name",  # Stems tabs (Travis) use "Title"
     "notes": "notes",
     "length": "length",
     "media length": "length",
+    "track length": "length",
     "date": "date",
     "release date": "date",
+    "leak date": "date",  # Best Of / Worst Of / Stems tabs
     "type": "entry_type",
     "available": "available",
+    "available length": "available",
+    "currently available": "available",
     "quality": "quality",
     "streaming": "streaming",
     "links": "links",
     "link(s)": "links",
     "link": "links",
+    "sources": "links",  # Travis Stems' link column
+    # Deliberately unmapped (no MiscEntry field, dropped): BPM, Key
+    # (Ye/Kendrick Stems), Made By/Creator (Fakes).
 }
 
 # Era header rows in these tabs carry per-era stats in the era column,
@@ -2113,7 +2238,11 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
             canonical = _MISC_COLUMN_ALIASES.get(key)
             if canonical and canonical not in candidate:
                 candidate[canonical] = c_idx
-        if "name" in candidate and ("era" in candidate or "links" in candidate):
+        # A name column plus any second content signal qualifies — "date"
+        # covers Stems layouts that have neither an Era nor a Links header.
+        if "name" in candidate and (
+            "era" in candidate or "links" in candidate or "date" in candidate
+        ):
             col_map = candidate
             header_idx = idx
             break

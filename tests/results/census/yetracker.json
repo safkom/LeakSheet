@@ -5,7 +5,7 @@
   "origin": "snapshot",
   "totals": {
     "eras": 44,
-    "songs": 3949,
+    "songs": 3951,
     "versions": 9105,
     "misc_entries": 0,
     "notices": 2,
@@ -470,8 +470,8 @@
         "2.22.22 Sessions",
         "Post-2.22.22"
       ],
-      "songs": 324,
-      "versions": 942,
+      "songs": 287,
+      "versions": 869,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -486,8 +486,8 @@
       "sections": [
         ""
       ],
-      "songs": 0,
-      "versions": 0,
+      "songs": 39,
+      "versions": 73,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -837,13 +837,7 @@
     "unmatched_rows_total": 0
   },
   "suspicions": {
-    "zero_song_eras": [
-      {
-        "era": "WAR",
-        "has_description": true,
-        "has_timeline": true
-      }
-    ],
+    "zero_song_eras": [],
     "single_song_eras": [],
     "songs_10plus_versions": [
       {
@@ -1659,8 +1653,8 @@
       {
         "song": "all in love",
         "eras": [
-          "DONDA 2 [V1]",
           "IN A PERFECT WORLD",
+          "WAR",
           "YEBU"
         ]
       },
@@ -1691,7 +1685,7 @@
       {
         "song": "and they came back / this one here",
         "eras": [
-          "DONDA 2 [V1]",
+          "WAR",
           "¥$"
         ]
       },
@@ -1817,7 +1811,7 @@
         "song": "bobby digital",
         "eras": [
           "BULLY [V1]",
-          "DONDA 2 [V1]",
+          "WAR",
           "YEBU",
           "¥$"
         ]
@@ -1966,7 +1960,7 @@
       {
         "song": "church girl",
         "eras": [
-          "DONDA 2 [V1]",
+          "WAR",
           "¥$"
         ]
       },
@@ -3208,8 +3202,8 @@
         "song": "love love love",
         "eras": [
           "BULLY [V1]",
-          "DONDA 2 [V1]",
           "VULTURES 1",
+          "WAR",
           "YEBU",
           "¥$"
         ]
@@ -3686,7 +3680,7 @@
         "song": "quiet",
         "eras": [
           "BULLY [V1]",
-          "DONDA 2 [V1]"
+          "WAR"
         ]
       },
       {
@@ -3938,8 +3932,8 @@
       {
         "song": "someday we'll all be free",
         "eras": [
-          "DONDA 2 [V1]",
           "VULTURES 1",
+          "WAR",
           "YEBU"
         ]
       },
@@ -4050,8 +4044,8 @@
       {
         "song": "talking",
         "eras": [
-          "DONDA 2 [V1]",
           "VULTURES 1",
+          "WAR",
           "¥$"
         ]
       },
@@ -4150,7 +4144,7 @@
         "eras": [
           "BULLY [V1]",
           "BULLY [V2]",
-          "DONDA 2 [V1]",
+          "WAR",
           "YEBU",
           "¥$"
         ]
@@ -4158,7 +4152,7 @@
       {
         "song": "ticket to heaven",
         "eras": [
-          "DONDA 2 [V1]",
+          "WAR",
           "YEBU"
         ]
       },
@@ -4208,8 +4202,8 @@
       {
         "song": "traveller",
         "eras": [
-          "DONDA 2 [V1]",
-          "VULTURES 2"
+          "VULTURES 2",
+          "WAR"
         ]
       },
       {
@@ -4391,8 +4385,8 @@
       {
         "song": "unknown [don toliver collaborations]",
         "eras": [
-          "DONDA 2 [V1]",
-          "VULTURES 1"
+          "VULTURES 1",
+          "WAR"
         ]
       },
       {
@@ -4402,6 +4396,13 @@
           "Donda [V2]",
           "Hitler",
           "Turbo Grafx 16"
+        ]
+      },
+      {
+        "song": "unknown [fat money reference tracks]",
+        "eras": [
+          "DONDA 2 [V1]",
+          "WAR"
         ]
       },
       {
@@ -4496,6 +4497,7 @@
         "eras": [
           "DONDA 2 [V1]",
           "Donda [V2]",
+          "WAR",
           "YEBU"
         ]
       },
@@ -4590,7 +4592,7 @@
       {
         "song": "unknown [no id collaborations]",
         "eras": [
-          "DONDA 2 [V1]",
+          "WAR",
           "Yeezus"
         ]
       },
@@ -4609,11 +4611,11 @@
         "song": "unknown [pusha t collaborations]",
         "eras": [
           "Cruel Summer",
-          "DONDA 2 [V1]",
           "Donda [V2]",
           "God's Country",
           "My Beautiful Dark Twisted Fantasy",
-          "So Help Me God"
+          "So Help Me God",
+          "WAR"
         ]
       },
       {
@@ -4706,8 +4708,8 @@
       {
         "song": "unknown [vory collaborations]",
         "eras": [
-          "DONDA 2 [V1]",
-          "VULTURES 1"
+          "VULTURES 1",
+          "WAR"
         ]
       },
       {
@@ -4823,7 +4825,7 @@
       {
         "song": "we love you",
         "eras": [
-          "DONDA 2 [V1]",
+          "WAR",
           "¥$"
         ]
       },
@@ -4965,7 +4967,8 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "Ye Beat 5, Classic Beat"
+          "Classic Beat",
+          "Ye Beat 5"
         ]
       },
       {
@@ -4990,7 +4993,8 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "Champions, Round and Round"
+          "Champions",
+          "Round and Round"
         ]
       },
       {
@@ -4998,7 +5002,9 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "Foreskin Back, My Choice, Simulation Baptize"
+          "Foreskin Back",
+          "My Choice",
+          "Simulation Baptize"
         ]
       },
       {
@@ -5054,7 +5060,9 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "Alone, Travis Freestyles 2, Travis Freestyles 3"
+          "Alone",
+          "Travis Freestyles 2",
+          "Travis Freestyles 3"
         ]
       },
       {
@@ -5110,7 +5118,9 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "EVERY WAY, GONE, STARLIGHT"
+          "EVERY WAY",
+          "GONE",
+          "STARLIGHT"
         ]
       },
       {
@@ -5118,7 +5128,8 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "DARK MATTER, LIQUOR BLUES"
+          "DARK MATTER",
+          "LIQUOR BLUES"
         ]
       },
       {
@@ -5126,7 +5137,8 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "ONE OF ONE, LIL DEMON"
+          "LIL DEMON",
+          "ONE OF ONE"
         ]
       },
       {
@@ -5134,7 +5146,8 @@
         "base": "???",
         "versions": 2,
         "alt_title_clusters": [
-          "SEAN JOHN, MAGIC DON JUAN (PRINCESS DIANA)"
+          "MAGIC DON JUAN (PRINCESS DIANA)",
+          "SEAN JOHN"
         ]
       },
       {

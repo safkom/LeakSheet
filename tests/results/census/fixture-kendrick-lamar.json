@@ -5,12 +5,12 @@
   "origin": "fixture",
   "totals": {
     "eras": 19,
-    "songs": 668,
-    "versions": 863,
+    "songs": 738,
+    "versions": 977,
     "misc_entries": 0,
     "notices": 2,
-    "links": 735,
-    "streamable_links": 504,
+    "links": 830,
+    "streamable_links": 569,
     "streamable_pct": 68.6
   },
   "eras": [
@@ -35,8 +35,8 @@
       "sections": [
         ""
       ],
-      "songs": 5,
-      "versions": 5,
+      "songs": 6,
+      "versions": 6,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -48,8 +48,8 @@
       "sections": [
         ""
       ],
-      "songs": 10,
-      "versions": 10,
+      "songs": 12,
+      "versions": 12,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -63,7 +63,7 @@
       "sections": [
         ""
       ],
-      "songs": 10,
+      "songs": 9,
       "versions": 12,
       "has_art": true,
       "has_description": true,
@@ -78,8 +78,8 @@
       "sections": [
         ""
       ],
-      "songs": 6,
-      "versions": 6,
+      "songs": 7,
+      "versions": 7,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -88,7 +88,7 @@
     {
       "name": "Collaboration with J. Cole",
       "alt_names": [
-        "Out the Sky"
+        "Out the Sky, Burning Leather"
       ],
       "sections": [
         ""
@@ -108,8 +108,8 @@
       "sections": [
         ""
       ],
-      "songs": 19,
-      "versions": 19,
+      "songs": 23,
+      "versions": 25,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -123,8 +123,8 @@
       "sections": [
         ""
       ],
-      "songs": 58,
-      "versions": 74,
+      "songs": 62,
+      "versions": 84,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -138,8 +138,8 @@
       "sections": [
         ""
       ],
-      "songs": 25,
-      "versions": 29,
+      "songs": 35,
+      "versions": 41,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -153,8 +153,8 @@
       "sections": [
         ""
       ],
-      "songs": 74,
-      "versions": 85,
+      "songs": 83,
+      "versions": 102,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -170,8 +170,8 @@
         "New York Sessions (Janurary 21st, 2017)",
         "DAMN. Sessions (Feburary 22nd, 2017 - April 14th, 2017)"
       ],
-      "songs": 129,
-      "versions": 156,
+      "songs": 138,
+      "versions": 179,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -183,11 +183,11 @@
         "Collaboration with TDE"
       ],
       "sections": [
-        "Black Panther Sessions (October 2017 - Feburary 9th, 2018)",
+        "Black Panther Sessions (August 2017 - Feburary 9th, 2018)",
         "Pre-Everybody Sensitive Sessions (October 2017 - Feburary 9th, 2018)"
       ],
-      "songs": 40,
-      "versions": 57,
+      "songs": 41,
+      "versions": 58,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -201,12 +201,12 @@
       "sections": [
         ""
       ],
-      "songs": 20,
+      "songs": 22,
       "versions": 22,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
-      "timeline_events": 3
+      "timeline_events": 4
     },
     {
       "name": "Everybody Sensitive [V1]",
@@ -214,15 +214,15 @@
         "An Audio Book By Kendrick L. Duckworth, Mr. Morale & The Big Steppers"
       ],
       "sections": [
-        "Everybody Sensitive Sessions (December 1st, 2018 - August 2018)",
+        "Everybody Sensitive Sessions (December 1st, 2017 - August 2018)",
         "Everybody Sensitive Sessions (August 2018 - December 2018)",
         "London Sessions (Feburary 11th, 2019)",
         "Everybody Sensitive Sessions (March 2019 - August 2019)",
-        "Everybody Sensitive Sessions (09/2019 - 01/11/2020)",
-        "Everybody Sensitive Sessions (01/11/2020 - 03/15/2020)"
+        "Everybody Sensitive Sessions (September, 2019 - January 11th, 2020)",
+        "Everybody Sensitive Sessions (January 11th, 2020 - March 15th, 2020)"
       ],
-      "songs": 143,
-      "versions": 203,
+      "songs": 150,
+      "versions": 219,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -234,12 +234,12 @@
         "Everybody Sensitive, Mr. Morale & The Big Steppers"
       ],
       "sections": [
-        "Mr. Morale Sessions (03/15/2020 - 05/05/2020)",
-        "Mr. Morale Sessions (05/05/2020 - 03/19/2021)",
-        "Mr. Morale Sessions (03/19/2021 - 08/02/2021)"
+        "Mr. Morale Sessions (March 15th, 2020 - May 5th, 2020)",
+        "Mr. Morale Sessions (May 5th, 2020 - March 19th, 2021)",
+        "Mr. Morale Sessions (March 19th, 2021 - August 2nd, 2021)"
       ],
-      "songs": 33,
-      "versions": 43,
+      "songs": 39,
+      "versions": 51,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -251,12 +251,12 @@
         "Everybody Sensitive, Mr. Morale & The Big Steppers"
       ],
       "sections": [
-        "Mr. Morale Sessions (08/02/2021 - 04/18/2022)",
-        "Mr. Morale Sessions (04/18/2022 - 05/03/2022)",
-        "Mr. Morale Sessions (05/03/2022 - 05/13/2022)"
+        "Mr. Morale Sessions (August 2nd, 2021 - April 18th, 2022)",
+        "Mr. Morale Sessions (April 18th, 2022 - May 3rd, 2022)",
+        "Mr. Morale Sessions (May 3rd, 2022 - May 13th, 2022)"
       ],
-      "songs": 28,
-      "versions": 61,
+      "songs": 33,
+      "versions": 66,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -269,8 +269,8 @@
         "Drake vs. Kendrick Lamar",
         "GNX"
       ],
-      "songs": 37,
-      "versions": 42,
+      "songs": 44,
+      "versions": 52,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -284,7 +284,7 @@
       "sections": [
         ""
       ],
-      "songs": 5,
+      "songs": 6,
       "versions": 6,
       "has_art": true,
       "has_description": true,
@@ -297,8 +297,8 @@
       "sections": [
         ""
       ],
-      "songs": 14,
-      "versions": 21,
+      "songs": 16,
+      "versions": 23,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -308,129 +308,128 @@
   "distributions": {
     "badges": {
       "special": 94,
-      "best": 58,
-      "grail": 40,
-      "worst": 8
+      "best": 57,
+      "grail": 45,
+      "worst": 11
     },
     "version_tags": {
-      "V1": 152,
-      "V2": 142,
-      "V3": 73,
-      "V4": 44,
-      "V5": 26,
-      "V6": 16,
+      "V1": 167,
+      "V2": 153,
+      "V3": 84,
+      "V4": 54,
+      "V5": 37,
+      "V6": 18,
       "V7": 12,
-      "V8": 9,
+      "V8": 11,
       "V10": 7,
-      "V?": 5,
-      "V9": 4,
+      "V9": 6,
+      "V?": 6,
+      "V11": 6,
+      "V1-V2": 5,
       "V1-V?": 3,
-      "V11": 3,
+      "V2-V3": 3,
+      "V12": 3,
+      "V14": 3,
+      "Clean": 2,
+      "V3-V?": 2,
+      "V13": 2,
+      "V1-V4": 2,
       "V15": 2,
-      "V4-5": 2,
-      "Alt.": 1,
-      "V2-V25": 1,
-      "V1-V2": 1,
-      "V3-V?": 1,
-      "V1-V8": 1,
-      "V8-V9": 1,
-      "V2-V?": 1,
-      "V12": 1,
-      "V13": 1,
-      "V2-V3": 1
+      "V2-V5": 2,
+      "V21": 2,
+      "V22": 2
     },
     "quality": {
-      "Not Available": 365,
-      "CD Quality": 195,
-      "High Quality": 163,
-      "Recording": 64,
-      "Lossless": 53,
-      "Low Quality": 21,
-      "OG File": 1,
+      "Not Available": 423,
+      "CD Quality": 200,
+      "High Quality": 187,
+      "Lossless": 77,
+      "Recording": 72,
+      "Low Quality": 17,
       "Conflicting Sources": 1
     },
     "availability": {
-      "Confirmed": 272,
-      "OG File": 154,
+      "Confirmed": 326,
+      "OG File": 175,
+      "Full": 139,
       "Snippet": 124,
-      "Full": 119,
-      "Rumored": 90,
-      "Partial": 39,
-      "Beat Only": 30,
-      "Stem Bounce": 19,
-      "Tagged": 9,
+      "Rumored": 94,
+      "Partial": 41,
+      "Beat Only": 38,
+      "Stem Bounce": 23,
+      "Tagged": 10,
       "Vocals Only": 4,
       "Conflicting Sources": 3
     },
     "type": {},
     "link_hosts": {
-      "pillows.su": 501,
-      "youtube.com": 108,
-      "complex.com": 10,
+      "pillows.su": 569,
+      "youtube.com": 120,
+      "complex.com": 9,
+      "web.archive.org": 7,
+      "youtu.be": 7,
       "open.spotify.com": 6,
+      "reddit.com": 6,
       "rollingstone.com": 6,
       "hiphopdx.com": 5,
+      "instagram.com": 5,
       "x.com": 5,
-      "pixeldrain.com": 5,
-      "youtu.be": 4,
+      "npr.org": 5,
       "genius.com": 4,
-      "npr.org": 4,
-      "reddit.com": 4,
+      "djbooth.net": 4,
+      "i.ibb.co": 4,
       "pitchfork.com": 4,
-      "people.com": 4,
       "dubcnn.com": 3,
-      "djbooth.net": 3,
-      "instagram.com": 3,
+      "xxlmag.com": 3,
+      "theneptunes.org": 3,
       "billboard.com": 3,
-      "imgur.gg": 3,
       "thefader.com": 3,
+      "people.com": 3,
       "facebook.com": 3,
-      "xxlmag.com": 2,
-      "www-billboard-com.cdn.ampproject.org": 2,
-      "mtv.com": 2,
-      "i.ibb.co": 2
+      "myspace.com": 2,
+      "www-billboard-com.cdn.ampproject.org": 2
     }
   },
   "misc_entry_types": {},
   "coverage": {
     "notes": {
-      "count": 857,
-      "pct": 99.3
+      "count": 977,
+      "pct": 100.0
     },
     "samples": {
-      "count": 45,
-      "pct": 5.2
+      "count": 47,
+      "pct": 4.8
     },
     "og_filenames": {
-      "count": 254,
-      "pct": 29.4
+      "count": 292,
+      "pct": 29.9
     },
     "featuring": {
-      "count": 270,
-      "pct": 31.3
+      "count": 318,
+      "pct": 32.5
     },
     "producers": {
-      "count": 564,
-      "pct": 65.4
+      "count": 655,
+      "pct": 67.0
     },
     "track_length": {
-      "count": 838,
-      "pct": 97.1
+      "count": 950,
+      "pct": 97.2
     },
     "file_date": {
-      "count": 194,
-      "pct": 22.5
+      "count": 212,
+      "pct": 21.7
     },
     "leak_date": {
-      "count": 774,
-      "pct": 89.7
+      "count": 561,
+      "pct": 57.4
     },
     "quality": {
-      "count": 863,
+      "count": 977,
       "pct": 100.0
     },
     "available_length": {
-      "count": 863,
+      "count": 977,
       "pct": 100.0
     },
     "sources": {
@@ -443,17 +442,15 @@
     }
   },
   "parse_signals": {
-    "total_rows": 931,
-    "song_rows": 863,
-    "skipped_rows": 1,
-    "skipped_ratio_pct": 0.11,
-    "footer_rows": 23,
+    "total_rows": 1045,
+    "song_rows": 977,
+    "skipped_rows": 0,
+    "skipped_ratio_pct": 0.0,
+    "footer_rows": 22,
     "fuzzy_matched_rows": 0,
     "dropped_columns": [],
-    "unmatched_rows": [
-      "Row 1: MASS KENDRICK/KEEM GB THAT INCLUDES:\n- FRIENDS [FINISHED]\n- I AM SOMEBODY\n- BADDEST BITCH [FINISHED]\n- BABY KEEM - PARK [FINISHED]\nWILL LEAK AT 3K. DONATE & SHARE."
-    ],
-    "unmatched_rows_total": 1
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
   },
   "suspicions": {
     "zero_song_eras": [],
@@ -503,14 +500,14 @@
         ]
       },
       {
-        "song": "it's us",
+        "song": "friends",
         "eras": [
           "Everybody Sensitive [V1]",
           "Mr. Morale [V2]"
         ]
       },
       {
-        "song": "jump",
+        "song": "it's us",
         "eras": [
           "Everybody Sensitive [V1]",
           "Mr. Morale [V2]"
@@ -546,6 +543,13 @@
         ]
       },
       {
+        "song": "overthink",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V2]"
+        ]
+      },
+      {
         "song": "push",
         "eras": [
           "Mr. Morale [V2]",
@@ -567,6 +571,13 @@
         ]
       },
       {
+        "song": "rihanna - righteous",
+        "eras": [
+          "Everybody Sensitive [V1]",
+          "Mr. Morale [V3]"
+        ]
+      },
+      {
         "song": "somebody",
         "eras": [
           "Black Panther: The Album",
@@ -584,7 +595,6 @@
       {
         "song": "take off",
         "eras": [
-          "Everybody Sensitive [V1]",
           "Mr. Morale [V2]",
           "Mr. Morale [V3]"
         ]
@@ -633,7 +643,7 @@
         ]
       },
       {
-        "song": "unknown [cardo beats]",
+        "song": "unknown [cardo got wings beats]",
         "eras": [
           "To Pimp A Butterfly [V2]",
           "good kid, m.A.A.d city"
@@ -645,6 +655,13 @@
           "DAMN.",
           "To Pimp A Butterfly [V2]",
           "good kid, m.A.A.d city"
+        ]
+      },
+      {
+        "song": "unknown [dr. dre collaborations]",
+        "eras": [
+          "GNX",
+          "Section.80"
         ]
       },
       {
@@ -683,13 +700,6 @@
           "Black Panther: The Album",
           "Training Day"
         ]
-      },
-      {
-        "song": "vent",
-        "eras": [
-          "Everybody Sensitive [V1]",
-          "Mr. Morale [V2]"
-        ]
       }
     ],
     "placeholder_groups": [
@@ -698,7 +708,17 @@
         "base": "Untitled",
         "versions": 3,
         "alt_title_clusters": [
-          "Validation And Promise, Real Good, Get It"
+          "Get It",
+          "Real Good",
+          "Validation And Promise"
+        ]
+      },
+      {
+        "era": "GNX",
+        "base": "???",
+        "versions": 2,
+        "alt_title_clusters": [
+          "gnx"
         ]
       }
     ],

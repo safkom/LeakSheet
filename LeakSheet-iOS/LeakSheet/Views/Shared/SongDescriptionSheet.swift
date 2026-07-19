@@ -22,6 +22,12 @@ struct SongDescriptionSheet: View {
     @Environment(FavouritesManager.self) private var favourites
 
     @State private var accentColor: Color?
+    /// In-app Safari for version links + evidence — the sheet must never
+    /// bounce the user out to system Safari.
+    @State private var safariItem: SafariItem?
+    /// Present when the sheet is shown from the artist screen — powers the
+    /// cross-era "Also in" section. Nil from Now Playing / Favourites.
+    @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
 
     private var badgeInfo: (emoji: String, label: String)? {
         guard let b = payload.version.badge, let badge = Badge(rawValue: b) else { return nil }
@@ -223,7 +229,9 @@ struct SongDescriptionSheet: View {
                         // tracker's Sources column ('First Mention
                         // (Screenshot)', 'Trailer (YouTube)').
                         if let sources = payload.version.sources, !sources.isEmpty {
-                            EvidenceSection(sources: sources)
+                            EvidenceSection(sources: sources) { url in
+                                safariItem = SafariItem(url: url)
+                            }
                         }
 
                         // Links — filter to valid URLs first so the header
@@ -237,7 +245,9 @@ struct SongDescriptionSheet: View {
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 ForEach(validLinks, id: \.raw) { link in
-                                    Link(destination: link.url) {
+                                    Button {
+                                        safariItem = SafariItem(url: link.url)
+                                    } label: {
                                         HStack(spacing: 6) {
                                             Image(systemName: "link")
                                                 .font(.caption2)
@@ -249,6 +259,40 @@ struct SongDescriptionSheet: View {
                                         .padding(.vertical, 6)
                                         .background(Color.lsAccent.opacity(0.1))
                                         .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // Cross-era linkage: other eras carrying the same
+                        // song (matched by the parser's normalized song_key).
+                        if let vm = artistVM {
+                            let alsoIn = vm.otherEras(
+                                forSongKey: payload.song?.songKey,
+                                excluding: payload.eraName
+                            )
+                            if !alsoIn.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Also in")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    ForEach(alsoIn) { ref in
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "square.stack")
+                                                .font(.caption2)
+                                            Text(ref.eraName)
+                                                .font(.caption)
+                                            Spacer(minLength: 0)
+                                            Text("\(ref.versionCount) version\(ref.versionCount == 1 ? "" : "s")")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.lsCard)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                     }
                                 }
                             }
@@ -394,6 +438,10 @@ struct SongDescriptionSheet: View {
         .presentationBackground(.ultraThinMaterial)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .sheet(item: $safariItem) { item in
+            SafariView(url: item.url)
+                .ignoresSafeArea()
+        }
     }
 
     // MARK: - Credits section
@@ -701,6 +749,8 @@ nonisolated enum FileInfoRows {
 /// type so the (potentially long) link list is its own invalidation boundary.
 private struct EvidenceSection: View {
     let sources: [SourceRef]
+    /// Parent owns the in-app Safari sheet.
+    var onOpenLink: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -709,7 +759,9 @@ private struct EvidenceSection: View {
                 .foregroundStyle(.secondary)
             ForEach(sources, id: \.url) { source in
                 if let url = URL(string: source.url) {
-                    Link(destination: url) {
+                    Button {
+                        onOpenLink(url)
+                    } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.caption2)
@@ -728,6 +780,7 @@ private struct EvidenceSection: View {
                         .background(Color.lsCard)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }

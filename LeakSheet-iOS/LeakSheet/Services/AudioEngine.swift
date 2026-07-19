@@ -50,6 +50,17 @@ final class AudioEngine {
     // MARK: - Private
 
     private var player: AVPlayer?
+    /// Read-only exposure for the Now Playing video surface — the layer
+    /// binds to the same AVPlayer, so playback state/controls stay unified.
+    var currentPlayer: AVPlayer? { player }
+    /// True when the current item carries a video track (e.g. an .mp4
+    /// behind an opaque pillows id). Set from the asset's track list in
+    /// `captureStreamFormat` — the one signal that works for every host.
+    private(set) var hasVideo = false
+    /// width/height of the current video track (transform-corrected), so
+    /// the Now Playing surface can size itself to the real picture instead
+    /// of letterboxing inside the square artwork frame.
+    private(set) var videoAspectRatio: Double?
     private var timeObserver: Any?
     private var observations: [NSKeyValueObservation] = []
     private var endOfTrackObserver: (any NSObjectProtocol)?
@@ -84,6 +95,8 @@ final class AudioEngine {
         error = ""
         originalQuality = false
         streamFormat = nil
+        hasVideo = false
+        videoAspectRatio = nil
         duration = Self.parseDuration(version?.trackLength)
 
         guard let version, let link = version.streamableLink else {
@@ -122,6 +135,19 @@ final class AudioEngine {
         player?.play()
         updateNowPlayingInfo()
         startLoadingTimeout()
+
+        // Early video hint from /metadata — the backend's stream-HEAD
+        // fallback knows the mime before AVAsset finishes loading tracks,
+        // so the Now Playing surface can show video without a late swap.
+        // The asset's own track list (captureStreamFormat) stays
+        // authoritative once loaded.
+        let trackKey = version.id
+        Task { [weak self] in
+            guard let meta = try? await APIClient.shared.fetchMetadata(for: link),
+                  meta.mediaKind == "video" else { return }
+            guard let self, self.currentTrack?.id == trackKey else { return }
+            self.hasVideo = true
+        }
     }
 
     func togglePlay() {
@@ -477,6 +503,11 @@ final class AudioEngine {
                 guard let self else { return }
                 self.isPlaying = false
                 self.currentTime = 0
+                // Settings → Playback → Autoplay next (default on).
+                let defaults = UserDefaults.standard
+                let autoplay = defaults.object(forKey: SettingsView.autoplayNextKey) == nil
+                    || defaults.bool(forKey: SettingsView.autoplayNextKey)
+                guard autoplay else { return }
                 self.playNext()
             }
         }
@@ -496,7 +527,21 @@ final class AudioEngine {
         var sampleRate: Double?
         var channels: Int?
         var bitrateBps: Double?
-        if let tracks = try? await item.asset.load(.tracks),
+        let loadedTracks = try? await item.asset.load(.tracks)
+        if let loadedTracks, currentTrack?.id == trackKey {
+            hasVideo = loadedTracks.contains { $0.mediaType == .video }
+        }
+        if let videoTrack = loadedTracks?.first(where: { $0.mediaType == .video }),
+           let size = try? await videoTrack.load(.naturalSize),
+           let transform = try? await videoTrack.load(.preferredTransform) {
+            let transformed = size.applying(transform)
+            let width = abs(transformed.width)
+            let height = abs(transformed.height)
+            if width > 0, height > 0, currentTrack?.id == trackKey {
+                videoAspectRatio = width / height
+            }
+        }
+        if let tracks = loadedTracks,
            let audioTrack = tracks.first(where: { $0.mediaType == .audio }) {
             if let descriptions = try? await audioTrack.load(.formatDescriptions),
                let description = descriptions.first {
@@ -755,9 +800,9 @@ final class AudioEngine {
         guard !targetUrl.isEmpty else { return }
         var fullURL = targetUrl
         if fullURL.hasPrefix("//") { fullURL = "https:" + fullURL }
-        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL, width: 1280) else { return }
+        guard let proxyURL = APIClient.shared.imageProxyURL(for: fullURL, width: 1600) else { return }
 
-        guard let image = await ImageCache.shared.loadImage(from: proxyURL, maxPixelSize: 1280) else { return }
+        guard let image = await ImageCache.shared.loadImage(from: proxyURL, maxPixelSize: 1600) else { return }
         // Guard against races: if the user advanced tracks while we were loading,
         // don't overwrite the newer track's artwork with the old one.
         guard artUrl == targetUrl else { return }

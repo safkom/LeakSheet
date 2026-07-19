@@ -35,14 +35,20 @@ actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
 
-    private init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 90
-        config.httpAdditionalHeaders = [
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        ]
-        self.session = URLSession(configuration: config)
+    /// Pass a session (e.g. URLProtocol-stubbed) for tests; nil builds the
+    /// production configuration.
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 90
+            config.httpAdditionalHeaders = [
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            ]
+            self.session = URLSession(configuration: config)
+        }
 
         self.decoder = JSONDecoder()
     }
@@ -51,8 +57,21 @@ actor APIClient {
 
     struct ParseResult {
         let artist: Artist
+        /// Raw response bytes — cached verbatim so the disk copy always
+        /// matches the server payload (no re-encode pass).
+        let rawData: Data
         let etag: String?
         let unchanged: Bool
+    }
+
+    /// Cold-load progress for the landing screen. `expectedBytes` is the
+    /// wire Content-Length when the server sent one (nil for chunked/gzip
+    /// responses without it) — the UI shows a fraction when it's known and
+    /// a byte counter otherwise.
+    nonisolated enum LoadPhase: Equatable, Sendable {
+        case connecting
+        case downloading(receivedBytes: Int64, expectedBytes: Int64?)
+        case preparing
     }
 
     func parseSheet(
@@ -60,7 +79,8 @@ actor APIClient {
         artistName: String? = nil,
         useCache: Bool = true,
         forceRefresh: Bool = false,
-        cachedEtag: String? = nil
+        cachedEtag: String? = nil,
+        onProgress: (@Sendable (LoadPhase) -> Void)? = nil
     ) async throws -> ParseResult {
         var request = URLRequest(url: Self.sheetEndpoint)
         request.httpMethod = "POST"
@@ -77,7 +97,23 @@ actor APIClient {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        onProgress?(.connecting)
+        // Chunked delegate download: URLSession hands the body over in Data
+        // CHUNKS (one memcpy each). The previous AsyncBytes loop iterated
+        // byte-at-a-time — ~8M suspension points on a Ye-size payload,
+        // burning seconds of CPU after the network was already done.
+        let downloadTask = session.dataTask(with: request)
+        let (data, response) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+                downloadTask.delegate = ChunkedDownloadDelegate(
+                    onProgress: onProgress, continuation: continuation
+                )
+                downloadTask.resume()
+            }
+        } onCancel: {
+            downloadTask.cancel()
+        }
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.httpError(status: 0, message: "Unexpected response type")
         }
@@ -97,8 +133,68 @@ actor APIClient {
             )
         }
 
+        onProgress?(.preparing)
         let artist = try Self.decodeArtist(from: data)
-        return ParseResult(artist: artist, etag: etag, unchanged: false)
+        return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
+    }
+
+    /// Accumulates a response body from delegate chunk callbacks and reports
+    /// throttled LoadPhase progress. URLSession serializes delegate calls,
+    /// so the mutable state needs no locking (@unchecked Sendable).
+    private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private let onProgress: (@Sendable (LoadPhase) -> Void)?
+        private let continuation: CheckedContinuation<(Data, URLResponse), Error>
+        private var data = Data()
+        private var response: URLResponse?
+        private var expected: Int64?
+        private var lastReport = 0
+        private var finished = false
+
+        init(
+            onProgress: (@Sendable (LoadPhase) -> Void)?,
+            continuation: CheckedContinuation<(Data, URLResponse), Error>
+        ) {
+            self.onProgress = onProgress
+            self.continuation = continuation
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive response: URLResponse,
+            completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+        ) {
+            self.response = response
+            let length = response.expectedContentLength
+            expected = length > 0 ? length : nil
+            if let expected { data.reserveCapacity(Int(expected)) }
+            completionHandler(.allow)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+            data.append(chunk)
+            // gzip bodies decompress past the wire Content-Length — drop the
+            // total rather than showing a >100% bar; the UI falls back to a
+            // byte counter.
+            if let total = expected, Int64(data.count) > total { expected = nil }
+            if data.count - lastReport >= 262_144 {
+                lastReport = data.count
+                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+            }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            guard !finished else { return }
+            finished = true
+            if let error {
+                continuation.resume(throwing: error)
+            } else if let response {
+                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+                continuation.resume(returning: (data, response))
+            } else {
+                continuation.resume(throwing: URLError(.badServerResponse))
+            }
+        }
     }
 
     // MARK: - Image Proxy
@@ -272,6 +368,9 @@ nonisolated struct FileMetadata: Codable, Sendable {
     let fileSize: Int?
     let mimeType: String?
     let filename: String?
+    /// Backend-derived "audio" | "video" | "unknown" — the only video signal
+    /// for opaque stream-host URLs (pillows always reports audio/mp4).
+    let mediaKind: String?
 
     enum CodingKeys: String, CodingKey {
         case provider, container, codec, bitrate, lossless, channels
@@ -284,6 +383,7 @@ nonisolated struct FileMetadata: Codable, Sendable {
         case qualityMismatch = "quality_mismatch"
         case fileSize = "file_size"
         case mimeType = "mime_type"
+        case mediaKind = "media_kind"
     }
 
     init(from decoder: Decoder) throws {
@@ -313,5 +413,6 @@ nonisolated struct FileMetadata: Codable, Sendable {
         fileSize = try c.decodeIfPresent(Int.self, forKey: .fileSize)
         mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
         filename = try c.decodeIfPresent(String.self, forKey: .filename)
+        mediaKind = try c.decodeIfPresent(String.self, forKey: .mediaKind)
     }
 }

@@ -4,29 +4,31 @@
   "source": "Trackers/Playboi Carti Tracker [Currently in Use] - Google Drive_files/sheet.html",
   "origin": "fixture",
   "totals": {
-    "eras": 28,
-    "songs": 1004,
-    "versions": 1367,
+    "eras": 29,
+    "songs": 1193,
+    "versions": 1616,
     "misc_entries": 0,
-    "notices": 2,
-    "links": 1189,
-    "streamable_links": 1098,
-    "streamable_pct": 92.3
+    "notices": 3,
+    "links": 1376,
+    "streamable_links": 1211,
+    "streamable_pct": 88.0
   },
   "eras": [
     {
       "name": "Aviation Class",
-      "alt_names": [],
+      "alt_names": [
+        "as JCee"
+      ],
       "sections": [
-        "Unsurfaced",
+        "Full",
         "Unavailable"
       ],
-      "songs": 4,
-      "versions": 4,
+      "songs": 6,
+      "versions": 6,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
-      "timeline_events": 4
+      "timeline_events": 5
     },
     {
       "name": "Killing Me Softly",
@@ -42,13 +44,15 @@
       "timeline_events": 3
     },
     {
-      "name": "THC: The High Chronical$",
+      "name": "The High Chronical$",
       "alt_names": [],
       "sections": [
-        "Surfaced"
+        "Full",
+        "OG Files for Released Songs",
+        "Unavailable"
       ],
-      "songs": 1,
-      "versions": 2,
+      "songs": 8,
+      "versions": 9,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -58,10 +62,12 @@
       "name": "Kream",
       "alt_names": [],
       "sections": [
-        "Unavailable"
+        "OG Files for Released Songs",
+        "Unavailable",
+        "Unknown Collaborations"
       ],
-      "songs": 2,
-      "versions": 2,
+      "songs": 3,
+      "versions": 3,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -71,8 +77,9 @@
       "name": "Young Mi$fit",
       "alt_names": [],
       "sections": [
-        "OG Files for Released Songs & Alternate Versions",
-        "Unavailable"
+        "OG Files for Released Songs",
+        "Unavailable",
+        "Unknown Collaborations"
       ],
       "songs": 12,
       "versions": 13,
@@ -82,12 +89,12 @@
       "timeline_events": 2
     },
     {
-      "name": "$ensation",
+      "name": "Sen$ation",
       "alt_names": [],
       "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
@@ -99,18 +106,19 @@
       "timeline_events": 3
     },
     {
-      "name": "Awful Records",
+      "name": "death in tune",
       "alt_names": [
-        "death in tune, FACE, Red Tape"
+        "Awful Records, FACE, Red Tape"
       ],
       "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable"
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations"
       ],
-      "songs": 24,
-      "versions": 26,
+      "songs": 25,
+      "versions": 28,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -122,13 +130,13 @@
         "Chucky Era, Cash Carti Season [V1]"
       ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable"
       ],
-      "songs": 41,
+      "songs": 38,
       "versions": 44,
       "has_art": true,
       "has_description": true,
@@ -141,15 +149,15 @@
         "Cash Carti The Mixtape [V2]"
       ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
-      "songs": 41,
-      "versions": 45,
+      "songs": 44,
+      "versions": 48,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -159,8 +167,8 @@
       "name": "Collaboration with Digital Nas",
       "alt_names": [],
       "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions"
+        "Full",
+        "OG Files for Released Songs + Alt Mixes"
       ],
       "songs": 8,
       "versions": 13,
@@ -170,32 +178,22 @@
       "timeline_events": 3
     },
     {
-      "name": "Collaboration with TrapMoneyBenny",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unavailable"
-      ],
-      "songs": 4,
-      "versions": 6,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 2
-    },
-    {
       "name": "Playboi Carti",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable"
+      "alt_names": [
+        "Self Titled"
       ],
-      "songs": 116,
-      "versions": 204,
+      "sections": [
+        "Full",
+        "Features",
+        "Main",
+        "Alt Mixes + Demos + OG versions",
+        "Features",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations"
+      ],
+      "songs": 130,
+      "versions": 210,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -203,31 +201,16 @@
     },
     {
       "name": "No Pressure",
-      "alt_names": [],
+      "alt_names": [
+        "Collaboration with Rich The Kid"
+      ],
       "sections": [
-        "Surfaced",
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
         "Unavailable"
       ],
       "songs": 4,
       "versions": 6,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 2
-    },
-    {
-      "name": "Die Lit",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable",
-        "Unknown Collaborations"
-      ],
-      "songs": 129,
-      "versions": 194,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -239,17 +222,37 @@
         "Collaboration with Lil Uzi Vert"
       ],
       "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable"
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations"
       ],
-      "songs": 13,
-      "versions": 16,
+      "songs": 11,
+      "versions": 13,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
       "timeline_events": 7
+    },
+    {
+      "name": "Die Lit",
+      "alt_names": [],
+      "sections": [
+        "Full",
+        "Features",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Features",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations"
+      ],
+      "songs": 132,
+      "versions": 207,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
     },
     {
       "name": "Whole Lotta Red [V1]",
@@ -257,21 +260,23 @@
         "Die Lit 2"
       ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations",
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Stem Edits",
+        "Snippets",
+        "Festival Remixes",
         "Unavailable",
-        "Unknown Collaborations"
+        "Unknown"
       ],
-      "songs": 84,
-      "versions": 122,
+      "songs": 97,
+      "versions": 147,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -279,13 +284,17 @@
     },
     {
       "name": "WE DON'T DIAL 911",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced"
+      "alt_names": [
+        "collaboration with Trippie Redd",
+        "14*29, 1429, Trippie Redd EP"
       ],
-      "songs": 4,
+      "sections": [
+        "Full",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations"
+      ],
+      "songs": 5,
       "versions": 6,
       "has_art": true,
       "has_description": true,
@@ -298,15 +307,16 @@
         "Blonde Era, Baby Voice Era, Opium Era"
       ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Full LQs",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
-      "songs": 69,
-      "versions": 79,
+      "songs": 70,
+      "versions": 84,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -315,15 +325,15 @@
     {
       "name": "Whole Lotta Red [V3]",
       "alt_names": [
-        "Pre-Kanye, September Tracklist Version"
+        "Pre-Ye"
       ],
       "sections": [
-        "Surfaced",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable"
       ],
-      "songs": 16,
+      "songs": 15,
       "versions": 20,
       "has_art": true,
       "has_description": true,
@@ -332,17 +342,19 @@
     },
     {
       "name": "Whole Lotta Red [V4]",
-      "alt_names": [],
+      "alt_names": [
+        "exec. prod. Ye"
+      ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
-      "songs": 20,
-      "versions": 29,
+      "songs": 27,
+      "versions": 38,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -352,76 +364,98 @@
       "name": "Whole Lotta Red (Deluxe)",
       "alt_names": [],
       "sections": [
-        "Surfaced",
-        "Features",
-        "Unsurfaced",
+        "Full",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "OG Files for Released Songs + Alternate Mixes",
         "Unavailable",
         "Unknown Collaborations"
       ],
-      "songs": 30,
-      "versions": 31,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 5
-    },
-    {
-      "name": "Narcissist",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable",
-        "Unknown Collaborations",
-        "WLR Higher Bitrate Files",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable"
-      ],
-      "songs": 57,
-      "versions": 104,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 5
-    },
-    {
-      "name": "MUSIC [V1]",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable",
-        "Unknown Collaborations",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions"
-      ],
-      "songs": 55,
-      "versions": 68,
+      "songs": 37,
+      "versions": 47,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
       "timeline_events": 6
     },
     {
-      "name": "004KT",
+      "name": "Ye - DONDA",
       "alt_names": [
-        "Collaboration with YoungBoy Never Broke Again",
-        "004KTWHOYOUHATE?"
+        "Balaclava Era, DONDA: WITH CHILD, DND WTH CHLD, DND, God's Country, The First Born Donda"
       ],
       "sections": [
-        "Surfaced",
-        "Unsurfaced",
+        "Features",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Unavailable",
+        "Unknown Collaborations"
+      ],
+      "songs": 10,
+      "versions": 54,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "Narcissist",
+      "alt_names": [
+        "Mollyworld"
+      ],
+      "sections": [
+        "Full",
+        "Features",
+        "OG files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations",
+        "King Vamp Tour Remixes",
+        "King Vamp Tour Performances",
+        "Whole Lotta Red OG Files (with space for the intro)"
+      ],
+      "songs": 79,
+      "versions": 93,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 9
+    },
+    {
+      "name": "MUSIC [V1]",
+      "alt_names": [],
+      "sections": [
+        "Full",
+        "Features",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Festival Remixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations",
+        "2022 - 2023 FESTIVAL REMIXES",
+        "OG Files for Released Songs + Alternate Mixes"
+      ],
+      "songs": 94,
+      "versions": 113,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "004KT",
+      "alt_names": [
+        "Collaboration with YoungBoy Never Broke Again"
+      ],
+      "sections": [
+        "Features",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
       "songs": 9,
-      "versions": 11,
+      "versions": 10,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -430,224 +464,259 @@
     {
       "name": "MUSIC [V2]",
       "alt_names": [
-        "Cave Era, Antagonist Era, MUSIC PARIS"
+        "Cave Era"
       ],
       "sections": [
-        "Surfaced",
+        "Full",
         "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable",
-        "Unknown Collaborations"
-      ],
-      "songs": 41,
-      "versions": 44,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 3
-    },
-    {
-      "name": "CARTI YE",
-      "alt_names": [
-        "Collaboration with Kanye West"
-      ],
-      "sections": [
-        "OG Files for Released Songs & Alternate Versions",
-        "Unavailable"
-      ],
-      "songs": 3,
-      "versions": 3,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 4
-    },
-    {
-      "name": "MUSIC [V3]",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable",
-        "Unknown Collaborations",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
-        "Unavailable"
-      ],
-      "songs": 134,
-      "versions": 188,
-      "has_art": true,
-      "has_description": true,
-      "has_stats": true,
-      "timeline_events": 7
-    },
-    {
-      "name": "BABY BOI",
-      "alt_names": [],
-      "sections": [
-        "Surfaced",
-        "Features",
-        "OG Files for Released Songs & Alternate Versions",
-        "Unsurfaced",
+        "OG Files for Released Songs + Alternate Mixes",
         "Festival Remixes",
+        "Snippets",
         "Unavailable",
         "Unknown Collaborations"
       ],
-      "songs": 67,
-      "versions": 69,
+      "songs": 55,
+      "versions": 61,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
       "timeline_events": 6
+    },
+    {
+      "name": "VULTURES",
+      "alt_names": [
+        "Bad Bitch Playbook, ¥$"
+      ],
+      "sections": [
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations",
+        "Features",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Unavailable"
+      ],
+      "songs": 16,
+      "versions": 58,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 5
+    },
+    {
+      "name": "CARTI YE",
+      "alt_names": [],
+      "sections": [
+        "OG Files for Released Songs + Alternate Mixes",
+        "Unavailable"
+      ],
+      "songs": 2,
+      "versions": 2,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 2
+    },
+    {
+      "name": "MUSIC [V3]",
+      "alt_names": [
+        "I AM MUSIC"
+      ],
+      "sections": [
+        "Full",
+        "🤖 Full AI Reference Tracks",
+        "Features",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Unavailable",
+        "Unknown Collaborations",
+        "Tour Intros"
+      ],
+      "songs": 128,
+      "versions": 146,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 6
+    },
+    {
+      "name": "BABY BOI",
+      "alt_names": [
+        "ANTAGONIST 2.0, BBYBOI"
+      ],
+      "sections": [
+        "Full",
+        "Features",
+        "Antagonist Tour Intros",
+        "Tour Intro Snippets",
+        "OG Files for Released Songs + Alternate Mixes",
+        "Snippets",
+        "Festival Remixes",
+        "Unavailable",
+        "Unknown Collaborations",
+        "004PF",
+        "Whole unreleased data"
+      ],
+      "songs": 112,
+      "versions": 119,
+      "has_art": true,
+      "has_description": true,
+      "has_stats": true,
+      "timeline_events": 4
     }
   ],
   "distributions": {
     "badges": {
-      "special": 131,
-      "best": 98,
-      "wanted": 58,
-      "grail": 35,
-      "worst": 16,
-      "ai": 10
+      "special": 141,
+      "best": 108,
+      "wanted": 67,
+      "grail": 28,
+      "worst": 14,
+      "ai": 12
     },
     "version_tags": {
-      "V1": 224,
-      "V2": 171,
-      "V3": 68,
-      "Unfinished": 41,
-      "V4": 35,
-      "MASTER": 29,
-      "V5": 18,
-      "CD VERSION": 15,
+      "V1": 266,
+      "V2": 211,
+      "V3": 91,
+      "V4": 43,
+      "V5": 22,
       "V6": 13,
-      "V7": 9,
-      "V?": 7,
-      "V8": 7,
+      "V?": 12,
+      "V7": 10,
+      "V8": 8,
       "V18": 7,
+      "V9": 6,
       "V19": 6,
-      "V22": 6,
-      "V9": 5,
+      "Song 2": 5,
       "V16": 5,
-      "V21": 5,
+      "V22": 5,
+      "Song 1": 4,
+      "Clean": 4,
+      "V11": 4,
+      "V12": 4,
+      "V13": 4,
       "V17": 4,
-      "V20": 4,
+      "V21": 4,
+      "V10": 3,
       "V14": 3,
-      "V15": 3,
-      "V13": 3,
-      "V24": 3,
-      "V11": 2
+      "V15": 3
     },
     "quality": {
-      "CD Quality": 469,
-      "Not Available": 375,
-      "High Quality": 185,
-      "Recording": 152,
-      "Lossless": 129,
-      "Low Quality": 42,
-      "Inaudible": 10,
-      "Performance": 4,
-      "Technicality": 1
+      "CD Quality": 551,
+      "Not Available": 455,
+      "Recording": 203,
+      "High Quality": 193,
+      "Lossless": 140,
+      "Performance": 61,
+      "Inaudible": 8,
+      "Mid Quality": 3,
+      "Low Quality": 1
     },
     "availability": {
-      "OG File": 508,
-      "Full": 214,
-      "Snippet": 193,
-      "Confirmed": 181,
-      "Rumored": 163,
-      "Partial": 51,
-      "Questionable": 20,
-      "Conflicting Sources": 11,
-      "Self-Bounce": 10,
-      "Cut": 9,
-      "Beat Only": 6,
+      "OG File": 578,
+      "Full": 278,
+      "Confirmed": 232,
+      "Snippet": 210,
+      "Rumored": 197,
+      "Partial": 44,
+      "Self-Bounce": 25,
+      "Questionable": 16,
+      "Beat Only": 14,
+      "Cut": 10,
+      "Conflicting Sources": 10,
       "Tagged": 1
     },
     "type": {
-      "Throwaway": 372,
-      "Unknown": 259,
-      "OG": 180,
-      "Feature": 137,
-      "Demo": 123,
-      "OG File": 114,
-      "Alt Mix": 84,
-      "Remix": 28,
-      "High Bitrate Rip": 25,
-      "Ref Track": 13,
-      "Scrapped Release": 13,
-      "Other": 9,
-      "Album/Zip": 3,
-      "Production": 2
+      "Throwaway": 394,
+      "Unknown": 308,
+      "Alt Mix": 211,
+      "OG": 172,
+      "OG File": 120,
+      "Demo": 112,
+      "Remix": 103,
+      "Feature": 93,
+      "Scrapped Release": 23,
+      "Tour Intro": 20,
+      "Ref Track": 15,
+      "Album Track": 8,
+      "High Bitrate Rip": 8,
+      "Zip": 5,
+      "Lost": 4,
+      "Other": 4,
+      "Stem Edit": 3,
+      "Production": 3,
+      "OG/High Bitrate Rip": 2,
+      "Freestyle": 1
     },
     "link_hosts": {
-      "music.froste.lol": 952,
-      "pillows.su": 135,
-      "x.com": 24,
-      "youtube.com": 17,
-      "imgur.com": 10,
-      "instagram.com": 8,
-      "youtu.be": 7,
+      "pillows.su": 1090,
+      "imgur.gg": 107,
+      "x.com": 34,
+      "imgur.com": 31,
+      "i.imgur.gg": 23,
+      "youtube.com": 18,
+      "youtu.be": 13,
+      "krakenfiles.com": 8,
       "twitter.com": 7,
-      "imgur.gg": 7,
-      "reddit.com": 5,
-      "thefader.com": 3,
-      "images.genius.com": 2,
-      "temp.imgur.gg": 2,
-      "plwcse.top": 2,
-      "i.ibb.co": 1,
+      "instagram.com": 6,
+      "music.froste.lol": 6,
+      "google.com": 5,
+      "i.e-z.host": 4,
+      "gofile.io": 4,
+      "soundcloud.com": 2,
+      "thefader.com": 2,
+      "ascap.com": 2,
+      "discord.gg": 2,
       "i-d.co": 1,
-      "pillowcase.su": 1,
-      "soundcloud.com": 1,
-      "krakenfiles.com": 1,
-      "ascap.com": 1,
-      "preview.redd.it": 1,
-      "vm.tiktok.com": 1
+      "genius.com": 1,
+      "images.genius.com": 1,
+      "townsquare.media": 1,
+      "fortnite.gg": 1,
+      "tiktok.com": 1,
+      "t.me": 1
     }
   },
   "misc_entry_types": {},
   "coverage": {
     "notes": {
-      "count": 1364,
+      "count": 1613,
       "pct": 99.8
     },
     "samples": {
-      "count": 12,
-      "pct": 0.9
+      "count": 22,
+      "pct": 1.4
     },
     "og_filenames": {
-      "count": 641,
-      "pct": 46.9
+      "count": 724,
+      "pct": 44.8
     },
     "featuring": {
-      "count": 498,
-      "pct": 36.4
+      "count": 540,
+      "pct": 33.4
     },
     "producers": {
-      "count": 1086,
-      "pct": 79.4
+      "count": 1413,
+      "pct": 87.4
     },
     "track_length": {
-      "count": 1366,
+      "count": 1614,
       "pct": 99.9
     },
     "file_date": {
-      "count": 0,
-      "pct": 0.0
+      "count": 1613,
+      "pct": 99.8
     },
     "leak_date": {
-      "count": 1366,
+      "count": 1615,
       "pct": 99.9
     },
     "quality": {
-      "count": 1367,
-      "pct": 100.0
+      "count": 1615,
+      "pct": 99.9
     },
     "available_length": {
-      "count": 1367,
-      "pct": 100.0
+      "count": 1615,
+      "pct": 99.9
     },
     "sources": {
       "count": 0,
@@ -659,12 +728,12 @@
     }
   },
   "parse_signals": {
-    "total_rows": 1561,
-    "song_rows": 1367,
+    "total_rows": 1872,
+    "song_rows": 1616,
     "skipped_rows": 0,
     "skipped_ratio_pct": 0.0,
-    "footer_rows": 22,
-    "fuzzy_matched_rows": 13,
+    "footer_rows": 42,
+    "fuzzy_matched_rows": 22,
     "dropped_columns": [],
     "unmatched_rows": [],
     "unmatched_rows_total": 0
@@ -672,32 +741,38 @@
   "suspicions": {
     "zero_song_eras": [],
     "single_song_eras": [
-      "Killing Me Softly",
-      "THC: The High Chronical$"
+      "Killing Me Softly"
     ],
     "songs_10plus_versions": [
       {
-        "song": "Ye - Junya",
-        "versions": 17,
-        "era": "Narcissist"
+        "song": "Ye - Off The Grid",
+        "versions": 21,
+        "era": "Ye - DONDA"
       },
       {
-        "song": "Ye - Off The Grid",
-        "versions": 17,
-        "era": "Narcissist"
+        "song": "Ye - Junya",
+        "versions": 18,
+        "era": "Ye - DONDA"
       },
       {
         "song": "¥$ - FIELD TRIP",
-        "versions": 16,
-        "era": "MUSIC [V3]"
+        "versions": 17,
+        "era": "VULTURES"
       },
       {
         "song": "¥$ - FUK SUMN",
         "versions": 15,
-        "era": "MUSIC [V3]"
+        "era": "VULTURES"
       }
     ],
     "duplicate_songs_across_eras": [
+      {
+        "song": "$teeze",
+        "eras": [
+          "Kream",
+          "Young Mi$fit"
+        ]
+      },
       {
         "song": "* i promise you !",
         "eras": [
@@ -713,9 +788,23 @@
         ]
       },
       {
+        "song": "[unknown 5unna collaborations]",
+        "eras": [
+          "MUSIC [V1]",
+          "Narcissist"
+        ]
+      },
+      {
+        "song": "[unknown d. hill collaborations]",
+        "eras": [
+          "Narcissist",
+          "Whole Lotta Red (Deluxe)"
+        ]
+      },
+      {
         "song": "[unknown destroy lonely collaborations]",
         "eras": [
-          "MUSIC [V3]",
+          "BABY BOI",
           "Narcissist"
         ]
       },
@@ -724,6 +813,13 @@
         "eras": [
           "MUSIC [V1]",
           "MUSIC [V3]"
+        ]
+      },
+      {
+        "song": "[unknown dj swamp izzo collaborations]",
+        "eras": [
+          "BABY BOI",
+          "MUSIC [V1]"
         ]
       },
       {
@@ -741,17 +837,17 @@
         ]
       },
       {
-        "song": "[unknown homixide gang collaborations]",
+        "song": "[unknown f1lthy collaborations]",
         "eras": [
-          "BABY BOI",
-          "Narcissist"
+          "004KT",
+          "Whole Lotta Red (Deluxe)"
         ]
       },
       {
-        "song": "[unknown jack harlow collaborations]",
+        "song": "[unknown hxg collaborations]",
         "eras": [
-          "Die Lit",
-          "Whole Lotta Red [V2]"
+          "BABY BOI",
+          "Narcissist"
         ]
       },
       {
@@ -765,7 +861,7 @@
         "song": "[unknown ken carson collaborations]",
         "eras": [
           "BABY BOI",
-          "MUSIC [V3]"
+          "Narcissist"
         ]
       },
       {
@@ -778,9 +874,11 @@
       {
         "song": "[unknown lil uzi vert collaborations]",
         "eras": [
+          "16*29",
           "BABY BOI",
           "MUSIC [V1]",
           "MUSIC [V2]",
+          "Narcissist",
           "Whole Lotta Red [V1]",
           "Whole Lotta Red [V2]"
         ]
@@ -793,53 +891,70 @@
         ]
       },
       {
-        "song": "[unknown metro boomin collaborations]",
+        "song": "[unknown pi'erre bourne collaborations]",
         "eras": [
-          "Whole Lotta Red [V1]",
-          "Whole Lotta Red [V2]"
+          "BABY BOI",
+          "MUSIC [V3]",
+          "Narcissist"
         ]
       },
       {
-        "song": "[unknown pi'erre bourne collaborations]",
+        "song": "[unknown rich the kid collaborations]",
         "eras": [
-          "MUSIC [V3]",
-          "Narcissist"
+          "No Pressure",
+          "Playboi Carti"
         ]
       },
       {
         "song": "[unknown richie souf collaborations]",
         "eras": [
-          "BABY BOI",
           "MUSIC [V3]",
           "Whole Lotta Red [V1]"
-        ]
-      },
-      {
-        "song": "[unknown skepta collaborations]",
-        "eras": [
-          "MUSIC [V3]",
-          "Narcissist"
         ]
       },
       {
         "song": "[unknown travis scott collaborations]",
         "eras": [
           "BABY BOI",
-          "MUSIC [V3]"
+          "MUSIC [V2]"
+        ]
+      },
+      {
+        "song": "[unknown trippie redd collaborations]",
+        "eras": [
+          "BABY BOI",
+          "WE DON'T DIAL 911"
+        ]
+      },
+      {
+        "song": "[unknown tyler, the creator collaborations]",
+        "eras": [
+          "MUSIC [V2]",
+          "Whole Lotta Red [V1]"
         ]
       },
       {
         "song": "[unknown ye collaborations]",
         "eras": [
           "BABY BOI",
-          "Narcissist"
+          "MUSIC [V3]",
+          "Narcissist",
+          "Whole Lotta Red [V4]",
+          "Ye - DONDA"
         ]
       },
       {
         "song": "[unknown youngboy never broke again collaborations]",
         "eras": [
           "BABY BOI",
-          "MUSIC [V3]"
+          "MUSIC [V2]"
+        ]
+      },
+      {
+        "song": "[unknown yung lean collaborations]",
+        "eras": [
+          "Die Lit",
+          "MUSIC [V1]"
         ]
       },
       {
@@ -850,10 +965,17 @@
         ]
       },
       {
-        "song": "arm and leg",
+        "song": "big bank",
         "eras": [
-          "Die Lit",
-          "WE DON'T DIAL 911"
+          "16*29",
+          "Die Lit"
+        ]
+      },
+      {
+        "song": "bitch boy",
+        "eras": [
+          "Whole Lotta Red [V2]",
+          "Whole Lotta Red [V4]"
         ]
       },
       {
@@ -864,17 +986,10 @@
         ]
       },
       {
-        "song": "boss up",
-        "eras": [
-          "Ca$h Carti Season",
-          "Playboi Carti"
-        ]
-      },
-      {
         "song": "brand new",
         "eras": [
-          "004KT",
-          "Playboi Carti"
+          "Playboi Carti",
+          "Whole Lotta Red (Deluxe)"
         ]
       },
       {
@@ -882,13 +997,6 @@
         "eras": [
           "Whole Lotta Red (Deluxe)",
           "Whole Lotta Red [V1]"
-        ]
-      },
-      {
-        "song": "cake",
-        "eras": [
-          "Die Lit",
-          "Playboi Carti"
         ]
       },
       {
@@ -913,10 +1021,17 @@
         ]
       },
       {
+        "song": "doctor",
+        "eras": [
+          "MUSIC [V2]",
+          "MUSIC [V3]"
+        ]
+      },
+      {
         "song": "dope",
         "eras": [
-          "$ensation",
-          "Die Lit"
+          "Die Lit",
+          "Sen$ation"
         ]
       },
       {
@@ -934,17 +1049,17 @@
         ]
       },
       {
-        "song": "drugs got me numb",
+        "song": "exotic",
         "eras": [
-          "MUSIC [V1]",
-          "MUSIC [V3]"
+          "WE DON'T DIAL 911",
+          "death in tune"
         ]
       },
       {
-        "song": "exotic",
+        "song": "fomdj",
         "eras": [
-          "Awful Records",
-          "WE DON'T DIAL 911"
+          "MUSIC [V1]",
+          "MUSIC [V3]"
         ]
       },
       {
@@ -955,10 +1070,26 @@
         ]
       },
       {
+        "song": "goku",
+        "eras": [
+          "Whole Lotta Red (Deluxe)",
+          "Whole Lotta Red [V1]"
+        ]
+      },
+      {
+        "song": "gwapanese",
+        "eras": [
+          "Die Lit",
+          "Whole Lotta Red [V4]"
+        ]
+      },
+      {
         "song": "headshot",
         "eras": [
           "Whole Lotta Red (Deluxe)",
-          "Whole Lotta Red [V2]"
+          "Whole Lotta Red [V2]",
+          "Whole Lotta Red [V4]",
+          "Ye - DONDA"
         ]
       },
       {
@@ -969,24 +1100,45 @@
         ]
       },
       {
-        "song": "homixide gang - chopshop",
+        "song": "home (kod)",
         "eras": [
-          "BABY BOI",
+          "16*29",
+          "Die Lit"
+        ]
+      },
+      {
+        "song": "homicide55555",
+        "eras": [
+          "MUSIC [V2]",
           "MUSIC [V3]"
         ]
       },
       {
-        "song": "juice wrld - back on that wok freestyle",
+        "song": "hxg - chopshop",
         "eras": [
-          "MUSIC [V1]",
-          "Whole Lotta Red [V2]"
+          "BABY BOI",
+          "MUSIC [V1]"
         ]
       },
       {
-        "song": "kill one of you niggas*",
+        "song": "i'm in this bitch",
         "eras": [
-          "Narcissist",
-          "Whole Lotta Red [V2]"
+          "Whole Lotta Red (Deluxe)",
+          "Whole Lotta Red [V3]"
+        ]
+      },
+      {
+        "song": "juice wrld - back on the wok freestyle",
+        "eras": [
+          "MUSIC [V1]",
+          "Whole Lotta Red [V1]"
+        ]
+      },
+      {
+        "song": "jumpoutthehouse",
+        "eras": [
+          "Whole Lotta Red [V3]",
+          "Whole Lotta Red [V4]"
         ]
       },
       {
@@ -997,17 +1149,24 @@
         ]
       },
       {
-        "song": "lil uzi vert - yea, yea",
+        "song": "let's do it",
         "eras": [
-          "Ca$h Carti Season",
-          "Cash Carti The Mixtape"
+          "BABY BOI",
+          "MUSIC [V3]"
         ]
       },
       {
-        "song": "m.a.d.",
+        "song": "m.a.d",
         "eras": [
-          "Whole Lotta Red (Deluxe)",
-          "Whole Lotta Red [V2]"
+          "Whole Lotta Red [V2]",
+          "Whole Lotta Red [V4]"
+        ]
+      },
+      {
+        "song": "meet yo maker",
+        "eras": [
+          "BABY BOI",
+          "MUSIC [V2]"
         ]
       },
       {
@@ -1018,10 +1177,10 @@
         ]
       },
       {
-        "song": "my cup",
+        "song": "ménage",
         "eras": [
-          "Narcissist",
-          "Whole Lotta Red [V2]"
+          "MUSIC [V1]",
+          "MUSIC [V2]"
         ]
       },
       {
@@ -1039,9 +1198,16 @@
         ]
       },
       {
-        "song": "omertà",
+        "song": "numb",
         "eras": [
-          "BABY BOI",
+          "MUSIC [V1]",
+          "MUSIC [V3]"
+        ]
+      },
+      {
+        "song": "omertà*",
+        "eras": [
+          "MUSIC [V2]",
           "MUSIC [V3]"
         ]
       },
@@ -1053,14 +1219,7 @@
         ]
       },
       {
-        "song": "perky gone grab on me",
-        "eras": [
-          "Whole Lotta Red (Deluxe)",
-          "Whole Lotta Red [V2]"
-        ]
-      },
-      {
-        "song": "pop out",
+        "song": "problem child",
         "eras": [
           "MUSIC [V2]",
           "MUSIC [V3]"
@@ -1075,6 +1234,13 @@
         ]
       },
       {
+        "song": "radar",
+        "eras": [
+          "MUSIC [V2]",
+          "MUSIC [V3]"
+        ]
+      },
+      {
         "song": "rockstar made",
         "eras": [
           "Narcissist",
@@ -1082,17 +1248,31 @@
         ]
       },
       {
-        "song": "teen x",
+        "song": "she will*",
         "eras": [
-          "Narcissist",
-          "Whole Lotta Red [V1]"
+          "BABY BOI",
+          "MUSIC [V1]"
         ]
       },
       {
-        "song": "texas",
+        "song": "sights",
+        "eras": [
+          "MUSIC [V1]",
+          "Narcissist"
+        ]
+      },
+      {
+        "song": "squad",
         "eras": [
           "16*29",
-          "Die Lit"
+          "Playboi Carti"
+        ]
+      },
+      {
+        "song": "teen x",
+        "eras": [
+          "Narcissist",
+          "Whole Lotta Red [V2]"
         ]
       },
       {
@@ -1106,36 +1286,28 @@
         "song": "travis scott - fe!n",
         "eras": [
           "MUSIC [V1]",
-          "MUSIC [V2]",
-          "MUSIC [V3]"
+          "MUSIC [V2]"
         ]
       },
       {
-        "song": "upside down*",
-        "eras": [
-          "MUSIC [V1]",
-          "Whole Lotta Red [V1]"
-        ]
-      },
-      {
-        "song": "vetements jeans",
+        "song": "ty dolla $ign - say it",
         "eras": [
           "BABY BOI",
           "MUSIC [V3]"
         ]
       },
       {
-        "song": "wake up f1lthy",
+        "song": "walk",
         "eras": [
           "MUSIC [V1]",
           "MUSIC [V3]"
         ]
       },
       {
-        "song": "ye - mr. miyagi",
+        "song": "way too much cash*",
         "eras": [
-          "BABY BOI",
-          "MUSIC [V1]"
+          "Whole Lotta Red (Deluxe)",
+          "Whole Lotta Red [V2]"
         ]
       },
       {
@@ -1147,12 +1319,7 @@
       }
     ],
     "placeholder_groups": [],
-    "era_like_song_names": [
-      {
-        "era": "16*29",
-        "song": "[Unknown 16*29 songs]"
-      }
-    ],
+    "era_like_song_names": [],
     "over_long_names": []
   }
 }

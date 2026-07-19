@@ -29,7 +29,7 @@ struct FilterPipelineTests {
 
     private func song(_ baseName: String, versions: [SongVersion]) -> Song {
         Song(
-            baseName: baseName, versions: versions, badge: nil,
+            baseName: baseName, songKey: nil, versions: versions, badge: nil,
             availableLength: nil, quality: nil, trackLength: nil,
             leakDate: nil, fileDate: nil
         )
@@ -62,7 +62,8 @@ struct FilterPipelineTests {
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
             eras: [eraA, eraB], trackerStats: nil, parseMetadata: nil,
-            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil
+            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            tabs: nil
         )
     }
 
@@ -245,11 +246,202 @@ struct FilterPipelineTests {
 
     // MARK: - Image buckets
 
+    // 2026-07-17: 1600 bucket added to match the backend (full-screen art
+    // was upscaled from 1280 on ~1290px displays).
     @Test(arguments: [
         (40.0, 3.0, 128), (64.0, 3.0, 320), (96.0, 3.0, 320),
-        (160.0, 3.0, 640), (300.0, 3.0, 1280), (1000.0, 3.0, 1280),
+        (160.0, 3.0, 640), (300.0, 3.0, 1280), (430.0, 3.0, 1600),
+        (1000.0, 3.0, 1600),
     ])
     func `image size buckets`(points: Double, scale: Double, expected: Int) {
         #expect(ImageCache.bucket(forPointSize: points, scale: scale) == expected)
+    }
+}
+
+/// Tab-mode routing through the filter pipeline (2026-07-17): a selected
+/// TabSection's entries flow into `miscResults` so the existing misc list
+/// UI renders every parsed tab.
+struct TabModeFilterTests {
+    private func entry(_ name: String, era: String = "Era 1", tab: String) -> MiscEntry {
+        MiscEntry(
+            eraName: era, name: name, notes: nil, entryType: nil, date: nil,
+            length: nil, available: nil, quality: nil, streaming: nil,
+            links: [], sourceTab: tab
+        )
+    }
+
+    private func artistWithTabs() -> Artist {
+        let released = TabSection(
+            kind: "released", name: "📻 Released",
+            entries: [entry("Hurricane", tab: "released"), entry("Moon", tab: "released")]
+        )
+        let stems = TabSection(
+            kind: "stems", name: "🌱 Stems",
+            entries: [entry("Runaway Stems", tab: "stems")]
+        )
+        return Artist(
+            name: "Test", slug: "test", sourceUrl: nil, eras: [],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil,
+            miscEntries: [entry("Old Flat Misc", tab: "misc")],
+            tabs: [released, stems]
+        )
+    }
+
+    @Test func `selected tab routes its entries into miscResults`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = artist.tabs![0].id
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Hurricane", "Moon"])
+    }
+
+    @Test func `tab entries respect the search query`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = artist.tabs![0].id
+        state.query = "moon"
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Moon"])
+    }
+
+    @Test func `unknown tab key yields no entries`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.tabKey = "missing::tab"
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.isEmpty)
+    }
+
+    @Test func `legacy misc mode still reads the flat list`() {
+        let artist = artistWithTabs()
+        var state = FilterState()
+        state.misc = true
+        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
+        #expect(content.miscResults.map(\.name) == ["Old Flat Misc"])
+    }
+}
+
+/// Worst Of filter (2026-07-18): mirrors Best Of for the 🗑 badge.
+struct WorstOfFilterTests {
+    private func artist() -> Artist {
+        let good = SongVersion(
+            name: "Good", versionTag: nil, badge: "best", featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: "High Quality",
+            links: ["https://pillows.su/f/a"], qualityColor: nil,
+            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            sources: nil, rating: nil
+        )
+        let bad = SongVersion(
+            name: "Bad", versionTag: nil, badge: "worst", featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: "Low Quality",
+            links: ["https://pillows.su/f/b"], qualityColor: nil,
+            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            sources: nil, rating: nil
+        )
+        let era = Era(
+            name: "Era A", altNames: nil, description: nil, timeline: nil,
+            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            sections: [Section(name: "", group: nil, songs: [
+                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil,
+                     availableLength: nil, quality: nil, trackLength: nil,
+                     leakDate: nil, fileDate: nil),
+                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil,
+                     availableLength: nil, quality: nil, trackLength: nil,
+                     leakDate: nil, fileDate: nil),
+            ])],
+            songCount: nil, versionCount: nil
+        )
+        return Artist(
+            name: "T", slug: "t", sourceUrl: nil, eras: [era],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+    }
+
+    @Test func `worstOf keeps only worst-badged versions`() {
+        var state = FilterState()
+        state.worstOf = true
+        let content = ArtistViewModel.computeContent(artist: artist(), state: state, eraStats: [:])
+        #expect(content.eras.count == 1)
+        #expect(content.eras[0].songs.map(\.baseName) == ["Bad"])
+    }
+
+    @Test func `badge tab kinds are hidden from available tabs`() async {
+        let tabbed = Artist(
+            name: "T", slug: "t", sourceUrl: nil, eras: [],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            tabs: [
+                TabSection(kind: "released", name: "Released", entries: []),
+                TabSection(kind: "best_of", name: "Best Of", entries: []),
+                TabSection(kind: "grails", name: "Grails", entries: []),
+            ]
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: tabbed) }
+        let kinds = await MainActor.run { vm.availableTabs.map(\.kind) }
+        #expect(kinds == ["released"])
+    }
+}
+
+/// Cross-era song linkage (2026-07-18): Precomputed indexes songKey → eras.
+struct CrossEraIndexTests {
+    private func song(_ name: String, key: String?, versions: Int = 1) -> Song {
+        let v = SongVersion(
+            name: name, versionTag: nil, badge: nil, featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: nil, links: nil,
+            qualityColor: nil, availableLengthColor: nil,
+            dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        )
+        return Song(
+            baseName: name, songKey: key,
+            versions: Array(repeating: v, count: versions), badge: nil,
+            availableLength: nil, quality: nil, trackLength: nil,
+            leakDate: nil, fileDate: nil
+        )
+    }
+
+    private func era(_ name: String, songs: [Song]) -> Era {
+        Era(
+            name: name, altNames: nil, description: nil, timeline: nil,
+            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            sections: [Section(name: "", group: nil, songs: songs)],
+            songCount: nil, versionCount: nil
+        )
+    }
+
+    @Test func `index keeps only keys spanning multiple eras`() async {
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [
+                era("War", songs: [song("This One Here", key: "this one here")]),
+                era("Donda 2", songs: [
+                    song("This One Here", key: "this one here", versions: 3),
+                    song("Unique", key: "unique"),
+                ]),
+            ],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let fromWar = await MainActor.run {
+            vm.otherEras(forSongKey: "this one here", excluding: "War")
+        }
+        #expect(fromWar.map(\.eraName) == ["Donda 2"])
+        #expect(fromWar.first?.versionCount == 3)
+        // Era-unique songs have no cross-era refs
+        let unique = await MainActor.run {
+            vm.otherEras(forSongKey: "unique", excluding: "War")
+        }
+        #expect(unique.isEmpty)
     }
 }

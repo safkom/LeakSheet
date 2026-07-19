@@ -13,6 +13,12 @@ struct StreamResolverTests {
         "https://music.froste.lol/song/0a1b2c3d",
         "https://krakenfiles.com/view/FJmpAhYHMp/file.html",
         "HTTPS://PILLOWS.SU/F/ABC123",  // case-insensitive
+        // 2026-07-17: pixeldrain files + Google Drive single files stream
+        // through the backend proxy.
+        "https://pixeldrain.com/u/aBc123",
+        "https://www.pixeldrain.com/u/xY9z",
+        "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing",
+        "https://drive.google.com/file/d/1AbC-x_9",
     ])
     func `known hosts are streamable`(url: String) {
         #expect(StreamResolver.isStreamableURL(url))
@@ -25,10 +31,23 @@ struct StreamResolverTests {
         "https://notpillows.su/f/abc123",        // wrong host
         "https://krakenfiles.com/view/X/other",  // missing file.html
         "https://music.froste.lol/song/XYZ",     // non-hex hash
+        "https://pixeldrain.com/l/abc123",       // pixeldrain LIST, not a file
+        "https://drive.google.com/drive/folders/1AbCdEf",  // gdrive folder
+        "https://drive.google.com/open?id=1AbCdEf",        // legacy form → Safari
         "",
     ])
     func `unknown hosts and malformed links are not streamable`(url: String) {
         #expect(!StreamResolver.isStreamableURL(url))
+    }
+
+    @Test func `pixeldrain original quality is the direct file API`() {
+        let url = StreamResolver.originalQualityURL(for: "https://pixeldrain.com/u/aBc123")
+        #expect(url?.absoluteString == "https://pixeldrain.com/api/file/aBc123?download")
+    }
+
+    @Test func `gdrive original quality routes through the stream proxy`() {
+        let url = StreamResolver.originalQualityURL(for: "https://drive.google.com/file/d/1AbC/view")
+        #expect(url?.absoluteString.contains("/stream?url=") == true)
     }
 
     @Test func `original quality maps pillows to the download API`() {

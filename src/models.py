@@ -5,10 +5,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-import pydantic
 from pydantic import BaseModel, Field
-
-_PYDANTIC_V2 = int(pydantic.VERSION.split(".")[0]) >= 2
 
 
 class Badge(str, Enum):
@@ -119,6 +116,14 @@ class SongVersion(BaseModel):
 class Song(BaseModel):
     """A logical song that may have multiple versions."""
     base_name: str = Field(..., description="Song name without version tags or badges")
+    song_key: str = Field(
+        default="",
+        description=(
+            "Stable normalized identity key (case/diacritics/punctuation "
+            "collapsed) shared by the same song across eras; empty for "
+            "unidentified placeholder tracks"
+        ),
+    )
     versions: list[SongVersion] = Field(default_factory=list)
 
     @property
@@ -135,7 +140,7 @@ class Song(BaseModel):
         return self.versions[0] if self.versions else None
 
     def dict(self, **kwargs):
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["badge"] = self.badge.value if self.badge else None
         # Surface primary version metadata at Song level for convenience
         p = self.primary
@@ -180,7 +185,7 @@ class EraStats(BaseModel):
         )
 
     def dict(self, **kwargs):
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["total"] = self.total
         return d
 
@@ -268,7 +273,7 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["sections"] = [
             {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}
             for sec in self.sections
@@ -318,7 +323,31 @@ class MiscEntry(BaseModel):
     quality: str | None = Field(None, description="Quality column (Misc tab)")
     streaming: bool | None = Field(None, description="Streaming Yes/No (Music Videos tab)")
     links: list[str] = Field(default_factory=list, description="Entry URLs")
-    source_tab: str = Field(..., description="'misc' or 'music_videos'")
+    source_tab: str = Field(
+        ...,
+        description=(
+            "Tab kind the entry came from: 'misc', 'music_videos', "
+            "'released', 'best_of', 'worst_of', 'stems', or 'other'"
+        ),
+    )
+
+
+class TabSection(BaseModel):
+    """One parsed secondary tab, exposed as a switchable content mode.
+
+    ``misc`` / ``music_videos`` entries also remain in the flat
+    ``Artist.misc_entries`` list for backward compatibility — clients that
+    understand ``tabs`` should prefer it as the uniform surface.
+    """
+    kind: str = Field(
+        ...,
+        description=(
+            "Tab kind: 'misc' | 'music_videos' | 'released' | 'best_of' | "
+            "'worst_of' | 'stems' | 'other'"
+        ),
+    )
+    name: str = Field(..., description="Original tab display name (may include emoji)")
+    entries: list[MiscEntry] = Field(default_factory=list)
 
 
 class Notice(BaseModel):
@@ -341,6 +370,13 @@ class Artist(BaseModel):
         default_factory=list,
         description="Entries from secondary Misc / Music Videos tabs (separate from eras)",
     )
+    tabs: list[TabSection] = Field(
+        default_factory=list,
+        description=(
+            "All parsed secondary tabs (misc, music_videos, released, "
+            "best_of, worst_of, stems, other) as switchable content modes"
+        ),
+    )
 
     @property
     def total_songs(self) -> int:
@@ -355,7 +391,7 @@ class Artist(BaseModel):
         # serialized twice (once natively here, then discarded and rebuilt via
         # ``era.dict()``). On a large tracker that redundant pass was real CPU.
         kwargs = _with_excluded(kwargs, "eras")
-        d = super().model_dump(**kwargs) if _PYDANTIC_V2 else super().dict(**kwargs)
+        d = super().model_dump(**kwargs)
         d["eras"] = [era.dict() for era in self.eras]
         d["total_songs"] = self.total_songs
         d["total_versions"] = self.total_versions
@@ -549,6 +585,40 @@ _WITH_PATTERN = re.compile(r"\(with\s+(.+?)\)", re.IGNORECASE)
 _REF_PATTERN = re.compile(r"\(ref\.?\s+(.+?)\)", re.IGNORECASE)
 
 
+# Title continuations like "Vol. 2" / "Pt. II" / "Part Two" — a comma before
+# these is part of one title ("Meet The Woo, Vol. 2"), not an alias separator.
+_ALIAS_CONTINUATION_RE = re.compile(
+    r"^(?:vol|pt|part|no)\.?\s*"
+    r"(?:\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)$",
+    re.IGNORECASE,
+)
+
+
+def _split_alt_aliases(text: str) -> list[str]:
+    """Split a comma-separated alias list into individual aliases.
+
+    Trackers write alt-name lines like "(Mollyworld, Balaclava Era)" meaning
+    two aliases. Returns the parts only when the list looks like genuine
+    aliases: every part >=3 chars and not a title continuation like "Vol. 2",
+    and at least one part contains a letter — otherwise returns [text]
+    unchanged. Keeps "Meet The Woo, Vol. 2" and "10,000 Days" whole while
+    splitting numeric-alias lists like "14*29, 1429, Trippie Redd EP".
+    """
+    if "," not in text:
+        return [text]
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) < 2:
+        return [text]
+    for p in parts:
+        if len(p) < 3:
+            return [text]
+        if _ALIAS_CONTINUATION_RE.match(p):
+            return [text]
+    if not any(c.isalpha() for p in parts for c in p):
+        return [text]
+    return parts
+
+
 def parse_song_credits(
     raw_name: str,
 ) -> tuple[str, str | None, str | None, str | None, str | None, list[str]]:
@@ -585,9 +655,10 @@ def parse_song_credits(
         line = line.strip()
         if not line:
             continue
-        # Strip wrapping parens: "(All I Have)" → "All I Have"
+        # Strip wrapping parens: "(All I Have)" → "All I Have".
+        # Parenthetical lines may list several aliases: "(A, B)" → two alts.
         if line.startswith("(") and line.endswith(")"):
-            alt_titles.append(line[1:-1].strip())
+            alt_titles.extend(_split_alt_aliases(line[1:-1].strip()))
         else:
             alt_titles.append(line)
 

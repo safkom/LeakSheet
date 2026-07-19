@@ -9,9 +9,13 @@ import Observation
 nonisolated struct FilterState: Equatable, Sendable {
     var query: String = ""
     var bestOf = false
+    var worstOf = false
     var recents = false
     var noSnippets = false
     var misc = false
+    /// Selected TabSection id (Released / Best Of / Stems / …). Routes that
+    /// tab's entries through the misc pipeline; nil = no tab mode active.
+    var tabKey: String? = nil
 }
 
 /// One era with its filtered songs/sections and (unfiltered) display stats.
@@ -33,6 +37,14 @@ nonisolated struct FilteredEra: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One era's worth of misc/tab entries — prebuilt off-main so the tab
+/// page's accordion doesn't regroup ~1900 entries on every render.
+nonisolated struct MiscEraGroup: Identifiable, Equatable, Sendable {
+    let eraName: String
+    let entries: [MiscEntry]
+    var id: String { eraName }
+}
+
 /// Everything the artist screen renders for one FilterState, computed in a
 /// single off-main pass. Only the branch matching the state is populated.
 nonisolated struct FilteredContent: Equatable, Sendable {
@@ -46,6 +58,8 @@ nonisolated struct FilteredContent: Equatable, Sendable {
     /// RecentResult.id → index into `recentPlaybackItems`.
     let recentStreamIndex: [String: Int]
     let miscResults: [MiscEntry]
+    /// `miscResults` grouped by era in first-appearance order.
+    var miscEraGroups: [MiscEraGroup] = []
 }
 
 /// One row of the flattened era list. All rows render as direct children of
@@ -104,12 +118,17 @@ final class ArtistViewModel {
     // MARK: - Filters
 
     var bestOf: Bool = false
+    var worstOf: Bool = false
     var recents: Bool = false
     var noSnippets: Bool = false
     /// Misc mode — a strict switch, not a peer filter: when ON, only entries
     /// from the tracker's Misc / Music Videos tabs are shown, never mixed
     /// with era songs; the other chips (and search) filter within them.
+    /// Legacy path for payloads without `tabs`; superseded by tab chips.
     var misc: Bool = false
+    /// Selected content-tab id (TabSection.id) — same strict-switch
+    /// semantics as misc, one chip per parsed tab.
+    private(set) var selectedTabKey: String? = nil
     var expandedEra: String? = nil
     /// Expanded multi-version songs, keyed "eraName::baseName". Lives here
     /// (not view @State) because lazy containers discard offscreen state.
@@ -126,6 +145,10 @@ final class ArtistViewModel {
     /// Flattened rows for the eras branch — rebuilt on content/expansion
     /// changes so `body` only iterates.
     private(set) var eraRows: [EraRow] = []
+
+    /// songKey → eras containing that song (only keys spanning >1 era) —
+    /// built once in Precomputed.
+    private let songKeyEras: [String: [CrossEraRef]]
 
     // MARK: - Recents windowing
 
@@ -150,31 +173,101 @@ final class ArtistViewModel {
         !(artist.miscEntries ?? []).isEmpty
     }
 
+    /// Badge-annotation kinds — never pages (the backend stopped emitting
+    /// them 2026-07-18; the filter also hides them in older cached payloads).
+    private static let badgeTabKinds: Set<String> = [
+        "best_of", "worst_of", "special", "grails", "wanted",
+    ]
+
+    /// Parsed content tabs (Misc / Music Videos / Released / Stems / …) —
+    /// one switchable chip each. Empty for older cached payloads, which
+    /// fall back to the single legacy Misc chip.
+    var availableTabs: [TabSection] {
+        (artist.tabs ?? []).filter { !Self.badgeTabKinds.contains($0.kind) }
+    }
+
     // MARK: - Init
 
-    init(artist: Artist) {
-        self.artist = artist
+    /// The heavy startup pass — era stats + the unfiltered content tree —
+    /// computed off-main by `make(artist:)` so pushing a huge tracker
+    /// doesn't hitch the navigation transition.
+    /// One era containing another copy of a song (matched by `songKey`).
+    nonisolated struct CrossEraRef: Equatable, Sendable, Identifiable {
+        let eraName: String
+        let versionCount: Int
+        var id: String { eraName }
+    }
 
-        var statsByName: [String: Stats] = [:]
-        var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
-        for era in artist.eras {
-            let s = Self.computeEraStats(era)
-            statsByName[era.name] = s
-            total += s.total
-            available += s.available
-            snippets += s.snippets
-            confirmed += s.confirmed
-            fullHQ += s.fullHQ
+    nonisolated struct Precomputed: Sendable {
+        let eraStatsByName: [String: Stats]
+        let artistStats: Stats
+        let content: FilteredContent
+        /// songKey → every era containing that song, in era order — backs
+        /// the description sheet's "Also in" cross-era section.
+        let songKeyEras: [String: [CrossEraRef]]
+
+        init(artist: Artist) {
+            var statsByName: [String: Stats] = [:]
+            var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+            var keyEras: [String: [CrossEraRef]] = [:]
+            for era in artist.eras {
+                let s = ArtistViewModel.computeEraStats(era)
+                statsByName[era.name] = s
+                total += s.total
+                available += s.available
+                snippets += s.snippets
+                confirmed += s.confirmed
+                fullHQ += s.fullHQ
+                for song in era.allSongs {
+                    guard let key = song.songKey, !key.isEmpty else { continue }
+                    // One ref per era per key (a song appears once per era)
+                    if keyEras[key]?.last?.eraName != era.name {
+                        keyEras[key, default: []].append(
+                            CrossEraRef(eraName: era.name, versionCount: song.versions.count)
+                        )
+                    }
+                }
+            }
+            self.eraStatsByName = statsByName
+            self.artistStats = Stats(
+                total: total, available: available, snippets: snippets,
+                confirmed: confirmed, fullHQ: fullHQ
+            )
+            self.content = ArtistViewModel.computeContent(
+                artist: artist, state: FilterState(), eraStats: statsByName
+            )
+            // Only keys that actually span content are worth keeping
+            self.songKeyEras = keyEras.filter { $0.value.count > 1 }
         }
-        self.eraStatsByName = statsByName
-        self.artistStats = Stats(
-            total: total, available: available, snippets: snippets,
-            confirmed: confirmed, fullHQ: fullHQ
-        )
+    }
 
-        // First frame renders synchronously from the unfiltered state — one
-        // cheap pass, no filtering allocations.
-        self.content = Self.computeContent(artist: artist, state: FilterState(), eraStats: statsByName)
+    /// Other eras containing the same song (by songKey), excluding the one
+    /// the user is already looking at. Empty when the song is era-unique.
+    func otherEras(forSongKey key: String?, excluding eraName: String) -> [CrossEraRef] {
+        guard let key, !key.isEmpty, let refs = songKeyEras[key] else { return [] }
+        return refs.filter { $0.eraName != eraName }
+    }
+
+    /// Preferred construction path: the stats/content pass runs off-main.
+    static func make(artist: Artist) async -> ArtistViewModel {
+        let precomputed = await Task.detached(priority: .userInitiated) {
+            Precomputed(artist: artist)
+        }.value
+        return ArtistViewModel(artist: artist, precomputed: precomputed)
+    }
+
+    /// Synchronous variant — used by tests and previews; computes the
+    /// startup pass inline on the caller's thread.
+    convenience init(artist: Artist) {
+        self.init(artist: artist, precomputed: Precomputed(artist: artist))
+    }
+
+    init(artist: Artist, precomputed: Precomputed) {
+        self.artist = artist
+        self.eraStatsByName = precomputed.eraStatsByName
+        self.artistStats = precomputed.artistStats
+        self.content = precomputed.content
+        self.songKeyEras = precomputed.songKeyEras
 
         // Seed era colors from the persisted extraction cache so cards and
         // headers are tinted on first paint without any image download.
@@ -225,6 +318,13 @@ final class ArtistViewModel {
             applyFilters()
             return
         }
+        // Honest indicator: filtering is pending from the moment the query
+        // changes, not only after the debounce fires — previously the
+        // spinner never appeared during the 200ms window, which is most of
+        // a fast query's total latency.
+        if q != debouncedQuery {
+            isFiltering = true
+        }
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
@@ -239,9 +339,11 @@ final class ArtistViewModel {
         FilterState(
             query: debouncedQuery.lowercased(),
             bestOf: bestOf,
+            worstOf: worstOf,
             recents: recents,
             noSnippets: noSnippets,
-            misc: misc
+            misc: misc,
+            tabKey: selectedTabKey
         )
     }
 
@@ -305,13 +407,13 @@ final class ArtistViewModel {
     // MARK: - Era expand/collapse
 
     func toggleEra(_ name: String) {
-        if bestOf { return }
+        if bestOf || worstOf { return }
         expandedEra = expandedEra == name ? nil : name
         rebuildEraRows()
     }
 
     func isEraExpanded(_ name: String) -> Bool {
-        if bestOf { return true }
+        if bestOf || worstOf { return true }
         return expandedEra == name
     }
 
@@ -336,12 +438,20 @@ final class ArtistViewModel {
 
     func toggleBestOf() {
         bestOf.toggle()
+        if bestOf { worstOf = false }  // contradictory highlight filters
         if !bestOf && !recents { expandedEra = nil }
         // No synchronous rebuildEraRows() here: isEraExpanded treats bestOf
         // as "every era expanded", so rebuilding against the still-stale
         // (unfiltered) `content` would briefly render every song in every
         // era. applyFilters()'s completion rebuilds once `content` actually
         // matches the new bestOf state.
+        applyFilters()
+    }
+
+    func toggleWorstOf() {
+        worstOf.toggle()
+        if worstOf { bestOf = false }
+        if !worstOf && !recents { expandedEra = nil }
         applyFilters()
     }
 
@@ -361,7 +471,26 @@ final class ArtistViewModel {
 
     func toggleMisc() {
         misc.toggle()
+        if misc { selectedTabKey = nil }
         if !misc && !bestOf && !recents {
+            expandedEra = nil
+            rebuildEraRows()
+        }
+        applyFilters()
+    }
+
+    /// Selects a content tab (tapping the active chip deselects it).
+    /// Entering a tab resets the filter chips — except No Snippets, which
+    /// keeps excluding short clips on every page.
+    func selectTab(_ key: String?) {
+        selectedTabKey = (selectedTabKey == key) ? nil : key
+        if selectedTabKey != nil {
+            misc = false
+            bestOf = false
+            worstOf = false
+            recents = false
+        }
+        if selectedTabKey == nil && !bestOf && !recents {
             expandedEra = nil
             rebuildEraRows()
         }
@@ -451,11 +580,13 @@ final class ArtistViewModel {
             recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
         )
 
-        if state.misc {
+        if state.misc || state.tabKey != nil {
+            let miscResults = computeMiscResults(artist: artist, state: state)
             return FilteredContent(
                 state: state, eras: [], searchResults: [], recentResults: [],
                 recentPlaybackItems: [], recentStreamIndex: [:],
-                miscResults: computeMiscResults(artist: artist, state: state)
+                miscResults: miscResults,
+                miscEraGroups: groupMiscByEra(miscResults)
             )
         }
 
@@ -505,6 +636,12 @@ final class ArtistViewModel {
                 }
                 guard hasBest else { continue }
             }
+            if state.worstOf {
+                let hasWorst = allSongs.contains { song in
+                    song.versions.contains { isWorstOfVersion($0) }
+                }
+                guard hasWorst else { continue }
+            }
 
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
@@ -528,10 +665,11 @@ final class ArtistViewModel {
     }
 
     private nonisolated static func filterSongs(_ songs: [Song], state: FilterState) -> [Song] {
-        guard state.bestOf || state.noSnippets else { return songs }
+        guard state.bestOf || state.worstOf || state.noSnippets else { return songs }
         return songs.compactMap { song in
             song.withFilteredVersions { version in
                 if state.bestOf && !isBestOfVersion(version) { return false }
+                if state.worstOf && !isWorstOfVersion(version) { return false }
                 if state.noSnippets && shouldFilterForNoSnippets(version) { return false }
                 return true
             }
@@ -562,6 +700,7 @@ final class ArtistViewModel {
                 guard score > 0 else { continue }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     results.append(SearchResult(song: song, version: version, era: era, score: score))
                 }
@@ -595,8 +734,13 @@ final class ArtistViewModel {
                     let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
                     if !hasBestVersion { continue }
                 }
+                if state.worstOf {
+                    let hasWorstVersion = song.versions.contains { isWorstOfVersion($0) }
+                    if !hasWorstVersion { continue }
+                }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
+                    if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     let dateStr = version.leakDate ?? version.fileDate
                     guard let dateStr, !dateStr.isEmpty else { continue }
@@ -617,8 +761,25 @@ final class ArtistViewModel {
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
+    nonisolated static func groupMiscByEra(_ entries: [MiscEntry]) -> [MiscEraGroup] {
+        var order: [String] = []
+        var byEra: [String: [MiscEntry]] = [:]
+        for entry in entries {
+            if byEra[entry.eraName] == nil { order.append(entry.eraName) }
+            byEra[entry.eraName, default: []].append(entry)
+        }
+        return order.map { MiscEraGroup(eraName: $0, entries: byEra[$0] ?? []) }
+    }
+
     private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
-        var entries = artist.miscEntries ?? []
+        // A selected tab sources that tab's entries; the legacy misc mode
+        // reads the flat misc/MV list (older cached payloads have no tabs).
+        var entries: [MiscEntry]
+        if let tabKey = state.tabKey {
+            entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
+        } else {
+            entries = artist.miscEntries ?? []
+        }
         if state.noSnippets {
             entries = entries.filter { e in
                 let al = (e.available ?? "").lowercased()
@@ -631,6 +792,10 @@ final class ArtistViewModel {
                 Badge.allCases.contains { e.name.contains($0.emoji) }
             }
             if !starred.isEmpty { entries = starred }
+        }
+        if state.worstOf {
+            let flagged = entries.filter { $0.name.contains(Badge.worst.emoji) }
+            if !flagged.isEmpty { entries = flagged }
         }
         if !state.query.isEmpty {
             let q = state.query
@@ -685,6 +850,10 @@ final class ArtistViewModel {
     private nonisolated static func isBestOfVersion(_ v: SongVersion) -> Bool {
         guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
         return bestOfBadges.contains(badge)
+    }
+
+    private nonisolated static func isWorstOfVersion(_ v: SongVersion) -> Bool {
+        v.badge.flatMap { Badge(rawValue: $0) } == .worst
     }
 
     private nonisolated static func scoreSong(_ song: Song, query: String) -> Int {

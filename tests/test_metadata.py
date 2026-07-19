@@ -2,6 +2,8 @@
 
 from src.api import (
     _TTLCache,
+    _derive_media_kind,
+    _media_kind_from_mime,
     _parse_froste_metadata,
     _parse_imgur_metadata,
     _parse_pillows_metadata,
@@ -59,7 +61,25 @@ class TestParsePillowsMetadata:
         assert result["title"] == "Some Song"
 
     def test_empty_input(self):
-        assert _parse_pillows_metadata("") == {"provider": "pillows"}
+        # 2026-07-17: media_kind is always derived (unknown when no signal)
+        assert _parse_pillows_metadata("") == {
+            "provider": "pillows",
+            "media_kind": "unknown",
+        }
+
+    def test_video_file_flagged(self):
+        """An mp4/H.264 behind an opaque pillows id — the only video signal
+        clients get, since the pillows stream endpoint always says audio/mp4."""
+        text = (
+            "FILE FORMAT INFO:CONTAINER: MPEG-4CODEC: H.264"
+            "CODEC PROFILE: High ProfileDURATION: 212.4s"
+        )
+        result = _parse_pillows_metadata(text)
+        assert result["media_kind"] == "video"
+
+    def test_audio_file_flagged(self):
+        assert _parse_pillows_metadata(PILLOWS_BLOB)["media_kind"] == "audio"
+        assert _parse_pillows_metadata(PILLOWS_NEWLINES)["media_kind"] == "audio"
 
 
 class TestParseFrosteMetadata:
@@ -82,12 +102,46 @@ class TestParseImgurMetadata:
         result = _parse_imgur_metadata(
             {"size": 12345, "mimeType": "audio/mpeg", "name": "song.mp3"}
         )
+        # 2026-07-17: media_kind derived from the mime type
         assert result == {
             "provider": "imgur",
             "file_size": 12345,
             "mime_type": "audio/mpeg",
             "filename": "song.mp3",
+            "media_kind": "audio",
         }
+
+    def test_video_mime_flagged(self):
+        result = _parse_imgur_metadata({"mimeType": "video/mp4", "name": "clip.mp4"})
+        assert result["media_kind"] == "video"
+
+
+class TestDeriveMediaKind:
+    def test_video_codecs(self):
+        for codec in ("H.264 High Profile", "h264", "HEVC", "AV1", "VP9", "MPEG-4 Video"):
+            assert _derive_media_kind("MPEG-4", codec) == "video", codec
+
+    def test_audio_codecs(self):
+        for codec in ("AAC LC", "MPEG 1 Layer 3", "FLAC", "ALAC", "Opus", "PCM"):
+            assert _derive_media_kind("MPEG-4", codec) == "audio", codec
+
+    def test_audio_container_without_codec(self):
+        for container in ("FLAC", "WAV", "Ogg", "AIFF"):
+            assert _derive_media_kind(container, None) == "audio", container
+
+    def test_ambiguous_container_is_unknown(self):
+        # mp4/mov hold audio-only m4a files too — container alone can't decide
+        for container in ("MPEG-4", "MOV", "Matroska", "WebM"):
+            assert _derive_media_kind(container, None) == "unknown", container
+
+    def test_no_signal_is_unknown(self):
+        assert _derive_media_kind(None, None) == "unknown"
+
+    def test_mime_helper(self):
+        assert _media_kind_from_mime("video/mp4") == "video"
+        assert _media_kind_from_mime("audio/mpeg; charset=binary") == "audio"
+        assert _media_kind_from_mime("application/octet-stream") == "unknown"
+        assert _media_kind_from_mime(None) == "unknown"
 
 
 class TestTTLCache:

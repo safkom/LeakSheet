@@ -5,13 +5,13 @@
   "origin": "fixture",
   "totals": {
     "eras": 6,
-    "songs": 187,
-    "versions": 271,
+    "songs": 198,
+    "versions": 287,
     "misc_entries": 0,
     "notices": 2,
-    "links": 213,
-    "streamable_links": 190,
-    "streamable_pct": 89.2
+    "links": 233,
+    "streamable_links": 213,
+    "streamable_pct": 91.4
   },
   "eras": [
     {
@@ -50,8 +50,8 @@
       "sections": [
         ""
       ],
-      "songs": 39,
-      "versions": 51,
+      "songs": 40,
+      "versions": 52,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -64,10 +64,13 @@
       ],
       "sections": [
         "Pre Pandemic Late 2019-2020",
-        "Post Pandemic 2020-2021"
+        "Post Pandemic 2020-2021",
+        "Lil Uzi Vert - Pink Tape",
+        "Mr Morale Sessions",
+        "The Melodic Blue Deluxe"
       ],
-      "songs": 70,
-      "versions": 113,
+      "songs": 95,
+      "versions": 168,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -76,16 +79,14 @@
     {
       "name": "Child With Wolves",
       "alt_names": [
-        "eerietimes, Classical Rage"
+        "Janice, eerietimes, Classical Rage"
       ],
       "sections": [
-        "The Melodic Blue Deluxe",
-        "Mr Morale Sessions",
-        "May 25, 2022 - August 5, 2023",
+        "May 25th, 2022 - November 14th, 2024",
         "Child With Wolves"
       ],
-      "songs": 49,
-      "versions": 76,
+      "songs": 24,
+      "versions": 25,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -94,13 +95,14 @@
     {
       "name": "Ca$ino",
       "alt_names": [
-        "Child With Wolves, Janice"
+        "Janice"
       ],
       "sections": [
-        ""
+        "Ca$ino",
+        "Ca$ino (Deluxe)"
       ],
-      "songs": 1,
-      "versions": 1,
+      "songs": 11,
+      "versions": 12,
       "has_art": true,
       "has_description": true,
       "has_stats": true,
@@ -109,17 +111,17 @@
   ],
   "distributions": {
     "badges": {
+      "grail": 24,
+      "special": 21,
       "best": 19,
-      "grail": 19,
-      "special": 15,
       "worst": 2
     },
     "version_tags": {
+      "V2": 53,
       "V1": 51,
-      "V2": 50,
-      "V3": 13,
+      "V3": 18,
       "V4": 7,
-      "V5": 5,
+      "V5": 4,
       "V6": 3,
       "V7": 3,
       "V26": 2,
@@ -138,88 +140,86 @@
       "V46": 2,
       "V47": 2,
       "V48": 2,
-      "Radio Mix": 1,
-      "V21": 1
+      "V15": 2,
+      "Radio Mix": 1
     },
     "quality": {
-      "CD Quality": 104,
-      "Not Available": 77,
-      "High Quality": 34,
-      "Recording": 31,
-      "Lossless": 18,
-      "Low Quality": 7
+      "CD Quality": 108,
+      "Not Available": 80,
+      "High Quality": 38,
+      "Recording": 33,
+      "Lossless": 19,
+      "Low Quality": 8
     },
     "availability": {
-      "Full": 74,
-      "Snippet": 57,
-      "Confirmed": 51,
-      "OG File": 41,
-      "Rumored": 26,
-      "Partial": 16,
+      "Full": 75,
+      "Snippet": 61,
+      "Confirmed": 52,
+      "OG File": 47,
+      "Rumored": 28,
+      "Partial": 18,
       "Stem Bounce": 4,
-      "Beat Only": 2
+      "Beat Only": 1
     },
     "type": {},
     "link_hosts": {
-      "pillows.su": 171,
-      "imgur.gg": 16,
-      "i.ibb.co": 5,
-      "youtu.be": 4,
-      "thesource.to": 3,
+      "pillows.su": 211,
+      "youtube.com": 4,
+      "i.ibb.co": 3,
+      "thesource.to": 2,
       "pixeldrain.com": 2,
-      "music.froste.lol": 2,
-      "reddit.com": 2,
+      "imgur.gg": 2,
+      "x.com": 2,
       "web.archive.org": 1,
+      "soundcloud.com": 1,
       "rollingstone.com": 1,
       "gq.com": 1,
-      "krakenfiles.com": 1,
-      "files.catbox.moe": 1,
       "www-billboard-com.cdn.ampproject.org": 1,
-      "pbs.twimg.com": 1,
+      "reddit.com": 1,
       "tiktok.com": 1
     }
   },
   "misc_entry_types": {},
   "coverage": {
     "notes": {
-      "count": 271,
+      "count": 287,
       "pct": 100.0
     },
     "samples": {
       "count": 4,
-      "pct": 1.5
+      "pct": 1.4
     },
     "og_filenames": {
-      "count": 77,
-      "pct": 28.4
+      "count": 82,
+      "pct": 28.6
     },
     "featuring": {
-      "count": 104,
-      "pct": 38.4
+      "count": 115,
+      "pct": 40.1
     },
     "producers": {
-      "count": 177,
-      "pct": 65.3
+      "count": 182,
+      "pct": 63.4
     },
     "track_length": {
-      "count": 80,
-      "pct": 29.5
+      "count": 222,
+      "pct": 77.4
     },
     "file_date": {
-      "count": 41,
-      "pct": 15.1
+      "count": 47,
+      "pct": 16.4
     },
     "leak_date": {
-      "count": 215,
-      "pct": 79.3
+      "count": 212,
+      "pct": 73.9
     },
     "quality": {
-      "count": 271,
-      "pct": 100.0
+      "count": 286,
+      "pct": 99.7
     },
     "available_length": {
-      "count": 271,
-      "pct": 100.0
+      "count": 286,
+      "pct": 99.7
     },
     "sources": {
       "count": 0,
@@ -231,11 +231,11 @@
     }
   },
   "parse_signals": {
-    "total_rows": 316,
-    "song_rows": 271,
+    "total_rows": 335,
+    "song_rows": 287,
     "skipped_rows": 0,
     "skipped_ratio_pct": 0.0,
-    "footer_rows": 20,
+    "footer_rows": 19,
     "fuzzy_matched_rows": 0,
     "dropped_columns": [],
     "unmatched_rows": [],
@@ -243,9 +243,7 @@
   },
   "suspicions": {
     "zero_song_eras": [],
-    "single_song_eras": [
-      "Ca$ino"
-    ],
+    "single_song_eras": [],
     "songs_10plus_versions": [
       {
         "song": "Kanye West - Praise God",
@@ -255,19 +253,26 @@
       {
         "song": "Kanye West - We Did It Kid",
         "versions": 16,
-        "era": "Child With Wolves"
+        "era": "The Melodic Blue"
       }
     ],
     "duplicate_songs_across_eras": [
       {
-        "song": "a$ap rocky - baby talk",
+        "song": "kanye west - we did it",
         "eras": [
-          "Child With Wolves",
+          "Ca$ino",
           "The Melodic Blue"
         ]
       },
       {
-        "song": "killstreaks",
+        "song": "kanye west - we did it kid",
+        "eras": [
+          "Ca$ino",
+          "The Melodic Blue"
+        ]
+      },
+      {
+        "song": "shibuya",
         "eras": [
           "Child With Wolves",
           "The Melodic Blue"
