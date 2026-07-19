@@ -37,6 +37,14 @@ nonisolated struct FilteredEra: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One era's worth of misc/tab entries — prebuilt off-main so the tab
+/// page's accordion doesn't regroup ~1900 entries on every render.
+nonisolated struct MiscEraGroup: Identifiable, Equatable, Sendable {
+    let eraName: String
+    let entries: [MiscEntry]
+    var id: String { eraName }
+}
+
 /// Everything the artist screen renders for one FilterState, computed in a
 /// single off-main pass. Only the branch matching the state is populated.
 nonisolated struct FilteredContent: Equatable, Sendable {
@@ -50,6 +58,8 @@ nonisolated struct FilteredContent: Equatable, Sendable {
     /// RecentResult.id → index into `recentPlaybackItems`.
     let recentStreamIndex: [String: Int]
     let miscResults: [MiscEntry]
+    /// `miscResults` grouped by era in first-appearance order.
+    var miscEraGroups: [MiscEraGroup] = []
 }
 
 /// One row of the flattened era list. All rows render as direct children of
@@ -136,6 +146,10 @@ final class ArtistViewModel {
     /// changes so `body` only iterates.
     private(set) var eraRows: [EraRow] = []
 
+    /// songKey → eras containing that song (only keys spanning >1 era) —
+    /// built once in Precomputed.
+    private let songKeyEras: [String: [CrossEraRef]]
+
     // MARK: - Recents windowing
 
     private(set) var visibleRecents: [RecentResult] = []
@@ -177,14 +191,25 @@ final class ArtistViewModel {
     /// The heavy startup pass — era stats + the unfiltered content tree —
     /// computed off-main by `make(artist:)` so pushing a huge tracker
     /// doesn't hitch the navigation transition.
+    /// One era containing another copy of a song (matched by `songKey`).
+    nonisolated struct CrossEraRef: Equatable, Sendable, Identifiable {
+        let eraName: String
+        let versionCount: Int
+        var id: String { eraName }
+    }
+
     nonisolated struct Precomputed: Sendable {
         let eraStatsByName: [String: Stats]
         let artistStats: Stats
         let content: FilteredContent
+        /// songKey → every era containing that song, in era order — backs
+        /// the description sheet's "Also in" cross-era section.
+        let songKeyEras: [String: [CrossEraRef]]
 
         init(artist: Artist) {
             var statsByName: [String: Stats] = [:]
             var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+            var keyEras: [String: [CrossEraRef]] = [:]
             for era in artist.eras {
                 let s = ArtistViewModel.computeEraStats(era)
                 statsByName[era.name] = s
@@ -193,6 +218,15 @@ final class ArtistViewModel {
                 snippets += s.snippets
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
+                for song in era.allSongs {
+                    guard let key = song.songKey, !key.isEmpty else { continue }
+                    // One ref per era per key (a song appears once per era)
+                    if keyEras[key]?.last?.eraName != era.name {
+                        keyEras[key, default: []].append(
+                            CrossEraRef(eraName: era.name, versionCount: song.versions.count)
+                        )
+                    }
+                }
             }
             self.eraStatsByName = statsByName
             self.artistStats = Stats(
@@ -202,7 +236,16 @@ final class ArtistViewModel {
             self.content = ArtistViewModel.computeContent(
                 artist: artist, state: FilterState(), eraStats: statsByName
             )
+            // Only keys that actually span content are worth keeping
+            self.songKeyEras = keyEras.filter { $0.value.count > 1 }
         }
+    }
+
+    /// Other eras containing the same song (by songKey), excluding the one
+    /// the user is already looking at. Empty when the song is era-unique.
+    func otherEras(forSongKey key: String?, excluding eraName: String) -> [CrossEraRef] {
+        guard let key, !key.isEmpty, let refs = songKeyEras[key] else { return [] }
+        return refs.filter { $0.eraName != eraName }
     }
 
     /// Preferred construction path: the stats/content pass runs off-main.
@@ -224,6 +267,7 @@ final class ArtistViewModel {
         self.eraStatsByName = precomputed.eraStatsByName
         self.artistStats = precomputed.artistStats
         self.content = precomputed.content
+        self.songKeyEras = precomputed.songKeyEras
 
         // Seed era colors from the persisted extraction cache so cards and
         // headers are tinted on first paint without any image download.
@@ -537,10 +581,12 @@ final class ArtistViewModel {
         )
 
         if state.misc || state.tabKey != nil {
+            let miscResults = computeMiscResults(artist: artist, state: state)
             return FilteredContent(
                 state: state, eras: [], searchResults: [], recentResults: [],
                 recentPlaybackItems: [], recentStreamIndex: [:],
-                miscResults: computeMiscResults(artist: artist, state: state)
+                miscResults: miscResults,
+                miscEraGroups: groupMiscByEra(miscResults)
             )
         }
 
@@ -715,6 +761,16 @@ final class ArtistViewModel {
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
+    nonisolated static func groupMiscByEra(_ entries: [MiscEntry]) -> [MiscEraGroup] {
+        var order: [String] = []
+        var byEra: [String: [MiscEntry]] = [:]
+        for entry in entries {
+            if byEra[entry.eraName] == nil { order.append(entry.eraName) }
+            byEra[entry.eraName, default: []].append(entry)
+        }
+        return order.map { MiscEraGroup(eraName: $0, entries: byEra[$0] ?? []) }
+    }
+
     private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
         // A selected tab sources that tab's entries; the legacy misc mode
         // reads the flat misc/MV list (older cached payloads have no tabs).

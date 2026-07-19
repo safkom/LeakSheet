@@ -66,6 +66,18 @@ struct NativeFullScreenVideoPresenter: UIViewControllerRepresentable {
     final class Coordinator {
         var playerController: DismissReportingPlayerViewController?
     }
+
+    /// The presenter's view branch disappears when the current track loses
+    /// its video (e.g. autoplay advances to an audio-only song). Without
+    /// this, an already-presented fullscreen player would be orphaned with
+    /// no binding left to dismiss it.
+    static func dismantleUIViewController(_ host: UIViewController, coordinator: Coordinator) {
+        if let controller = coordinator.playerController {
+            coordinator.playerController = nil
+            controller.onDismiss = nil
+            controller.presentingViewController?.dismiss(animated: true)
+        }
+    }
 }
 
 /// AVPlayerViewController that reports when its own Done button (or any

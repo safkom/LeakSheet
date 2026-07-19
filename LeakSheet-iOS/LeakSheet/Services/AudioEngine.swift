@@ -135,6 +135,19 @@ final class AudioEngine {
         player?.play()
         updateNowPlayingInfo()
         startLoadingTimeout()
+
+        // Early video hint from /metadata — the backend's stream-HEAD
+        // fallback knows the mime before AVAsset finishes loading tracks,
+        // so the Now Playing surface can show video without a late swap.
+        // The asset's own track list (captureStreamFormat) stays
+        // authoritative once loaded.
+        let trackKey = version.id
+        Task { [weak self] in
+            guard let meta = try? await APIClient.shared.fetchMetadata(for: link),
+                  meta.mediaKind == "video" else { return }
+            guard let self, self.currentTrack?.id == trackKey else { return }
+            self.hasVideo = true
+        }
     }
 
     func togglePlay() {

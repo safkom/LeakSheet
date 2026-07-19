@@ -29,7 +29,12 @@ actor CacheService {
         cacheDirectory = directory
             ?? URL.cachesDirectory.appending(path: "LeakSheet", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        Self.sweepLegacyFiles(in: cacheDirectory)
+        // The `.shared` initializer runs on whichever thread first touches
+        // it (usually main) — sweep legacy files off that thread.
+        let directoryToSweep = cacheDirectory
+        Task.detached(priority: .utility) {
+            Self.sweepLegacyFiles(in: directoryToSweep)
+        }
     }
 
     private func cacheFile(for url: String) -> URL {
@@ -100,6 +105,7 @@ actor CacheService {
 
     /// Remove v1-era files whose base64-derived names don't match the SHA-256
     /// hex scheme — they would otherwise sit orphaned until manually cleared.
+    /// Runs detached from `init`; exposed for tests to invoke deterministically.
     func sweepLegacyEntries() {
         Self.sweepLegacyFiles(in: cacheDirectory)
     }

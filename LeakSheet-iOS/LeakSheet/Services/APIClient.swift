@@ -98,7 +98,22 @@ actor APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         onProgress?(.connecting)
-        let (bytes, response) = try await session.bytes(for: request)
+        // Chunked delegate download: URLSession hands the body over in Data
+        // CHUNKS (one memcpy each). The previous AsyncBytes loop iterated
+        // byte-at-a-time — ~8M suspension points on a Ye-size payload,
+        // burning seconds of CPU after the network was already done.
+        let downloadTask = session.dataTask(with: request)
+        let (data, response) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+                downloadTask.delegate = ChunkedDownloadDelegate(
+                    onProgress: onProgress, continuation: continuation
+                )
+                downloadTask.resume()
+            }
+        } onCancel: {
+            downloadTask.cancel()
+        }
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.httpError(status: 0, message: "Unexpected response type")
         }
@@ -109,21 +124,6 @@ actor APIClient {
             // 304 Not Modified — caller should use cached data
             throw APIError.notModified(etag: etag)
         }
-
-        let expected = httpResponse.expectedContentLength > 0
-            ? httpResponse.expectedContentLength : nil
-        var data = Data()
-        if let expected { data.reserveCapacity(Int(expected)) }
-        var lastReport = 0
-        for try await byte in bytes {
-            data.append(byte)
-            // Throttle progress callbacks to every 256 KB of body.
-            if data.count - lastReport >= 262_144 {
-                lastReport = data.count
-                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
-            }
-        }
-        onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
 
         guard httpResponse.statusCode == 200 else {
             let detail = Self.decodeErrorResponse(from: data)
@@ -136,6 +136,65 @@ actor APIClient {
         onProgress?(.preparing)
         let artist = try Self.decodeArtist(from: data)
         return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
+    }
+
+    /// Accumulates a response body from delegate chunk callbacks and reports
+    /// throttled LoadPhase progress. URLSession serializes delegate calls,
+    /// so the mutable state needs no locking (@unchecked Sendable).
+    private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private let onProgress: (@Sendable (LoadPhase) -> Void)?
+        private let continuation: CheckedContinuation<(Data, URLResponse), Error>
+        private var data = Data()
+        private var response: URLResponse?
+        private var expected: Int64?
+        private var lastReport = 0
+        private var finished = false
+
+        init(
+            onProgress: (@Sendable (LoadPhase) -> Void)?,
+            continuation: CheckedContinuation<(Data, URLResponse), Error>
+        ) {
+            self.onProgress = onProgress
+            self.continuation = continuation
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive response: URLResponse,
+            completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+        ) {
+            self.response = response
+            let length = response.expectedContentLength
+            expected = length > 0 ? length : nil
+            if let expected { data.reserveCapacity(Int(expected)) }
+            completionHandler(.allow)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+            data.append(chunk)
+            // gzip bodies decompress past the wire Content-Length — drop the
+            // total rather than showing a >100% bar; the UI falls back to a
+            // byte counter.
+            if let total = expected, Int64(data.count) > total { expected = nil }
+            if data.count - lastReport >= 262_144 {
+                lastReport = data.count
+                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+            }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            guard !finished else { return }
+            finished = true
+            if let error {
+                continuation.resume(throwing: error)
+            } else if let response {
+                onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+                continuation.resume(returning: (data, response))
+            } else {
+                continuation.resume(throwing: URLError(.badServerResponse))
+            }
+        }
     }
 
     // MARK: - Image Proxy

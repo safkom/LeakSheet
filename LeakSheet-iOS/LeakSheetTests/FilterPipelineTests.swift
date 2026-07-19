@@ -389,3 +389,59 @@ struct WorstOfFilterTests {
         #expect(kinds == ["released"])
     }
 }
+
+/// Cross-era song linkage (2026-07-18): Precomputed indexes songKey → eras.
+struct CrossEraIndexTests {
+    private func song(_ name: String, key: String?, versions: Int = 1) -> Song {
+        let v = SongVersion(
+            name: name, versionTag: nil, badge: nil, featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil,
+            availableLength: "Full", quality: nil, links: nil,
+            qualityColor: nil, availableLengthColor: nil,
+            dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        )
+        return Song(
+            baseName: name, songKey: key,
+            versions: Array(repeating: v, count: versions), badge: nil,
+            availableLength: nil, quality: nil, trackLength: nil,
+            leakDate: nil, fileDate: nil
+        )
+    }
+
+    private func era(_ name: String, songs: [Song]) -> Era {
+        Era(
+            name: name, altNames: nil, description: nil, timeline: nil,
+            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            sections: [Section(name: "", group: nil, songs: songs)],
+            songCount: nil, versionCount: nil
+        )
+    }
+
+    @Test func `index keeps only keys spanning multiple eras`() async {
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [
+                era("War", songs: [song("This One Here", key: "this one here")]),
+                era("Donda 2", songs: [
+                    song("This One Here", key: "this one here", versions: 3),
+                    song("Unique", key: "unique"),
+                ]),
+            ],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let fromWar = await MainActor.run {
+            vm.otherEras(forSongKey: "this one here", excluding: "War")
+        }
+        #expect(fromWar.map(\.eraName) == ["Donda 2"])
+        #expect(fromWar.first?.versionCount == 3)
+        // Era-unique songs have no cross-era refs
+        let unique = await MainActor.run {
+            vm.otherEras(forSongKey: "unique", excluding: "War")
+        }
+        #expect(unique.isEmpty)
+    }
+}

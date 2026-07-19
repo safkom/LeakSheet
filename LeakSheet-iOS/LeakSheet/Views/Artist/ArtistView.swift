@@ -114,6 +114,9 @@ private struct ArtistContentView: View {
                         onShowDescription: { showDescription = $0 },
                         onOpenLink: { openLink($0) }
                     )
+                    // Fresh expansion state per tab — without this the
+                    // @State set bleeds era names across tab switches.
+                    .id(contentState.tabKey ?? "misc")
                 } else if !contentState.query.isEmpty {
                     SearchResultsListView(
                         vm: vm,
@@ -210,6 +213,7 @@ private struct ArtistContentView: View {
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
+                .environment(vm)  // enables the cross-era "Also in" section
         }
         .sheet(isPresented: $showQueue) {
             QueueSheet()
@@ -480,28 +484,12 @@ private struct MiscListView: View {
 
     @Environment(PlayerViewModel.self) private var player
     /// Expanded era groups — presentation-only, keyed on eraName. A live
-    /// search expands everything so results are never hidden.
+    /// search expands everything so results are never hidden, and a page
+    /// with a single group starts open.
     @State private var expandedEras: Set<String> = []
 
-    /// Entries grouped by era in order of first appearance.
-    private struct EraGroup: Identifiable {
-        let eraName: String
-        let entries: [MiscEntry]
-        var id: String { eraName }
-    }
-
-    private func eraGroups(_ entries: [MiscEntry]) -> [EraGroup] {
-        var order: [String] = []
-        var byEra: [String: [MiscEntry]] = [:]
-        for entry in entries {
-            if byEra[entry.eraName] == nil { order.append(entry.eraName) }
-            byEra[entry.eraName, default: []].append(entry)
-        }
-        return order.map { EraGroup(eraName: $0, entries: byEra[$0] ?? []) }
-    }
-
-    private func isExpanded(_ eraName: String) -> Bool {
-        vm.isSearching || expandedEras.contains(eraName)
+    private func isExpanded(_ eraName: String, groupCount: Int) -> Bool {
+        vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
     var body: some View {
@@ -522,8 +510,10 @@ private struct MiscListView: View {
             }
         } else {
             // Era-card accordion — the same mental model as the main eras
-            // view: one collapsible card per era, entries inside.
-            ForEach(eraGroups(entries)) { group in
+            // view: one collapsible card per era, entries inside. Groups are
+            // prebuilt off-main in the filter pipeline (miscEraGroups).
+            let groups = vm.content.miscEraGroups
+            ForEach(groups) { group in
                 Button {
                     withAnimation(.default) {
                         if expandedEras.contains(group.eraName) {
@@ -563,17 +553,21 @@ private struct MiscListView: View {
                         Image(systemName: "chevron.down")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isExpanded(group.eraName) ? 0 : -90))
+                            .rotationEffect(.degrees(isExpanded(group.eraName, groupCount: groups.count) ? 0 : -90))
                     }
                     .padding(12)
                     .background(Color.lsCard.opacity(0.6))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
+                .accessibilityValue(
+                    isExpanded(group.eraName, groupCount: groups.count)
+                        ? "Expanded" : "Collapsed"
+                )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                if isExpanded(group.eraName) {
+                if isExpanded(group.eraName, groupCount: groups.count) {
                     ForEach(group.entries) { entry in
                         MiscEntryRowView(
                             entry: entry,
