@@ -1396,6 +1396,18 @@ class TestCommaAltTitles:
         _, _, _, _, _, alts = parse_song_credits(raw)
         assert alts == ["10,000 Days"]
 
+    def test_roman_numeral_continuation_kept_whole(self):
+        # 2026-07-18 review: "Pt. II"/"Part Two" are title continuations,
+        # not aliases.
+        from src.models import parse_song_credits
+        _, _, _, _, _, alts = parse_song_credits("Song\n(Hell Of A Life, Pt. II)")
+        assert alts == ["Hell Of A Life, Pt. II"]
+
+    def test_worded_ordinal_continuation_kept_whole(self):
+        from src.models import parse_song_credits
+        _, _, _, _, _, alts = parse_song_credits("Song\n(The Story, Part Two)")
+        assert alts == ["The Story, Part Two"]
+
     def test_feat_credit_commas_unaffected(self):
         from src.models import parse_song_credits
         raw = "Some Song\n(feat. Rhymefest, Kanye West)"

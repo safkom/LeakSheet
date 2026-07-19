@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 from src.models import Artist, TabSection
 from src.parser import (
     apply_art_tab_images,
-    apply_badge_tab,
+    apply_badge_tabs,
     parse_art_tab,
     parse_misc_tab,
     parse_sheet,
@@ -379,8 +379,13 @@ def _decode_js_string(s: str) -> str:
         return esc[1]  # \/ \u2192 /, \\ \u2192 \, \" \u2192 "
 
     decoded = _JS_ESCAPE_RE.sub(_sub, s)
-    # Recombine UTF-16 surrogate pairs produced by \ud83c\udfc6-style emoji
-    return decoded.encode("utf-16", "surrogatepass").decode("utf-16")
+    # Recombine UTF-16 surrogate pairs produced by \ud83c\udfc6-style emoji. A lone
+    # (truncated) surrogate can't round-trip \u2014 keep the raw string rather
+    # than aborting tab discovery for the whole tracker.
+    try:
+        return decoded.encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeDecodeError:
+        return "".join(c for c in decoded if not 0xD800 <= ord(c) <= 0xDFFF)
 
 
 def _discover_named_tabs(html: str) -> dict[str, str]:
@@ -1405,6 +1410,7 @@ async def _load_secondary_tabs(
     if secondary:
         await asyncio.gather(*secondary)
     # Extend in declared tab order (misc first) for stable output.
+    badge_tabs: list[tuple[str, list]] = []
     for gid_val, kind, display_name in content_tabs:
         entries = tab_results.get(gid_val, [])
         if not entries:
@@ -1413,14 +1419,18 @@ async def _load_secondary_tabs(
             artist.misc_entries.extend(entries)
         if kind in _BADGE_TAB_KINDS:
             # Highlight tabs annotate existing songs; they are not pages.
-            applied = apply_badge_tab(artist, kind, entries)
-            logger.debug(
-                "Badge tab %s: %d/%d entries matched songs",
-                kind, applied, len(entries),
-            )
+            badge_tabs.append((kind, entries))
             continue
         artist.tabs.append(
             TabSection(kind=kind, name=display_name, entries=entries)
+        )
+    if badge_tabs:
+        # One O(songs) index build for all badge tabs, off the event loop.
+        with t.phase("badge_annotate"):
+            applied = await asyncio.to_thread(apply_badge_tabs, artist, badge_tabs)
+        logger.debug(
+            "Badge tabs %s: %d entries matched songs",
+            [k for k, _ in badge_tabs], applied,
         )
 
 

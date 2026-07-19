@@ -220,3 +220,79 @@ class TestBadgeTabAnnotation:
         from src.parser import apply_badge_tab
         artist = self._artist()
         assert apply_badge_tab(artist, "released", [self._entry("Jail")]) == 0
+
+
+class TestTabColumnVariants:
+    """Real-world column variants from the 2026-07-18 review: Carti's
+    Released tab uses Rel./Rec. Era, Travis Stems uses Title/Sources with
+    no Era or Link(s) column."""
+
+    CARTI_RELEASED_HTML = (
+        "<table>"
+        "<tr><td>Rel. Era</td><td>Rec. Era</td><td>Name</td><td>Notes</td>"
+        "<td>Link(s)</td></tr>"
+        "<tr><td>Die Lit</td><td>Self-Titled</td><td>R.I.P.</td><td>final</td>"
+        "<td><a href='https://pillows.su/f/abc'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def test_dual_era_released_keeps_release_era(self):
+        entries = parse_misc_tab(self.CARTI_RELEASED_HTML, "released")
+        assert len(entries) == 1
+        # Release era (first era-mapped column) wins for grouping
+        assert entries[0].era_name == "Die Lit"
+        assert entries[0].links == ["https://pillows.su/f/abc"]
+
+    TRAVIS_STEMS_HTML = (
+        "<table>"
+        "<tr><td>Title</td><td>Notes</td><td>Leak Date</td><td>Sources</td></tr>"
+        "<tr><td>Sky Stems</td><td>full stems</td><td>May 2023</td>"
+        "<td><a href='https://pillows.su/f/xyz'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def test_stems_title_sources_no_era_parses(self):
+        entries = parse_misc_tab(self.TRAVIS_STEMS_HTML, "stems")
+        assert len(entries) == 1
+        assert entries[0].name == "Sky Stems"
+        assert entries[0].date == "May 2023"
+        assert entries[0].links == ["https://pillows.su/f/xyz"]
+
+
+class TestDecodeRobustness:
+    def test_lone_surrogate_does_not_raise(self):
+        # A truncated emoji escape must not abort tab discovery.
+        js = 'items.push({name: "\\ud83c Broken", pageUrl: "x", gid: "9"});'
+        tabs = _discover_named_tabs(js)
+        assert "9" in tabs  # name survives in some readable form
+
+class TestBatchedBadgeAnnotation:
+    """2026-07-18 review fixes: one index build for all badge tabs, and
+    placeholder tracks are never badge targets."""
+
+    def test_batched_apply_badge_tabs_single_index(self):
+        from src.parser import apply_badge_tabs
+        artist = TestBadgeTabAnnotation._artist()
+        entry = TestBadgeTabAnnotation._entry
+        applied = apply_badge_tabs(artist, [
+            ("best_of", [entry("Hurricane", era="Yeezus")]),
+            ("worst_of", [entry("Jail")]),
+        ])
+        assert applied == 2
+        yeezus_hurricane = next(
+            s for s in artist.eras[1].sections[0].songs if s.base_name == "Hurricane"
+        )
+        assert yeezus_hurricane.versions[0].badge == "best"
+        assert artist.eras[0].sections[0].songs[1].versions[0].badge == "worst"
+
+    def test_placeholder_songs_never_badged(self):
+        from src.models import Era, Section, Song, SongVersion
+        from src.parser import apply_badge_tab
+        artist = Artist(name="T", slug="t", eras=[
+            Era(name="E", sections=[Section(songs=[
+                Song(base_name="Untitled", versions=[SongVersion(name="Untitled")]),
+            ])])
+        ])
+        entry = TestBadgeTabAnnotation._entry
+        # A badge entry named "Untitled" must not stamp a placeholder track.
+        assert apply_badge_tab(artist, "best_of", [entry("Untitled", era="E")]) == 0

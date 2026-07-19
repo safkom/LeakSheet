@@ -2093,6 +2093,9 @@ def _add_version_to_era(
 # Badge tabs — Best Of / Worst Of / Special / Grails / Wanted annotate songs
 # ---------------------------------------------------------------------------
 
+# Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
+# every entry in it — including the wanted section — is stamped GRAIL.
+# Splitting the combined tab by its internal sections is a known follow-up.
 _BADGE_BY_TAB_KIND = {
     "best_of": Badge.BEST,
     "worst_of": Badge.WORST,
@@ -2102,16 +2105,19 @@ _BADGE_BY_TAB_KIND = {
 }
 
 
-def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
-    """Stamp the badge for a highlight tab onto matching main-tab songs.
+def apply_badge_tabs(
+    artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
+) -> int:
+    """Stamp badges from every highlight tab onto matching main-tab songs.
 
-    Matches era-scoped first (normalized era + song keys), then falls back to
-    a name-only match when the song key is unique across the tracker. Songs
-    that already carry any badge (inline emoji from the main tab) are left
-    untouched. Returns the number of songs annotated.
+    Builds the song index ONCE for all tabs (a Ye-size artist can carry up
+    to five badge tabs). Matches era-scoped first (normalized era + song
+    keys), then falls back to a name-only match when the song key is unique
+    across the tracker. Placeholder tracks ("???", "untitled", …) are never
+    badge targets, and songs that already carry any badge (inline emoji from
+    the main tab) are left untouched. Returns the number of songs annotated.
     """
-    badge = _BADGE_BY_TAB_KIND.get(kind)
-    if badge is None:
+    if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
         return 0
 
     by_era_and_name: dict[tuple[str, str], Song] = {}
@@ -2120,6 +2126,8 @@ def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
         era_key = _era_match_key(era.name)
         for section in era.sections:
             for song in section.songs:
+                if song.base_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
+                    continue
                 song_key = _song_match_key(song.base_name)
                 if not song_key:
                     continue
@@ -2127,23 +2135,32 @@ def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
                 by_name.setdefault(song_key, []).append(song)
 
     applied = 0
-    for entry in entries:
-        _, base_name = extract_version_tag(entry.name)
-        song_key = _song_match_key(base_name)
-        if not song_key:
+    for kind, entries in tabs:
+        badge = _BADGE_BY_TAB_KIND.get(kind)
+        if badge is None:
             continue
-        song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
-        if song is None:
-            candidates = by_name.get(song_key, [])
-            if len(candidates) == 1:
-                song = candidates[0]
-        if song is None or not song.versions:
-            continue
-        if any(v.badge is not None for v in song.versions):
-            continue
-        song.versions[0].badge = badge
-        applied += 1
+        for entry in entries:
+            _, base_name = extract_version_tag(entry.name)
+            song_key = _song_match_key(base_name)
+            if not song_key:
+                continue
+            song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
+            if song is None:
+                candidates = by_name.get(song_key, [])
+                if len(candidates) == 1:
+                    song = candidates[0]
+            if song is None or not song.versions:
+                continue
+            if any(v.badge is not None for v in song.versions):
+                continue
+            song.versions[0].badge = badge
+            applied += 1
     return applied
+
+
+def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
+    """Single-tab convenience wrapper around :func:`apply_badge_tabs`."""
+    return apply_badge_tabs(artist, [(kind, entries)])
 
 
 # ---------------------------------------------------------------------------
@@ -2154,11 +2171,17 @@ def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
 # quirks ("Media Length", "Streaming") never perturb main-tab detection.
 _MISC_COLUMN_ALIASES = {
     "era": "era",
+    # Carti's Released tab has BOTH "Rel. Era" and "Rec. Era"; the first
+    # era-mapped column in header order wins (release era — it leads on the
+    # sheet), the second is ignored by the `not in candidate` guard below.
+    "rel. era": "era",
+    "rec. era": "era",
     "name": "name",
     "title": "name",  # Stems tabs (Travis) use "Title"
     "notes": "notes",
     "length": "length",
     "media length": "length",
+    "track length": "length",
     "date": "date",
     "release date": "date",
     "leak date": "date",  # Best Of / Worst Of / Stems tabs
@@ -2171,6 +2194,9 @@ _MISC_COLUMN_ALIASES = {
     "links": "links",
     "link(s)": "links",
     "link": "links",
+    "sources": "links",  # Travis Stems' link column
+    # Deliberately unmapped (no MiscEntry field, dropped): BPM, Key
+    # (Ye/Kendrick Stems), Made By/Creator (Fakes).
 }
 
 # Era header rows in these tabs carry per-era stats in the era column,
@@ -2212,7 +2238,11 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
             canonical = _MISC_COLUMN_ALIASES.get(key)
             if canonical and canonical not in candidate:
                 candidate[canonical] = c_idx
-        if "name" in candidate and ("era" in candidate or "links" in candidate):
+        # A name column plus any second content signal qualifies — "date"
+        # covers Stems layouts that have neither an Era nor a Links header.
+        if "name" in candidate and (
+            "era" in candidate or "links" in candidate or "date" in candidate
+        ):
             col_map = candidate
             header_idx = idx
             break

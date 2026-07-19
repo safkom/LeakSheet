@@ -429,6 +429,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 # check on the final resolved URL is sufficient.
 
 _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
+# Large public files are frequently served from Google's storage CDN
+# (*.googleusercontent.com). Still Google-controlled, so redirects there are
+# accepted; anything else stays rejected.
+_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
 
 
 class GdriveInterstitialError(Exception):
@@ -481,9 +485,10 @@ def is_gdrive_stream_url(url: str) -> bool:
 
 def _is_gdrive_host_allowed(url: str) -> bool:
     try:
-        return (urlparse(url).hostname or "").lower() in _GDRIVE_ALLOWED_HOSTS
+        host = (urlparse(url).hostname or "").lower()
     except Exception:
         return False
+    return host in _GDRIVE_ALLOWED_HOSTS or bool(_GDRIVE_USERCONTENT_RE.match(host))
 
 
 def _is_gdrive_playable_content_type(ct: str) -> bool:

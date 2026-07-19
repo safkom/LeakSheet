@@ -355,3 +355,19 @@ class TestStreamEndpointGdriveMapping:
         client = TestClient(app)
         r = client.get("/stream", params={"url": "https://not-a-supported-host.example/x"})
         assert r.status_code == 400
+
+
+class TestGdriveRedirectHosts:
+    """2026-07-18: large public files redirect to *.googleusercontent.com —
+    accept Google's storage CDN, reject everything else."""
+
+    def test_googleusercontent_storage_hosts_allowed(self):
+        from src.streaming import _is_gdrive_host_allowed
+        assert _is_gdrive_host_allowed("https://doc-0k-8s-docs.googleusercontent.com/x")
+        assert _is_gdrive_host_allowed("https://lh3.googleusercontent.com/d/abc")
+
+    def test_non_google_hosts_rejected(self):
+        from src.streaming import _is_gdrive_host_allowed
+        assert not _is_gdrive_host_allowed("https://evil.com/googleusercontent.com")
+        assert not _is_gdrive_host_allowed("https://googleusercontent.com.evil.com/x")
+        assert not _is_gdrive_host_allowed("https://xgoogleusercontent.com/x")

@@ -585,9 +585,13 @@ _WITH_PATTERN = re.compile(r"\(with\s+(.+?)\)", re.IGNORECASE)
 _REF_PATTERN = re.compile(r"\(ref\.?\s+(.+?)\)", re.IGNORECASE)
 
 
-# Title continuations like "Vol. 2" / "Pt. 3" — a comma before these is part
-# of one title ("Meet The Woo, Vol. 2"), not an alias separator.
-_ALIAS_CONTINUATION_RE = re.compile(r"^(?:vol|pt|part|no)\.?\s*\d+$", re.IGNORECASE)
+# Title continuations like "Vol. 2" / "Pt. II" / "Part Two" — a comma before
+# these is part of one title ("Meet The Woo, Vol. 2"), not an alias separator.
+_ALIAS_CONTINUATION_RE = re.compile(
+    r"^(?:vol|pt|part|no)\.?\s*"
+    r"(?:\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)$",
+    re.IGNORECASE,
+)
 
 
 def _split_alt_aliases(text: str) -> list[str]:
