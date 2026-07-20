@@ -15,6 +15,7 @@ struct LandingView: View {
 
     @State private var url: String = ""
     @State private var loading = false
+    @State private var loadPhase: APIClient.LoadPhase?
     @State private var error: String?
 
     var onArtistLoaded: (Artist) -> Void
@@ -36,7 +37,7 @@ struct LandingView: View {
                 .padding(.top, 48)
 
                 // URL Input
-                TrackerInputView(url: $url, loading: loading) {
+                TrackerInputView(url: $url, loading: loading, loadPhase: loadPhase) {
                     await handleParse(url)
                 }
                 .padding(.horizontal, 20)
@@ -111,7 +112,11 @@ struct LandingView: View {
         guard !trimmed.isEmpty else { return }
         withAnimation { error = nil }
         loading = true
-        defer { loading = false }
+        loadPhase = nil
+        defer {
+            loading = false
+            loadPhase = nil
+        }
 
         // Conditional request: send the cached ETag so an unchanged tracker
         // comes back as a bodyless 304 and we reopen the local copy instead
@@ -119,15 +124,16 @@ struct LandingView: View {
         let cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
 
         do {
-            let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName, cachedEtag: cachedEtag)
+            let result = try await APIClient.shared.parseSheet(
+                url: trimmed,
+                artistName: artistName,
+                cachedEtag: cachedEtag,
+                onProgress: { phase in
+                    Task { @MainActor in self.loadPhase = phase }
+                }
+            )
             if let etag = result.etag {
-                await CacheService.shared.cacheTracker(
-                    url: trimmed,
-                    artist: result.artist,
-                    etag: etag,
-                    totalSongs: result.artist.computedTotalSongs,
-                    totalVersions: result.artist.computedTotalVersions
-                )
+                await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
             onArtistLoaded(result.artist)
@@ -143,13 +149,7 @@ struct LandingView: View {
                     do {
                         let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
                         if let etag = result.etag {
-                            await CacheService.shared.cacheTracker(
-                                url: trimmed,
-                                artist: result.artist,
-                                etag: etag,
-                                totalSongs: result.artist.computedTotalSongs,
-                                totalVersions: result.artist.computedTotalVersions
-                            )
+                            await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
                         }
                         recents.saveTracker(artist: result.artist)
                         onArtistLoaded(result.artist)

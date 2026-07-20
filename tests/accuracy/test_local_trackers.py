@@ -68,9 +68,11 @@ class TestColumnDetection:
             assert key in col_map
 
     def test_carti_columns(self, carti):
+        # 2026-07-17 (PR #10 re-pin): the live tracker dropped its "Date of
+        # Recording" column in favour of "Track Length"; Type remains.
         html = (TRACKERS_DIR / "Playboi Carti Tracker [Currently in Use] - Google Drive_files" / "sheet.html").read_text(encoding="utf-8")
         col_map = detect_columns(extract_table(html)[0])
-        assert "date_of_recording" in col_map and "type" in col_map and "notes" in col_map
+        assert "type" in col_map and "track_length" in col_map and "notes" in col_map
 
 
 class TestAllTrackers:
@@ -138,8 +140,10 @@ class TestCartiTracker:
         assert len(carti.eras) >= 10 and carti.total_songs >= 400
 
     def test_carti_specific_fields(self, carti):
+        # 2026-07-17 (PR #10 re-pin): date_of_recording no longer asserted —
+        # the live tracker removed that column.
         vs = [v for era in carti.eras for s in era.songs for v in s.versions]
-        assert any(v.type for v in vs) and any(v.date_of_recording for v in vs)
+        assert any(v.type for v in vs)
 
 
 class TestNoteLinksMerge:
@@ -155,9 +159,11 @@ class TestNoteLinksMerge:
 
 
 class TestVersionTagGrouping:
-    def test_carti_cd_version_tag_parsed(self, carti):
+    def test_carti_word_tag_parsed(self, carti):
+        # 2026-07-17 (PR #10 re-pin): no [CD VERSION] rows remain in the live
+        # tracker; [Clean] is the surviving word-tag example.
         assert any(
-            v.version_tag and v.version_tag.upper() == "CD VERSION"
+            v.version_tag and v.version_tag.upper() == "CLEAN"
             for era in carti.eras for s in era.songs for v in s.versions
         )
 
@@ -208,16 +214,20 @@ class TestSongCreditsOnData:
     def test_ye_songs_have_producers(self, ye):
         assert sum(1 for era in ye.eras for s in era.songs for v in s.versions if v.producers) > 100
 
-    def test_ye_10_in_a_benz_credits(self, ye):
+    def test_ye_structured_credits(self, ye):
+        # 2026-07-17 (PR #10 re-pin): "10 in a Benz" gone from the live Ye
+        # tracker; "Hey Mama" (feat/prod/alt) and "Baby's Coming" (with-collab).
         era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
-        v = next(s for s in era.songs if s.base_name == "10 in a Benz").versions[0]
-        assert v.featuring == "Rhymefest"
-        assert v.producers == "Kanye West & Andy C."
-        assert v.collaboration == "Go Getters"
+        v = next(s for s in era.songs if s.base_name == "Hey Mama").versions[0]
+        assert v.featuring == "John Legend"
+        assert v.producers == "Kanye West"
+        assert "Hey Ma" in v.alt_titles
+        collab = next(s for s in era.songs if s.base_name == "Baby's Coming")
+        assert collab.versions[0].collaboration == "Go Getters"
 
     def test_song_name_is_clean_title(self, ye):
         era = next(e for e in ye.eras if "Before The College Dropout" in e.name)
-        v = next(s for s in era.songs if s.base_name == "10 in a Benz").versions[0]
+        v = next(s for s in era.songs if s.base_name == "Hey Mama").versions[0]
         assert "\n" not in v.name and "(prod." not in v.name and "(feat." not in v.name
 
 
@@ -237,7 +247,9 @@ class TestSectionAndStubHandling:
         result = all_artists["Playboi Carti"]
         assert result.parse_metadata.skipped_rows == 0, result.parse_metadata.unmatched_rows
         labels = {lbl for era in result.eras for sec in era.sections for lbl in (sec.name, sec.group) if lbl}
-        assert "WLR Higher Bitrate Files" in labels
+        # 2026-07-17 (PR #10 re-pin): "WLR Higher Bitrate Files" no longer in
+        # the live tracker; "Full LQs" is the surviving Notes-column label.
+        assert "Full LQs" in labels
         assert "Festival Remixes" in labels
 
     def test_tmb_collab_stub_merged(self, all_artists):

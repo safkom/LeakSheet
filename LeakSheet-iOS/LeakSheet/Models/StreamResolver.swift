@@ -34,11 +34,32 @@ enum StreamResolver {
         ) != nil
     }
 
+    /// pixeldrain single files only — /l/ lists are collections and open
+    /// externally.
+    nonisolated private static func pixeldrainID(_ url: String) -> Substring? {
+        url.firstMatch(
+            of: #/^https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)(?:$|[?#/])/#
+                .ignoresCase()
+        )?.1
+    }
+
+    /// Google Drive single-file links only — folders and legacy open?id=
+    /// forms stay unresolved (the payload kind is unknowable client-side;
+    /// the backend proxy content-type-gates what we do resolve).
+    nonisolated private static func gdriveFileID(_ url: String) -> Substring? {
+        url.firstMatch(
+            of: #/^https?://drive\.google\.com/file/d/([A-Za-z0-9_-]+)(?:$|[?#/])/#
+                .ignoresCase()
+        )?.1
+    }
+
     nonisolated static func isStreamableURL(_ url: String) -> Bool {
         pillowsID(url) != nil
             || imgurID(url) != nil
             || frosteHash(url) != nil
             || isKrakenView(url)
+            || pixeldrainID(url) != nil
+            || gdriveFileID(url) != nil
     }
 
     /// Returns the proxied stream URL for a file-sharing link.
@@ -67,6 +88,15 @@ enum StreamResolver {
             // The view URL is an HTML page — AVPlayer can't play it directly.
             // The backend proxy scrapes the CDN URL and streams the original
             // file bytes, so "original quality" IS the proxied stream here.
+            return streamURL(for: originalLink)
+        }
+
+        if let id = pixeldrainID(originalLink) {
+            return URL(string: "https://pixeldrain.com/api/file/\(id)?download")
+        }
+
+        if gdriveFileID(originalLink) != nil {
+            // Drive's direct download needs the proxy's interstitial handling.
             return streamURL(for: originalLink)
         }
 

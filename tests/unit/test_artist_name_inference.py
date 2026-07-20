@@ -25,6 +25,11 @@ from src.fetcher import _infer_artist_name
         ("Playboi Carti Tracker [Official]", "Playboi Carti"),
         ("Ye Tracker PUBLIC", "Ye"),
         ("Drake Tracker (reup 12.29.25) - Google Drive", "Drake"),
+        # 2026-07-18: yetracker.net titles itself " - Google disk" (sic) and
+        # suffix matching was case-sensitive, so the whole title leaked into
+        # the artist name shown by the apps.
+        ("Ye Tracker - Google disk", "Ye"),
+        ("Ye Tracker - GOOGLE DRIVE", "Ye"),
     ],
 )
 def test_infer_artist_name(title: str, expected: str) -> None:

@@ -1,20 +1,36 @@
 import SwiftUI
 
-/// URL input bar with paste button / parse button.
+/// URL input bar with paste button / parse button and cold-load progress.
 struct TrackerInputView: View {
     @Binding var url: String
     var loading: Bool
+    var loadPhase: APIClient.LoadPhase?
     var onSubmit: () async -> Void
 
     @FocusState private var focused: Bool
+    @State private var selection: TextSelection?
 
     var body: some View {
+        VStack(spacing: 6) {
+            inputRow
+            if loading, let loadPhase {
+                progressRow(for: loadPhase)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect(focused ? .regular.tint(.lsAccent) : .regular, in: .rect(cornerRadius: 12))
+        .animation(.default, value: loading)
+    }
+
+    private var inputRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "link")
                 .foregroundStyle(.secondary)
                 .font(.subheadline)
 
-            TextField("Paste a tracker URL...", text: $url)
+            TextField("Paste a tracker URL...", text: $url, selection: $selection)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -25,6 +41,13 @@ struct TrackerInputView: View {
                 .onSubmit {
                     normalizeIfConcatenated()
                     Task { await onSubmit() }
+                }
+                .onChange(of: focused) { _, isFocused in
+                    // Select-all on focus: retyping into a filled field
+                    // replaces the old URL instead of appending to it.
+                    if isFocused, !url.isEmpty {
+                        selection = TextSelection(range: url.startIndex..<url.endIndex)
+                    }
                 }
 
             if !url.isEmpty {
@@ -66,9 +89,41 @@ struct TrackerInputView: View {
                 .controlSize(.small)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .glassEffect(focused ? .regular.tint(.lsAccent) : .regular, in: .rect(cornerRadius: 12))
+    }
+
+    /// One line of honest progress: fraction when the payload size is known,
+    /// a byte counter otherwise, and a phase label either way.
+    @ViewBuilder
+    private func progressRow(for phase: APIClient.LoadPhase) -> some View {
+        HStack(spacing: 8) {
+            switch phase {
+            case .connecting:
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Contacting server…")
+            case .downloading(let received, let expected):
+                if let expected, expected > 0 {
+                    ProgressView(value: Double(received), total: Double(expected))
+                        .frame(maxWidth: 120)
+                    Text("\(Self.formatBytes(received)) of \(Self.formatBytes(expected))")
+                } else {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Downloading… \(Self.formatBytes(received))")
+                }
+            case .preparing:
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Preparing tracker…")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    static func formatBytes(_ bytes: Int64) -> String {
+        bytes.formatted(.byteCount(style: .file))
     }
 
     private func pasteFromClipboard() {
@@ -77,13 +132,10 @@ struct TrackerInputView: View {
         }
     }
 
-    /// SwiftUI's TextField has no public API to select-all on focus, so
-    /// retyping into an already-filled field can append rather than replace
-    /// (the clear button above is the primary fix for that). As a backstop
-    /// against a concatenated result actually reaching submit — e.g.
-    /// "https://a.com/xhttps://b.com/y" from a partial retype — keep only
-    /// the last "http" occurrence, which is the URL the user most recently
-    /// typed or pasted.
+    /// Backstop against a concatenated result reaching submit — e.g.
+    /// "https://a.com/xhttps://b.com/y" from a partial retype before
+    /// select-all-on-focus existed. Keeps only the last "http" occurrence,
+    /// which is the URL the user most recently typed or pasted.
     private func normalizeIfConcatenated() {
         var ranges: [Range<String.Index>] = []
         var searchStart = url.startIndex

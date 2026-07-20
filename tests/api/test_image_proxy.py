@@ -65,9 +65,12 @@ class TestRewriteGoogleSize:
 
 
 class TestSnapWidth:
+    # 2026-07-17: 1600 bucket added — the old 1280 top bucket was below
+    # iPhone full-screen width (~1290px), forcing an upscale on device.
     @pytest.mark.parametrize("requested,expected", [
         (32, 128), (128, 128), (129, 320), (320, 320),
-        (321, 640), (640, 640), (641, 1280), (1600, 1280),
+        (321, 640), (640, 640), (641, 1280), (1280, 1280),
+        (1290, 1600), (1600, 1600), (1601, 1600),
     ])
     def test_buckets(self, requested, expected):
         assert _snap_image_width(requested) == expected

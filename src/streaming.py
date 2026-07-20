@@ -16,6 +16,19 @@ direct audio stream URLs.  Supported hosts:
   krakenfiles.com
     https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  krakencloud.net CDN URL
     Requires Referer: https://krakenfiles.com/ when streaming from CDN.
+
+  pixeldrain.com
+    https://pixeldrain.com/u/{id}  →  https://pixeldrain.com/api/file/{id}
+    (pixeldrain.com/l/{id} is a *list* URL and is intentionally not resolved.)
+
+  drive.google.com
+    https://drive.google.com/file/d/{id}/view...
+    https://drive.google.com/open?id={id}
+    https://drive.google.com/uc?id={id}...
+      →  https://drive.google.com/uc?export=download&id={id}
+    Large/unscanned files return an HTML virus-scan interstitial instead of
+    bytes; the confirm form on that page is parsed and retried once against
+    drive.usercontent.google.com/download. See GdriveInterstitialError.
 """
 
 from __future__ import annotations
@@ -25,7 +38,7 @@ import ipaddress
 import logging
 import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
@@ -92,6 +105,21 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# pixeldrain.com — /u/ is a single file, /l/ is a list (intentionally not
+# matched here; lists are ignored this round).
+_PIXELDRAIN_PATTERN = re.compile(
+    r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
+)
+
+# drive.google.com/file/d/{id}/... — the id is captured directly; the
+# open?id=... and uc?id=... forms are handled via query-string parsing in
+# _extract_gdrive_id since the id can appear alongside other params in any
+# order.
+_GDRIVE_FILE_D_PATTERN = re.compile(
+    r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
+)
+_GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -133,11 +161,44 @@ async def close_shared_client() -> None:
         await _shared_client.aclose()
         _shared_client = None
 
+def _extract_gdrive_id(link: str) -> str | None:
+    """Extract a Google Drive file id from any of the supported URL forms.
+
+    Handles ``/file/d/{id}/...``, ``/open?id={id}``, and ``/uc?id={id}...``.
+    Returns None if the link isn't a recognised drive.google.com file URL or
+    the id contains characters outside [A-Za-z0-9_-].
+    """
+    m = _GDRIVE_FILE_D_PATTERN.match(link)
+    if m:
+        file_id = m.group(1)
+        return file_id if _GDRIVE_ID_RE.match(file_id) else None
+
+    parsed = urlparse(link)
+    host = (parsed.hostname or "").lower()
+    if host not in ("drive.google.com", "www.drive.google.com"):
+        return None
+    if parsed.path not in ("/open", "/uc"):
+        return None
+    ids = parse_qs(parsed.query).get("id")
+    if not ids:
+        return None
+    file_id = ids[0]
+    if not _GDRIVE_ID_RE.match(file_id):
+        return None
+    return file_id
+
+
+def is_gdrive_url(link: str) -> bool:
+    """Return True if *link* is a recognised Google Drive file share URL."""
+    return _extract_gdrive_id(link) is not None
+
+
 def resolve_metadata_url(link: str) -> dict[str, str] | None:
     """Convert a file-sharing link to its provider metadata API URL.
 
-    Returns ``{"url": "...", "provider": "pillows"|"froste"|"imgur"}``
-    or ``None`` if the host has no metadata API.
+    Returns ``{"url": "...", "provider": "pillows"|"froste"|"imgur"|"pixeldrain"}``
+    or ``None`` if the host has no metadata API (this includes drive.google.com —
+    no metadata provider is implemented for it yet).
     """
     m = _PILLOWS_PATTERN.match(link)
     if m:
@@ -163,8 +224,17 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
             "provider": "imgur",
         }
 
+    m = _PIXELDRAIN_PATTERN.match(link)
+    if m:
+        file_id = m.group(1)
+        return {
+            "url": f"https://pixeldrain.com/api/file/{file_id}/info",
+            "provider": "pixeldrain",
+        }
+
     # krakenfiles has no metadata API (the view page only yields a filename);
     # clients fall back to player-derived format info for kraken links.
+    # drive.google.com also has no metadata provider this round.
     return None
 
 
@@ -203,6 +273,19 @@ def resolve_stream_url(link: str) -> str | None:
         # Return view URL unchanged — resolved to CDN URL lazily in stream_audio()
         logger.debug("Resolved krakenfiles.com link %s (CDN resolved lazily)", link)
         return link
+
+    m = _PIXELDRAIN_PATTERN.match(link)
+    if m:
+        file_id = m.group(1)
+        resolved = f"https://pixeldrain.com/api/file/{file_id}"
+        logger.debug("Resolved pixeldrain.com link %s → %s", link, resolved)
+        return resolved
+
+    gdrive_id = _extract_gdrive_id(link)
+    if gdrive_id:
+        resolved = f"https://drive.google.com/uc?export=download&id={gdrive_id}"
+        logger.debug("Resolved drive.google.com link %s → %s", link, resolved)
+        return resolved
 
     logger.warning("No stream host matched for link: %s", link)
     return None
@@ -329,6 +412,155 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# drive.google.com — virus-scan interstitial bypass
+# ---------------------------------------------------------------------------
+#
+# Large or unscanned files served from drive.google.com/uc?export=download
+# return an HTML "Google Drive can't scan this file for viruses" confirmation
+# page instead of the file bytes. The page contains a hidden-input form that
+# posts (as a GET) to drive.usercontent.google.com/download with fields
+# id/export/confirm/uuid; retrying against that URL once yields the real
+# file. If the retry *also* comes back as HTML, we give up rather than ever
+# proxy HTML bytes to the client as if they were audio.
+#
+# Redirects are constrained to a fixed, literal two-host allowlist — the
+# same defense-in-depth spirit as the imgur cdnUrl guard above, but here the
+# hosts are hardcoded (never attacker-influenceable) so a simple membership
+# check on the final resolved URL is sufficient.
+
+_GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
+# Large public files are frequently served from Google's storage CDN
+# (*.googleusercontent.com). Still Google-controlled, so redirects there are
+# accepted; anything else stays rejected.
+_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
+
+
+class GdriveInterstitialError(Exception):
+    """Raised when Google Drive returns an HTML virus-scan interstitial that
+    could not be bypassed via the confirm-form retry."""
+
+
+# Hidden <input> tags anywhere in the confirm page, attribute order agnostic.
+_GDRIVE_INPUT_TAG_RE = re.compile(r"<input\b[^>]*>", re.IGNORECASE)
+_GDRIVE_INPUT_NAME_RE = re.compile(r'name=["\']([^"\']*)["\']', re.IGNORECASE)
+_GDRIVE_INPUT_VALUE_RE = re.compile(r'value=["\']([^"\']*)["\']', re.IGNORECASE)
+_GDRIVE_INPUT_HIDDEN_RE = re.compile(r'type=["\']hidden["\']', re.IGNORECASE)
+
+
+def parse_gdrive_confirm_form(html: str) -> dict[str, str] | None:
+    """Extract hidden form fields from Google Drive's virus-scan interstitial.
+
+    Returns a dict of the hidden ``<input>`` name/value pairs (typically
+    ``id``, ``export``, ``confirm``, ``uuid``), or None if the page doesn't
+    contain a recognisable confirm form (no hidden ``id``/``confirm`` pair).
+    """
+    fields: dict[str, str] = {}
+    for tag in _GDRIVE_INPUT_TAG_RE.findall(html):
+        if not _GDRIVE_INPUT_HIDDEN_RE.search(tag):
+            continue
+        name_m = _GDRIVE_INPUT_NAME_RE.search(tag)
+        if not name_m:
+            continue
+        value_m = _GDRIVE_INPUT_VALUE_RE.search(tag)
+        fields[name_m.group(1)] = value_m.group(1) if value_m else ""
+
+    if "id" not in fields or "confirm" not in fields:
+        return None
+    return fields
+
+
+def build_gdrive_confirm_url(fields: dict[str, str]) -> str:
+    """Build the drive.usercontent.google.com/download retry URL."""
+    return f"https://drive.usercontent.google.com/download?{urlencode(fields)}"
+
+
+def is_gdrive_stream_url(url: str) -> bool:
+    """Return True if *url* is the drive.google.com stream URL produced by
+    ``resolve_stream_url`` (used to dispatch into the gdrive fetch path)."""
+    try:
+        return (urlparse(url).hostname or "").lower() == "drive.google.com"
+    except Exception:
+        return False
+
+
+def _is_gdrive_host_allowed(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return host in _GDRIVE_ALLOWED_HOSTS or bool(_GDRIVE_USERCONTENT_RE.match(host))
+
+
+def _is_gdrive_playable_content_type(ct: str) -> bool:
+    """Return True if *ct* looks like real media Drive would serve.
+
+    Drive uses application/octet-stream for many audio files — the client
+    probes the container itself, so it's accepted here. HTML is never
+    accepted; it's always the interstitial or an error page.
+    """
+    base = ct.split(";")[0].strip().lower()
+    return (
+        base.startswith("audio/")
+        or base.startswith("video/")
+        or base in ("application/octet-stream", "binary/octet-stream")
+    )
+
+
+async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Response:
+    """Fetch a Google Drive stream URL, transparently bypassing the
+    virus-scan interstitial once via the confirm-form retry.
+
+    Returns the final upstream streaming response (caller must aclose it).
+    Raises GdriveInterstitialError if HTML persists after the retry, or
+    ValueError if a request would target a host outside the fixed allowlist.
+    """
+    client = _get_shared_client()
+
+    async def _get(url: str) -> httpx.Response:
+        if not _is_gdrive_host_allowed(url):
+            raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
+        request = client.build_request("GET", url, headers=headers)
+        resp = await client.send(request, stream=True)
+        if not _is_gdrive_host_allowed(str(resp.url)):
+            await resp.aclose()
+            raise ValueError(
+                f"gdrive request redirected off-allowlist to {str(resp.url)[:80]}"
+            )
+        return resp
+
+    resp = await _get(stream_url)
+
+    # Permission-required/private files: pass through untouched so the
+    # caller can relay the 403 as-is rather than treating it as an
+    # interstitial or a generic upstream error.
+    if resp.status_code == 403:
+        return resp
+
+    ct = resp.headers.get("content-type", "")
+    base_ct = ct.split(";")[0].strip().lower()
+    if resp.status_code == 200 and base_ct == "text/html":
+        html_bytes = await resp.aread()
+        await resp.aclose()
+        fields = parse_gdrive_confirm_form(html_bytes.decode("utf-8", errors="ignore"))
+        if not fields:
+            raise GdriveInterstitialError(
+                "drive.google.com returned HTML with no recognisable confirm form"
+            )
+        confirm_url = build_gdrive_confirm_url(fields)
+        resp = await _get(confirm_url)
+        if resp.status_code == 403:
+            return resp
+        retry_ct = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+        if retry_ct == "text/html":
+            await resp.aclose()
+            raise GdriveInterstitialError(
+                "drive.google.com interstitial persisted after confirm retry"
+            )
+
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Proxy streaming — fetches audio from upstream and yields chunks
 # ---------------------------------------------------------------------------
 
@@ -367,6 +599,27 @@ async def stream_audio(
     req_headers = {"User-Agent": _STREAM_USER_AGENT}
     if range_header:
         req_headers["Range"] = range_header
+
+    # drive.google.com: dedicated path — bypasses the virus-scan interstitial,
+    # allows video/* and application/octet-stream (Drive's generic type for
+    # many audio files) in addition to audio/*, and lets 403 (permission
+    # required) pass straight through instead of becoming a generic 502.
+    if is_gdrive_stream_url(stream_url):
+        resp = await _fetch_gdrive(stream_url, req_headers)
+        try:
+            if resp.status_code == 403:
+                return resp
+            if resp.status_code not in (200, 206, 416):
+                logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
+                raise ValueError(f"Upstream returned {resp.status_code}")
+            ct = resp.headers.get("content-type", "")
+            if resp.status_code != 416 and ct and not _is_gdrive_playable_content_type(ct):
+                logger.warning("Upstream %s returned non-media content-type: %s", stream_url, ct)
+                raise ValueError(f"Upstream returned non-audio content: {ct}")
+        except Exception:
+            await resp.aclose()
+            raise
+        return resp
 
     # music.froste.lol requires a Referer header
     if "music.froste.lol/song/" in stream_url:

@@ -128,3 +128,56 @@ class TestMimeAndDisposition:
         r = api_client.get("/stream", params={"url": PILLOWS, "download": "true"})
         assert r.status_code == 200
         assert r.headers["content-disposition"] == 'attachment; filename="track.mp3"'
+
+
+# ---------------------------------------------------------------------------
+# Google Drive error mapping (ported from PR #10's test_stream_hosts.py)
+# ---------------------------------------------------------------------------
+
+GDRIVE_SHARE_URL = "https://drive.google.com/file/d/abc123XYZ/view?usp=sharing"
+
+
+class FakeUpstreamResponse:
+    """Bare stand-in for the httpx.Response stream_audio() returns (no body)."""
+
+    def __init__(self, status_code, headers=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    async def aclose(self):
+        pass
+
+
+class TestStreamEndpointGdriveMapping:
+    def test_persistent_interstitial_maps_to_409(self, api_client, monkeypatch):
+        from src.streaming import GdriveInterstitialError
+
+        async def fake_stream_audio(url, *, range_header=None):
+            raise GdriveInterstitialError("interstitial persisted after confirm retry")
+
+        monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
+        r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
+        assert r.status_code == 409
+        assert r.json()["detail"] == "gdrive_interstitial"
+
+    def test_permission_denied_maps_to_403(self, api_client, monkeypatch):
+        async def fake_stream_audio(url, *, range_header=None):
+            return FakeUpstreamResponse(403)
+
+        monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
+        r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
+        assert r.status_code == 403
+
+    def test_generic_upstream_error_still_maps_to_502(self, api_client, monkeypatch):
+        # Non-gdrive failures keep their 502 mapping — the 409/403 branches
+        # must not swallow other ValueErrors.
+        async def fake_stream_audio(url, *, range_header=None):
+            raise ValueError("Upstream returned 500")
+
+        monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
+        r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
+        assert r.status_code == 502
+
+    def test_unresolvable_url_still_400s(self, api_client):
+        r = api_client.get("/stream", params={"url": "https://not-a-supported-host.example/x"})
+        assert r.status_code == 400

@@ -53,6 +53,7 @@ from src.fetcher import (
     STALE_CACHE_TTL,
 )
 from src.streaming import (
+    GdriveInterstitialError,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
@@ -245,6 +246,11 @@ _STREAM_ALLOWED_DOMAINS = {
     # Note: the krakenfiles CDN host is *.krakencloud.net (constrained by
     # _KRAKEN_CDN_AUDIO_PATTERN in streaming.py), not cdn.krakenfiles.com —
     # that stale entry never matched and was removed.
+    "pixeldrain.com",
+    "drive.google.com",
+    # The virus-scan interstitial confirm retry targets this host — see
+    # streaming._fetch_gdrive / _GDRIVE_ALLOWED_HOSTS.
+    "drive.usercontent.google.com",
 }
 
 
@@ -491,10 +497,14 @@ async def parse_sheet(
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
+    # Serialize + hash cost ~600ms on a Ye-sized artist — run off the event
+    # loop so concurrent requests aren't stalled during a cold miss.
+    def _serialize_and_hash() -> tuple[dict, str]:
+        d = artist.model_dump()
+        return d, compute_content_hash(d)
+
     with timer.phase("serialize"):
-        data = artist.model_dump()
-    with timer.phase("etag"):
-        etag = compute_content_hash(data)
+        data, etag = await asyncio.to_thread(_serialize_and_hash)
     response.headers["ETag"] = f'"{etag}"'
     response.headers["X-Cache-Status"] = "miss"
     response.headers["Cache-Control"] = "public, max-age=300"
@@ -519,7 +529,9 @@ async def clear_fetch_cache():
 # ---------------------------------------------------------------------------
 
 # Width buckets bound the cache cardinality; clients snap to the next bucket.
-_IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280)
+# 1600 added 2026-07-17: the old 1280 top bucket sat below iPhone full-screen
+# width (~1290px), so Now Playing art was upscaled on device.
+_IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
@@ -826,6 +838,47 @@ _PILLOWS_SPLIT_RE = re.compile(
 )
 
 
+# Codec is the strongest audio/video signal — mp4/mov containers hold
+# audio-only m4a files too, so an ambiguous container without codec info
+# stays "unknown". Substring-tolerant: pillows strings look like
+# "H.264 High Profile" or "AAC LC".
+_VIDEO_CODEC_RE = re.compile(
+    r"h\.?264|avc|hevc|h\.?265|av1|vp[89]|mpeg-?4 video|xvid|divx", re.IGNORECASE
+)
+_AUDIO_CODEC_RE = re.compile(
+    r"aac|mp3|mpeg[- ]?\d? layer|flac|alac|opus|vorbis|pcm|wav|ac-?3|dts", re.IGNORECASE
+)
+_AUDIO_CONTAINER_RE = re.compile(
+    r"flac|mp3|mpeg audio|wav|wave|ogg|aiff", re.IGNORECASE
+)
+
+
+def _media_kind_from_mime(mime: str | None) -> str:
+    """Classify from a Content-Type/mime string ("video/mp4" → "video")."""
+    m = (mime or "").lower()
+    if m.startswith("video/"):
+        return "video"
+    if m.startswith("audio/"):
+        return "audio"
+    return "unknown"
+
+
+def _derive_media_kind(container: str | None, codec: str | None) -> str:
+    """Classify a file as "audio" | "video" | "unknown" from metadata strings.
+
+    This is the only video signal clients get for opaque stream-host URLs —
+    the pillows stream endpoint reports audio/mp4 regardless of content.
+    """
+    if codec:
+        if _VIDEO_CODEC_RE.search(codec):
+            return "video"
+        if _AUDIO_CODEC_RE.search(codec):
+            return "audio"
+    if container and _AUDIO_CONTAINER_RE.search(container):
+        return "audio"
+    return "unknown"
+
+
 def _parse_pillows_metadata(text: str) -> dict:
     """Parse pillows.su metadata text format into normalized dict.
 
@@ -865,6 +918,7 @@ def _parse_pillows_metadata(text: str) -> dict:
         result["artist"] = pairs["ARTIST"]
     if "TITLE" in pairs:
         result["title"] = pairs["TITLE"]
+    result["media_kind"] = _derive_media_kind(result.get("container"), result.get("codec"))
     return result
 
 
@@ -890,7 +944,54 @@ def _parse_imgur_metadata(data: dict) -> dict:
         result["mime_type"] = data["mimeType"]
     if data.get("name"):
         result["filename"] = data["name"]
+    result["media_kind"] = _media_kind_from_mime(data.get("mimeType"))
     return result
+
+
+def _parse_pixeldrain_metadata(data: dict) -> dict:
+    """Extract useful fields from pixeldrain.com's /api/file/{id}/info response."""
+    result: dict = {"provider": "pixeldrain"}
+    if data.get("name"):
+        result["filename"] = data["name"]
+    if data.get("size") is not None:
+        result["file_size"] = data["size"]
+    if data.get("mime_type"):
+        result["mime_type"] = data["mime_type"]
+    result["media_kind"] = _media_kind_from_mime(data.get("mime_type"))
+    return result
+
+
+async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
+    """Minimal metadata from a HEAD of the pillows stream URL (mime + size).
+
+    Used when the .txt metadata endpoint has no entry for a file. Returns
+    None on any failure so the caller falls through to its normal error.
+    """
+    stream_url = resolve_stream_url(file_url)
+    if not stream_url:
+        return None
+    try:
+        client = _get_shared_client()
+        resp = await client.head(
+            stream_url,
+            headers={"User-Agent": _METADATA_USER_AGENT, "Referer": "https://pillows.su/"},
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return None
+        mime = resp.headers.get("content-type")
+        result: dict = {
+            "provider": "pillows",
+            "media_kind": _media_kind_from_mime(mime),
+        }
+        if mime:
+            result["mime_type"] = mime.split(";")[0].strip()
+        size = resp.headers.get("content-length")
+        if size and size.isdigit():
+            result["file_size"] = int(size)
+        return result
+    except Exception:
+        return None
 
 
 @app.get("/metadata")
@@ -926,6 +1027,22 @@ async def proxy_metadata(
         client = _get_shared_client()
         resp = await client.get(meta_url, headers=headers)
         if resp.status_code != 200:
+            # pillows' metadata .txt endpoint 404s for some files — notably
+            # videos. The CDN's Content-Type on the stream URL is accurate,
+            # so fall back to a HEAD probe before giving up.
+            if provider == "pillows":
+                fallback = await _pillows_stream_head_fallback(url)
+                if fallback is not None:
+                    payload = json.dumps(fallback)
+                    _metadata_cache.set(meta_url, payload)
+                    return Response(
+                        content=payload,
+                        media_type="application/json",
+                        headers={
+                            "Cache-Control": "public, max-age=3600",
+                            "X-Cache-Status": "miss",
+                        },
+                    )
             raise HTTPException(
                 status_code=502,
                 detail=f"Provider returned {resp.status_code}",
@@ -937,6 +1054,8 @@ async def proxy_metadata(
             result = _parse_froste_metadata(resp.json())
         elif provider == "imgur":
             result = _parse_imgur_metadata(resp.json())
+        elif provider == "pixeldrain":
+            result = _parse_pixeldrain_metadata(resp.json())
         else:
             result = {"provider": provider}
 
@@ -1236,12 +1355,25 @@ async def proxy_stream(
 
     try:
         resp = await stream_audio(stream_url, range_header=range_header)
+    except GdriveInterstitialError as e:
+        # Google Drive returned (and kept returning, after the confirm
+        # retry) an HTML virus-scan interstitial instead of file bytes.
+        # Never proxy HTML as audio — tell the client to fall back to
+        # opening the original share link in a browser.
+        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except ValueError as e:
         logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.exception("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
+
+    # Permission-required/private gdrive files come back from stream_audio
+    # as a real 403 response object (not raised) — relay it as-is.
+    if resp.status_code == 403:
+        await resp.aclose()
+        raise HTTPException(status_code=403, detail="Provider denied access")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
     # instead of collapsing it into a generic 502.

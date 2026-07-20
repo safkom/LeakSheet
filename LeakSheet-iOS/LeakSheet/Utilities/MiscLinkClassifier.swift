@@ -8,15 +8,17 @@ import Foundation
 nonisolated enum MiscLinkKind: Sendable, Equatable {
     case stream   // playable via the existing StreamResolver hosts
     case image    // direct image file or a known image-hosting host
-    case video    // YouTube/Vimeo or a direct video file
+    case video    // a direct video file
+    case embed    // YouTube/Vimeo/SoundCloud — official in-app embed player
     case archive  // zip/rar/7z or a known file-locker host
-    case link     // anything else — open externally
+    case link     // anything else — in-app Safari
 
     var systemImage: String {
         switch self {
         case .stream: return "play.circle"
         case .image: return "photo"
         case .video: return "film"
+        case .embed: return "play.rectangle"
         case .archive: return "archivebox"
         case .link: return "arrow.up.right.square"
         }
@@ -39,9 +41,14 @@ nonisolated enum MiscLinkClassifier {
     private static let archiveExtensions: Set<String> = ["zip", "rar", "7z", "tar", "gz"]
     private static let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "webm", "mkv", "avi"]
 
-    private static let videoHosts: Set<String> = [
+    /// Hosts whose content plays through their official embed widget.
+    private static let embedHosts: Set<String> = [
         "youtube.com", "m.youtube.com", "youtu.be", "vimeo.com",
+        "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com",
     ]
+    /// drive.google.com stays here as a fallback for folder and uc?id=
+    /// links; single-file /file/d/ links classify as .stream first via
+    /// StreamResolver.
     private static let archiveHosts: Set<String> = [
         "mega.nz", "mediafire.com", "drive.google.com",
     ]
@@ -64,7 +71,7 @@ nonisolated enum MiscLinkClassifier {
         if videoExtensions.contains(ext) { return .video }
         if StreamResolver.isStreamableURL(urlString) { return .stream }
         if archiveExtensions.contains(ext) || archiveHosts.contains(host) { return .archive }
-        if videoHosts.contains(host) { return .video }
+        if embedHosts.contains(host) { return .embed }
         if imageExtensions.contains(ext) || imageHosts.contains(host) { return .image }
         return .link
     }
@@ -76,6 +83,7 @@ nonisolated enum MiscLinkClassifier {
         switch host {
         case "youtube.com", "m.youtube.com", "youtu.be": return "YouTube"
         case "vimeo.com": return "Vimeo"
+        case "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com": return "SoundCloud"
         case "drive.google.com": return "Google Drive"
         case "mega.nz": return "Mega"
         case "mediafire.com": return "MediaFire"
@@ -94,12 +102,34 @@ nonisolated enum MiscLinkClassifier {
         switch kind {
         case .image:
             return urlString
-        case .video:
+        case .embed:
             guard let id = youTubeVideoID(from: urlString) else { return nil }
             return "https://img.youtube.com/vi/\(id)/hqdefault.jpg"
-        case .stream, .archive, .link:
+        case .stream, .video, .archive, .link:
             return nil
         }
+    }
+
+    /// Official embed-player URL for an embeddable link — the ToS-safe way
+    /// to play YouTube/Vimeo/SoundCloud in-app. Nil for everything else
+    /// (the caller falls back to the in-app Safari sheet).
+    static func embedURL(for urlString: String) -> URL? {
+        guard let url = URL(string: urlString), let host = normalizedHost(url) else { return nil }
+        if let id = youTubeVideoID(from: urlString) {
+            return URL(string: "https://www.youtube.com/embed/\(id)?playsinline=1")
+        }
+        if host == "vimeo.com" {
+            if let id = URLComponents(string: urlString)?.path.split(separator: "/").first,
+               id.allSatisfy(\.isNumber) {
+                return URL(string: "https://player.vimeo.com/video/\(id)")
+            }
+            return nil
+        }
+        if host == "soundcloud.com" || host == "m.soundcloud.com" || host == "on.soundcloud.com" {
+            guard let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+            return URL(string: "https://w.soundcloud.com/player/?url=\(encoded)&auto_play=false")
+        }
+        return nil
     }
 
     private static func normalizedHost(_ url: URL) -> String? {
