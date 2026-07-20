@@ -910,6 +910,63 @@ class TestColumnHeaderNormalization:
         assert self._detect("Era", "Name", "Release/Leaked Date:").get("leak_date") == 2
 
 
+class TestSweepDrivenColumnWiring:
+    """User-confirmed mappings (2026-07-20): bare 'Date' → leak_date;
+    'Producer(s)' → producers (when the name-cell credit didn't set it);
+    'Artist'/'Credited Artist' → the new credited_artists field;
+    'File Name'/'Instrumental Name' → og_filenames."""
+
+    HTML = (
+        "<table>"
+        "<tr><td>Era</td><td>Track Titles:</td><td>Artists:</td><td>Producers:</td>"
+        "<td>Date</td><td>File Name</td><td>Links</td></tr>"
+        "<tr><td>1 Full</td><td>Demo Era</td><td></td><td></td><td></td><td></td><td></td></tr>"
+        "<tr><td>Demo Era</td><td>Glass House</td><td>SynthGuest</td><td>Mathan Beats</td>"
+        "<td>March 2, 2012</td><td>glass_house_final</td><td></td></tr>"
+        "</table>"
+    )
+
+    def _version(self):
+        from src.parser import parse_sheet
+        artist = parse_sheet(self.HTML, "Test")
+        return artist.eras[0].songs[0].primary
+
+    def test_date_column_maps_to_leak_date(self):
+        assert self._version().leak_date == "March 2, 2012"
+
+    def test_producer_column_populates_producers(self):
+        assert self._version().producers == "Mathan Beats"
+
+    def test_name_cell_credit_beats_producer_column(self):
+        from src.parser import parse_sheet
+        html = self.HTML.replace("Glass House", "Glass House\n(prod. Inline Credit)")
+        v = parse_sheet(html, "Test").eras[0].songs[0].primary
+        assert v.producers == "Inline Credit"
+
+    def test_artist_column_populates_credited_artists(self):
+        assert self._version().credited_artists == "SynthGuest"
+
+    def test_file_name_column_populates_og_filenames(self):
+        v = self._version()
+        assert v.og_filenames == ["glass_house_final"]
+        assert v.og_filename == "glass_house_final"
+
+    def test_file_name_column_merges_with_notes_og_no_dupes(self):
+        # A sheet may carry BOTH a File Name column and an 'OG Filename:'
+        # notes line; both must land in og_filenames without duplicates.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>File Name</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Demo Era</td><td></td><td></td><td></td></tr>"
+            "<tr><td>Demo Era</td><td>Glass House</td>"
+            "<td>OG Filename: glass_house_alt</td><td>glass_house_final</td><td></td></tr>"
+            "</table>"
+        )
+        v = parse_sheet(html, "Test").eras[0].songs[0].primary
+        assert v.og_filenames == ["glass_house_final", "glass_house_alt"]
+
+
 class TestDroppedColumns:
     def test_unknown_header_surfaced(self):
         from src.parser import _Cell, detect_dropped_columns

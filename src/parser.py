@@ -2036,6 +2036,22 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
 
+    # Dedicated File Name / Instrumental Name column (2026-07-20 sweep,
+    # user-confirmed): same concept as the 'OG Filename:' notes convention —
+    # column values lead, notes-derived names follow, no duplicates.
+    og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
+    if og_col_text:
+        col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
+        og_filenames = col_names + [n for n in og_filenames if n not in col_names]
+
+    # Dedicated credit columns (2026-07-20 sweep, user-confirmed): a
+    # Producer column fills producers only when the name-cell '(prod. …)'
+    # credit didn't; Artist/Credited Artist columns carry the row's
+    # performer into the additive credited_artists field.
+    if not producers:
+        producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
+    credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
+
     links_idx = col_map.get("links")
     alt_links_idx = col_map.get("alt_links")
     link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
@@ -2086,6 +2102,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         badge=badge,
         featuring=featuring,
         producers=producers,
+        credited_artists=credited_artists,
         collaboration=collaboration,
         refs=refs,
         alt_titles=alt_titles,

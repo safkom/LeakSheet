@@ -83,6 +83,9 @@ COLUMN_ALIASES: dict[str, str] = {
     "creation date": "file_date",  # Kid Cudi
     "date created": "file_date",
     "year": "file_date",           # Avicii
+    # Bare 'Date' means the surfaced/leaked date in most trackers
+    # (user-confirmed 2026-07-20; 19 trackers in the TrackerHub sweep).
+    "date": "leak_date",
     "leak date": "leak_date",
     "release date": "leak_date",   # Gucci Mane, Yuno Miles
     "release/leaked date": "leak_date",  # SosMula (2026-07-20 sweep)
@@ -140,4 +143,21 @@ COLUMN_ALIASES: dict[str, str] = {
     "date of recording": "date_of_recording",  # Carti
     "recording date": "date_of_recording",      # Gucci Mane
     "record date": "date_of_recording",         # 2026-07-20 sweep (4 trackers)
+
+    # Dedicated credit columns (user-confirmed 2026-07-20 sweep mappings).
+    # Producer column fills SongVersion.producers only when the name-cell
+    # '(prod. …)' credit didn't already set it; Artist columns land in the
+    # additive credited_artists field (the row's performer, NOT a feature).
+    "producer": "producers_col",
+    "producers": "producers_col",
+    "artist": "credited_artists",
+    "artists": "credited_artists",
+    "credited artist": "credited_artists",
+    "credited artists": "credited_artists",
+
+    # Dedicated original-filename columns → og_filenames (merged with the
+    # 'OG Filename:' notes convention).
+    "file name": "og_filename_col",
+    "filename": "og_filename_col",
+    "instrumental name": "og_filename_col",
 }
