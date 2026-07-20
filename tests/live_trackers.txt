@@ -1,0 +1,14 @@
+# Locked set of public tracker URLs for the live invariant suite (-m live) and
+# the CI "live" job. These are public spreadsheet links, NOT tracker content, so
+# committing them carries no DMCA exposure (unlike the sheet HTML itself).
+#
+# One URL per line; blank lines and lines starting with # are ignored.
+# Keep this list small and stable — it exists to catch "a tracker changed format
+# and the parser now drops rows", not to exhaustively crawl every tracker.
+https://yetracker.net/
+https://docs.google.com/spreadsheets/d/1gJqbQrb3dIWF-PLMsKkNUrftpQb8zxsZFDAIpSvT5Fo/htmlview#gid=1807066929
+https://docs.google.com/spreadsheets/d/1i4OQglDHiiqMDthqfUFPutGmpZzK7n63LaoWApqhQXI/htmlview
+https://docs.google.com/spreadsheets/d/1v55XAPLzw1iuWxH1OQKajCIYPhW2BXcLoV4mXDZ55DI/htmlview
+https://docs.google.com/spreadsheets/d/1_SNZQS-AAXVleukgKlraegaozkLOu8WMHbUwmPm61hc/htmlview
+https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview
+https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/htmlview

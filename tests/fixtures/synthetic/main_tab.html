@@ -1,0 +1,40 @@
+<!--
+  Synthetic main "Unreleased" tracker tab — invented artist "SynthWave", real
+  Google-Sheets-export grammar. DMCA-safe: no real tracker content.
+
+  Exercises: header/column detection, era-header stats rows, era→song routing,
+  version-tag grouping ([V1]/[V2] → one Song), badge emoji, (feat.) credits,
+  OG Filename extraction + strip, Samples extraction, a section separator, a
+  quality cell background color, Google-redirect link cleaning, and the global
+  stats footer.
+
+  Hand-computed expectations (pinned in tests/parse/test_main_tab.py):
+    eras=2, songs=4, versions=5
+    total_rows=9, song_rows=5, footer_rows=1, skipped=0, other_rows=3
+    Debut Era: Sunrise (⭐ BEST, HQ, color), Nightfall (V1+V2), Echoes (feat. Nova)
+    Sophomore Era: "Features" section → Guest Spot (feat. Aurora)
+    tracker_stats.total_links=3, total_full=3
+-->
+<html><head><title>SynthWave Tracker - Google Drive</title>
+<style>
+.s0 { background-color:#ffffff; }
+.s10 { background-color:#4caf50; }
+</style></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Length</td><td>Leak Date</td><td>Available</td><td>Quality</td><td>Link(s)</td></tr>
+
+<tr><td>2 Full 1 Snippet</td><td>Debut Era</td><td>(2018) (SynthWave forms the group)</td><td></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td>Debut Era</td><td>⭐ Sunrise</td><td>OG Filename: sunrise_master</td><td>3:14</td><td>2019-01-01</td><td>Full</td><td class="s10">High Quality</td><td><a href="https://pillows.su/f/abc123">listen</a></td></tr>
+<tr><td>Debut Era</td><td>Nightfall [V1]</td><td></td><td>2:50</td><td>2019-02-01</td><td>Snippet</td><td>Low Quality</td><td><a href="https://www.google.com/url?q=https://pillows.su/f/night1&amp;sa=D&amp;source=editors">v1</a></td></tr>
+<tr><td>Debut Era</td><td>Nightfall [V2]</td><td></td><td>3:10</td><td>2019-03-01</td><td>Full</td><td>High Quality</td><td><a href="https://pillows.su/f/night2">v2</a></td></tr>
+<tr><td>Debut Era</td><td>Echoes<br>(feat. Nova)</td><td>Samples "Clair de Lune" by Debussy</td><td>4:20</td><td></td><td>Full</td><td>CD Quality</td><td></td></tr>
+
+<tr><td>1 Full</td><td>Sophomore Era</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+
+<tr><td></td><td>Features</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>Sophomore Era</td><td>Guest Spot<br>(feat. Aurora)</td><td></td><td>4:00</td><td>2021-05-05</td><td>Full</td><td>High Quality</td><td><a href="https://music.froste.lol/song/deadbeef">link</a></td></tr>
+
+<tr><td>&#128279; 3 Total Links</td><td></td><td></td><td>3 Total Full</td><td></td><td></td><td></td><td></td></tr>
+</table>
+</body></html>

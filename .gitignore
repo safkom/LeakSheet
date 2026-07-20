@@ -6,6 +6,14 @@ agents.md
 /Trackers
 *__pycache__
 ui_ideas
+
+# Real tracker content (DMCA): never commit fetched sheet HTML or parsed dumps.
+# Deterministic tests use tests/fixtures/synthetic/ (invented content) instead;
+# real-tracker accuracy is validated by the live CI job and the local -m accuracy
+# gate against the gitignored /Trackers dumps.
+/tests/fixtures/snapshots/
+/tests/fixtures/*.html
+/tests/results/
 iOS
 .worktrees
 .superpowers

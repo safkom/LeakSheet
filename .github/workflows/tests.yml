@@ -1,0 +1,46 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily — catches "a tracker changed format and the parser now drops data"
+    # even on days with no code changes.
+    - cron: "0 6 * * *"
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: Offline suite (gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      # Bare pytest = the offline gate (addopts excludes live/accuracy/slow).
+      # Deterministic, no network, no Trackers/ dumps needed. This gates merges.
+      - run: pytest
+
+  live:
+    name: Live invariants (latest data)
+    runs-on: ubuntu-latest
+    # Tracker availability / Google rate-limiting must never block a merge —
+    # this job is informational. Real parse breaks still show up as failures.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      # The locked public URL set only (excludes the slow full-registry sweep,
+      # which needs the gitignored artists.ndjson and is a local-only tool).
+      - run: pytest -m "live and not slow" -ra
