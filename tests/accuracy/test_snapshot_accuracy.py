@@ -20,52 +20,51 @@ from src.parser import _PLACEHOLDER_BASE_NAMES, parse_sheet
 # tests/accuracy/ → tests/ → fixtures/snapshots  (the module moved into accuracy/).
 SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "snapshots"
 
-# Pinned 2026-07-06 from the census run (pre-fix parser state).
+# Pinned 2026-07-20 from a fresh --live --fresh census (snapshots re-captured;
+# previous pins were 2026-07-06). Every delta was triaged against the raw
+# snapshot bytes before re-pinning — all data-side (tracker maintainers
+# edited), zero parser regressions:
+#   - tracker-1v55 (Drake) eras 29→28: the 'Performance Tracks' era was
+#     deleted from the sheet (0 occurrences in fresh bytes).
+#   - tracker-1v55 10plus 4→3: the maintainer re-attributed 'Kanye West -
+#     When I See It' [V2]-[V11] from IYRTITL to a new 'Views From The 6ix
+#     [V1]' era (era-column values changed in the raw HTML); the 12-version
+#     group is now split 9/3/1 across eras, faithfully following the sheet.
+#   - Everything else: organic growth (rows added), skipped=0 everywhere.
 BASELINES = {
     "yetracker": dict(
-        # songs 3949→3951 (2026-07-16): the WAR era no longer starves — its
-        # song rows previously misrouted to DONDA 2 [V1] because the "War"
-        # section label registered the "war" key first. Fixed by routing
-        # section-label/speculative era aliases to the fallback dict so the
-        # genuine WAR header claims the primary key. WAR now parses 39 songs;
-        # net +2 distinct song groups vs. when they were merged under DONDA 2.
-        eras=44, songs=3951, versions=9105,
-        total_rows=9314, song_rows=9105, skipped=0, footer=115, other_rows=94,
-        fuzzy=4, songs_with_10plus_versions=142,
+        eras=44, songs=3979, versions=9140,
+        total_rows=9349, song_rows=9140, skipped=0, footer=115, other_rows=94,
+        fuzzy=4, songs_with_10plus_versions=143,
     ),
     "tracker-1gJq": dict(  # Travis Scott
-        eras=15, songs=1165, versions=1306,
-        # skipped 1→0, other 75→76 (2026-07-06): the '| Last Updated: … |'
-        # banner row is now captured as a notice instead of dropped.
-        total_rows=1382, song_rows=1306, skipped=0, footer=0, other_rows=76,
+        eras=15, songs=1170, versions=1311,
+        total_rows=1387, song_rows=1311, skipped=0, footer=0, other_rows=76,
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "tracker-1i4O": dict(
-        eras=19, songs=735, versions=974,
-        total_rows=1042, song_rows=974, skipped=0, footer=22, other_rows=46,
+        eras=19, songs=738, versions=977,
+        total_rows=1045, song_rows=977, skipped=0, footer=22, other_rows=46,
         fuzzy=0, songs_with_10plus_versions=1,
     ),
-    "tracker-1v55": dict(
-        eras=29, songs=793, versions=998,
-        total_rows=1142, song_rows=998, skipped=0, footer=63, other_rows=81,
-        fuzzy=0, songs_with_10plus_versions=4,
+    "tracker-1v55": dict(  # Drake
+        eras=28, songs=796, versions=1002,
+        total_rows=1105, song_rows=1002, skipped=0, footer=63, other_rows=40,
+        fuzzy=0, songs_with_10plus_versions=3,
     ),
     "tracker-1_SN": dict(
-        eras=6, songs=197, versions=286,
-        total_rows=334, song_rows=286, skipped=0, footer=19, other_rows=29,
+        eras=6, songs=198, versions=287,
+        total_rows=335, song_rows=287, skipped=0, footer=19, other_rows=29,
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "tracker-1zqq": dict(
-        eras=30, songs=2225, versions=2459,
-        total_rows=2674, song_rows=2459, skipped=0, footer=31, other_rows=184,
+        eras=30, songs=2237, versions=2479,
+        total_rows=2694, song_rows=2479, skipped=0, footer=30, other_rows=185,
         fuzzy=0, songs_with_10plus_versions=1,
     ),
     "tracker-1Irt": dict(  # Playboi Carti [Official]
-        eras=29, songs=1182, versions=1603,
-        # skipped 2→0, other 212→214 (2026-07-06): the 'Full LQs' note-annotated
-        # section label and a timeline continuation row are now classified as
-        # structural rows instead of being dropped as unmatched.
-        total_rows=1859, song_rows=1603, skipped=0, footer=42, other_rows=214,
+        eras=29, songs=1191, versions=1615,
+        total_rows=1872, song_rows=1615, skipped=0, footer=42, other_rows=215,
         fuzzy=22, songs_with_10plus_versions=4,
     ),
 }
