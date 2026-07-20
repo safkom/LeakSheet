@@ -21,9 +21,22 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+import re
+
 from src.models import Artist
 from src.parser import _PLACEHOLDER_BASE_NAMES
 from src.streaming import resolve_stream_url
+
+# Era names that are template scaffolding rather than real eras — sheets built
+# from shared templates carry these with dummy stats blocks ("TBA", "Album
+# Name 4", "Unknown Eras", "Ongoing"; 2026-07-20 sweep). A faithful parse of
+# such an era has stats but zero songs; live checks must not flag that as a
+# starved-era parser bug. Strict (synthetic-fixture) checks keep flagging them.
+_PLACEHOLDER_ERA_RE = re.compile(
+    r"^(tba|tbd|n/?a|unknown(\s+eras?)?|ongoing|misc(ellaneous)?|other"
+    r"|album name \d+|era name( \d+)?|placeholder|template.*)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +78,7 @@ def health_violations(
     thresholds: Thresholds = DEFAULT,
     allow_empty_eras: frozenset[str] = frozenset(),
     include_advisory: bool = True,
+    lenient_placeholder_eras: bool = False,
 ) -> list[str]:
     """Return human-readable invariant violations; empty list means healthy.
 
@@ -126,10 +140,16 @@ def health_violations(
         v.append(f"unmapped header columns dropping data: {md.dropped_columns}")
 
     # --- Starved eras: stats claim songs but none parsed → era-routing bug ---
+    def _excused(name: str) -> bool:
+        stripped = name.strip()
+        if stripped.lower() in allow_empty_eras:
+            return True
+        return lenient_placeholder_eras and bool(_PLACEHOLDER_ERA_RE.match(stripped))
+
     starved = [
         e.name for e in artist.eras
         if e.song_count == 0 and e.stats is not None and e.stats.total > 0
-        and e.name.strip().lower() not in allow_empty_eras
+        and not _excused(e.name)
     ]
     if starved:
         v.append(f"eras whose stats claim songs but parsed 0: {starved}")
@@ -182,5 +202,9 @@ def live_violations(artist: Artist, *, allow_empty_eras: frozenset[str] = frozen
     eras, placeholder mis-grouping) fails.
     """
     return health_violations(
-        artist, thresholds=LIVE, allow_empty_eras=allow_empty_eras, include_advisory=False
+        artist,
+        thresholds=LIVE,
+        allow_empty_eras=allow_empty_eras,
+        include_advisory=False,
+        lenient_placeholder_eras=True,
     )

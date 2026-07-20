@@ -57,29 +57,34 @@ background (next request is fresh); >24h refetched inline. For "often updated" t
 the correct trade-off — the sweep measured cold fetches at 2–12s, which you never want inline.
 
 Observations (ranked):
-1. 🔴 **Sheet cache has no eviction.** `.cache/` reached **770MB** after one sweep; images are
-   capped at 200MB (`_evict_image_cache`) but sheet HTML/parsed JSON grow forever. On the 512MB
-   box disk isn't RAM, but unbounded growth on a small droplet eventually hurts. → add the same
-   mtime-based size-cap eviction for `{hash}.html`/`.parsed.json` (suggest 1–2GB cap).
+1. ~~🔴 **Sheet cache has no eviction.**~~ **IMPLEMENTED (addendum):** mtime-based, group-atomic
+   size-cap eviction for `{hash}.html`/`.meta.json`/`.parsed.json` (default 1GB,
+   `LEAKSHEET_SHEET_CACHE_MAX_BYTES` override), throttled to one dir scan/minute, hooked into
+   both cache writes. Images keep their own 200MB cap. (`.cache/` had reached 770MB after one
+   sweep.)
 2. 🟡 **Single-flight only covers SWR revalidation** (`_revalidating`, per-process). Two
    concurrent *cold* misses for the same tracker both do the full fetch+parse. Low impact at
    current traffic (Procfile runs 1 worker, so per-process is fine today) — worth a lock if
    worker count ever grows.
 3. 🟡 iOS never sends `force_refresh` and ignores `X-Cache-Status` — the app cannot show data
    age or offer pull-to-refresh. Backend supports both; purely a client follow-up.
-4. 🟢 Proposal (needs sign-off): a scheduled prewarm that background-revalidates the TrackerHub
-   `up_to_date` set hourly would make the stale-first UX disappear for popular trackers at
-   ~415 fetches/hour worst-case.
+4. ~~🟢 Proposal: scheduled prewarm~~ **IMPLEMENTED (addendum)** with a better cost profile than
+   proposed: instead of sweeping the whole TrackerHub set (~415 fetches/hour), an hourly loop
+   (`_prewarm_loop`, disable via `LEAKSHEET_PREWARM=0`) revalidates only cached parses inside
+   the SWR gap — i.e. trackers people actually use — capped at 25/cycle, sequential, reusing
+   the single-flight revalidator. Cost is proportional to real usage; stale-first UX disappears
+   for active trackers.
 
 ## Tracker format differences (the 415-tracker evidence)
 
 Full per-tracker matrix: `tests/results/sweep-20260720/*.json` (+ `_aggregate.json`).
 
 - **Dates — the biggest cross-layer gap.** Of ~92k date values: 86% are `MMM d, yyyy`
-  ("Mar 20, 2023") which the **iOS client can only parse to year precision**; only 9% are in a
-  format it parses fully; 2.5k have no year at all (sort to zero). → Proposal (API-visible,
-  needs sign-off): emit a normalized ISO companion field (e.g. `leak_date_iso`) parser-side, or
-  extend the iOS date parser with the `MMM d, yyyy` format (one-line client fix, biggest win).
+  ("Mar 20, 2023") which the **iOS client could only parse to year precision**; only 9% were in
+  a fully-parsed format; 2.5k have no year at all (sort to zero). → **IMPLEMENTED (addendum):**
+  the iOS `parseLeakDate` now handles `MMM d, yyyy` / `MMMM d, yyyy` / `MMM yyyy` (pinned in
+  `LeakSheetTests` `LeakDateParsingTests`), taking full-precision coverage from ~9% to ~95%.
+  The ISO companion field (`leak_date_iso`) remains an option if non-iOS clients ever appear.
 - **Availability/quality vocabulary** is 40+ values each but head-heavy (Full/Confirmed/OG
   File/Snippet cover 80%+; CD Quality/Not Available/High Quality/Recording/Lossless likewise).
   iOS colors by substring and handles the head well; tail values ("Full CDQ", "Confirmed") fall
@@ -101,8 +106,9 @@ Full per-tracker matrix: `tests/results/sweep-20260720/*.json` (+ `_aggregate.js
 
 | Class | Trackers | Assessment |
 |---|---|---|
-| Template/placeholder eras with dummy stats | SpaceGhostPurrp, KAYTRANADA "TBA", Carly Rae "Unknown Eras", Central Cee "Ongoing" | Mostly **data-side** (sheet contains stats text but no songs); consider relaxing the starved-era check for placeholder-named eras |
-| Era-less / exotic grammars | Avicii (multi-block landing sheet), Ice Spice [Alt], ChaseSYNX, Underground Artists, Smino, Mag.Lo | Needs a flat-tracklist parsing mode — design decision, not a patch |
+| Template/placeholder eras with dummy stats | SpaceGhostPurrp, KAYTRANADA "TBA", Carly Rae "Unknown Eras", Central Cee "Ongoing" | **RESOLVED (addendum):** data-side confirmed; `live_violations` now excuses placeholder-named eras (`_PLACEHOLDER_ERA_RE` in `tests/_health.py`, strict checks unaffected) — these 4 now report healthy (19/415 → 15/415 violating) |
+| Per-era multi-tab workbooks | Smino, Mag.Lo, Avicii, ChaseSYNX, Underground Artists | **Re-diagnosed (addendum):** not flat tracklists — the "main" tab is a hub of era names/descriptions and *each era lives in its own sheet tab*. Supporting this = aggregating unrecognized era-named tabs into eras; a real feature needing a design decision |
+| Numbered-single sheets | Ice Spice [Alt] (`# \| Title \| Artist \| Producer`, per-row "Released …" prose) | Distinct grammar; low tracker count; design decision |
 | Per-tracker quirks | Radiohead (side-project eras), Glocky, J. Cole, Amerie, ILOVEMAKONNEN, NBA Youngboy (2 left), Pet Shop Boys, Rauw Alejandro, Creamer Nation | Individually triageable from sweep artifacts; diminishing returns this round |
 | Dead links flagged working in TrackerHub | 9 fetch errors (401/403/404/410) | TrackerHub data quality; `/trackers` consumers could surface reachability |
 
@@ -130,6 +136,26 @@ DOMAINS`, iOS `StreamResolver`) — in sync today, drift-prone by construction.
 ## Verdict
 
 **Approve** (current state) — the five defect classes found are fixed and test-gated; the rest
-of the findings are proposals or documented follow-ups. Ship list for next rounds, in order of
-user value: iOS `MMM d, yyyy` date parsing (or ISO companion field) → sheet-cache eviction →
-flat-tracklist parsing mode → scheduled prewarm.
+of the findings are proposals or documented follow-ups.
+
+## Addendum — same-day implementation round (2026-07-20, user-approved)
+
+Shipped from the ship list, each test-gated:
+- **iOS date parsing**: `MMM d, yyyy` / `MMMM d, yyyy` / `MMM yyyy` formats added to
+  `ArtistViewModel.parseLeakDate` (+ `LeakDateParsingTests`); full-precision date coverage
+  ~9% → ~95% of live values.
+- **Sheet-cache eviction**: 1GB size cap, group-atomic, throttled
+  (`tests/unit/test_sheet_cache_eviction.py`).
+- **Stale-cache prewarm loop**: hourly SWR-gap revalidation of actually-used trackers
+  (`tests/api/test_prewarm.py`); `LEAKSHEET_PREWARM=0` to disable.
+- **Misc-tab colon-suffixed headers** now parse (`_misc_header_key` matches the main-tab
+  colon-strip).
+- **Placeholder-era leniency** in live health checks (template scaffolding no longer reads as
+  a starved-era bug): sweep violation count 19 → 15 of 415.
+- Living docs (README, agents.md, iOS README/SPEC, web README) verified against code and
+  refreshed (TrackerHub registry, pixeldrain/GDrive hosts, tab system, test pyramid,
+  CacheService v2, media_kind).
+
+Remaining next-round candidates, in order of user value: per-era multi-tab workbook support →
+iOS pull-to-refresh + data-age surfacing (`X-Cache-Status`) → numbered-single grammar →
+per-tracker quirk triage (sweep artifacts have the evidence).

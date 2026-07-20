@@ -2323,7 +2323,9 @@ def _misc_header_key(text: str) -> str:
     # "Link(s)" — the paren is part of the name, keep a special case
     if text.strip().lower().startswith("link"):
         key = "links"
-    return re.sub(r"\s+", " ", key.strip().lower())
+    # Colon-suffixed headers ("Era:", "Type:") — same grammar the 2026-07-20
+    # sweep found on main tabs; strip like detect_columns does.
+    return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
 def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:

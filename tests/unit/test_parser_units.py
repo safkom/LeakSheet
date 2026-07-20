@@ -1091,6 +1091,23 @@ class TestMiscTabUnits:
         from src.parser import parse_misc_tab
         assert parse_misc_tab("<html><body>no table</body></html>", "misc") == []
 
+    def test_colon_suffixed_headers(self):
+        # Same colon-suffix grammar the 2026-07-20 sweep found on main tabs
+        # exists on secondary tabs; _misc_header_key must strip it too.
+        from src.parser import parse_misc_tab
+        html = (
+            "<table>"
+            "<tr><td>Era:</td><td>Name:</td><td>Type:</td><td>Link(s):</td></tr>"
+            "<tr><td>Era One</td><td>Entry A</td><td>Video</td>"
+            "<td><a href='https://example.com/a'>l</a></td></tr>"
+            "</table>"
+        )
+        entries = parse_misc_tab(html, "misc")
+        assert len(entries) == 1
+        assert entries[0].era_name == "Era One"
+        assert entries[0].entry_type == "Video"
+        assert entries[0].links == ["https://example.com/a"]
+
     def test_synthetic_era_header_grouping(self):
         from src.parser import parse_misc_tab
         html = """
