@@ -287,7 +287,10 @@ def resolve_stream_url(link: str) -> str | None:
         logger.debug("Resolved drive.google.com link %s → %s", link, resolved)
         return resolved
 
-    logger.warning("No stream host matched for link: %s", link)
+    # A non-streamable host (YouTube, Instagram, imgbb, …) is normal tracker
+    # content, not an anomaly — census/health tooling probes every link, so a
+    # WARNING here floods logs. The /stream endpoint still 400s unmatched URLs.
+    logger.debug("No stream host matched for link: %s", link)
     return None
 
 

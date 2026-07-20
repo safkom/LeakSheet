@@ -35,7 +35,9 @@ BASELINES = {
     "yetracker": dict(
         eras=44, songs=3979, versions=9140,
         total_rows=9349, song_rows=9140, skipped=0, footer=115, other_rows=94,
-        fuzzy=4, songs_with_10plus_versions=143,
+        # fuzzy 4→1 (2026-07-20): positional-prior fix — placement verified
+        # byte-identical pre/post on all 44 eras; only the match tier changed.
+        fuzzy=1, songs_with_10plus_versions=143,
     ),
     "tracker-1gJq": dict(  # Travis Scott
         eras=15, songs=1170, versions=1311,
@@ -65,7 +67,11 @@ BASELINES = {
     "tracker-1Irt": dict(  # Playboi Carti [Official]
         eras=29, songs=1191, versions=1615,
         total_rows=1872, song_rows=1615, skipped=0, footer=42, other_rows=215,
-        fuzzy=22, songs_with_10plus_versions=4,
+        # fuzzy 22→2 (2026-07-20): positional-prior fix — the 22 fuzzy rows
+        # were repeat abbreviations of their own headers; now only the first
+        # occurrence per cluster is fuzzy, the rest resolve exactly.
+        # Placement verified byte-identical pre/post on all 29 eras.
+        fuzzy=2, songs_with_10plus_versions=4,
     ),
 }
 

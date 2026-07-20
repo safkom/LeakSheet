@@ -636,6 +636,109 @@ class TestSongKey:
         assert song.dict()["song_key"] == "test"
 
 
+class TestPositionalFuzzyPrior:
+    """A row-era abbreviation that fuzzy-matches its OWN header must never be
+    stolen by a higher-scoring sibling era (2026-07-20 review, 50 Cent).
+
+    Real case: the "Get Rich Or Die Tryin' Soundtrack" header's song rows use
+    era="Get Rich Or Die Tryin' OST". Global fuzzy scored the main "Get Rich
+    Or Die Tryin'" era 1.0 (4/4 words) vs the Soundtrack era's 0.8 (4/5), so
+    all OST songs were misattributed and the Soundtrack era starved (stats
+    claim songs, 0 parsed).
+    """
+
+    HTML = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+        "<tr><td>2 Full</td><td>Get Rich Or Die Tryin'</td><td></td><td></td></tr>"
+        "<tr><td>Get Rich Or Die Tryin'</td><td>In Da Club</td><td>note</td><td></td></tr>"
+        "<tr><td>1 Full</td><td>Get Rich Or Die Tryin' Soundtrack</td><td></td><td></td></tr>"
+        "<tr><td>Get Rich Or Die Tryin' OST</td><td>Pearly Gates</td><td>note</td><td></td></tr>"
+        "<tr><td>Get Rich Or Die Tryin' OST</td><td>Gangsta Shit</td><td>note</td><td></td></tr>"
+        "</table>"
+    )
+
+    def test_abbreviation_stays_with_current_header(self):
+        from src.parser import parse_sheet
+        artist = parse_sheet(self.HTML, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["Get Rich Or Die Tryin'"] == ["In Da Club"]
+        assert by_name["Get Rich Or Die Tryin' Soundtrack"] == ["Pearly Gates", "Gangsta Shit"]
+
+    def test_first_row_fuzzy_then_exact_via_fallback(self):
+        # Only the FIRST abbreviated row needs fuzzy — the positional match
+        # registers the abbreviation in the fallback dict, so subsequent rows
+        # resolve exactly.
+        from src.parser import parse_sheet
+        artist = parse_sheet(self.HTML, "Test")
+        assert artist.parse_metadata.fuzzy_matched_rows == 1
+
+    def test_global_fuzzy_still_works_without_positional_context(self):
+        """A row far from its era (different current era, no positional link)
+        still resolves via the global fuzzy search."""
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Collaboration with Digital Nas</td><td></td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Some Other Era</td><td></td><td></td></tr>"
+            "<tr><td>Digital Nas Collab</td><td>Lost Song</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        collab = next(e for e in artist.eras if e.name == "Collaboration with Digital Nas")
+        assert [s.base_name for s in collab.songs] == ["Lost Song"]
+
+
+class TestStatsHeaderBeatsSeparator:
+    """A row carrying era stats in col 0 is an era header even when its name
+    matches a section-separator keyword (2026-07-20 review).
+
+    Before the fix, a sparse (2-cell) header like stats + 'Collaboration with
+    Digital Nas' was classified as a section separator — the check ran before
+    the era-header check — so the era was never created and its song rows had
+    nowhere correct to go."""
+
+    def test_sparse_collab_header_creates_era(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Collaboration with Digital Nas</td><td></td><td></td></tr>"
+            "<tr><td>Collaboration with Digital Nas</td><td>Team Song</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        collab = next((e for e in artist.eras if e.name == "Collaboration with Digital Nas"), None)
+        assert collab is not None, f"eras: {[e.name for e in artist.eras]}"
+        assert [s.base_name for s in collab.songs] == ["Team Song"]
+
+
+class TestNoSilentRowLossOnAutoCreate:
+    """Auto-creating an era from a song row must keep the row's song
+    (2026-07-20 review).
+
+    The current-era branch created the new era but dropped the parsed
+    version on the floor when the row had only a name + notes (no links or
+    quality/date metadata) — silent data loss, not even counted as skipped.
+    The no-current-era branch already kept the song; the two must agree."""
+
+    def test_notes_only_song_survives_era_autocreate(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Era One</td><td></td><td></td></tr>"
+            "<tr><td>Era One</td><td>First Song</td><td>note</td><td></td></tr>"
+            "<tr><td>Brand New Chapter</td><td>Some Song</td><td>rumoured to exist</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name.get("Brand New Chapter") == ["Some Song"], by_name
+        assert artist.parse_metadata.song_rows == 2
+
+
 class TestFuzzyEraMatch:
     def _eras(self, *names):
         from src.models import Era

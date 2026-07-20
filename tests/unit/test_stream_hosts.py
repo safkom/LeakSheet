@@ -303,6 +303,18 @@ def test_gdrive_interstitial_error_is_an_exception():
 # tests/api/test_stream_endpoint.py — this module is pure functions only.
 
 
+class TestUnmatchedLinkLogging:
+    def test_unmatched_host_does_not_warn(self, caplog):
+        """Non-streamable hosts are normal tracker content (YouTube, imgbb, …);
+        census/health tooling probes every link, so a WARNING per miss floods
+        logs. 2026-07-20 review: downgraded to debug."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="src.streaming"):
+            assert resolve_stream_url("https://www.youtube.com/watch?v=x") is None
+        assert caplog.records == []
+
+
 class TestGdriveRedirectHosts:
     """2026-07-18: large public files redirect to *.googleusercontent.com —
     accept Google's storage CDN, reject everything else."""

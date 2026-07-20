@@ -50,12 +50,18 @@ BASELINES = {
     "Playboi Carti": dict(
         eras=29, songs=1193, versions=1616,
         total_rows=1872, song_rows=1616, skipped=0, footer=42, other_rows=214,
-        fuzzy=22, songs_with_10plus_versions=4,
+        # fuzzy 22→2 (2026-07-20): positional-prior fix — placement verified
+        # byte-identical pre/post on all 29 eras; only the match tier changed.
+        fuzzy=2, songs_with_10plus_versions=4,
     ),
     "Ye": dict(
         eras=44, songs=3977, versions=9141,
         total_rows=9350, song_rows=9141, skipped=0, footer=115, other_rows=94,
-        fuzzy=4, songs_with_10plus_versions=143,
+        # fuzzy 4→1 (2026-07-20): the positional-prior fix matches abbreviated
+        # row-eras against the current header first and registers the
+        # abbreviation for exact reuse. Song placement verified byte-identical
+        # pre/post fix on all 44 eras — only the match tier changed.
+        fuzzy=1, songs_with_10plus_versions=143,
     ),
 }
 

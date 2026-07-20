@@ -1454,19 +1454,14 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
-        # Section separators → capture as named sections within current era
-        if _is_section_separator(row):
-            if current_era is not None:
-                non_empty = [c for c in row if c.text.strip()]
-                label = non_empty[0].text.strip() if non_empty else ""
-                if label:
-                    current_era.sections.append(Section(name=label))
-            continue
-
-        # Check for era header (must come before footer check, since
-        # Carti era stats contain "Total Full" which is also a footer keyword).
-        # Also resets footer state — if data resumes after a footer-like row,
-        # it's a new era, not leftover footer.
+        # Check for era header FIRST (2026-07-20 review: before the section-
+        # separator check — a sparse 2-cell header like stats + 'Collaboration
+        # with X' otherwise gets swallowed as a separator and the era is never
+        # created; a genuine separator row never carries era stats in col 0).
+        # Must also come before the footer check, since Carti era stats contain
+        # "Total Full" which is also a footer keyword. Also resets footer
+        # state — if data resumes after a footer-like row, it's a new era,
+        # not leftover footer.
         if _is_era_header(row):
             in_footer = False
             current_era, needs_backfill = _parse_era_header_row(row, col_map)
@@ -1474,6 +1469,15 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             _register_era_keys(current_era, current_era.name, era_by_key, era_by_key_fallback)
             if needs_backfill:
                 _needs_name_backfill.add(id(current_era))
+            continue
+
+        # Section separators → capture as named sections within current era
+        if _is_section_separator(row):
+            if current_era is not None:
+                non_empty = [c for c in row if c.text.strip()]
+                label = non_empty[0].text.strip() if non_empty else ""
+                if label:
+                    current_era.sections.append(Section(name=label))
             continue
 
         # Check name column for footer signals (e.g. "CARTI TRACKER HUB").
@@ -1532,6 +1536,27 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 matched_era = era_by_key_fallback.get(row_era_norm)
                 if matched_era is None and row_era_stripped != row_era_norm:
                     matched_era = era_by_key_fallback.get(row_era_stripped)
+
+            # Positional prior before the global fuzzy search (2026-07-20
+            # review, 50 Cent): a row-era value that fuzzy-matches the era
+            # we're currently under is an abbreviation of that header (e.g.
+            # "Get Rich Or Die Tryin' OST" rows directly beneath the "Get
+            # Rich Or Die Tryin' Soundtrack" header). The global search would
+            # let a similarly-worded sibling era outscore it ("Get Rich Or
+            # Die Tryin'", 4/4 words = 1.0 vs the header's 4/5 = 0.8) and
+            # silently steal every song, starving the real era.
+            if matched_era is None and current_era is not None:
+                cur_key = _era_match_key(current_era.name) if current_era.name else ""
+                if cur_key and _fuzzy_era_match(row_era_norm, {cur_key: current_era}):
+                    matched_era = current_era
+                    fuzzy_matched_rows += 1
+                    # Future rows with the same abbreviation resolve exactly
+                    # (fallback tier, so a genuine era keeps primary-key wins).
+                    era_by_key_fallback.setdefault(row_era_stripped, current_era)
+                    logger.debug(
+                        "Positional fuzzy match: %r → current era %r",
+                        row_era_norm, current_era.name,
+                    )
 
             # Fuzzy match if all exact paths fail
             if matched_era is None:
@@ -1596,6 +1621,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
+                            # 2026-07-20 review: keep the row's own song — this
+                            # branch used to drop the parsed version on the
+                            # floor (silent data loss, not even counted as
+                            # skipped). The no-current-era auto-create path
+                            # below has always kept it; the two now agree.
+                            _add_version_to_era(current_era, version, song_index)
+                            song_rows += 1
                     elif version:
                         # Not a plausible era name but has song data —
                         # assign to current era as fallback
