@@ -445,3 +445,44 @@ struct CrossEraIndexTests {
         #expect(unique.isEmpty)
     }
 }
+
+// MARK: - Leak-date parsing (2026-07-20 review)
+
+@Suite("Leak date parsing")
+struct LeakDateParsingTests {
+    // "MMM d, yyyy" is the dominant live format (86% of dated versions in
+    // the 2026-07-20 TrackerHub sweep, incl. the entire Ye tracker); before
+    // the fix it fell through to the bare-year regex and lost day precision.
+    @Test func abbreviatedMonthDayParsesToFullPrecision() {
+        let a = ArtistViewModel.parseLeakDate("Mar 20, 2023")
+        let b = ArtistViewModel.parseLeakDate("Mar 21, 2023")
+        #expect(a > 0)
+        #expect(b - a == 86_400)  // day precision, not year-bucketed
+    }
+
+    @Test func fullMonthDayParses() {
+        #expect(ArtistViewModel.parseLeakDate("March 20, 2023") ==
+                ArtistViewModel.parseLeakDate("Mar 20, 2023"))
+    }
+
+    @Test func abbreviatedMonthYearParses() {
+        let v = ArtistViewModel.parseLeakDate("Mar 2023")
+        #expect(v == ArtistViewModel.parseLeakDate("March 2023"))
+        #expect(v > 0)
+    }
+
+    @Test func existingFormatsStillParse() {
+        #expect(ArtistViewModel.parseLeakDate("03/20/2023") > 0)
+        #expect(ArtistViewModel.parseLeakDate("2023-03-20") > 0)
+        #expect(ArtistViewModel.parseLeakDate("March 2023") > 0)
+        #expect(ArtistViewModel.parseLeakDate("2023") > 0)
+    }
+
+    @Test func yearFallbackAndGarbage() {
+        // Unknown format containing a year still year-buckets…
+        #expect(ArtistViewModel.parseLeakDate("sometime in 2019?") > 0)
+        // …and true garbage sorts to the bottom.
+        #expect(ArtistViewModel.parseLeakDate("n/a") == 0)
+        #expect(ArtistViewModel.parseLeakDate("") == 0)
+    }
+}
