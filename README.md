@@ -14,11 +14,11 @@ LeakSheet is split into three pieces:
 
 | Piece | Path | Stack |
 |---|---|---|
-| **Backend / parser** | `src/` | Python 3.10+, FastAPI, httpx |
-| **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) |
-| **iOS app** | `LeakSheet-iOS/` | SwiftUI (iOS 26+), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
+| **Backend / parser** | `src/` | Python 3.10+, FastAPI, httpx, lxml |
+| **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) · **unmaintained** |
+| **iOS app** | `LeakSheet-iOS/` | SwiftUI (iOS 27+), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
-Both apps talk to the same FastAPI backend.
+Both apps talk to the same FastAPI backend. The iOS app is the maintained client; the web app is kept for reference but no longer developed.
 
 ### Web app (in short)
 
@@ -32,12 +32,13 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 ## Features (backend + apps)
 
-- 🎵 **Inline streaming** from pillows.su, imgur.gg, music.froste.lol, and krakenfiles.com
-- 📊 **Live parsing** of Google Sheets trackers — no manual exports
+- 🎵 **Inline streaming** from pillows.su, imgur.gg, music.froste.lol, krakenfiles.com, pixeldrain.com, and Google Drive
+- 📊 **Live parsing** of Google Sheets trackers — no manual exports; secondary tabs (Released / Stems / Misc / Music Videos) become pages, highlight tabs (Best Of / Grails / Wanted / …) stamp badges
+- 🗂️ **Tracker discovery** via the live TrackerHub sheet (`GET /trackers`)
 - 🎨 **Per-era cover art colors** extracted on the fly
 - 🔍 **Fast search & filters** across eras, songs, and versions
 - ⭐ **Favourites & queue** persisted locally
-- 📦 **ETag-aware caching** on both backend and clients
+- 📦 **ETag-aware caching** on both backend and clients (stale-while-revalidate)
 
 ---
 
@@ -65,8 +66,16 @@ python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https:/
 ### Tests
 
 ```bash
-python -m pytest tests/
+pip install -r requirements-dev.txt
+pytest                  # offline gate: deterministic, no network, no local dumps needed
+pytest -m accuracy      # exact-count regression vs local Trackers/ dumps (skips if absent)
+pytest -m live          # fetches the locked live tracker set, drift-tolerant invariants
+pytest -m "live and slow"  # full TrackerHub sweep (deliberate, slow)
 ```
+
+The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|live|accuracy`) with one
+shared health definition in `tests/_health.py`. CI runs the offline gate on every push and a
+soft live job daily (`.github/workflows/tests.yml`).
 
 ---
 
@@ -74,10 +83,10 @@ python -m pytest tests/
 
 | Source | Example |
 |---|---|
-| Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` |
-| Custom tracker domain | sites with embedded sheets (auto-redirected) |
-| Links file | `Trackers/links.txt` — one URL per line |
-| Local HTML export | `Trackers/.../sheet.html` (dev only) |
+| Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` (any `/edit`/`/view` form is normalized) |
+| Custom tracker domain | sites with embedded sheets, e.g. `yetracker.net` |
+| TrackerHub registry | `GET /trackers` — live list of community trackers with up-to-date flags |
+| Local HTML export | `Trackers/.../sheet.html` (dev only, gitignored) |
 
 ---
 
@@ -91,16 +100,19 @@ The backend proxies audio so clients can play it without CORS pain.
 | imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` |
 | music.froste.lol | `music.froste.lol/song/{hash}` |
 | krakenfiles.com | `krakenfiles.com/view/{id}/file.html` (CDN URL scraped) |
+| pixeldrain.com | `pixeldrain.com/u/{id}` |
+| drive.google.com | `drive.google.com/file/d/{id}/…` (virus-scan interstitial handled) |
 
 ---
 
 ## API
 
 ```
-POST /api/sheet              → Parse tracker URL → Artist JSON
-GET  /api/stream?url=...     → Proxy audio from supported hosts
-GET  /api/image-proxy?url=…  → Proxy images (CORS bypass)
-GET  /api/metadata?url=...   → Audio file metadata
+POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate)
+GET  /api/trackers           → TrackerHub discovery list (name, url, best, up-to-date flags)
+GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
+GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)
+GET  /api/metadata?url=...   → File metadata from provider APIs (incl. media_kind)
 POST /api/cache/clear        → Clear URL fetch cache
 ```
 
@@ -136,17 +148,21 @@ For deeper architecture notes, parsing strategy, and design decisions, see [agen
 
 ## CLI Tools
 
-Useful when adding support for a new tracker layout:
+Useful when adding support for a new tracker layout (debug scripts live in `scripts/tools/`;
+the census harness stays importable under `tests/tools/`):
 
 | Tool | Purpose |
 |---|---|
-| `tests/tools/dump_raw_table.py` | Dump raw HTML table rows |
-| `tests/tools/inspect_eras.py` | Show eras with song/version counts |
-| `tests/tools/inspect_songs.py` | Inspect parsed songs with filters |
-| `tests/tools/diff_trackers.py` | Compare column layouts across trackers |
-| `tests/tools/debug_zero_eras.py` | Diagnose eras with 0 matched songs |
+| `tests/tools/census.py` | Per-tracker content census + gzipped live snapshots (accuracy baselines) |
+| `scripts/tools/trackerhub_sweep.py` | Sweep every up-to-date TrackerHub tracker: health, columns, tabs, date formats |
+| `scripts/tools/dump_raw_table.py` | Dump raw HTML table rows |
+| `scripts/tools/inspect_eras.py` | Show eras with song/version counts |
+| `scripts/tools/inspect_songs.py` | Inspect parsed songs with filters |
+| `scripts/tools/diff_trackers.py` | Compare column layouts across trackers |
 
 ```bash
-python -m tests.tools.inspect_eras --tracker ye
-python -m tests.tools.inspect_songs --tracker ye --era "Yeezus 2"
+python3 -m tests.tools.census --fixtures          # offline census of local dumps
+python3 scripts/tools/trackerhub_sweep.py --limit 20
 ```
+
+The latest deep-review findings live in [docs/reviews/](docs/reviews/).

@@ -24,14 +24,18 @@ By default the app talks to the FastAPI backend (see [root README](../README.md)
 ## Features
 
 - 🔗 Tracker URL input with paste support and recent trackers
-- 📚 Browse pre-indexed artists from `Artists.ndjson`
+- 📚 Browse artists from the live TrackerHub feed (`GET /trackers`)
+- 🗂️ Tab-mode chips: content tabs (Released / Stems / Misc / Music Videos) render as pages;
+  highlight tabs annotate songs with badges
 - 🔍 Debounced search with Best Of / Recents / No Snippets filter chips
 - 🎨 Era cards with dominant-color gradients
 - 🎵 Inline streaming with mini-player, full-screen Now Playing, and queue
+  (pillows, imgur.gg, froste, krakenfiles, pixeldrain, Google Drive)
+- 🎬 Inline video at native aspect; tap → native fullscreen player
 - 🔒 Lock-screen controls + Control Center integration
 - 👆 Swipe right to play, swipe left to queue, long-press for context menu
 - ⭐ Favourites grouped by artist/era (UserDefaults persistence)
-- 💾 Disk cache with ETag validation; in-memory image cache
+- 💾 CacheService v2 disk cache with ETag validation; in-memory image cache
 
 ## Project Layout
 
