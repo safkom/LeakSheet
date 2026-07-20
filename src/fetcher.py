@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from contextlib import contextmanager
@@ -47,6 +48,16 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
+
+# Size cap for the sheet HTML + parsed-JSON cache (2026-07-20 review: the
+# image cache has had a 200MB cap for a while, the sheet cache had none — a
+# TrackerHub sweep left ~700MB behind on a 512MB-class box). Oldest entries
+# (grouped per hash stem) are evicted first; img_* files have their own cap.
+_SHEET_CACHE_MAX_BYTES = int(
+    os.environ.get("LEAKSHEET_SHEET_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))
+)
+_SHEET_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
+_last_sheet_evict = 0.0
 
 
 class PhaseTimer:
@@ -123,7 +134,9 @@ _BEST_OF_TAB_NAMES = frozenset({"best of"})
 _WORST_OF_TAB_NAMES = frozenset({"worst of"})
 _STEMS_TAB_NAMES = frozenset({"stems"})
 _SPECIAL_TAB_NAMES = frozenset({"special", "notable"})
-_GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails/wanted"})
+# Slash spacing is normalized to " / " by _clean_tab_name before matching;
+# "grails & wanted" observed 7x in the 2026-07-20 TrackerHub sweep.
+_GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails & wanted"})
 _WANTED_TAB_NAMES = frozenset({"wanted"})
 _FAKES_TAB_NAMES = frozenset({"fakes"})
 
@@ -420,9 +433,18 @@ def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
 
 
 def _clean_tab_name(name: str) -> str:
-    """Normalize a sheet tab name for keyword matching (strip emoji, lower)."""
+    """Normalize a sheet tab name for keyword matching (strip emoji, lower).
+
+    2026-07-20 sweep: also strips trailing parenthetical/bracket qualifiers —
+    '(WIP)'-suffixed content tabs ('Released (WIP)', 'Stems [WIP]', 'Art
+    (wip)') appeared 60+ times across TrackerHub and fell out of
+    classification entirely — and normalizes slash spacing so 'Grails/
+    Wanted' matches the 'grails / wanted' keyword set.
+    """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
-    return re.sub(r"\s+", " ", clean)
+    clean = re.sub(r"[\(\[][^)\]]*[\)\]]\s*$", "", clean).strip()
+    clean = re.sub(r"\s*/\s*", " / ", clean)
+    return re.sub(r"\s+", " ", clean).strip()
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
@@ -541,6 +563,57 @@ def _get_cached(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> tuple[str, st
     return None
 
 
+def _evict_sheet_cache() -> None:
+    """Drop the oldest sheet-cache entries once the cache exceeds the cap.
+
+    Entries are grouped per hash stem (.html / .meta.json / .parsed.json
+    evicted together, so no orphan meta or parsed files survive) and ranked
+    by their most recent mtime. ``img_*`` files belong to the image cache,
+    which has its own cap — never touched here.
+    """
+    if not CACHE_DIR.exists():
+        return
+    groups: dict[str, list[tuple[float, int, Path]]] = {}
+    total = 0
+    for path in CACHE_DIR.iterdir():
+        if not path.is_file() or path.name.startswith("img_"):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        stem = path.name.split(".", 1)[0]
+        groups.setdefault(stem, []).append((stat.st_mtime, stat.st_size, path))
+        total += stat.st_size
+    if total <= _SHEET_CACHE_MAX_BYTES:
+        return
+    ranked = sorted(
+        groups.values(), key=lambda files: max(m for m, _, _ in files)
+    )
+    for files in ranked:
+        if total <= _SHEET_CACHE_MAX_BYTES:
+            break
+        for _, size, victim in files:
+            total -= size
+            try:
+                victim.unlink()
+            except OSError:
+                pass
+
+
+def _maybe_evict_sheet_cache() -> None:
+    """Throttled eviction — a full dir scan at most every minute."""
+    global _last_sheet_evict
+    now = time.time()
+    if now - _last_sheet_evict < _SHEET_EVICT_MIN_INTERVAL:
+        return
+    _last_sheet_evict = now
+    try:
+        _evict_sheet_cache()
+    except OSError as e:
+        logger.warning("Sheet-cache eviction failed: %s", e)
+
+
 def _set_cache(url: str, html: str, title: str) -> None:
     """Write HTML and metadata to cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -550,6 +623,7 @@ def _set_cache(url: str, html: str, title: str) -> None:
         json.dumps({"url": url, "title": title, "timestamp": time.time()}),
         encoding="utf-8",
     )
+    _maybe_evict_sheet_cache()
 
 
 def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist | None:
@@ -593,6 +667,7 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         meta_file.write_text(
             json.dumps(meta, ensure_ascii=False), encoding="utf-8"
         )
+        _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
 
@@ -611,6 +686,39 @@ async def _async_get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TT
 
 async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
     await asyncio.to_thread(_set_cached_parsed, url, artist)
+
+
+def stale_parsed_cache_urls(limit: int) -> list[str]:
+    """URLs of cached parses inside the stale-while-revalidate gap.
+
+    These are trackers someone actually uses (they have a parsed cache entry)
+    whose next request would be served stale (age between DEFAULT_CACHE_TTL
+    and STALE_CACHE_TTL). The prewarm loop refreshes them in the background
+    so frequently-updated trackers serve fresh data instead of stale-first.
+    Freshest-stale first — those are the most likely to be requested again —
+    capped at ``limit`` per call.
+    """
+    if not CACHE_DIR.exists():
+        return []
+    now = time.time()
+    candidates: list[tuple[float, str]] = []
+    for meta_file in CACHE_DIR.glob("*.meta.json"):
+        stem = meta_file.name.removesuffix(".meta.json")
+        if not (CACHE_DIR / f"{stem}.parsed.json").exists():
+            continue  # gid sub-pages etc. — only full parses are prewarmed
+        try:
+            meta = json.loads(meta_file.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        url = meta.get("url")
+        ts = meta.get("timestamp", 0)
+        if not url or ts <= 0:
+            continue
+        age = now - ts
+        if DEFAULT_CACHE_TTL < age <= STALE_CACHE_TTL:
+            candidates.append((age, url))
+    candidates.sort()
+    return [url for _, url in candidates[:limit]]
 
 
 def clear_cache() -> int:

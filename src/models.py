@@ -89,6 +89,11 @@ class SongVersion(BaseModel):
     badge: Badge | None = Field(None, description="Emoji badge classification")
     featuring: str | None = Field(None, description="Featured artists, e.g. 'Rhymefest & Kanye West'")
     producers: str | None = Field(None, description="Producers, e.g. 'Kanye West & Andy C.'")
+    credited_artists: str | None = Field(
+        None,
+        description="Performer(s) from a dedicated Artist/Credited Artist column "
+        "(collab-style trackers) — the row's performing artist, not a feature",
+    )
     collaboration: str | None = Field(None, description="Collaboration artist, e.g. 'Go Getters'")
     refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")

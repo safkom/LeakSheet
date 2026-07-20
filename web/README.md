@@ -1,5 +1,9 @@
 # LeakSheet — Web App
 
+> ⚠️ **Unmaintained.** The iOS app ([LeakSheet-iOS/](../LeakSheet-iOS/)) is the maintained
+> client; this web app is kept for reference and no longer tracks new backend features
+> (tab pages, pixeldrain/Google Drive streaming, media_kind metadata, …).
+
 Vue 3 frontend for [LeakSheet](../README.md). A fast, keyboard-friendly tracker browser with inline audio streaming, search, and favourites.
 
 ## Stack

@@ -115,7 +115,7 @@ NowPlayingView (sheet)
 Sheets:
   ├── SongDescriptionSheet — full song/version metadata (CachedImage)
   ├── QueueSheet           — reorderable playback queue
-  ├── BrowseArtistsView    — searchable artists.ndjson list
+  ├── BrowseArtistsView    — searchable TrackerHub list (GET /trackers)
   ├── FavouritesView       — all favourites
   └── SettingsView         — cache management, about
 ```
@@ -167,7 +167,9 @@ Response: image/* with Cache-Control: public, max-age=86400
 ### GET /api/metadata?url=...
 ```
 Fetches audio file metadata from provider APIs.
-Providers: pillows (codec/bitrate/duration), froste (quality analysis), imgur (file info)
+Providers: pillows (codec/bitrate/duration + HEAD fallback), froste (quality analysis),
+imgur (file info), pixeldrain (file info). Every provider result carries `media_kind`
+("audio" | "video" | "unknown") — the only video signal for opaque stream-host URLs.
 Response: { provider, codec?, bitrate?, sample_rate?, duration?, ... }
 Cached: max-age=3600
 ```
@@ -175,7 +177,10 @@ Cached: max-age=3600
 ### GET /api/stream?url=...&download=false
 ```
 Proxies audio stream from supported file hosts.
-Hosts: pillows.su, pillowcase.su, imgur.gg, temp.imgur.gg, music.froste.lol, krakenfiles.com
+Hosts: pillows.su, pillowcase.su, imgur.gg, temp.imgur.gg, music.froste.lol, krakenfiles.com,
+pixeldrain.com (`/u/{id}`), drive.google.com (`/file/d/{id}`, `open?id=`, `uc?id=`; the
+virus-scan interstitial is retried via its confirm form — persistent interstitial → HTTP 409
+`gdrive_interstitial`, private file → 403)
 Supports HTTP Range requests (byte-range seeking).
 MIME sniffing: magic-byte detection corrects misreported Content-Types.
 Response: audio/* stream with Accept-Ranges: bytes
@@ -332,24 +337,25 @@ best: Bool?                     // recommended tracker
 ## 4. Audio Playback
 
 ### Stream Resolution (client-side)
-All audio streams go through `/api/stream?url=<encoded_original_link>`.
-Supported host patterns:
+All audio/video streams go through `/api/stream?url=<encoded_original_link>`.
+Supported host patterns (per-host matchers in `Models/StreamResolver.swift` — kept in sync
+with the backend resolvers in `src/streaming.py`; there is no single combined regex anymore):
 - `pillows.su/f/{id}`, `pillowcase.su/f/{id}`
 - `imgur.gg/f/{id}`, `temp.imgur.gg/f/{id}`
 - `music.froste.lol/song/{hash}`
 - `krakenfiles.com/view/{id}/file.html`
+- `pixeldrain.com/u/{id}` (single files only — `/l/` lists open externally)
+- `drive.google.com/file/d/{id}/…`, `open?id=`, `uc?id=`
 
-Regex for streamable link detection:
-```
-^https?://(?:(?:www\.)?(pillows\.su|pillowcase\.su|(?:temp\.)?imgur\.gg)/f/|music\.froste\.lol/song/[a-f0-9]+|(?:www\.)?krakenfiles\.com/view/[A-Za-z0-9_-]+/file\.html)
-```
-
-A version with `og_filename` ending in `.zip` is NOT streamable.
+A version with `og_filename` ending in a non-media extension (`.zip`, `.pdf`, …) is NOT
+streamable; `MiscLinkClassifier` additionally reclassifies video/archive links on
+streamable hosts.
 
 ### Original Quality URLs
 - pillows: `https://api.pillows.su/api/download/{id}`
 - froste: `https://music.froste.lol/song/{hash}/download`
-- imgur/kraken: same URL (CDN serves original)
+- pixeldrain: `https://pixeldrain.com/api/file/{id}?download`
+- imgur/kraken/gdrive: same URL (proxy serves original)
 
 ### Queue
 - Max 200 items
@@ -419,11 +425,13 @@ Debounce: 200ms via Task.sleep.
 
 ## 7. Caching
 
-### API Response Cache
-- Store: URL → { data: Artist JSON, etag: String, timestamp: Date }
-- On request: send `If-None-Match: <etag>` → 304 means use cached data
-- Storage: FileManager Caches directory (JSON files) or SwiftData
-- Single tracker cached at a time (matching web behavior)
+### API Response Cache (CacheService v2)
+- Store: URL → { data: raw Artist JSON bytes, etag, timestamp, artistName, slug,
+  totalSongs, totalVersions, version } — SHA-256-derived file keys under
+  Caches/LeakSheet/, schema-versioned (mismatched entries discarded on read)
+- On request: send `If-None-Match: <etag>` → 304 means reopen the local copy
+  (if the local copy is gone despite the 304, the entry is dropped and refetched)
+- TTL: 7 days; multiple trackers cached concurrently; size reporting in Settings
 
 ### Favourites
 - UserDefaults with key `leaksheet_favourites`

@@ -912,10 +912,41 @@ final class ArtistViewModel {
         return f
     }()
 
-    private nonisolated static func parseLeakDate(_ dateStr: String) -> TimeInterval {
+    // "Mar 20, 2023" — the DOMINANT format across live trackers (86% of all
+    // dated versions in the 2026-07-20 TrackerHub sweep, incl. the whole Ye
+    // tracker). Without it every such date degraded to year-only precision
+    // and Recents ordering within a year was arbitrary.
+    private nonisolated static let _abbrevMonthDayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM d, yyyy"
+        return f
+    }()
+
+    // "March 20, 2023"
+    private nonisolated static let _fullMonthDayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMMM d, yyyy"
+        return f
+    }()
+
+    // "Mar 2023"
+    private nonisolated static let _abbrevMonthYearFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM yyyy"
+        return f
+    }()
+
+    // Internal (not private) so LeakSheetTests can pin the accepted formats.
+    nonisolated static func parseLeakDate(_ dateStr: String) -> TimeInterval {
         if let d = _slashFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _isoFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
+        if let d = _abbrevMonthDayFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
+        if let d = _fullMonthDayFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _monthYearFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
+        if let d = _abbrevMonthYearFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         // Extract bare year with Swift Regex (compile-time checked)
         if let match = dateStr.firstMatch(of: /(\d{4})/),
            let d = _yearFmt.date(from: String(match.output.1)) {

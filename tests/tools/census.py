@@ -49,6 +49,7 @@ from src.fetcher import (
 )
 from src.models import Artist
 from src.parser import _PLACEHOLDER_BASE_NAMES, parse_file
+from src.streaming import resolve_stream_url
 
 # The locked live set for the 2026-07-06 deep review (user-verified fresh).
 LIVE_TRACKERS: list[tuple[str, str]] = [
@@ -60,15 +61,6 @@ LIVE_TRACKERS: list[tuple[str, str]] = [
     ("tracker-1zqq", "https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview"),
     ("tracker-1Irt", "https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/htmlview"),
 ]
-
-# Hosts the backend /stream proxy can serve (mirror of api.py allowlist —
-# test tool only, kept in sync manually).
-STREAMABLE_HOSTS = {
-    "pillows.su", "pillowcase.su", "api.pillows.su",
-    "imgur.gg", "temp.imgur.gg",
-    "music.froste.lol", "froste.lol",
-    "krakenfiles.com", "cdn.krakenfiles.com",
-}
 
 SNAPSHOT_DIR_DEFAULT = ROOT / "tests" / "fixtures" / "snapshots"
 OUT_DIR_DEFAULT = ROOT / "tests" / "results" / "census"
@@ -100,6 +92,7 @@ def census_artist(artist: Artist, source: str, origin: str) -> dict:
 
     n_versions = 0
     n_songs = 0
+    n_streamable = 0  # links the real /stream proxy can serve (resolve_stream_url)
     cov = Counter()  # metadata coverage counts over versions
 
     zero_song_eras: list[dict] = []
@@ -168,6 +161,8 @@ def census_artist(artist: Artist, source: str, origin: str) -> dict:
                     type_hist[v.type.strip()] += 1
                 for link in v.links:
                     host_hist[_host(link)] += 1
+                    if resolve_stream_url(link):
+                        n_streamable += 1
                 for field in ("notes", "samples", "og_filenames", "featuring",
                               "producers", "track_length", "file_date",
                               "leak_date", "quality", "available_length",
@@ -188,7 +183,7 @@ def census_artist(artist: Artist, source: str, origin: str) -> dict:
                       "track_length", "file_date", "leak_date", "quality",
                       "available_length", "sources", "rating")
     }
-    streamable = sum(c for h, c in host_hist.items() if h in STREAMABLE_HOSTS)
+    streamable = n_streamable
     total_links = sum(host_hist.values())
 
     return {

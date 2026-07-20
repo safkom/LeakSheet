@@ -51,6 +51,7 @@ from src.fetcher import (
     ParseError,
     PhaseTimer,
     STALE_CACHE_TTL,
+    stale_parsed_cache_urls,
 )
 from src.streaming import (
     GdriveInterstitialError,
@@ -322,10 +323,21 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # No explicit startup work needed — _proxy_client is lazily initialised on
-    # first use by _get_proxy_client().
+    # Prewarm loop (2026-07-20 review): frequently-updated trackers otherwise
+    # always serve stale-first once per TTL window. Disable with
+    # LEAKSHEET_PREWARM=0. The loop sleeps BEFORE its first pass, so startup
+    # (and TestClient contexts) never fire network work.
+    prewarm_task: asyncio.Task | None = None
+    if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
+        prewarm_task = asyncio.create_task(_prewarm_loop())
     yield
-    # Shutdown: close both shared HTTP clients to release connections cleanly.
+    # Shutdown: stop background work and close both shared HTTP clients.
+    if prewarm_task is not None:
+        prewarm_task.cancel()
+        try:
+            await prewarm_task
+        except asyncio.CancelledError:
+            pass
     if _proxy_client is not None:
         await _proxy_client.aclose()
     await close_shared_client()
@@ -375,6 +387,38 @@ async def _background_revalidate(url: str, artist_name: str | None) -> None:
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
     finally:
         _revalidating.discard(url_key)
+
+
+# Stale-cache prewarm — refresh parses inside the stale-while-revalidate gap
+# so trackers people actually use serve fresh data instead of stale-first.
+_PREWARM_INTERVAL_S = float(os.environ.get("LEAKSHEET_PREWARM_INTERVAL", "3600"))
+_PREWARM_BATCH = int(os.environ.get("LEAKSHEET_PREWARM_BATCH", "25"))
+
+
+async def _refresh_stale_once(limit: int = _PREWARM_BATCH) -> int:
+    """Revalidate up to ``limit`` stale cached parses; returns how many ran.
+
+    Sequential on purpose — this is background politeness work, not a sweep.
+    Reuses ``_background_revalidate`` so the per-URL single-flight guard also
+    covers request-triggered revalidations of the same tracker.
+    """
+    urls = await asyncio.to_thread(stale_parsed_cache_urls, limit)
+    for url in urls:
+        await _background_revalidate(url, None)
+    return len(urls)
+
+
+async def _prewarm_loop() -> None:
+    while True:
+        await asyncio.sleep(_PREWARM_INTERVAL_S)
+        try:
+            refreshed = await _refresh_stale_once()
+            if refreshed:
+                logger.info("Prewarm: revalidated %d stale tracker(s)", refreshed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — the loop must survive anything
+            logger.warning("Prewarm pass failed: %s", e)
 
 
 def _parse_if_none_match(header_value: str) -> str:

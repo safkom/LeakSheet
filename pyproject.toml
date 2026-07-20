@@ -1,0 +1,37 @@
+# Tool configuration for LeakSheet.
+#
+# Only tool sections are declared here (no [build-system]) — the project is run
+# from source, not packaged. This file is the single source of pytest config so
+# the suite behaves identically for every developer and in CI.
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# Import `src` as a top-level package without installing the project.
+pythonpath = ["."]
+# Coroutine tests need no per-test @pytest.mark.asyncio decorator. This also
+# makes the previously-legacy async tests run deterministically.
+asyncio_mode = "auto"
+# A bare `pytest` runs the fast, deterministic offline gate: no network (live),
+# no local-dump baselines (accuracy), no long sweeps (slow). Opt into those with
+# an explicit `-m accuracy` / `-m live` / `-m slow`, which overrides this default.
+addopts = "-ra --strict-markers -m 'not live and not accuracy and not slow'"
+markers = [
+  "live: hits real Google Sheets / provider hosts over the network. Excluded from the default run; used by the CI 'live' job (see .github/workflows/tests.yml).",
+  "accuracy: exact-count regression gate against local Trackers/ dumps. Skipped automatically when those dumps are absent (clean checkout / CI).",
+  "slow: long-running (e.g. the full 486-tracker mass validation).",
+]
+filterwarnings = [
+  # pytest-asyncio<0.21 emits this until asyncio_mode is read; harmless.
+  "ignore:The 'asyncio_mode' default value will change:DeprecationWarning",
+  # pydantic v2 keeps v1 .dict()/.parse_obj() shims the code deliberately uses.
+  "ignore:.*(dict\\(\\)|parse_obj|copy).*:DeprecationWarning:pydantic.*",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

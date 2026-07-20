@@ -385,6 +385,9 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
             raw = raw[:paren_idx]
         key = raw.strip().lower()
         key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
+        # 2026-07-20 sweep: colon-suffixed headers ('Track Titles:',
+        # 'Category:') dropped whole columns across dozens of trackers.
+        key = key.rstrip(":").strip()
 
         canonical = _match_column_alias(key)
 
@@ -604,8 +607,8 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not ERA_STATS_PATTERN.search(text):
         return False
     # Real era headers have at least one cell (or first line of cell 0) that
-    # contains a non-numeric, non-stats era name.  Global stats rows have
-    # only stat-like content (numbers + keywords) in every cell.
+    # contains a non-stats era name.  Global stats rows have only stat-like
+    # content (numbers + keywords) in every cell.
     _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
     for c in row:
         first_line = c.text.split("\n")[0].strip()
@@ -613,6 +616,13 @@ def _is_era_header(row: list[_Cell]) -> bool:
             continue
         # If the first line doesn't start with a digit, it's likely an era name
         if not _NUMERIC_STAT_RE.match(first_line):
+            return True
+        # Digit-leading lines are only stat-like when a stats keyword follows
+        # or the line is a bare number — era names DO start with digits
+        # ("38 Baby 2 [V1] / …", "808s & Heartbreak"-era variants;
+        # 2026-07-20 review, NBA Youngboy). Without this, a sparse header
+        # whose only text cell is such a name is rejected outright.
+        if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
             return True
         # Check for images (era art) — a strong signal this is an era header
         if c.images:
@@ -1257,6 +1267,36 @@ def _has_song_data(v: SongVersion) -> bool:
     )
 
 
+def _era_own_keys(era: Era) -> set[str]:
+    """Every key form this era's own header/aliases can be referenced by.
+
+    Used by the positional-exact prior: a row value matching ANY of these
+    belongs to this era when it is the current header, regardless of which
+    sibling era registered the shared key first in the global dicts.
+    """
+    keys: set[str] = set()
+    primary = _era_match_key(era.name)
+    if primary:
+        keys.add(primary)
+    full = _normalize_unicode(era.name).lower().strip()
+    if full:
+        keys.add(full)
+    for alt in era.alt_names:
+        alt_key = _era_match_key(alt)
+        if alt_key:
+            keys.add(alt_key)
+        for part in _split_alt_aliases(alt):
+            part_key = _era_match_key(part)
+            if part_key:
+                keys.add(part_key)
+    if " / " in era.name:
+        for part in era.name.split(" / "):
+            part_key = _era_match_key(part)
+            if part_key:
+                keys.add(part_key)
+    return keys
+
+
 def _get_cell_text(row: list[_Cell], idx: int) -> str:
     """Safely get cell text by index, returning empty string if out of range."""
     if 0 <= idx < len(row):
@@ -1417,6 +1457,8 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Eras whose name cell had an image but no usable text — backfill from
     # the first song row's era column.
     _needs_name_backfill: set[int] = set()  # id(era) values
+    # id(era) → its own key forms, for the positional-exact prior.
+    _era_own_keys_cache: dict[int, set[str]] = {}
     # (id(era), song base name) → Song, for O(1) version grouping
     song_index: dict[tuple[int, str], Song] = {}
     in_footer = False
@@ -1454,19 +1496,14 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
-        # Section separators → capture as named sections within current era
-        if _is_section_separator(row):
-            if current_era is not None:
-                non_empty = [c for c in row if c.text.strip()]
-                label = non_empty[0].text.strip() if non_empty else ""
-                if label:
-                    current_era.sections.append(Section(name=label))
-            continue
-
-        # Check for era header (must come before footer check, since
-        # Carti era stats contain "Total Full" which is also a footer keyword).
-        # Also resets footer state — if data resumes after a footer-like row,
-        # it's a new era, not leftover footer.
+        # Check for era header FIRST (2026-07-20 review: before the section-
+        # separator check — a sparse 2-cell header like stats + 'Collaboration
+        # with X' otherwise gets swallowed as a separator and the era is never
+        # created; a genuine separator row never carries era stats in col 0).
+        # Must also come before the footer check, since Carti era stats contain
+        # "Total Full" which is also a footer keyword. Also resets footer
+        # state — if data resumes after a footer-like row, it's a new era,
+        # not leftover footer.
         if _is_era_header(row):
             in_footer = False
             current_era, needs_backfill = _parse_era_header_row(row, col_map)
@@ -1474,6 +1511,15 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             _register_era_keys(current_era, current_era.name, era_by_key, era_by_key_fallback)
             if needs_backfill:
                 _needs_name_backfill.add(id(current_era))
+            continue
+
+        # Section separators → capture as named sections within current era
+        if _is_section_separator(row):
+            if current_era is not None:
+                non_empty = [c for c in row if c.text.strip()]
+                label = non_empty[0].text.strip() if non_empty else ""
+                if label:
+                    current_era.sections.append(Section(name=label))
             continue
 
         # Check name column for footer signals (e.g. "CARTI TRACKER HUB").
@@ -1517,12 +1563,30 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             continue
 
         if row_era:
-            # Case-insensitive exact lookup with Unicode normalization
             row_era_norm = _normalize_unicode(row_era).lower()
-            matched_era = era_by_key.get(row_era_norm)
+            row_era_stripped = _era_match_key(row_era)
+
+            # Positional-exact prior (2026-07-20 review: Glocky, NBA
+            # Youngboy): if the value names the era we're currently under —
+            # any of its own key forms — it belongs there. Sibling eras that
+            # share a stripped key ("Fre3$tyle [V2]"/"[V3]", "38 Baby 2
+            # [V1] / …"/"[V3] / Post") otherwise route every bare row to
+            # whichever sibling registered the shared key first, starving
+            # the rest.
+            matched_era = None
+            if current_era is not None:
+                own_keys = _era_own_keys_cache.get(id(current_era))
+                if own_keys is None:
+                    own_keys = _era_own_keys(current_era)
+                    _era_own_keys_cache[id(current_era)] = own_keys
+                if row_era_norm in own_keys or row_era_stripped in own_keys:
+                    matched_era = current_era
+
+            # Case-insensitive exact lookup with Unicode normalization
+            if matched_era is None:
+                matched_era = era_by_key.get(row_era_norm)
 
             # Try stripped key (version tags removed) if exact fails
-            row_era_stripped = _era_match_key(row_era)
             if matched_era is None and row_era_stripped != row_era_norm:
                 matched_era = era_by_key.get(row_era_stripped)
 
@@ -1532,6 +1596,27 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 matched_era = era_by_key_fallback.get(row_era_norm)
                 if matched_era is None and row_era_stripped != row_era_norm:
                     matched_era = era_by_key_fallback.get(row_era_stripped)
+
+            # Positional prior before the global fuzzy search (2026-07-20
+            # review, 50 Cent): a row-era value that fuzzy-matches the era
+            # we're currently under is an abbreviation of that header (e.g.
+            # "Get Rich Or Die Tryin' OST" rows directly beneath the "Get
+            # Rich Or Die Tryin' Soundtrack" header). The global search would
+            # let a similarly-worded sibling era outscore it ("Get Rich Or
+            # Die Tryin'", 4/4 words = 1.0 vs the header's 4/5 = 0.8) and
+            # silently steal every song, starving the real era.
+            if matched_era is None and current_era is not None:
+                cur_key = _era_match_key(current_era.name) if current_era.name else ""
+                if cur_key and _fuzzy_era_match(row_era_norm, {cur_key: current_era}):
+                    matched_era = current_era
+                    fuzzy_matched_rows += 1
+                    # Future rows with the same abbreviation resolve exactly
+                    # (fallback tier, so a genuine era keeps primary-key wins).
+                    era_by_key_fallback.setdefault(row_era_stripped, current_era)
+                    logger.debug(
+                        "Positional fuzzy match: %r → current era %r",
+                        row_era_norm, current_era.name,
+                    )
 
             # Fuzzy match if all exact paths fail
             if matched_era is None:
@@ -1596,6 +1681,13 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
+                            # 2026-07-20 review: keep the row's own song — this
+                            # branch used to drop the parsed version on the
+                            # floor (silent data loss, not even counted as
+                            # skipped). The no-current-era auto-create path
+                            # below has always kept it; the two now agree.
+                            _add_version_to_era(current_era, version, song_index)
+                            song_rows += 1
                     elif version:
                         # Not a plausible era name but has song data —
                         # assign to current era as fallback
@@ -1944,6 +2036,22 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
 
+    # Dedicated File Name / Instrumental Name column (2026-07-20 sweep,
+    # user-confirmed): same concept as the 'OG Filename:' notes convention —
+    # column values lead, notes-derived names follow, no duplicates.
+    og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
+    if og_col_text:
+        col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
+        og_filenames = col_names + [n for n in og_filenames if n not in col_names]
+
+    # Dedicated credit columns (2026-07-20 sweep, user-confirmed): a
+    # Producer column fills producers only when the name-cell '(prod. …)'
+    # credit didn't; Artist/Credited Artist columns carry the row's
+    # performer into the additive credited_artists field.
+    if not producers:
+        producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
+    credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
+
     links_idx = col_map.get("links")
     alt_links_idx = col_map.get("alt_links")
     link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
@@ -1994,6 +2102,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         badge=badge,
         featuring=featuring,
         producers=producers,
+        credited_artists=credited_artists,
         collaboration=collaboration,
         refs=refs,
         alt_titles=alt_titles,
@@ -2214,7 +2323,9 @@ def _misc_header_key(text: str) -> str:
     # "Link(s)" — the paren is part of the name, keep a special case
     if text.strip().lower().startswith("link"):
         key = "links"
-    return re.sub(r"\s+", " ", key.strip().lower())
+    # Colon-suffixed headers ("Era:", "Type:") — same grammar the 2026-07-20
+    # sweep found on main tabs; strip like detect_columns does.
+    return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
 def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
