@@ -690,6 +690,66 @@ class TestPositionalFuzzyPrior:
         assert [s.base_name for s in collab.songs] == ["Lost Song"]
 
 
+class TestSiblingEraKeyCollision:
+    """Version-tagged / slash-named sibling eras share a stripped key; bare
+    rows under each header must stay with THEIR header, not the first sibling
+    that registered the key (2026-07-20 review: Glocky, NBA Youngboy — every
+    later sibling era starved while the first collected all their songs)."""
+
+    def test_version_tagged_siblings_keep_their_rows(self):
+        # Glocky class: "Fre3$tyle [V2]" and "[V3]" eras both strip to
+        # "fre3$tyle"; rows under [V3] carry the bare name.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Fre3$tyle [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Fre3$tyle</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Fre3$tyle [V3]</td><td></td><td></td></tr>"
+            "<tr><td>Fre3$tyle</td><td>Song B</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["Fre3$tyle [V2]"] == ["Song A"]
+        assert by_name["Fre3$tyle [V3]"] == ["Song B"]
+
+    def test_slash_named_siblings_keep_their_rows(self):
+        # NBA Youngboy class: several headers alias "38 Baby 2" via slash
+        # parts; bare rows under each must not all route to the first.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>38 Baby 2 [V1] / Ain't Too Long</td><td></td><td></td></tr>"
+            "<tr><td>38 Baby 2</td><td>No Talkin</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>38 Baby 2 [V3] / Post</td><td></td><td></td></tr>"
+            "<tr><td>38 Baby 2</td><td>Pain Reliever</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["38 Baby 2 [V1] / Ain't Too Long"] == ["No Talkin"]
+        assert by_name["38 Baby 2 [V3] / Post"] == ["Pain Reliever"]
+
+    def test_rows_far_from_their_era_still_resolve_globally(self):
+        # A bare row NOT under any related header keeps the registration-order
+        # behavior (first sibling owns the key).
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Fre3$tyle [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Fre3$tyle</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Unrelated Era</td><td></td><td></td></tr>"
+            "<tr><td>Fre3$tyle</td><td>Song C</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["Fre3$tyle [V2]"] == ["Song A", "Song C"]
+
+
 class TestStatsHeaderBeatsSeparator:
     """A row carrying era stats in col 0 is an era header even when its name
     matches a section-separator keyword (2026-07-20 review).
@@ -821,6 +881,33 @@ class TestExtractTable:
         assert rows[1][1].text.strip() == ""
         assert rows[1][2].text.strip() == "note text"
         assert rows[1][3].text.strip() == "CD Quality"
+
+
+class TestColumnHeaderNormalization:
+    """2026-07-20 sweep findings: colon-suffixed headers ('Track Titles:',
+    'Producers:', 'Category:') and a few unambiguous alias gaps ('Song',
+    'Record Date', 'Release/Leaked Date') dropped whole columns across
+    dozens of trackers."""
+
+    def _detect(self, *headers):
+        from src.parser import _Cell, detect_columns
+        return detect_columns([_Cell(text=h) for h in headers])
+
+    def test_trailing_colon_stripped(self):
+        col_map = self._detect("Era:", "Track Titles:", "Notes:", "Links:")
+        assert col_map.get("era") == 0
+        assert col_map.get("name") == 1
+        assert col_map.get("notes") == 2
+        assert col_map.get("links") == 3
+
+    def test_song_alias(self):
+        assert self._detect("Era", "Song", "Notes").get("name") == 1
+
+    def test_record_date_alias(self):
+        assert self._detect("Era", "Name", "Record Date").get("date_of_recording") == 2
+
+    def test_release_leaked_date_alias(self):
+        assert self._detect("Era", "Name", "Release/Leaked Date:").get("leak_date") == 2
 
 
 class TestDroppedColumns:

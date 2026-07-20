@@ -123,7 +123,9 @@ _BEST_OF_TAB_NAMES = frozenset({"best of"})
 _WORST_OF_TAB_NAMES = frozenset({"worst of"})
 _STEMS_TAB_NAMES = frozenset({"stems"})
 _SPECIAL_TAB_NAMES = frozenset({"special", "notable"})
-_GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails/wanted"})
+# Slash spacing is normalized to " / " by _clean_tab_name before matching;
+# "grails & wanted" observed 7x in the 2026-07-20 TrackerHub sweep.
+_GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails & wanted"})
 _WANTED_TAB_NAMES = frozenset({"wanted"})
 _FAKES_TAB_NAMES = frozenset({"fakes"})
 
@@ -420,9 +422,18 @@ def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
 
 
 def _clean_tab_name(name: str) -> str:
-    """Normalize a sheet tab name for keyword matching (strip emoji, lower)."""
+    """Normalize a sheet tab name for keyword matching (strip emoji, lower).
+
+    2026-07-20 sweep: also strips trailing parenthetical/bracket qualifiers —
+    '(WIP)'-suffixed content tabs ('Released (WIP)', 'Stems [WIP]', 'Art
+    (wip)') appeared 60+ times across TrackerHub and fell out of
+    classification entirely — and normalizes slash spacing so 'Grails/
+    Wanted' matches the 'grails / wanted' keyword set.
+    """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
-    return re.sub(r"\s+", " ", clean)
+    clean = re.sub(r"[\(\[][^)\]]*[\)\]]\s*$", "", clean).strip()
+    clean = re.sub(r"\s*/\s*", " / ", clean)
+    return re.sub(r"\s+", " ", clean).strip()
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:

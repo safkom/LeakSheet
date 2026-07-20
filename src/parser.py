@@ -385,6 +385,9 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
             raw = raw[:paren_idx]
         key = raw.strip().lower()
         key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
+        # 2026-07-20 sweep: colon-suffixed headers ('Track Titles:',
+        # 'Category:') dropped whole columns across dozens of trackers.
+        key = key.rstrip(":").strip()
 
         canonical = _match_column_alias(key)
 
@@ -604,8 +607,8 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not ERA_STATS_PATTERN.search(text):
         return False
     # Real era headers have at least one cell (or first line of cell 0) that
-    # contains a non-numeric, non-stats era name.  Global stats rows have
-    # only stat-like content (numbers + keywords) in every cell.
+    # contains a non-stats era name.  Global stats rows have only stat-like
+    # content (numbers + keywords) in every cell.
     _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
     for c in row:
         first_line = c.text.split("\n")[0].strip()
@@ -613,6 +616,13 @@ def _is_era_header(row: list[_Cell]) -> bool:
             continue
         # If the first line doesn't start with a digit, it's likely an era name
         if not _NUMERIC_STAT_RE.match(first_line):
+            return True
+        # Digit-leading lines are only stat-like when a stats keyword follows
+        # or the line is a bare number — era names DO start with digits
+        # ("38 Baby 2 [V1] / …", "808s & Heartbreak"-era variants;
+        # 2026-07-20 review, NBA Youngboy). Without this, a sparse header
+        # whose only text cell is such a name is rejected outright.
+        if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
             return True
         # Check for images (era art) — a strong signal this is an era header
         if c.images:
@@ -1257,6 +1267,36 @@ def _has_song_data(v: SongVersion) -> bool:
     )
 
 
+def _era_own_keys(era: Era) -> set[str]:
+    """Every key form this era's own header/aliases can be referenced by.
+
+    Used by the positional-exact prior: a row value matching ANY of these
+    belongs to this era when it is the current header, regardless of which
+    sibling era registered the shared key first in the global dicts.
+    """
+    keys: set[str] = set()
+    primary = _era_match_key(era.name)
+    if primary:
+        keys.add(primary)
+    full = _normalize_unicode(era.name).lower().strip()
+    if full:
+        keys.add(full)
+    for alt in era.alt_names:
+        alt_key = _era_match_key(alt)
+        if alt_key:
+            keys.add(alt_key)
+        for part in _split_alt_aliases(alt):
+            part_key = _era_match_key(part)
+            if part_key:
+                keys.add(part_key)
+    if " / " in era.name:
+        for part in era.name.split(" / "):
+            part_key = _era_match_key(part)
+            if part_key:
+                keys.add(part_key)
+    return keys
+
+
 def _get_cell_text(row: list[_Cell], idx: int) -> str:
     """Safely get cell text by index, returning empty string if out of range."""
     if 0 <= idx < len(row):
@@ -1417,6 +1457,8 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Eras whose name cell had an image but no usable text — backfill from
     # the first song row's era column.
     _needs_name_backfill: set[int] = set()  # id(era) values
+    # id(era) → its own key forms, for the positional-exact prior.
+    _era_own_keys_cache: dict[int, set[str]] = {}
     # (id(era), song base name) → Song, for O(1) version grouping
     song_index: dict[tuple[int, str], Song] = {}
     in_footer = False
@@ -1521,12 +1563,30 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             continue
 
         if row_era:
-            # Case-insensitive exact lookup with Unicode normalization
             row_era_norm = _normalize_unicode(row_era).lower()
-            matched_era = era_by_key.get(row_era_norm)
+            row_era_stripped = _era_match_key(row_era)
+
+            # Positional-exact prior (2026-07-20 review: Glocky, NBA
+            # Youngboy): if the value names the era we're currently under —
+            # any of its own key forms — it belongs there. Sibling eras that
+            # share a stripped key ("Fre3$tyle [V2]"/"[V3]", "38 Baby 2
+            # [V1] / …"/"[V3] / Post") otherwise route every bare row to
+            # whichever sibling registered the shared key first, starving
+            # the rest.
+            matched_era = None
+            if current_era is not None:
+                own_keys = _era_own_keys_cache.get(id(current_era))
+                if own_keys is None:
+                    own_keys = _era_own_keys(current_era)
+                    _era_own_keys_cache[id(current_era)] = own_keys
+                if row_era_norm in own_keys or row_era_stripped in own_keys:
+                    matched_era = current_era
+
+            # Case-insensitive exact lookup with Unicode normalization
+            if matched_era is None:
+                matched_era = era_by_key.get(row_era_norm)
 
             # Try stripped key (version tags removed) if exact fails
-            row_era_stripped = _era_match_key(row_era)
             if matched_era is None and row_era_stripped != row_era_norm:
                 matched_era = era_by_key.get(row_era_stripped)
 

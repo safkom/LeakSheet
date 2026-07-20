@@ -63,6 +63,9 @@ COLUMN_ALIASES: dict[str, str] = {
     "title": "name",              # Billie Eilish, Childish Gambino, Travis Scott
     "song name": "name",          # XXXTENTACION
     "song title": "name",
+    "song": "name",               # 2026-07-20 sweep (3 trackers)
+    "track titles": "name",       # SosMula ("Track Titles:")
+    "track title": "name",
     "notes": "notes",
     "notes & information": "notes",
     "track number / info": "notes",  # Yuno Miles
@@ -82,6 +85,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "year": "file_date",           # Avicii
     "leak date": "leak_date",
     "release date": "leak_date",   # Gucci Mane, Yuno Miles
+    "release/leaked date": "leak_date",  # SosMula (2026-07-20 sweep)
     "obtained on:": "leak_date",   # Wu-Tang Clan
     "obtained on": "leak_date",
 
@@ -135,4 +139,5 @@ COLUMN_ALIASES: dict[str, str] = {
     # Recording date variants
     "date of recording": "date_of_recording",  # Carti
     "recording date": "date_of_recording",      # Gucci Mane
+    "record date": "date_of_recording",         # 2026-07-20 sweep (4 trackers)
 }

@@ -148,6 +148,35 @@ class TestTabNameCleaning:
         assert _clean_tab_name("⭐ Best Of") == "best of"
         assert _clean_tab_name("🗑️Worst Of") == "worst of"
 
+    def test_wip_qualifiers_stripped(self):
+        # 2026-07-20 sweep: '(wip)'/'[wip]'-suffixed content tabs appeared
+        # 60+ times across trackers and fell out of classification entirely.
+        assert _clean_tab_name("Released (WIP)") == "released"
+        assert _clean_tab_name("Stems [WIP]") == "stems"
+        assert _clean_tab_name("Art (wip)") == "art"
+
+    def test_slash_spacing_normalized(self):
+        assert _clean_tab_name("Grails/ Wanted") == _clean_tab_name("Grails / Wanted")
+
+
+class TestSweepDrivenTabClassification:
+    """Tab variants observed ≥7× in the 2026-07-20 TrackerHub sweep."""
+
+    def test_wip_content_tabs_classify(self):
+        tabs = _get_content_tabs({"1": "Released (WIP)", "2": "Stems [WIP]", "3": "Misc (WIP)"})
+        assert {kind for _, kind, _ in tabs} == {"released", "stems", "misc"}
+
+    def test_grails_and_wanted_ampersand_variant(self):
+        tabs = _get_content_tabs({"1": "Grails & Wanted"})
+        assert [kind for _, kind, _ in tabs] == ["grails"]
+
+    def test_grails_slash_spacing_variant(self):
+        tabs = _get_content_tabs({"1": "🏆 Grails/ Wanted"})
+        assert [kind for _, kind, _ in tabs] == ["grails"]
+
+    def test_wip_art_tab_recognized(self):
+        assert _get_art_tab_gid({"9": "Art (WIP)"}) == "9"
+
 
 class TestContentTabClassification:
     @staticmethod
