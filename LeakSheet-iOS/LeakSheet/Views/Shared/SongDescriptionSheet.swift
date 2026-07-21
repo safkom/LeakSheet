@@ -453,6 +453,7 @@ struct SongDescriptionSheet: View {
             ("prod.", payload.version.producers),
             ("with", payload.version.collaboration),
             ("ref.", payload.version.refs),
+            ("artist", payload.version.creditedArtists),
         ].compactMap { label, val in
             guard let v = val, !v.isEmpty else { return nil }
             return (label, v)

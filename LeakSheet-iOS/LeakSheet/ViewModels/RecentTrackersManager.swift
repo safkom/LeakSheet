@@ -137,16 +137,17 @@ final class RecentTrackersManager {
     // MARK: - Stats helper
 
     private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int, confirmed: Int) {
+        // Delegate to the single source of truth (ArtistViewModel.computeEraStats)
+        // so the recents card and the artist view never disagree — most notably
+        // that "confirmed" counts only non-streamable versions (a streamable
+        // "Confirmed" version is really available, and was previously
+        // double-reported here but not in the artist view).
         var available = 0, snippets = 0, confirmed = 0
         for era in eras {
-            for song in era.allSongs {
-                for v in song.versions {
-                    if v.isStreamable { available += 1 }
-                    let al = (v.availableLength ?? "").lowercased()
-                    if al.contains("snippet") { snippets += 1 }
-                    if al.contains("confirmed") { confirmed += 1 }
-                }
-            }
+            let s = ArtistViewModel.computeEraStats(era)
+            available += s.available
+            snippets += s.snippets
+            confirmed += s.confirmed
         }
         return (available, snippets, confirmed)
     }

@@ -55,6 +55,7 @@ final class FavouritesManager {
                 producers: nil,
                 collaboration: nil,
                 refs: nil,
+                creditedArtists: nil,
                 altTitles: nil,
                 notes: notes,
                 ogFilename: nil,

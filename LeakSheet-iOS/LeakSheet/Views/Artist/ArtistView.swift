@@ -434,10 +434,10 @@ private struct ErasListView: View {
 
     /// Multi-version songs expand/collapse; single-version songs play (or
     /// show the description when not streamable).
-    private func handleSongTap(_ song: Song, eraName: String, eraArt: String?) {
+    private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.versions.count > 1 {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                vm.toggleSongExpansion(eraName: eraName, baseName: song.baseName)
+                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
         } else if let v = song.versions.first {
             if v.isStreamable {
@@ -749,7 +749,7 @@ private struct EraRowView: View {
     let sourceUrl: String?
     let onCardTap: (String) -> Void
     let onColorExtracted: (String, Color) -> Void
-    let onSongTap: (Song, String, String?) -> Void
+    let onSongTap: (Song, String, String?, Int) -> Void
     let onPlayVersion: (SongVersion, String) -> Void
     let onShowDescription: (DescriptionSheet.Payload) -> Void
 
@@ -803,7 +803,7 @@ private struct EraRowView: View {
                     .padding(.top, group == nil ? 14 : 6)
                 }
 
-            case .song(let song, let eraName, let eraArt, _, _, let isLast):
+            case .song(let song, let eraName, let eraArt, _, _, let isLast, let ordinal):
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
@@ -819,11 +819,11 @@ private struct EraRowView: View {
                     .contentShape(Rectangle())
                     .accessibilityAddTraits(.isButton)
                     .onTapGesture {
-                        onSongTap(song, eraName, eraArt)
+                        onSongTap(song, eraName, eraArt, ordinal)
                     }
                 }
 
-            case .version(let version, let index, let song, let eraName, let eraArt, let isLast):
+            case .version(let version, let index, let song, let eraName, let eraArt, let isLast, _):
                 panel(isLast: isLast) {
                     VersionRowView(
                         version: version,
@@ -869,8 +869,8 @@ private extension EraRow {
         case .divider(let era), .eraGap(let era): return era
         case .groupHeader(_, let era): return era
         case .sectionHeader(_, let era, _): return era
-        case .song(_, let era, _, _, _, _): return era
-        case .version(_, _, _, let era, _, _): return era
+        case .song(_, let era, _, _, _, _, _): return era
+        case .version(_, _, _, let era, _, _, _): return era
         }
     }
 }

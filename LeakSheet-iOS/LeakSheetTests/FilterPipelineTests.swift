@@ -17,7 +17,7 @@ struct FilterPipelineTests {
     ) -> SongVersion {
         SongVersion(
             name: name, versionTag: tag, badge: badge, featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, altTitles: altTitles,
+            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: altTitles,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: leakDate,
             availableLength: available, quality: quality,
@@ -217,6 +217,31 @@ struct FilterPipelineTests {
         }
     }
 
+    @Test @MainActor func `same-named placeholder songs get distinct row ids`() {
+        // Leak trackers deliberately emit several distinct "???" songs per era
+        // (the parser keeps them separate). Their EraRow ids must not collide,
+        // or SwiftUI's ForEach silently drops the duplicate rows.
+        let mysteryEra = era("Mystery Era", songs: [
+            song("???", versions: [version("???", link: nil)]),
+            song("???", versions: [version("???", link: nil)]),
+            song("???", versions: [version("???", link: nil)]),
+        ])
+        let a = Artist(
+            name: "PH", slug: "ph", sourceUrl: nil, eras: [mysteryEra],
+            trackerStats: nil, parseMetadata: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = ArtistViewModel(artist: a)
+        vm.toggleEra("Mystery Era")  // expand so the song rows materialize
+
+        let songRowIDs = vm.eraRows.compactMap { row -> String? in
+            if case .song = row { return row.id }
+            return nil
+        }
+        #expect(songRowIDs.count == 3)
+        #expect(Set(songRowIDs).count == 3)  // all distinct — no id collision
+    }
+
     @Test @MainActor func `setEraColor coalesces same-turn callbacks into one eraDisplay write`() async {
         let vm = ArtistViewModel(artist: artist)
         // Simulate several EraCardViews finishing extraction in the same
@@ -327,7 +352,7 @@ struct WorstOfFilterTests {
     private func artist() -> Artist {
         let good = SongVersion(
             name: "Good", versionTag: nil, badge: "best", featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "High Quality",
@@ -337,7 +362,7 @@ struct WorstOfFilterTests {
         )
         let bad = SongVersion(
             name: "Bad", versionTag: nil, badge: "worst", featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "Low Quality",
@@ -395,7 +420,7 @@ struct CrossEraIndexTests {
     private func song(_ name: String, key: String?, versions: Int = 1) -> Song {
         let v = SongVersion(
             name: name, versionTag: nil, badge: nil, featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: nil, links: nil,

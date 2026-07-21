@@ -70,8 +70,13 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case divider(eraName: String)
     case groupHeader(text: String, eraName: String)
     case sectionHeader(name: String, eraName: String, group: String?)
-    case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool)
-    case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool)
+    // `ordinal` is the song's position within its era's flattened song list.
+    // It disambiguates the identity of same-`baseName` songs — leak trackers
+    // deliberately emit several distinct "???"/"Unknown" tracks per era
+    // (parser keeps them separate), and without a positional key their EraRow
+    // ids collide, so SwiftUI's ForEach silently drops the duplicates.
+    case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool, ordinal: Int)
+    case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool, songOrdinal: Int)
     case eraGap(eraName: String)
 
     var id: String {
@@ -82,9 +87,9 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
         // Group is part of section identity (Section.id is name+group) —
         // same-named sections under different groups must not collide.
         case .sectionHeader(let name, let era, let group): return "sec::\(era)::\(group ?? "")::\(name)"
-        case .song(let song, let era, _, _, _, _): return "song::\(era)::\(song.baseName)"
-        case .version(let version, let index, let song, let era, _, _):
-            return "ver::\(era)::\(song.baseName)::\(version.id)::\(index)"
+        case .song(let song, let era, _, _, _, _, let ord): return "song::\(era)::\(ord)::\(song.baseName)"
+        case .version(let version, let index, let song, let era, _, _, let songOrd):
+            return "ver::\(era)::\(songOrd)::\(song.baseName)::\(version.id)::\(index)"
         case .eraGap(let era): return "gap::\(era)"
         }
     }
@@ -417,12 +422,14 @@ final class ArtistViewModel {
         return expandedEra == name
     }
 
-    func isSongExpanded(eraName: String, baseName: String) -> Bool {
-        expandedSongs.contains("\(eraName)::\(baseName)")
+    func isSongExpanded(eraName: String, ordinal: Int) -> Bool {
+        expandedSongs.contains("\(eraName)::\(ordinal)")
     }
 
-    func toggleSongExpansion(eraName: String, baseName: String) {
-        let key = "\(eraName)::\(baseName)"
+    func toggleSongExpansion(eraName: String, ordinal: Int) {
+        // Keyed by positional ordinal, not baseName, so expanding one of
+        // several same-named ("???") songs doesn't expand its siblings.
+        let key = "\(eraName)::\(ordinal)"
         if expandedSongs.contains(key) {
             expandedSongs.remove(key)
         } else {
@@ -510,8 +517,11 @@ final class ArtistViewModel {
             if expanded {
                 rows.append(.divider(eraName: eraName))
                 let startCount = rows.count
+                // One running ordinal across all sections of the era so every
+                // song row has a unique positional identity within the era.
+                var ordinal = 0
                 if filtered.sections.isEmpty {
-                    appendSongRows(&rows, songs: filtered.songs, eraName: eraName, eraArt: eraArt)
+                    appendSongRows(&rows, songs: filtered.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
                 } else {
                     for section in filtered.sections {
                         if let group = section.group {
@@ -523,7 +533,7 @@ final class ArtistViewModel {
                                 group: section.group
                             ))
                         }
-                        appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt)
+                        appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
                     }
                 }
                 // Mark the era's final content row for bottom-corner rounding.
@@ -536,33 +546,34 @@ final class ArtistViewModel {
         eraRows = rows
     }
 
-    private func appendSongRows(_ rows: inout [EraRow], songs: [Song], eraName: String, eraArt: String?) {
+    private func appendSongRows(_ rows: inout [EraRow], songs: [Song], eraName: String, eraArt: String?, ordinal: inout Int) {
         for song in songs {
             let hasMultiple = song.versions.count > 1
-            let expanded = hasMultiple && isSongExpanded(eraName: eraName, baseName: song.baseName)
+            let expanded = hasMultiple && isSongExpanded(eraName: eraName, ordinal: ordinal)
             rows.append(.song(
                 song, eraName: eraName, eraArt: eraArt,
-                expanded: expanded, hasMultiple: hasMultiple, isLast: false
+                expanded: expanded, hasMultiple: hasMultiple, isLast: false, ordinal: ordinal
             ))
             if expanded {
                 for (idx, version) in song.versions.enumerated() {
                     rows.append(.version(
                         version, index: idx, song: song,
-                        eraName: eraName, eraArt: eraArt, isLast: false
+                        eraName: eraName, eraArt: eraArt, isLast: false, songOrdinal: ordinal
                     ))
                 }
             }
+            ordinal += 1
         }
     }
 
     private func markedLast(_ row: EraRow) -> EraRow {
         switch row {
-        case .song(let song, let eraName, let eraArt, let expanded, let hasMultiple, _):
+        case .song(let song, let eraName, let eraArt, let expanded, let hasMultiple, _, let ordinal):
             return .song(song, eraName: eraName, eraArt: eraArt,
-                         expanded: expanded, hasMultiple: hasMultiple, isLast: true)
-        case .version(let version, let index, let song, let eraName, let eraArt, _):
+                         expanded: expanded, hasMultiple: hasMultiple, isLast: true, ordinal: ordinal)
+        case .version(let version, let index, let song, let eraName, let eraArt, _, let songOrdinal):
             return .version(version, index: index, song: song,
-                            eraName: eraName, eraArt: eraArt, isLast: true)
+                            eraName: eraName, eraArt: eraArt, isLast: true, songOrdinal: songOrdinal)
         default:
             return row
         }
@@ -788,8 +799,11 @@ final class ArtistViewModel {
             }
         }
         if state.bestOf {
+            // Match only best/special emojis — the same set the song-version
+            // Best Of uses (isBestOfVersion). Matching every Badge case here
+            // wrongly surfaced worst-of (🗑️) and AI (🤖) entries under Best Of.
             let starred = entries.filter { e in
-                Badge.allCases.contains { e.name.contains($0.emoji) }
+                Badge.allCases.contains { $0.isBestOf && e.name.contains($0.emoji) }
             }
             if !starred.isEmpty { entries = starred }
         }

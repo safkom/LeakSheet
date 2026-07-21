@@ -19,6 +19,11 @@ struct StreamResolverTests {
         "https://www.pixeldrain.com/u/xY9z",
         "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing",
         "https://drive.google.com/file/d/1AbC-x_9",
+        // 2026-07-21: open?id= / uc?id= now stream too (backend parity —
+        // streaming._extract_gdrive_id resolves all three forms).
+        "https://drive.google.com/open?id=1AbC-x_9",
+        "https://drive.google.com/uc?id=1AbC-x_9&export=download",
+        "https://drive.google.com/uc?export=download&id=1AbC-x_9",
     ])
     func `known hosts are streamable`(url: String) {
         #expect(StreamResolver.isStreamableURL(url))
@@ -32,8 +37,7 @@ struct StreamResolverTests {
         "https://krakenfiles.com/view/X/other",  // missing file.html
         "https://music.froste.lol/song/XYZ",     // non-hex hash
         "https://pixeldrain.com/l/abc123",       // pixeldrain LIST, not a file
-        "https://drive.google.com/drive/folders/1AbCdEf",  // gdrive folder
-        "https://drive.google.com/open?id=1AbCdEf",        // legacy form → Safari
+        "https://drive.google.com/drive/folders/1AbCdEf",  // gdrive folder (no file id)
         "",
     ])
     func `unknown hosts and malformed links are not streamable`(url: String) {

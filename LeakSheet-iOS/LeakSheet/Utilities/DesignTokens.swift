@@ -209,7 +209,7 @@ extension String {
 // MARK: - Credit Tag Colors
 
 enum CreditType: String {
-    case featuring, producers, collaboration, refs
+    case featuring, producers, collaboration, refs, creditedArtists
 
     var color: Color {
         switch self {
@@ -217,6 +217,7 @@ enum CreditType: String {
         case .producers: Color(hue: 280/360, saturation: 0.50, brightness: 0.75)
         case .collaboration: Color(hue: 160/360, saturation: 0.50, brightness: 0.70)
         case .refs: Color(hue: 30/360, saturation: 0.60, brightness: 0.75)
+        case .creditedArtists: Color(hue: 340/360, saturation: 0.50, brightness: 0.75)
         }
     }
 
@@ -226,6 +227,7 @@ enum CreditType: String {
         case .producers: "prod."
         case .collaboration: "with"
         case .refs: "ref."
+        case .creditedArtists: "artist"
         }
     }
 
@@ -236,6 +238,7 @@ enum CreditType: String {
         case .producers: "Produced by"
         case .collaboration: "With"
         case .refs: "Reference by"
+        case .creditedArtists: "Artist"
         }
     }
 }
