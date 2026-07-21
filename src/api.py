@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -55,6 +56,7 @@ from src.fetcher import (
 )
 from src.streaming import (
     GdriveInterstitialError,
+    PublicOnlyAsyncTransport,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
@@ -90,8 +92,10 @@ def _sniff_audio_format(header: bytes) -> str | None:
     # Ogg container (Vorbis, Opus, FLAC-in-Ogg) — "OggS"
     if header[:4] == b"OggS":
         return "audio/ogg"
-    # Partial Ogg (only 1-2 bytes received, e.g. from bytes=0-1 Safari probe)
-    if len(header) >= 1 and header[0:1] == b"O" and (len(header) < 4):
+    # Partial Ogg: a short read (e.g. Safari's bytes=0-1 probe) that is a
+    # genuine prefix of the "OggS" signature — not just any byte starting 'O',
+    # which would misclassify tiny non-Ogg bodies.
+    if 0 < len(header) < 4 and b"OggS".startswith(header):
         return "audio/ogg"
 
     # FLAC — "fLaC"
@@ -292,6 +296,11 @@ def _get_proxy_client() -> httpx.AsyncClient:
         _proxy_client = httpx.AsyncClient(
             timeout=15,
             follow_redirects=True,
+            # SSRF guard: reject connecting to a non-public host on any hop, so
+            # an allow-listed image URL that 30x-redirects to an internal
+            # address (169.254.169.254, localhost, RFC1918) is refused at
+            # connect rather than proxied back.
+            transport=PublicOnlyAsyncTransport(),
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
@@ -362,6 +371,79 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition", "ETag", "X-Cache-Status"],
 )
+
+
+# Expensive endpoints worth throttling: cold sheet fetches and the upstream
+# proxies. Cheap/cached endpoints (/trackers) are left alone.
+_RATE_LIMIT_PATHS = ("/sheet", "/stream", "/image-proxy", "/metadata")
+_RATE_LIMIT_WINDOW_S = 60.0
+_rate_hits: dict[str, list[float]] = {}
+_rate_last_prune = 0.0
+
+
+class _RateLimitMiddleware:
+    """Opt-in sliding-window per-IP rate limiter (pure ASGI so it never buffers
+    the streaming response body).
+
+    Off by default — set ``LEAKSHEET_RATE_LIMIT_PER_MIN`` to a positive integer
+    to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
+    (see Procfile), so in-process counters are authoritative. The limit is read
+    per request so it can be tuned without a redeploy.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self._should_limit(scope):
+            resp = Response(
+                status_code=429,
+                content="Too Many Requests",
+                headers={"Retry-After": str(int(_RATE_LIMIT_WINDOW_S))},
+            )
+            await resp(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _should_limit(self, scope) -> bool:
+        try:
+            limit = int(os.environ.get("LEAKSHEET_RATE_LIMIT_PER_MIN", "0") or 0)
+        except ValueError:
+            limit = 0
+        if limit <= 0:
+            return False
+        path = scope.get("path", "").rstrip("/")
+        if not any(path.endswith(p) for p in _RATE_LIMIT_PATHS):
+            return False
+        client = scope.get("client")
+        ip = client[0] if client else "unknown"
+        now = time.monotonic()
+        cutoff = now - _RATE_LIMIT_WINDOW_S
+        hits = _rate_hits.setdefault(ip, [])
+        del hits[: _bisect_right(hits, cutoff)]
+        self._maybe_prune(now, cutoff)
+        if len(hits) >= limit:
+            return True
+        hits.append(now)
+        return False
+
+    @staticmethod
+    def _maybe_prune(now: float, cutoff: float) -> None:
+        global _rate_last_prune
+        if now - _rate_last_prune <= _RATE_LIMIT_WINDOW_S:
+            return
+        _rate_last_prune = now
+        for k in [k for k, v in _rate_hits.items() if not v or v[-1] < cutoff]:
+            _rate_hits.pop(k, None)
+
+
+def _bisect_right(sorted_ts: list[float], value: float) -> int:
+    """Index of the first timestamp > value (list is monotonically increasing)."""
+    import bisect
+    return bisect.bisect_right(sorted_ts, value)
+
+
+app.add_middleware(_RateLimitMiddleware)
 
 
 # ---------------------------------------------------------------------------
@@ -562,8 +644,25 @@ async def parse_sheet(
 # ---------------------------------------------------------------------------
 
 @app.post("/cache/clear")
-async def clear_fetch_cache():
-    """Clear the URL fetch cache."""
+async def clear_fetch_cache(request: Request):
+    """Clear the URL fetch cache (privileged).
+
+    CORS is open (`allow_origins=["*"]`) and this mutates shared server state,
+    so an unauthenticated endpoint would let any web page flush the cache and
+    force cold refetches for everyone. Requires the admin token: set
+    ``LEAKSHEET_ADMIN_TOKEN`` and send it as the ``X-Admin-Token`` header. When
+    the token is unset the endpoint is disabled (fail closed — behind a reverse
+    proxy the client IP is the proxy, so loopback checks aren't trustworthy).
+    """
+    admin_token = os.environ.get("LEAKSHEET_ADMIN_TOKEN")
+    if not admin_token:
+        raise HTTPException(
+            status_code=503,
+            detail="cache clear disabled: set LEAKSHEET_ADMIN_TOKEN to enable",
+        )
+    provided = request.headers.get("x-admin-token", "")
+    if not hmac.compare_digest(provided, admin_token):
+        raise HTTPException(status_code=401, detail="invalid or missing admin token")
     count = clear_cache()
     return {"cleared": count}
 
@@ -1458,6 +1557,13 @@ async def proxy_stream(
             _prepend_chunk = await _stream_iter.__anext__()
         except StopAsyncIteration:
             _prepend_chunk = b""
+        except Exception as exc:
+            # A read error (upstream stall/reset) while sniffing the first chunk
+            # would otherwise escape without closing `resp`, leaking its pooled
+            # connection until it times out. Close it and surface a 502.
+            await resp.aclose()
+            logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
+            raise HTTPException(status_code=502, detail="Upstream read error") from exc
         sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
         if sniffed:
             ct = sniffed

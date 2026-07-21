@@ -52,6 +52,31 @@ logger = logging.getLogger(__name__)
 # internal service would turn this proxy into an SSRF pivot. We require https
 # and reject any destination that resolves to a non-public address. (The
 # krakenfiles path is already constrained by _KRAKEN_CDN_AUDIO_PATTERN.)
+def _ip_is_public(ip_str: str) -> bool:
+    """True unless *ip_str* is a private/loopback/link-local/reserved/etc. address."""
+    ip = ipaddress.ip_address(ip_str)
+    return not (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+def _assert_public_host(host: str, *, source: str) -> None:
+    """Raise ValueError unless every address *host* resolves to is public.
+
+    Blocking (socket.getaddrinfo) — call via asyncio.to_thread from async code.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"{source} host does not resolve: {host}") from exc
+    for info in infos:
+        if not _ip_is_public(info[4][0]):
+            raise ValueError(
+                f"{source} resolved to non-public address {info[4][0]} for host {host}"
+            )
+
+
 def _assert_public_https_url(url: str, *, source: str) -> None:
     """Raise ValueError unless *url* is https and resolves only to public IPs."""
     parsed = urlparse(url)
@@ -60,19 +85,97 @@ def _assert_public_https_url(url: str, *, source: str) -> None:
     host = parsed.hostname
     if not host:
         raise ValueError(f"{source} returned URL with no host: {url[:80]}")
+    _assert_public_host(host, source=source)
+
+
+async def assert_public_redirect_target(resp: httpx.Response, *, source: str) -> None:
+    """Re-validate that the FINAL url of a (redirect-followed) response is a
+    public https host; aclose the response and raise ValueError otherwise.
+
+    ``follow_redirects=True`` means an allow-listed / pre-validated origin can
+    still 30x to an internal address (169.254.169.254, localhost, RFC1918) — the
+    exact SSRF class the gdrive path already guards. This closes the same hole
+    on the general stream / image-proxy paths. Because callers pass
+    ``stream=True`` and run this before reading the body, no internal content is
+    ever relayed to the client.
+    """
+    final = str(resp.url)
+    parsed = urlparse(final)
+    host = parsed.hostname or ""
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as exc:
-        raise ValueError(f"{source} host does not resolve: {host}") from exc
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (
-            ip.is_private or ip.is_loopback or ip.is_link_local
-            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-        ):
-            raise ValueError(
-                f"{source} resolved to non-public address {ip} for host {host}"
-            )
+        if parsed.scheme != "https":
+            raise ValueError(f"{source} redirected to non-https URL: {final[:80]}")
+        await asyncio.to_thread(_assert_public_host, host, source=source)
+    except ValueError:
+        await resp.aclose()
+        raise
+
+
+class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
+    """SSRF guard at the transport layer: before every connection (including
+    each redirect hop) reject any host that resolves only-or-partly to a
+    non-public address.
+
+    This narrows the DNS-rebinding window — the check runs at connect time, not
+    only during pre-flight validation — and defends every request made through
+    the shared clients. Exact-IP pinning would fully close the residual rebind
+    race but needs live verification against each upstream, so it is deferred;
+    ``assert_public_redirect_target`` is the tested belt-and-suspenders on top.
+    """
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        try:
+            is_literal = ipaddress.ip_address(host) is not None
+        except ValueError:
+            is_literal = False
+        try:
+            if is_literal:
+                if not _ip_is_public(host):
+                    raise ValueError(f"blocked non-public literal IP {host}")
+            else:
+                loop = asyncio.get_running_loop()
+                infos = await loop.getaddrinfo(
+                    host, request.url.port, type=socket.SOCK_STREAM
+                )
+                for info in infos:
+                    if not _ip_is_public(info[4][0]):
+                        raise ValueError(
+                            f"blocked non-public address {info[4][0]} for host {host}"
+                        )
+        except ValueError as exc:
+            raise httpx.ConnectError(str(exc), request=request) from exc
+        return await super().handle_async_request(request)
+
+
+# Scraped HTML pages (krakenfiles view page, gdrive interstitial) only ever
+# carry the CDN URL / confirm form near the top. httpx transparently
+# decompresses response bodies, so an uncapped read of a gzip-bombed page could
+# unpack to hundreds of MB and OOM the worker — read at most this many
+# (decompressed) bytes.
+_SCRAPER_READ_CAP = 512 * 1024
+
+
+async def _get_text_capped(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    *,
+    cap: int = _SCRAPER_READ_CAP,
+) -> tuple[int, str]:
+    """GET *url*, decoding at most *cap* decompressed bytes. Returns
+    (status_code, text). Stops consuming the body once the cap is reached."""
+    request = client.build_request("GET", url, headers=headers)
+    resp = await client.send(request, stream=True)
+    try:
+        buf = bytearray()
+        async for chunk in resp.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) >= cap:
+                break
+        return resp.status_code, bytes(buf[:cap]).decode("utf-8", errors="ignore")
+    finally:
+        await resp.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +252,11 @@ def _get_shared_client() -> httpx.AsyncClient:
         _shared_client = httpx.AsyncClient(
             follow_redirects=True,
             timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
-            limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+            # limits live on the transport because a custom transport bypasses
+            # the client-level `limits` argument.
+            transport=PublicOnlyAsyncTransport(
+                limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
+            ),
         )
     return _shared_client
 
@@ -319,18 +426,18 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
     """
     client = _get_shared_client()
     try:
-        resp = await client.get(
+        status, html = await _get_text_capped(
+            client,
             view_url,
-            headers={
+            {
                 "User-Agent": _STREAM_USER_AGENT,
                 "Referer": "https://krakenfiles.com/",
             },
         )
-        if resp.status_code != 200:
+        if status != 200:
             raise ValueError(
-                f"krakenfiles.com returned {resp.status_code} for {view_url}"
+                f"krakenfiles.com returned {status} for {view_url}"
             )
-        html = resp.text
     except httpx.HTTPError as exc:
         raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
 
@@ -542,9 +649,17 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
     ct = resp.headers.get("content-type", "")
     base_ct = ct.split(";")[0].strip().lower()
     if resp.status_code == 200 and base_ct == "text/html":
-        html_bytes = await resp.aread()
+        # Cap the interstitial read — the confirm form is always near the top,
+        # and an uncapped decompressed read of a crafted page could OOM.
+        buf = bytearray()
+        async for chunk in resp.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) >= _SCRAPER_READ_CAP:
+                break
         await resp.aclose()
-        fields = parse_gdrive_confirm_form(html_bytes.decode("utf-8", errors="ignore"))
+        fields = parse_gdrive_confirm_form(
+            bytes(buf[:_SCRAPER_READ_CAP]).decode("utf-8", errors="ignore")
+        )
         if not fields:
             raise GdriveInterstitialError(
                 "drive.google.com returned HTML with no recognisable confirm form"
@@ -637,6 +752,11 @@ async def stream_audio(
 
     request = client.build_request("GET", stream_url, headers=req_headers)
     resp = await client.send(request, stream=True)
+
+    # follow_redirects=True can land us on an internal host even when the
+    # resolved stream_url was public/allow-listed (SSRF). Re-validate the final
+    # url before relaying any bytes — mirrors the gdrive path's re-check.
+    await assert_public_redirect_target(resp, source="stream upstream")
 
     try:
         ct = resp.headers.get("content-type", "")
