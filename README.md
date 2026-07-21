@@ -4,7 +4,7 @@ A modern reader for tracker spreadsheets — turns clunky Google Docs trackers i
 
 Inspired by trackerhub.cx, built as a personal replacement while it's down.
 
-> Made for fun with Claude Opus 4.6. Expect rough edges.
+> Made for fun with Claude Code. Expect rough edges.
 
 ---
 
@@ -55,7 +55,7 @@ uvicorn src.api:app --reload          # → http://localhost:8000
 cd web && npm install && npm run dev  # → http://localhost:5173
 ```
 
-Then open the frontend and paste any supported tracker URL. For the iOS app, open `LeakSheet-iOS/LeakSheet.xcodeproj` in Xcode 26+ and run.
+Then open the frontend and paste any supported tracker URL. For the iOS app, open `LeakSheet-iOS/LeakSheet.xcodeproj` in Xcode 27+ and run (iOS 27+ device or simulator).
 
 ### One-liner: parse a tracker from the CLI
 
@@ -113,8 +113,20 @@ GET  /api/trackers           → TrackerHub discovery list (name, url, best, up-
 GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
 GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)
 GET  /api/metadata?url=...   → File metadata from provider APIs (incl. media_kind)
-POST /api/cache/clear        → Clear URL fetch cache
+POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Admin-Token: $LEAKSHEET_ADMIN_TOKEN)
 ```
+
+### Environment variables
+
+| Var | Default | Purpose |
+|---|---|---|
+| `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
+| `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata` |
+| `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
+| `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
+
+> The backend proxies audio and images server-side. It re-validates the final host after
+> redirects and rejects non-public addresses (SSRF guard) on every proxied hop.
 
 ---
 

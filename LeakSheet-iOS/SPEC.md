@@ -1,7 +1,8 @@
 # LeakSheet iOS — Specification
 
-> Auto-generated reference from the LeakSheet web app analysis.
+> Reference spec for the maintained native client.
 > Target: SwiftUI, iOS 27+, Swift 6, Liquid Glass design language.
+> Last verified against source: 2026-07-21.
 
 ---
 
@@ -12,26 +13,28 @@
 - **Build settings:** `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`
 - **Navigation:** `NavigationStack(path:)` with type-safe `.navigationDestination(for: Artist.self)`
 - **State:** `@Observable` macro (Observation framework), `@Environment` injection
-- **Services:** `actor`-isolated (`APIClient`, `CacheService`, `ImageCache`, `EraColorExtractor`)
+- **Services:** `actor`-isolated (`APIClient`, `CacheService`, `ImageCache`); `AudioEngine`
+  is a `@MainActor @Observable` singleton (not an actor); `PlaybackQueueLogic` is a pure value type
 - **Audio:** `@MainActor @Observable AudioEngine` singleton with AVPlayer
 - **Models:** `nonisolated` Codable structs (opt out of default MainActor isolation)
 - **Dependencies:** Zero third-party
 
-### File Structure (36 files)
+### File Structure (42 files)
 ```
 LeakSheet/
 ├── LeakSheetApp.swift
 ├── ContentView.swift
 ├── Models/
-│   ├── Models.swift              # Artist, Era, Section, Song, SongVersion, Badge, etc.
-│   └── StreamResolver.swift      # Streamable URL pattern matching
+│   ├── Models.swift              # Artist, Era, Section, Song, SongVersion, Badge, MiscEntry, TabSection…
+│   └── StreamResolver.swift      # Streamable URL pattern matching (host parity w/ src/streaming.py)
 ├── Services/
-│   ├── APIClient.swift           # HTTP client actor (sheet, image-proxy, metadata, stream)
-│   ├── AudioEngine.swift         # AVPlayer + MPNowPlayingInfoCenter + queue management
-│   ├── CacheService.swift        # Disk cache actor with ETag validation
-│   └── ImageCache.swift          # In-memory NSCache + URLSession image loader
+│   ├── APIClient.swift           # HTTP client actor (sheet, image-proxy, metadata, stream, trackers)
+│   ├── AudioEngine.swift         # @MainActor: AVPlayer + MPNowPlayingInfoCenter + video + queue
+│   ├── CacheService.swift        # Disk cache actor with ETag validation (v2, SHA-256 keys)
+│   ├── ImageCache.swift          # Actor: NSCache + URLSession + ImageIO downsample
+│   └── PlaybackQueueLogic.swift  # Pure value type: queue / era-rollover / list auto-advance
 ├── ViewModels/
-│   ├── ArtistViewModel.swift     # Search, filter, recents, era state (470+ lines)
+│   ├── ArtistViewModel.swift     # Search, filter, recents, era row state (~980 lines)
 │   ├── PlayerViewModel.swift     # Thin @Observable wrapper over AudioEngine
 │   ├── FavouritesManager.swift   # UserDefaults persistence singleton
 │   └── RecentTrackersManager.swift
@@ -39,31 +42,36 @@ LeakSheet/
 │   ├── Landing/
 │   │   ├── LandingView.swift
 │   │   ├── TrackerInputView.swift
-│   │   ├── BrowseArtistsView.swift     # Artists.ndjson discovery list
+│   │   ├── BrowseArtistsView.swift     # Explore Trackers — GET /trackers (TrackerHub)
 │   │   └── RecentTrackerCardView.swift
 │   ├── Artist/
-│   │   ├── ArtistView.swift
+│   │   ├── ArtistView.swift             # Flattened LazyVStack of EraRows; search/filter/misc branches
 │   │   ├── ArtistStatsBarView.swift
 │   │   ├── EraCardView.swift
-│   │   ├── EraNavView.swift
-│   │   ├── SongListView.swift
 │   │   ├── SongRowView.swift
 │   │   ├── VersionRowView.swift
 │   │   ├── BadgeRowView.swift
-│   │   ├── CreditTagsView.swift
-│   │   └── SongContextMenu.swift       # Shared context menu + 3-dot menu
+│   │   ├── CreditTagsView.swift         # feat / prod / with / ref / artist (credited_artists)
+│   │   ├── MiscEntryRowView.swift       # Misc / Music-Videos tab entry row
+│   │   └── SongContextMenu.swift        # Shared context menu + 3-dot menu
 │   ├── Player/
 │   │   ├── MiniPlayerBar.swift
-│   │   └── NowPlayingView.swift        # Full-screen now-playing
+│   │   ├── NowPlayingView.swift         # Full-screen now-playing
+│   │   └── VideoSurfaceView.swift       # Inline video at native aspect
 │   └── Shared/
-│       ├── CachedImage.swift           # ImageCache-backed AsyncImage replacement
-│       ├── SongDescriptionSheet.swift  # Includes FlowLayout
+│       ├── CachedImage.swift            # ImageCache-backed AsyncImage replacement
+│       ├── SongDescriptionSheet.swift   # Full metadata; includes FlowLayout
 │       ├── QueueSheet.swift
 │       ├── FavouritesView.swift
-│       └── SettingsView.swift          # Cache clear, about info
+│       ├── EmbedPlayerView.swift        # Embedded web player fallback
+│       ├── SafariView.swift             # SFSafariViewController wrapper
+│       └── SettingsView.swift           # Cache clear, autoplay, streaming mode, about
 └── Utilities/
-    ├── DesignTokens.swift        # Color/spacing constants
+    ├── DesignTokens.swift        # Color/spacing constants, CreditType
     ├── EraColorExtractor.swift   # Dominant color from cover art
+    ├── EraDisplayColors.swift    # Derived readable era gradient/text colors
+    ├── MiscLinkClassifier.swift  # Classifies misc links (video/archive/stream)
+    ├── TrackerURLNormalizer.swift
     └── Haptics.swift             # UIKit haptic feedback helpers
 ```
 
@@ -86,9 +94,9 @@ ContentView (NavigationStack root)
   ├── ArtistStatsBar       — total / available / snippets / full HQ
   ├── .searchable()        — debounced search with filter toggles (Liquid Glass)
   ├── FilterChips          — Best Of / Recents / No Snippets (Liquid Glass tinted)
-  ├── EraNav               — side rail with era abbreviation buttons (Liquid Glass)
+  ├── Content tabs         — Released / Stems / Misc / Music Videos (chips → pages)
   └── ScrollView
-       └── LazyVStack of EraCards
+       └── LazyVStack of EraRows (flattened: card → section → song → version)
             ├── Cover art + gradient (dominant color)
             ├── Title + alt names + timeline
             ├── Collapsible description
@@ -253,6 +261,7 @@ featuring: String?
 producers: String?
 collaboration: String?
 refs: String?
+credited_artists: String?      // performer from a dedicated Artist column (distinct from featuring)
 alt_titles: [String]
 notes: String?
 og_filename: String?
@@ -503,13 +512,10 @@ radius-lg:  16pt
 player-height: 72pt (mini), expandable
 ```
 
-### Liquid Glass (iOS 26)
+### Liquid Glass (iOS 27)
 ```swift
 // Mini player bar — floating glass pill
 .glassEffect(in: .rect(cornerRadius: 16))
-
-// Era navigation rail — glass pill
-.glassEffect(in: .rect(cornerRadius: 8))
 
 // Tracker URL input — tinted when focused
 .glassEffect(focused ? .regular.tint(.lsAccent) : .regular, in: .rect(cornerRadius: 12))
@@ -528,7 +534,6 @@ player-height: 72pt (mini), expandable
 
 Components using Liquid Glass:
 - MiniPlayerBar (glass pill)
-- EraNavView (glass pill)
 - TrackerInputView (tinted on focus)
 - ArtistView FilterChip (tinted on active)
 - ArtistView search field
@@ -583,6 +588,8 @@ Components using Liquid Glass:
 | temp.imgur.gg | `/f/{id}` | → `/api/stream?url=...` (proxy) |
 | music.froste.lol | `/song/{hash}` | → `/api/stream?url=...` (proxy) |
 | krakenfiles.com | `/view/{id}/file.html` | → `/api/stream?url=...` (proxy) |
+| pixeldrain.com | `/u/{id}` (single files) | → `/api/stream?url=...` (proxy) |
+| drive.google.com | `/file/d/{id}`, `/open?id=`, `/uc?id=` | → `/api/stream?url=...` (proxy) |
 
 ### MIME Corrections (handled server-side)
 - `audio/m4a` → `audio/mp4`

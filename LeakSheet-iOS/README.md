@@ -44,7 +44,7 @@ LeakSheet/
 ├── LeakSheetApp.swift
 ├── ContentView.swift
 ├── Models/         — Artist, Era, Song, SongVersion, StreamResolver
-├── Services/       — APIClient, AudioEngine, CacheService, ImageCache (actors)
+├── Services/       — APIClient/CacheService/ImageCache (actors), AudioEngine (@MainActor), PlaybackQueueLogic
 ├── ViewModels/     — ArtistVM, PlayerVM, Favourites, RecentTrackers
 ├── Views/
 │   ├── Landing/    — LandingView, TrackerInput, BrowseArtists
