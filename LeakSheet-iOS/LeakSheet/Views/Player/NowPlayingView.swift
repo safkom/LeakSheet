@@ -155,7 +155,7 @@ struct NowPlayingView: View {
                         Image(systemName: "list.bullet")
                             .font(.body)
                             .foregroundStyle(.secondary)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Queue")
@@ -177,7 +177,7 @@ struct NowPlayingView: View {
                             Image(systemName: isFav ? "heart.fill" : "heart")
                                 .font(.body)
                                 .foregroundStyle(isFav ? Color.lsFavourite : .secondary)
-                                .frame(width: 36, height: 36)
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.glass)
                         .accessibilityLabel(isFav ? "Remove from favourites" : "Add to favourites")
@@ -198,7 +198,7 @@ struct NowPlayingView: View {
                         Image(systemName: "info.circle")
                             .font(.body)
                             .foregroundStyle(.secondary)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.glass)
                     .accessibilityLabel("Track details")

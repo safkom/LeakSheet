@@ -188,7 +188,7 @@ private struct ArtistContentView: View {
                         showQueue = true
                     } label: {
                         Image(systemName: "list.bullet")
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .accessibilityHidden(true)
                     }
                     .glassEffect(.regular.interactive(), in: .circle)
@@ -408,27 +408,49 @@ private struct ErasListView: View {
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var hasActiveFilters: Bool {
+        vm.bestOf || vm.worstOf || vm.noSnippets
+    }
+
     var body: some View {
-        ForEach(vm.eraRows) { row in
-            EraRowView(
-                row: row,
-                displayColors: vm.eraDisplay[row.eraName],
-                artistName: artistName,
-                artistSlug: artistSlug,
-                sourceUrl: sourceUrl,
-                onCardTap: { eraName in
-                    withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                        vm.toggleEra(eraName)
-                    }
-                },
-                onColorExtracted: { eraName, color in
-                    vm.setEraColor(eraName: eraName, dominant: color)
-                    onColorExtracted(color)
-                },
-                onSongTap: handleSongTap,
-                onPlayVersion: playWithEraContext,
-                onShowDescription: onShowDescription
-            )
+        if vm.eraRows.isEmpty {
+            // Every other content branch (search/recents/misc) shows an empty
+            // state; without this the eras branch rendered a blank void when a
+            // filter (e.g. Best Of) removed every era.
+            ContentUnavailableView {
+                Label(
+                    hasActiveFilters ? "No Matches" : "No Songs",
+                    systemImage: hasActiveFilters ? "line.3.horizontal.decrease.circle" : "music.note.list"
+                )
+            } description: {
+                Text(hasActiveFilters
+                     ? "No songs match the current filters."
+                     : "This tracker has no songs yet.")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 48)
+        } else {
+            ForEach(vm.eraRows) { row in
+                EraRowView(
+                    row: row,
+                    displayColors: vm.eraDisplay[row.eraName],
+                    artistName: artistName,
+                    artistSlug: artistSlug,
+                    sourceUrl: sourceUrl,
+                    onCardTap: { eraName in
+                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
+                            vm.toggleEra(eraName)
+                        }
+                    },
+                    onColorExtracted: { eraName, color in
+                        vm.setEraColor(eraName: eraName, dominant: color)
+                        onColorExtracted(color)
+                    },
+                    onSongTap: handleSongTap,
+                    onPlayVersion: playWithEraContext,
+                    onShowDescription: onShowDescription
+                )
+            }
         }
     }
 
