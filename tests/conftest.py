@@ -54,6 +54,27 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     return cache_dir
 
 
+@pytest.fixture(autouse=True)
+def _fresh_shared_clients(monkeypatch):
+    """Reset the module-global httpx clients before every test.
+
+    pytest-asyncio runs each coroutine on a FRESH event loop, but the fetch /
+    stream / proxy stacks cache module-global ``httpx.AsyncClient``s bound to
+    whichever loop first created them (fine under uvicorn's single loop). Without
+    a reset, an async test that touches the real client after an earlier test
+    instantiated it dies with "RuntimeError: Event loop is closed". Applied
+    suite-wide (not just ``-m live``) so an offline async test can't hit the same
+    latent flake.
+    """
+    import src.api as api
+    import src.fetcher as fetcher
+    import src.streaming as streaming
+
+    monkeypatch.setattr(fetcher, "_sheets_client", None)
+    monkeypatch.setattr(streaming, "_shared_client", None)
+    monkeypatch.setattr(api, "_proxy_client", None)
+
+
 # ---------------------------------------------------------------------------
 # Synthetic fixture loading
 # ---------------------------------------------------------------------------
