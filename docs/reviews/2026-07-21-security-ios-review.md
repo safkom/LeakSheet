@@ -49,14 +49,19 @@ session**, plus the first deep iOS code/UX review since 2026-07-06.
 ### iOS UX / accessibility
 12. Eras branch empty state; Reduce-Motion gate on the now-playing symbol effect; Explore
     Trackers retry button; 44 pt tap targets; info-text contrast (`.tertiary`→`.secondary`);
-    "More options" VoiceOver label.
+    "More options" VoiceOver label; swipe-to-play from search/recents now continues down the
+    list (was single-track).
+
+### iOS perf / tests
+13. `FavouritesManager.save()` moved off the main actor + debounced; `AudioEngine` volume-0
+    persistence and `H:MM:SS` duration; the shared-httpx-client reset is now suite-wide in the
+    top-level conftest (closes a latent offline-test flake).
 
 ## Deferred (tracked follow-ups)
 
 - **iOS pull-to-refresh + data-age** (`X-Cache-Status` is returned but ignored) — a feature
   addition touching the reload/API flow; the known follow-up from 2026-07-20.
-- **`FlowLayout` for badge/credit pills** (Dynamic-Type wrapping) and **swipe-to-play list
-  continuation** from search/recents — polish.
+- **`FlowLayout` for badge/credit pills** (Dynamic-Type wrapping) — polish.
 - **CI count gate:** the exact-count accuracy suite skips in CI (no dumps), so count-drift can
   ship green — add a DMCA-safe synthetic count gate.
 - **iOS perf:** precomputed search index; off-main/debounced `FavouritesManager.save`.

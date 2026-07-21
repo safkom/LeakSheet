@@ -352,6 +352,15 @@ private struct SearchResultsListView: View {
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
+                    // Swipe-to-play must continue down the list like tap does,
+                    // not stop after one track (missing onPlay fell back to a
+                    // single-track play).
+                    onPlay: { _ in
+                        playWithinList(
+                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
+                            tappedId: result.id
+                        )
+                    },
                     onShowDescription: onShowDescription
                 )
                 .contentShape(Rectangle())
@@ -727,6 +736,12 @@ private struct RecentsListView: View {
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
+                    // Swipe-to-play continues down the recents list like tap.
+                    onPlay: { _ in
+                        if let (items, idx) = vm.recentPlayback(for: result.id) {
+                            player.playInList(items, startAt: idx)
+                        }
+                    },
                     onShowDescription: onShowDescription
                 )
                 .contentShape(Rectangle())
