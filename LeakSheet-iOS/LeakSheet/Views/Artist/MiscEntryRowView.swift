@@ -30,7 +30,9 @@ struct MiscEntryRowView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
-                HStack(spacing: 5) {
+                // FlowLayout so type/quality/availability pills wrap instead of
+                // clipping at accessibility Dynamic Type.
+                FlowLayout(spacing: 5) {
                     if let type = entry.entryType, !type.isEmpty {
                         typePill(type)
                     }

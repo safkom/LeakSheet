@@ -155,6 +155,9 @@ final class ArtistViewModel {
     /// built once in Precomputed.
     private let songKeyEras: [String: [CrossEraRef]]
 
+    /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
+    private let searchIndex: [[SongSearchFields]]
+
     // MARK: - Recents windowing
 
     private(set) var visibleRecents: [RecentResult] = []
@@ -210,6 +213,11 @@ final class ArtistViewModel {
         /// songKey → every era containing that song, in era order — backs
         /// the description sheet's "Also in" cross-era section.
         let songKeyEras: [String: [CrossEraRef]]
+        /// Per-era, per-song lowercased search haystack, built once off-main so
+        /// each keystroke's scoring is comparison-only (no re-lowercasing every
+        /// song name / alt title / version name across the whole tracker).
+        /// Shape mirrors `artist.eras[i].allSongs[j]`.
+        let searchIndex: [[SongSearchFields]]
 
         init(artist: Artist) {
             var statsByName: [String: Stats] = [:]
@@ -243,6 +251,7 @@ final class ArtistViewModel {
             )
             // Only keys that actually span content are worth keeping
             self.songKeyEras = keyEras.filter { $0.value.count > 1 }
+            self.searchIndex = artist.eras.map { $0.allSongs.map(SongSearchFields.init(song:)) }
         }
     }
 
@@ -273,6 +282,7 @@ final class ArtistViewModel {
         self.artistStats = precomputed.artistStats
         self.content = precomputed.content
         self.songKeyEras = precomputed.songKeyEras
+        self.searchIndex = precomputed.searchIndex
 
         // Seed era colors from the persisted extraction cache so cards and
         // headers are tinted on first paint without any image download.
@@ -363,6 +373,7 @@ final class ArtistViewModel {
         isFiltering = true
         let artist = self.artist
         let eraStats = self.eraStatsByName
+        let searchIndex = self.searchIndex
         // Single-flight: wait for the previous detached pass to actually
         // stop before starting the next one. Overlapping passes would race
         // on the shared static DateFormatters in parseDate (DateFormatter
@@ -372,7 +383,7 @@ final class ArtistViewModel {
         filterTask = Task.detached(priority: .userInitiated) { [weak self] in
             await previousTask?.value
             guard !Task.isCancelled else { return }
-            let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats)
+            let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats, searchIndex: searchIndex)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -584,7 +595,8 @@ final class ArtistViewModel {
     nonisolated static func computeContent(
         artist: Artist,
         state: FilterState,
-        eraStats: [String: Stats]
+        eraStats: [String: Stats],
+        searchIndex: [[SongSearchFields]] = []
     ) -> FilteredContent {
         let empty = FilteredContent(
             state: state, eras: [], searchResults: [], recentResults: [],
@@ -604,7 +616,7 @@ final class ArtistViewModel {
         if !state.query.isEmpty {
             return FilteredContent(
                 state: state, eras: [],
-                searchResults: computeSearchResults(artist: artist, state: state),
+                searchResults: computeSearchResults(artist: artist, state: state, searchIndex: searchIndex),
                 recentResults: [], recentPlaybackItems: [], recentStreamIndex: [:],
                 miscResults: []
             )
@@ -700,14 +712,22 @@ final class ArtistViewModel {
         var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
     }
 
-    private nonisolated static func computeSearchResults(artist: Artist, state: FilterState) -> [SearchResult] {
+    private nonisolated static func computeSearchResults(
+        artist: Artist, state: FilterState, searchIndex: [[SongSearchFields]]
+    ) -> [SearchResult] {
         let q = state.query
         guard !q.isEmpty else { return [] }
+        // Use the prebuilt haystack when its shape matches; otherwise fall back
+        // to inline scoring so correctness never depends on the index.
+        let useIndex = searchIndex.count == artist.eras.count
         var results: [SearchResult] = []
-        for era in artist.eras {
+        for (eraIdx, era) in artist.eras.enumerated() {
             if Task.isCancelled { return [] }
-            for song in era.allSongs {
-                let score = scoreSong(song, query: q)
+            let songs = era.allSongs
+            let eraFields = (useIndex && searchIndex[eraIdx].count == songs.count) ? searchIndex[eraIdx] : nil
+            for (songIdx, song) in songs.enumerated() {
+                let score = eraFields.map { scoreSong(fields: $0[songIdx], query: q) }
+                    ?? scoreSong(song, query: q)
                 guard score > 0 else { continue }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
@@ -868,6 +888,38 @@ final class ArtistViewModel {
 
     private nonisolated static func isWorstOfVersion(_ v: SongVersion) -> Bool {
         v.badge.flatMap { Badge(rawValue: $0) } == .worst
+    }
+
+    /// Prebuilt lowercased search fields for one song (see Precomputed.searchIndex).
+    nonisolated struct SongSearchFields: Sendable {
+        let baseName: String
+        let altTitles: [String]
+        let versionNames: [String]
+
+        init(song: Song) {
+            baseName = song.baseName.lowercased()
+            var alts: [String] = []
+            var names: [String] = []
+            for v in song.versions {
+                if let a = v.altTitles { alts.append(contentsOf: a.map { $0.lowercased() }) }
+                names.append(v.name.lowercased())
+            }
+            altTitles = alts
+            versionNames = names
+        }
+    }
+
+    /// Index-backed scorer — MUST stay identical in ranking to
+    /// `scoreSong(_ song:query:)` below (the FilterPipelineTests pin the order).
+    private nonisolated static func scoreSong(fields: SongSearchFields, query: String) -> Int {
+        if fields.baseName == query { return 100 }
+        if fields.altTitles.contains(query) { return 90 }
+        if fields.baseName.hasPrefix(query) { return 70 }
+        if fields.altTitles.contains(where: { $0.hasPrefix(query) }) { return 60 }
+        if fields.baseName.contains(query) { return 40 }
+        if fields.versionNames.contains(where: { $0.contains(query) }) { return 20 }
+        if fields.altTitles.contains(where: { $0.contains(query) }) { return 20 }
+        return 0
     }
 
     private nonisolated static func scoreSong(_ song: Song, query: String) -> Int {

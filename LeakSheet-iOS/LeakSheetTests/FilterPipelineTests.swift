@@ -140,6 +140,20 @@ struct FilterPipelineTests {
         #expect(content.searchResults.first?.song.baseName == "Starred Song")
     }
 
+    @Test func `prebuilt search index ranks identically to inline scoring`() {
+        // The precomputed haystack must produce byte-identical results to the
+        // inline scorer (`compute` uses no index) for every query.
+        let idx = ArtistViewModel.Precomputed(artist: artist).searchIndex
+        for query in ["song", "plain", "starred song", "alias one", "guest"] {
+            let state = FilterState(query: query)
+            let indexed = ArtistViewModel.computeContent(
+                artist: artist, state: state, eraStats: [:], searchIndex: idx
+            ).searchResults
+            let inline = compute(state).searchResults
+            #expect(indexed.map(\.id) == inline.map(\.id), "ranking diverged for query \(query)")
+        }
+    }
+
     // MARK: - Recents branch
 
     @Test func `recents sort newest first and index streamable playback`() {
