@@ -60,7 +60,7 @@ struct LandingView: View {
                 if let error {
                     Text(error)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.lsError)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
                         .transition(.opacity.combined(with: .move(edge: .top)))

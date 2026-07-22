@@ -88,7 +88,7 @@ struct QueueSheet: View {
                         Button("Clear") {
                             player.clearQueue()
                         }
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.lsError)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

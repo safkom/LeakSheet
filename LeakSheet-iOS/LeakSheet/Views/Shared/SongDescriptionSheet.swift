@@ -488,6 +488,7 @@ struct SongDescriptionSheet: View {
 
     @ViewBuilder
     private var detailGrid: some View {
+        let dateLabels: Set<String> = ["File Date", "Leak Date", "Recording"]
         let items: [(String, String)] = [
             ("Version", payload.version.versionTag),
             ("Duration", payload.version.trackLength),
@@ -496,7 +497,10 @@ struct SongDescriptionSheet: View {
             ("Type", payload.version.type),
             ("Recording", payload.version.dateOfRecording),
         ].compactMap { label, val in
-            guard let v = val, !v.isEmpty else { return nil }
+            guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
+            // Drop junk in date cells (some sheets carry "Ooc", "z", etc.);
+            // a real date always contains at least one digit.
+            if dateLabels.contains(label), !v.contains(where: \.isNumber) { return nil }
             return (label, v)
         }
 

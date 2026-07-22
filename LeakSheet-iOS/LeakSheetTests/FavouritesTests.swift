@@ -8,8 +8,7 @@ private func version(_ name: String, tag: String? = nil) -> SongVersion {
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
-        availableLength: nil, quality: nil, links: nil, qualityColor: nil,
-        availableLengthColor: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 

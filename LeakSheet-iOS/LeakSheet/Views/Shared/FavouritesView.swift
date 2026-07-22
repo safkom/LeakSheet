@@ -127,7 +127,7 @@ struct FavouritesView: View {
                         Button("Clear All") {
                             favourites.clearAll()
                         }
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.lsError)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

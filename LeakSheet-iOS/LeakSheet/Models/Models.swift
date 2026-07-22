@@ -242,8 +242,6 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let availableLength: String?
     let quality: String?
     let links: [String]?
-    let qualityColor: String?
-    let availableLengthColor: String?
     let dateOfRecording: String?
     let type: String?
     /// Labeled evidence links (Sources column, Travis-style trackers).
@@ -320,8 +318,6 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         case fileDate = "file_date"
         case leakDate = "leak_date"
         case availableLength = "available_length"
-        case qualityColor = "quality_color"
-        case availableLengthColor = "available_length_color"
         case dateOfRecording = "date_of_recording"
     }
 }
@@ -391,8 +387,6 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
             availableLength: available,
             quality: quality,
             links: links,
-            qualityColor: nil,
-            availableLengthColor: nil,
             dateOfRecording: nil,
             type: entryType,
             sources: nil,

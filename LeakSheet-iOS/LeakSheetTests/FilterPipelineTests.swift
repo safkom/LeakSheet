@@ -21,8 +21,7 @@ struct FilterPipelineTests {
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: leakDate,
             availableLength: available, quality: quality,
-            links: link.map { [$0] }, qualityColor: nil,
-            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            links: link.map { [$0] }, dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
     }
@@ -370,8 +369,7 @@ struct WorstOfFilterTests {
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "High Quality",
-            links: ["https://pillows.su/f/a"], qualityColor: nil,
-            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            links: ["https://pillows.su/f/a"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
         let bad = SongVersion(
@@ -380,8 +378,7 @@ struct WorstOfFilterTests {
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "Low Quality",
-            links: ["https://pillows.su/f/b"], qualityColor: nil,
-            availableLengthColor: nil, dateOfRecording: nil, type: nil,
+            links: ["https://pillows.su/f/b"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
         let era = Era(
@@ -438,7 +435,6 @@ struct CrossEraIndexTests {
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: nil, links: nil,
-            qualityColor: nil, availableLengthColor: nil,
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
         return Song(
