@@ -25,7 +25,7 @@ struct BrowseArtistsView: View {
                 if loading && artists.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("Loading artists...")
+                        Text("Loading trackers...")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -73,9 +73,11 @@ struct BrowseArtistsView: View {
                                         }
                                         HStack(spacing: 6) {
                                             if let credit = artist.credit, !credit.isEmpty {
+                                                // .secondary (not .tertiary) clears WCAG AA on OLED
+                                                // black for this info-bearing text — see SongRowView.
                                                 Text("by \(credit)")
                                                     .font(.caption2)
-                                                    .foregroundStyle(.tertiary)
+                                                    .foregroundStyle(.secondary)
                                                     .lineLimit(1)
                                             }
                                             if artist.upToDate == false {
@@ -104,7 +106,14 @@ struct BrowseArtistsView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
-                    .searchable(text: $searchText, prompt: "Search artists...")
+                    .searchable(text: $searchText, prompt: "Search trackers...")
+                    .overlay {
+                        // Keep the List (and its search field) mounted; show the
+                        // no-results state on top when a query matches nothing.
+                        if filtered.isEmpty && !searchText.isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                        }
+                    }
                 }
             }
             .background(Color.lsBackground)

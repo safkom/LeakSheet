@@ -909,7 +909,7 @@ private struct EraRowView: View {
                     }
                 }
 
-            case .version(let version, let index, let song, let eraName, let eraArt, let isLast, _):
+            case .version(let version, let index, _, let eraName, let eraArt, let isLast, _):
                 panel(isLast: isLast) {
                     VersionRowView(
                         version: version,

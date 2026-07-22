@@ -33,7 +33,7 @@ struct SettingsView: View {
                         }
 
                         Divider()
-                            .background(Color.lsBorder)
+                            .overlay(Color.lsBorder)
 
                         qualityOption(
                             title: "Original",

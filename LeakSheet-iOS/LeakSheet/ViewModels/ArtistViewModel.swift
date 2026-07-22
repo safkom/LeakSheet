@@ -706,10 +706,16 @@ final class ArtistViewModel {
         let version: SongVersion
         let era: Era
         let score: Int
+        /// Position of the song within its era's flattened list. Disambiguates
+        /// same-`baseName` songs (leak trackers emit several distinct "???"
+        /// placeholders per era with an identical single version) whose ids
+        /// would otherwise collide and be silently dropped by ForEach — the
+        /// same fix EraRow.id applies with its ordinal.
+        let songOrdinal: Int
 
         // Stable id derived from content so SwiftUI's ForEach can diff results
         // across queries instead of rebuilding every row on each keystroke.
-        var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
+        var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
     private nonisolated static func computeSearchResults(
@@ -733,7 +739,7 @@ final class ArtistViewModel {
                     if state.bestOf && !isBestOfVersion(version) { continue }
                     if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
-                    results.append(SearchResult(song: song, version: version, era: era, score: score))
+                    results.append(SearchResult(song: song, version: version, era: era, score: score, songOrdinal: songIdx))
                 }
             }
         }
@@ -748,19 +754,23 @@ final class ArtistViewModel {
         let version: SongVersion
         let era: Era
         let timestamp: TimeInterval
+        /// Position of the song within its era's flattened list — disambiguates
+        /// same-`baseName` songs (e.g. several "???" placeholders per era) whose
+        /// ids would otherwise collide and be dropped by ForEach. See SearchResult.
+        let songOrdinal: Int
 
         // Stable content-derived id so SwiftUI's ForEach can diff results
         // across filter/query changes instead of rebuilding every row each
         // keystroke (a fresh UUID() on every rebuild caused row flicker
         // and lost expand state).
-        var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
+        var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
     private nonisolated static func computeRecentResults(artist: Artist, state: FilterState) -> [RecentResult] {
         var results: [RecentResult] = []
         for era in artist.eras {
             if Task.isCancelled { return [] }
-            for song in era.allSongs {
+            for (songOrdinal, song) in era.allSongs.enumerated() {
                 if state.bestOf {
                     let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
                     if !hasBestVersion { continue }
@@ -777,7 +787,7 @@ final class ArtistViewModel {
                     guard let dateStr, !dateStr.isEmpty else { continue }
                     results.append(RecentResult(
                         song: song, version: version, era: era,
-                        timestamp: parseLeakDate(dateStr)
+                        timestamp: parseLeakDate(dateStr), songOrdinal: songOrdinal
                     ))
                 }
             }
