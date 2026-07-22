@@ -201,3 +201,47 @@ class TestDegenerateInput:
 
     def test_misc_tab_without_header_returns_empty(self):
         assert parse_misc_tab("<html><body>nope</body></html>", "misc") == []
+
+
+# ---------------------------------------------------------------------------
+# Era routing — the most regression-prone parser path (2026-07-20 fixes). This
+# fixture exercises what main_tab.html can't, so an era-routing regression fails
+# in CI (offline) instead of only in the gitignored -m accuracy suite.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def routing():
+    return parse_sheet(read_synthetic("era_routing"), "RoutingTest")
+
+
+class TestEraRoutingFixture:
+    def _songs(self, artist, era_name):
+        era = next(e for e in artist.eras if e.name == era_name)
+        return [s.base_name for sec in era.sections for s in sec.songs]
+
+    def test_counts_and_row_accounting(self, routing):
+        assert (len(routing.eras), routing.total_songs, routing.total_versions) == (3, 5, 5)
+        md = routing.parse_metadata
+        other = md.total_rows - md.song_rows - md.skipped_rows - md.footer_rows
+        assert (md.total_rows, md.song_rows, md.skipped_rows, md.footer_rows, other) == (9, 5, 0, 1, 3)
+        assert md.dropped_columns == []
+
+    def test_digit_leading_era_is_created(self, routing):
+        # "38 Special Sessions" starts with a digit — must be an era, not a
+        # rejected stats/numeric line — and must own its song.
+        assert self._songs(routing, "38 Special Sessions") == ["Opener"]
+
+    def test_sibling_eras_do_not_steal_each_others_rows(self, routing):
+        # "Grail Freestyle [V2]" and "[V3]" share the version-stripped key
+        # "grail freestyle"; each keeps its own rows (positional-exact prior).
+        assert self._songs(routing, "Grail Freestyle [V2]") == ["Alpha", "???", "???"]
+        assert self._songs(routing, "Grail Freestyle [V3]") == ["Beta"]
+
+    def test_placeholder_songs_stay_distinct(self, routing):
+        # The two "???" rows must remain two separate Song objects, never grouped.
+        v2 = next(e for e in routing.eras if e.name == "Grail Freestyle [V2]")
+        placeholders = [s for sec in v2.sections for s in sec.songs if s.base_name == "???"]
+        assert len(placeholders) == 2
+
+    def test_passes_health_invariants(self, routing):
+        assert_healthy(routing)
