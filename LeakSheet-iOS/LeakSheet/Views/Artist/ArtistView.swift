@@ -12,12 +12,23 @@ import SwiftUI
 /// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
+    @State private var displayed: Artist?
     @State private var vm: ArtistViewModel?
+    @State private var lastUpdated: Date?
+    @Environment(RecentTrackersManager.self) private var recents
+
+    /// The artist currently shown — the pushed value until a pull-to-refresh
+    /// swaps in freshly-fetched data.
+    private var current: Artist { displayed ?? artist }
 
     var body: some View {
         Group {
             if let vm {
-                ArtistContentView(artist: artist, vm: vm)
+                ArtistContentView(
+                    artist: current, vm: vm,
+                    lastUpdated: lastUpdated,
+                    onRefresh: refresh
+                )
             } else {
                 // Sub-second placeholder while the stats/content pass runs
                 // off-main — pushing a huge tracker no longer hitches the
@@ -29,8 +40,31 @@ struct ArtistView: View {
         }
         .task(id: artist.slug) {
             if vm == nil {
+                displayed = artist
                 vm = await ArtistViewModel.make(artist: artist)
+                if let url = artist.sourceUrl {
+                    lastUpdated = await CacheService.shared.getCachedTracker(for: url)?.timestamp
+                }
             }
+        }
+    }
+
+    /// Force-refetch the tracker (bypassing the ETag/cache), rebuild the view
+    /// model, and stamp the data age. On failure the current data stays put.
+    private func refresh() async {
+        guard let url = current.sourceUrl, !url.isEmpty else { return }
+        do {
+            let result = try await APIClient.shared.parseSheet(url: url, forceRefresh: true)
+            if let etag = result.etag {
+                await CacheService.shared.cacheTracker(url: url, data: result.rawData, etag: etag)
+            }
+            recents.saveTracker(artist: result.artist)
+            let refreshedVM = await ArtistViewModel.make(artist: result.artist)
+            displayed = result.artist
+            vm = refreshedVM
+            lastUpdated = .now
+        } catch {
+            // Keep showing the current data; the refresh control just ends.
         }
     }
 }
@@ -38,6 +72,8 @@ struct ArtistView: View {
 private struct ArtistContentView: View {
     let artist: Artist
     @Bindable var vm: ArtistViewModel
+    let lastUpdated: Date?
+    let onRefresh: () async -> Void
 
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
@@ -54,9 +90,11 @@ private struct ArtistContentView: View {
     /// dictionary instead of the artist's whole (potentially large) era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist, vm: ArtistViewModel) {
+    init(artist: Artist, vm: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
         self.artist = artist
         self.vm = vm
+        self.lastUpdated = lastUpdated
+        self.onRefresh = onRefresh
         var eraArt: [String: String?] = [:]
         for era in artist.eras {
             let key = era.name.lowercased()
@@ -95,6 +133,16 @@ private struct ArtistContentView: View {
 
                 // Stats bar
                 ArtistStatsBarView(stats: vm.artistStats)
+
+                // Data-age chip — how fresh the shown data is (pull to refresh).
+                if let lastUpdated {
+                    Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 1)
+                        .accessibilityLabel("Data updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                }
 
                 // Filter toggles
                 FilterTogglesView(vm: vm)
@@ -151,6 +199,7 @@ private struct ArtistContentView: View {
                 }
             }
         }
+        .refreshable { await onRefresh() }
         .background(
             ZStack {
                 Color.lsBackground
