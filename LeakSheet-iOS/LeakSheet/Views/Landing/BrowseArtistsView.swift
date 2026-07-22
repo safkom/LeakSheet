@@ -31,11 +31,17 @@ struct BrowseArtistsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let error {
-                    ContentUnavailableView(
-                        "Failed to Load",
-                        systemImage: "wifi.exclamationmark",
-                        description: Text(error)
-                    )
+                    ContentUnavailableView {
+                        Label("Failed to Load", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        // Without this the sheet is stuck on the error forever:
+                        // .task doesn't re-run while presented and `artists` is
+                        // still empty. loadArtists() clears `error` and refetches.
+                        Button("Retry") { Task { await loadArtists() } }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else {
                     List {
                         ForEach(filtered) { artist in

@@ -43,12 +43,21 @@ enum StreamResolver {
         )?.1
     }
 
-    /// Google Drive single-file links only — folders and legacy open?id=
-    /// forms stay unresolved (the payload kind is unknowable client-side;
-    /// the backend proxy content-type-gates what we do resolve).
+    /// Google Drive single-file links. Matches the three forms the backend
+    /// resolves (`streaming._extract_gdrive_id`): `/file/d/{id}`, `/open?id=`,
+    /// and `/uc?id=`. Keeping this in sync means a Drive audio link classifies
+    /// and plays the same in-app as it does through the backend proxy — folders
+    /// (no file id) still stay unresolved.
     nonisolated private static func gdriveFileID(_ url: String) -> Substring? {
-        url.firstMatch(
-            of: #/^https?://drive\.google\.com/file/d/([A-Za-z0-9_-]+)(?:$|[?#/])/#
+        if let m = url.firstMatch(
+            of: #/^https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)(?:$|[?#/])/#
+                .ignoresCase()
+        ) {
+            return m.1
+        }
+        // open?id={id} / uc?id={id} — the id can sit alongside other params.
+        return url.firstMatch(
+            of: #/^https?://(?:www\.)?drive\.google\.com/(?:open|uc)\?(?:[^#]*&)?id=([A-Za-z0-9_-]+)/#
                 .ignoresCase()
         )?.1
     }

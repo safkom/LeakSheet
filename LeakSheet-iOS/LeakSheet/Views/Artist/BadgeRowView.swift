@@ -5,7 +5,10 @@ struct BadgeRowView: View {
     let version: SongVersion
 
     var body: some View {
-        HStack(spacing: 5) {
+        // FlowLayout (not HStack) so the quality + availability pills wrap to a
+        // second row at accessibility Dynamic Type instead of the trailing pill
+        // clipping off the edge.
+        FlowLayout(spacing: 5) {
             if let quality = version.quality, !quality.isEmpty {
                 let variant = qualityVariant(quality)
                 Text(quality)

@@ -55,6 +55,7 @@ final class FavouritesManager {
                 producers: nil,
                 collaboration: nil,
                 refs: nil,
+                creditedArtists: nil,
                 altTitles: nil,
                 notes: notes,
                 ogFilename: nil,
@@ -307,12 +308,37 @@ final class FavouritesManager {
         }
     }
 
+    private var saveTask: Task<Void, Never>?
+
+    /// Persist off the main actor and coalesce bursts of toggles into one write.
+    /// Previously this JSON-encoded the whole entries array (each embeds a full
+    /// version snapshot) and did a synchronous atomic file write on the main
+    /// actor on every heart tap — a per-tap hitch that scaled with library size.
     private func save() {
+        let snapshot = entries              // Sendable value snapshot
+        let file = Self.storageFile
+        let logger = Self.log
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            if Task.isCancelled { return }
+            await Self.persist(snapshot, to: file, logger: logger)
+        }
+    }
+
+    // @concurrent forces this off the caller's actor. Without it, under
+    // SWIFT_APPROACHABLE_CONCURRENCY (SE-0461) a `nonisolated async` function
+    // runs on the caller's actor — here the MainActor (save()'s Task) — so the
+    // encode + atomic write would still block the main thread.
+    @concurrent
+    private nonisolated static func persist(
+        _ entries: [FavouriteEntry], to file: URL, logger: Logger
+    ) async {
         do {
             let data = try JSONEncoder().encode(entries)
-            try data.write(to: Self.storageFile, options: .atomic)
+            try data.write(to: file, options: .atomic)
         } catch {
-            Self.log.error("Failed to save favourites: \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed to save favourites: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

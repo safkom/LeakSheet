@@ -15,6 +15,7 @@ struct SongRowView: View {
 
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool {
         guard let v = version, let current = player.currentTrack else { return false }
@@ -65,7 +66,9 @@ struct SongRowView: View {
                         }
                         Text("\(song.versions.count) versions")
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            // Info-bearing text: .secondary clears WCAG AA on
+                            // OLED black where .tertiary (~2.3:1) does not.
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -178,7 +181,11 @@ struct SongRowView: View {
                 Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
                     .font(.caption)
                     .foregroundStyle(Color.lsAccent)
-                    .symbolEffect(.variableColor.iterative, options: .repeating, isActive: player.isPlaying)
+                    // Repeating symbol effects are content animations that the
+                    // system does NOT auto-suppress under Reduce Motion — gate
+                    // it ourselves so the now-playing icon stays static.
+                    .symbolEffect(.variableColor.iterative, options: .repeating,
+                                  isActive: player.isPlaying && !reduceMotion)
             }
         } else if showVersionBadge {
             // In recents/search: show ONLY this version's own badge (no fallthrough to song-level)

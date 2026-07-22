@@ -12,12 +12,23 @@ import SwiftUI
 /// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
+    @State private var displayed: Artist?
     @State private var vm: ArtistViewModel?
+    @State private var lastUpdated: Date?
+    @Environment(RecentTrackersManager.self) private var recents
+
+    /// The artist currently shown — the pushed value until a pull-to-refresh
+    /// swaps in freshly-fetched data.
+    private var current: Artist { displayed ?? artist }
 
     var body: some View {
         Group {
             if let vm {
-                ArtistContentView(artist: artist, vm: vm)
+                ArtistContentView(
+                    artist: current, vm: vm,
+                    lastUpdated: lastUpdated,
+                    onRefresh: refresh
+                )
             } else {
                 // Sub-second placeholder while the stats/content pass runs
                 // off-main — pushing a huge tracker no longer hitches the
@@ -29,8 +40,31 @@ struct ArtistView: View {
         }
         .task(id: artist.slug) {
             if vm == nil {
+                displayed = artist
                 vm = await ArtistViewModel.make(artist: artist)
+                if let url = artist.sourceUrl {
+                    lastUpdated = await CacheService.shared.getCachedTracker(for: url)?.timestamp
+                }
             }
+        }
+    }
+
+    /// Force-refetch the tracker (bypassing the ETag/cache), rebuild the view
+    /// model, and stamp the data age. On failure the current data stays put.
+    private func refresh() async {
+        guard let url = current.sourceUrl, !url.isEmpty else { return }
+        do {
+            let result = try await APIClient.shared.parseSheet(url: url, forceRefresh: true)
+            if let etag = result.etag {
+                await CacheService.shared.cacheTracker(url: url, data: result.rawData, etag: etag)
+            }
+            recents.saveTracker(artist: result.artist)
+            let refreshedVM = await ArtistViewModel.make(artist: result.artist)
+            displayed = result.artist
+            vm = refreshedVM
+            lastUpdated = .now
+        } catch {
+            // Keep showing the current data; the refresh control just ends.
         }
     }
 }
@@ -38,6 +72,8 @@ struct ArtistView: View {
 private struct ArtistContentView: View {
     let artist: Artist
     @Bindable var vm: ArtistViewModel
+    let lastUpdated: Date?
+    let onRefresh: () async -> Void
 
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
@@ -54,9 +90,11 @@ private struct ArtistContentView: View {
     /// dictionary instead of the artist's whole (potentially large) era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist, vm: ArtistViewModel) {
+    init(artist: Artist, vm: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
         self.artist = artist
         self.vm = vm
+        self.lastUpdated = lastUpdated
+        self.onRefresh = onRefresh
         var eraArt: [String: String?] = [:]
         for era in artist.eras {
             let key = era.name.lowercased()
@@ -95,6 +133,16 @@ private struct ArtistContentView: View {
 
                 // Stats bar
                 ArtistStatsBarView(stats: vm.artistStats)
+
+                // Data-age chip — how fresh the shown data is (pull to refresh).
+                if let lastUpdated {
+                    Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 1)
+                        .accessibilityLabel("Data updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                }
 
                 // Filter toggles
                 FilterTogglesView(vm: vm)
@@ -151,6 +199,7 @@ private struct ArtistContentView: View {
                 }
             }
         }
+        .refreshable { await onRefresh() }
         .background(
             ZStack {
                 Color.lsBackground
@@ -188,7 +237,7 @@ private struct ArtistContentView: View {
                         showQueue = true
                     } label: {
                         Image(systemName: "list.bullet")
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                             .accessibilityHidden(true)
                     }
                     .glassEffect(.regular.interactive(), in: .circle)
@@ -352,6 +401,15 @@ private struct SearchResultsListView: View {
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
+                    // Swipe-to-play must continue down the list like tap does,
+                    // not stop after one track (missing onPlay fell back to a
+                    // single-track play).
+                    onPlay: { _ in
+                        playWithinList(
+                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
+                            tappedId: result.id
+                        )
+                    },
                     onShowDescription: onShowDescription
                 )
                 .contentShape(Rectangle())
@@ -408,36 +466,58 @@ private struct ErasListView: View {
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var hasActiveFilters: Bool {
+        vm.bestOf || vm.worstOf || vm.noSnippets
+    }
+
     var body: some View {
-        ForEach(vm.eraRows) { row in
-            EraRowView(
-                row: row,
-                displayColors: vm.eraDisplay[row.eraName],
-                artistName: artistName,
-                artistSlug: artistSlug,
-                sourceUrl: sourceUrl,
-                onCardTap: { eraName in
-                    withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                        vm.toggleEra(eraName)
-                    }
-                },
-                onColorExtracted: { eraName, color in
-                    vm.setEraColor(eraName: eraName, dominant: color)
-                    onColorExtracted(color)
-                },
-                onSongTap: handleSongTap,
-                onPlayVersion: playWithEraContext,
-                onShowDescription: onShowDescription
-            )
+        if vm.eraRows.isEmpty {
+            // Every other content branch (search/recents/misc) shows an empty
+            // state; without this the eras branch rendered a blank void when a
+            // filter (e.g. Best Of) removed every era.
+            ContentUnavailableView {
+                Label(
+                    hasActiveFilters ? "No Matches" : "No Songs",
+                    systemImage: hasActiveFilters ? "line.3.horizontal.decrease.circle" : "music.note.list"
+                )
+            } description: {
+                Text(hasActiveFilters
+                     ? "No songs match the current filters."
+                     : "This tracker has no songs yet.")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 48)
+        } else {
+            ForEach(vm.eraRows) { row in
+                EraRowView(
+                    row: row,
+                    displayColors: vm.eraDisplay[row.eraName],
+                    artistName: artistName,
+                    artistSlug: artistSlug,
+                    sourceUrl: sourceUrl,
+                    onCardTap: { eraName in
+                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
+                            vm.toggleEra(eraName)
+                        }
+                    },
+                    onColorExtracted: { eraName, color in
+                        vm.setEraColor(eraName: eraName, dominant: color)
+                        onColorExtracted(color)
+                    },
+                    onSongTap: handleSongTap,
+                    onPlayVersion: playWithEraContext,
+                    onShowDescription: onShowDescription
+                )
+            }
         }
     }
 
     /// Multi-version songs expand/collapse; single-version songs play (or
     /// show the description when not streamable).
-    private func handleSongTap(_ song: Song, eraName: String, eraArt: String?) {
+    private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.versions.count > 1 {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                vm.toggleSongExpansion(eraName: eraName, baseName: song.baseName)
+                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
         } else if let v = song.versions.first {
             if v.isStreamable {
@@ -705,6 +785,12 @@ private struct RecentsListView: View {
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
+                    // Swipe-to-play continues down the recents list like tap.
+                    onPlay: { _ in
+                        if let (items, idx) = vm.recentPlayback(for: result.id) {
+                            player.playInList(items, startAt: idx)
+                        }
+                    },
                     onShowDescription: onShowDescription
                 )
                 .contentShape(Rectangle())
@@ -749,7 +835,7 @@ private struct EraRowView: View {
     let sourceUrl: String?
     let onCardTap: (String) -> Void
     let onColorExtracted: (String, Color) -> Void
-    let onSongTap: (Song, String, String?) -> Void
+    let onSongTap: (Song, String, String?, Int) -> Void
     let onPlayVersion: (SongVersion, String) -> Void
     let onShowDescription: (DescriptionSheet.Payload) -> Void
 
@@ -803,7 +889,7 @@ private struct EraRowView: View {
                     .padding(.top, group == nil ? 14 : 6)
                 }
 
-            case .song(let song, let eraName, let eraArt, _, _, let isLast):
+            case .song(let song, let eraName, let eraArt, _, _, let isLast, let ordinal):
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
@@ -819,11 +905,11 @@ private struct EraRowView: View {
                     .contentShape(Rectangle())
                     .accessibilityAddTraits(.isButton)
                     .onTapGesture {
-                        onSongTap(song, eraName, eraArt)
+                        onSongTap(song, eraName, eraArt, ordinal)
                     }
                 }
 
-            case .version(let version, let index, let song, let eraName, let eraArt, let isLast):
+            case .version(let version, let index, let song, let eraName, let eraArt, let isLast, _):
                 panel(isLast: isLast) {
                     VersionRowView(
                         version: version,
@@ -869,8 +955,8 @@ private extension EraRow {
         case .divider(let era), .eraGap(let era): return era
         case .groupHeader(_, let era): return era
         case .sectionHeader(_, let era, _): return era
-        case .song(_, let era, _, _, _, _): return era
-        case .version(_, _, _, let era, _, _): return era
+        case .song(_, let era, _, _, _, _, _): return era
+        case .version(_, _, _, let era, _, _, _): return era
         }
     }
 }

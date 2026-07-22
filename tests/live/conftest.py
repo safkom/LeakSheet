@@ -1,21 +1,10 @@
 """Live-layer fixtures.
 
-pytest-asyncio runs every coroutine test on a FRESH event loop, but the
-production fetch/stream stacks cache module-global ``httpx.AsyncClient``s
-bound to whichever loop first created them (fine under uvicorn's single
-loop). Without a reset, the second live test onward dies with
-"RuntimeError: Event loop is closed" before any network I/O happens.
+The shared-httpx-client reset that live tests need (module-global
+``httpx.AsyncClient``s are bound to the loop that created them, and
+pytest-asyncio uses a fresh loop per test) now lives in the top-level
+``tests/conftest.py`` (``_fresh_shared_clients``, autouse suite-wide), so there
+is nothing live-specific to add here.
 """
 
 from __future__ import annotations
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _fresh_shared_clients(monkeypatch):
-    import src.fetcher as fetcher
-    import src.streaming as streaming
-
-    monkeypatch.setattr(fetcher, "_sheets_client", None)
-    monkeypatch.setattr(streaming, "_shared_client", None)

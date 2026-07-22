@@ -6,10 +6,15 @@ server-side; a compromised/poisoned API could point it at an internal host
 requires https and rejects any host that resolves to a non-public address.
 """
 
+import httpx
 import pytest
 
 from src import streaming
-from src.streaming import _assert_public_https_url
+from src.streaming import (
+    PublicOnlyAsyncTransport,
+    _assert_public_https_url,
+    assert_public_redirect_target,
+)
 
 
 def _fake_getaddrinfo(ip: str):
@@ -46,3 +51,53 @@ def test_allows_public_https(monkeypatch):
     monkeypatch.setattr(streaming.socket, "getaddrinfo", _fake_getaddrinfo("8.8.8.8"))
     # Public IP, https — must not raise.
     _assert_public_https_url("https://cdn.example/x.mp3", source="test")
+
+
+# ---------------------------------------------------------------------------
+# Redirect re-validation: follow_redirects=True lets a guard-passing public
+# origin 30x to an internal host. The final resp.url must be re-checked before
+# any body is relayed. (Regression: this path was previously unguarded on the
+# general stream/image-proxy paths — only the gdrive path re-validated.)
+# ---------------------------------------------------------------------------
+
+async def test_redirect_to_private_host_is_rejected_and_closed(monkeypatch):
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "cdn.example":
+            return httpx.Response(302, headers={"Location": "https://metadata.internal/x"})
+        return httpx.Response(200, content=b"secret-internal-bytes")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        resp = await client.send(
+            client.build_request("GET", "https://cdn.example/x"), stream=True
+        )
+        assert resp.url.host == "metadata.internal"  # redirect was followed
+        with pytest.raises(ValueError, match="non-public"):
+            await assert_public_redirect_target(resp, source="test")
+        assert resp.is_closed  # body never relayed
+
+
+async def test_redirect_to_public_host_passes(monkeypatch):
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", _fake_getaddrinfo("8.8.8.8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"data")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        resp = await client.send(
+            client.build_request("GET", "https://cdn.example/x"), stream=True
+        )
+        await assert_public_redirect_target(resp, source="test")  # must not raise
+        await resp.aclose()
+
+
+async def test_transport_blocks_literal_private_ip():
+    # The connect-time transport guard rejects a literal private/loopback host
+    # before any socket is opened (defence against DNS-rebind / direct SSRF).
+    transport = PublicOnlyAsyncTransport()
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(httpx.ConnectError, match="non-public"):
+            await client.get("http://127.0.0.1:9/x")

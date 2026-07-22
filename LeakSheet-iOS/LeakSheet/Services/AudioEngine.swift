@@ -823,8 +823,10 @@ final class AudioEngine {
     // MARK: - Volume Persistence
 
     private static func loadVolume() -> Float {
-        let v = UserDefaults.standard.float(forKey: "leaksheet_volume")
-        return v > 0 ? min(1, v) : 1.0
+        // Distinguish "never set" from "muted to 0" — UserDefaults.float returns
+        // 0 for both, which previously reset a fully-muted user back to 1.0.
+        guard UserDefaults.standard.object(forKey: "leaksheet_volume") != nil else { return 1.0 }
+        return min(1, max(0, UserDefaults.standard.float(forKey: "leaksheet_volume")))
     }
 
     private static func saveVolume(_ v: Float) {
@@ -836,10 +838,13 @@ final class AudioEngine {
     static func parseDuration(_ str: String?) -> TimeInterval {
         guard let str, !str.isEmpty else { return 0 }
         let parts = str.split(separator: ":")
-        guard parts.count == 2,
-              let mins = Double(parts[0]),
-              let secs = Double(parts[1]) else { return 0 }
-        return mins * 60 + secs
+        let nums = parts.compactMap { Double($0) }
+        guard nums.count == parts.count else { return 0 }
+        switch nums.count {
+        case 2: return nums[0] * 60 + nums[1]              // M:SS
+        case 3: return nums[0] * 3600 + nums[1] * 60 + nums[2]  // H:MM:SS
+        default: return 0
+        }
     }
 }
 

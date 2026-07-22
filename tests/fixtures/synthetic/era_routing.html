@@ -1,0 +1,37 @@
+<!--
+  Synthetic era-routing regression fixture — invented artist, real Google-Sheets
+  export grammar. DMCA-safe: no real tracker content.
+
+  Exercises the era-routing code the 2026-07-20 review fixed (the most
+  regression-prone parser path — the offline gate otherwise only sees the small
+  main_tab.html which never hits these):
+
+    * Sibling eras sharing a version-tag-stripped key ("Grail Freestyle [V2]" /
+      "[V3]") — bare rows must stay with their own header, not get stolen by the
+      sibling that registered its key first.
+    * Digit-leading era name ("38 Special Sessions") — must be accepted as an era
+      header, not rejected as a stats-like / numeric line.
+    * Duplicate "???" placeholder songs in one era — must stay DISTINCT Song
+      objects, never grouped.
+
+  Placement is pinned in tests/parse/test_synthetic_parse.py::TestEraRoutingFixture.
+-->
+<html><head><title>RoutingTest Tracker - Google Drive</title>
+<style>.s0 { background-color:#ffffff; }</style></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Length</td><td>Leak Date</td><td>Available</td><td>Quality</td><td>Link(s)</td></tr>
+
+<tr><td>1 Full</td><td>38 Special Sessions</td><td>(2015)</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>38 Special Sessions</td><td>Opener</td><td></td><td>3:00</td><td>2015-01-01</td><td>Full</td><td>High Quality</td><td><a href="https://pillows.su/f/open1">listen</a></td></tr>
+
+<tr><td>3 Full</td><td>Grail Freestyle [V2]</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>Grail Freestyle [V2]</td><td>Alpha</td><td></td><td>2:30</td><td>2016-02-02</td><td>Full</td><td>CD Quality</td><td><a href="https://pillows.su/f/alpha">a</a></td></tr>
+<tr><td>Grail Freestyle [V2]</td><td>???</td><td></td><td>1:10</td><td></td><td>Snippet</td><td>Low Quality</td><td></td></tr>
+<tr><td>Grail Freestyle [V2]</td><td>???</td><td></td><td>1:20</td><td></td><td>Snippet</td><td>Low Quality</td><td></td></tr>
+
+<tr><td>1 Snippet</td><td>Grail Freestyle [V3]</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>Grail Freestyle [V3]</td><td>Beta</td><td></td><td>2:45</td><td>2017-03-03</td><td>Snippet</td><td>Low Quality</td><td><a href="https://pillows.su/f/beta">b</a></td></tr>
+
+<tr><td>&#128279; 3 Total Links</td><td></td><td></td><td>4 Total Full</td><td></td><td></td><td></td><td></td></tr>
+</table>
+</body></html>

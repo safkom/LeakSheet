@@ -57,6 +57,8 @@ struct TrackerInputView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
+                        .frame(width: 44, height: 44)   // 44pt HIG hit target
+                        .contentShape(Rectangle())
                 }
                 .disabled(loading)
                 .accessibilityLabel("Clear URL")
