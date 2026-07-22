@@ -30,6 +30,19 @@ struct SongRowView: View {
         song.versions.count > 1
     }
 
+    /// The first alternate title that differs from the base name — leaks are
+    /// often known by several names, so a subtle "aka" hint aids recognition.
+    private var akaTitle: String? {
+        for v in song.versions {
+            if let alt = v.altTitles?.first(where: {
+                !$0.isEmpty && $0.caseInsensitiveCompare(song.baseName) != .orderedSame
+            }) {
+                return alt
+            }
+        }
+        return nil
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             // Play indicator or badge
@@ -48,6 +61,15 @@ struct SongRowView: View {
                         Text("[\(tag)]")
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(.secondary)
+                    }
+                    if let aka = akaTitle {
+                        Text("aka \(aka)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            // Yield width to the title so the hint truncates first.
+                            .layoutPriority(-1)
                     }
                 }
 

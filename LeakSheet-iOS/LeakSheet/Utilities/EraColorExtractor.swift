@@ -14,6 +14,9 @@ actor EraColorExtractor {
     private static let cacheKey = "leaksheet_era_rgb_v3"
 
     private init() {
+        // One-time cleanup of the superseded v2 cache key (v3 re-keyed the
+        // cache from era name to art URL); harmless if already absent.
+        UserDefaults.standard.removeObject(forKey: "leaksheet_era_rgb_v2")
         cache = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: [Double]] ?? [:]
     }
 

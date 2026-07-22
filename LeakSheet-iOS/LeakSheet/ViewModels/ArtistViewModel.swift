@@ -10,6 +10,9 @@ nonisolated struct FilterState: Equatable, Sendable {
     var query: String = ""
     var bestOf = false
     var worstOf = false
+    /// Combined "grails" filter — matches the grail AND wanted badges (the
+    /// most sought-after tracks), surfaced as a single chip.
+    var grails = false
     var recents = false
     var noSnippets = false
     var misc = false
@@ -124,8 +127,15 @@ final class ArtistViewModel {
 
     var bestOf: Bool = false
     var worstOf: Bool = false
+    /// Combined "grails" filter — grail + wanted badges, one chip.
+    var grails: Bool = false
     var recents: Bool = false
     var noSnippets: Bool = false
+
+    /// The badge "highlight" filters — each expands every matching era and
+    /// they are mutually exclusive (only one active at a time), so the AND
+    /// logic in the filter pipeline never intersects two badge sets.
+    var isBadgeFilterActive: Bool { bestOf || worstOf || grails }
     /// Misc mode — a strict switch, not a peer filter: when ON, only entries
     /// from the tracker's Misc / Music Videos tabs are shown, never mixed
     /// with era songs; the other chips (and search) filter within them.
@@ -355,6 +365,7 @@ final class ArtistViewModel {
             query: debouncedQuery.lowercased(),
             bestOf: bestOf,
             worstOf: worstOf,
+            grails: grails,
             recents: recents,
             noSnippets: noSnippets,
             misc: misc,
@@ -423,13 +434,13 @@ final class ArtistViewModel {
     // MARK: - Era expand/collapse
 
     func toggleEra(_ name: String) {
-        if bestOf || worstOf { return }
+        if isBadgeFilterActive { return }
         expandedEra = expandedEra == name ? nil : name
         rebuildEraRows()
     }
 
     func isEraExpanded(_ name: String) -> Bool {
-        if bestOf || worstOf { return true }
+        if isBadgeFilterActive { return true }
         return expandedEra == name
     }
 
@@ -456,27 +467,36 @@ final class ArtistViewModel {
 
     func toggleBestOf() {
         bestOf.toggle()
-        if bestOf { worstOf = false }  // contradictory highlight filters
-        if !bestOf && !recents { expandedEra = nil }
-        // No synchronous rebuildEraRows() here: isEraExpanded treats bestOf
-        // as "every era expanded", so rebuilding against the still-stale
+        // The badge filters are mutually exclusive — enabling one clears the
+        // others so the AND pipeline never intersects two badge sets.
+        if bestOf { worstOf = false; grails = false }
+        if !isBadgeFilterActive && !recents { expandedEra = nil }
+        // No synchronous rebuildEraRows() here: isEraExpanded treats a badge
+        // filter as "every era expanded", so rebuilding against the still-stale
         // (unfiltered) `content` would briefly render every song in every
         // era. applyFilters()'s completion rebuilds once `content` actually
-        // matches the new bestOf state.
+        // matches the new state.
         applyFilters()
     }
 
     func toggleWorstOf() {
         worstOf.toggle()
-        if worstOf { bestOf = false }
-        if !worstOf && !recents { expandedEra = nil }
+        if worstOf { bestOf = false; grails = false }
+        if !isBadgeFilterActive && !recents { expandedEra = nil }
+        applyFilters()
+    }
+
+    func toggleGrails() {
+        grails.toggle()
+        if grails { bestOf = false; worstOf = false }
+        if !isBadgeFilterActive && !recents { expandedEra = nil }
         applyFilters()
     }
 
     func toggleRecents() {
         recents.toggle()
         if !recents {
-            if !bestOf { expandedEra = nil }
+            if !isBadgeFilterActive { expandedEra = nil }
             rebuildEraRows()
         }
         applyFilters()
@@ -490,7 +510,7 @@ final class ArtistViewModel {
     func toggleMisc() {
         misc.toggle()
         if misc { selectedTabKey = nil }
-        if !misc && !bestOf && !recents {
+        if !misc && !isBadgeFilterActive && !recents {
             expandedEra = nil
             rebuildEraRows()
         }
@@ -506,9 +526,10 @@ final class ArtistViewModel {
             misc = false
             bestOf = false
             worstOf = false
+            grails = false
             recents = false
         }
-        if selectedTabKey == nil && !bestOf && !recents {
+        if selectedTabKey == nil && !isBadgeFilterActive && !recents {
             expandedEra = nil
             rebuildEraRows()
         }
@@ -665,6 +686,12 @@ final class ArtistViewModel {
                 }
                 guard hasWorst else { continue }
             }
+            if state.grails {
+                let hasGrail = allSongs.contains { song in
+                    song.versions.contains { isGrailOrWantedVersion($0) }
+                }
+                guard hasGrail else { continue }
+            }
 
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
@@ -688,11 +715,12 @@ final class ArtistViewModel {
     }
 
     private nonisolated static func filterSongs(_ songs: [Song], state: FilterState) -> [Song] {
-        guard state.bestOf || state.worstOf || state.noSnippets else { return songs }
+        guard state.bestOf || state.worstOf || state.grails || state.noSnippets else { return songs }
         return songs.compactMap { song in
             song.withFilteredVersions { version in
                 if state.bestOf && !isBestOfVersion(version) { return false }
                 if state.worstOf && !isWorstOfVersion(version) { return false }
+                if state.grails && !isGrailOrWantedVersion(version) { return false }
                 if state.noSnippets && shouldFilterForNoSnippets(version) { return false }
                 return true
             }
@@ -706,10 +734,16 @@ final class ArtistViewModel {
         let version: SongVersion
         let era: Era
         let score: Int
+        /// Position of the song within its era's flattened list. Disambiguates
+        /// same-`baseName` songs (leak trackers emit several distinct "???"
+        /// placeholders per era with an identical single version) whose ids
+        /// would otherwise collide and be silently dropped by ForEach — the
+        /// same fix EraRow.id applies with its ordinal.
+        let songOrdinal: Int
 
         // Stable id derived from content so SwiftUI's ForEach can diff results
         // across queries instead of rebuilding every row on each keystroke.
-        var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
+        var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
     private nonisolated static func computeSearchResults(
@@ -732,8 +766,9 @@ final class ArtistViewModel {
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
                     if state.worstOf && !isWorstOfVersion(version) { continue }
+                    if state.grails && !isGrailOrWantedVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
-                    results.append(SearchResult(song: song, version: version, era: era, score: score))
+                    results.append(SearchResult(song: song, version: version, era: era, score: score, songOrdinal: songIdx))
                 }
             }
         }
@@ -748,19 +783,23 @@ final class ArtistViewModel {
         let version: SongVersion
         let era: Era
         let timestamp: TimeInterval
+        /// Position of the song within its era's flattened list — disambiguates
+        /// same-`baseName` songs (e.g. several "???" placeholders per era) whose
+        /// ids would otherwise collide and be dropped by ForEach. See SearchResult.
+        let songOrdinal: Int
 
         // Stable content-derived id so SwiftUI's ForEach can diff results
         // across filter/query changes instead of rebuilding every row each
         // keystroke (a fresh UUID() on every rebuild caused row flicker
         // and lost expand state).
-        var id: String { "\(era.name)::\(song.baseName)::\(version.id)" }
+        var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
     private nonisolated static func computeRecentResults(artist: Artist, state: FilterState) -> [RecentResult] {
         var results: [RecentResult] = []
         for era in artist.eras {
             if Task.isCancelled { return [] }
-            for song in era.allSongs {
+            for (songOrdinal, song) in era.allSongs.enumerated() {
                 if state.bestOf {
                     let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
                     if !hasBestVersion { continue }
@@ -769,15 +808,20 @@ final class ArtistViewModel {
                     let hasWorstVersion = song.versions.contains { isWorstOfVersion($0) }
                     if !hasWorstVersion { continue }
                 }
+                if state.grails {
+                    let hasGrail = song.versions.contains { isGrailOrWantedVersion($0) }
+                    if !hasGrail { continue }
+                }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
                     if state.worstOf && !isWorstOfVersion(version) { continue }
+                    if state.grails && !isGrailOrWantedVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
                     let dateStr = version.leakDate ?? version.fileDate
                     guard let dateStr, !dateStr.isEmpty else { continue }
                     results.append(RecentResult(
                         song: song, version: version, era: era,
-                        timestamp: parseLeakDate(dateStr)
+                        timestamp: parseLeakDate(dateStr), songOrdinal: songOrdinal
                     ))
                 }
             }
@@ -888,6 +932,13 @@ final class ArtistViewModel {
 
     private nonisolated static func isWorstOfVersion(_ v: SongVersion) -> Bool {
         v.badge.flatMap { Badge(rawValue: $0) } == .worst
+    }
+
+    /// The combined "grails" filter — the grail and wanted badges together
+    /// (the most sought-after tracks), surfaced as one chip.
+    private nonisolated static func isGrailOrWantedVersion(_ v: SongVersion) -> Bool {
+        guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
+        return badge == .grail || badge == .wanted
     }
 
     /// Prebuilt lowercased search fields for one song (see Precomputed.searchIndex).

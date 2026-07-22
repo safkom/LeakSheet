@@ -60,21 +60,23 @@ struct FavouritesView: View {
                                                     // Inline quality/availability badges
                                                     HStack(spacing: 4) {
                                                         if let q = entry.quality, !q.isEmpty {
+                                                            let variant = qualityVariant(q)
                                                             Text(q)
                                                                 .font(.caption2.weight(.medium))
                                                                 .padding(.horizontal, 4)
                                                                 .padding(.vertical, 1)
-                                                                .background(Color.lsAccent.opacity(0.12))
-                                                                .foregroundStyle(Color.lsAccent)
+                                                                .background(variant.background)
+                                                                .foregroundStyle(variant.foreground)
                                                                 .clipShape(Capsule())
                                                         }
                                                         if let a = entry.availableLength, !a.isEmpty {
+                                                            let variant = availabilityVariant(a)
                                                             Text(a)
                                                                 .font(.caption2.weight(.medium))
                                                                 .padding(.horizontal, 4)
                                                                 .padding(.vertical, 1)
-                                                                .background(Color.secondary.opacity(0.12))
-                                                                .foregroundStyle(.secondary)
+                                                                .background(variant.background)
+                                                                .foregroundStyle(variant.foreground)
                                                                 .clipShape(Capsule())
                                                         }
                                                     }
@@ -125,7 +127,7 @@ struct FavouritesView: View {
                         Button("Clear All") {
                             favourites.clearAll()
                         }
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.lsError)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

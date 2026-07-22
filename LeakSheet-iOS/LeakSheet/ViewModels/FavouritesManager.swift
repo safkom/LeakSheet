@@ -67,8 +67,6 @@ final class FavouritesManager {
                 availableLength: availableLength,
                 quality: quality,
                 links: links,
-                qualityColor: nil,
-                availableLengthColor: nil,
                 dateOfRecording: nil,
                 type: nil,
                 sources: nil,

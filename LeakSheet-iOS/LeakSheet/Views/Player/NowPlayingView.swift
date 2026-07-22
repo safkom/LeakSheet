@@ -49,7 +49,7 @@ struct NowPlayingView: View {
                     if !player.error.isEmpty {
                         Text(player.error)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.lsError)
                     }
                 }
                 .padding(.horizontal, 24)

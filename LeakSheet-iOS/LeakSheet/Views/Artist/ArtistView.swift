@@ -77,9 +77,17 @@ private struct ArtistContentView: View {
 
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showQueue = false
+    @State private var showStats = false
+    @State private var showTimeline = false
+    @State private var showLegend = false
     @State private var activeEraColor: Color?
     @State private var safariItem: SafariItem?
     @State private var embedItem: EmbedItem?
+
+    /// True when at least one era carries dated `timeline` events.
+    private var hasTimeline: Bool {
+        artist.eras.contains { !($0.timeline ?? []).isEmpty }
+    }
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -131,8 +139,11 @@ private struct ArtistContentView: View {
                     .padding(.vertical, 2)
                 }
 
-                // Stats bar
-                ArtistStatsBarView(stats: vm.artistStats)
+                // Stats bar — tap for the full TrackerStats breakdown.
+                ArtistStatsBarView(
+                    stats: vm.artistStats,
+                    onTap: artist.trackerStats != nil ? { showStats = true } : nil
+                )
 
                 // Data-age chip — how fresh the shown data is (pull to refresh).
                 if let lastUpdated {
@@ -233,15 +244,33 @@ private struct ArtistContentView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 GlassEffectContainer {
-                    Button {
-                        showQueue = true
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .frame(width: 44, height: 44)
-                            .accessibilityHidden(true)
+                    HStack(spacing: 8) {
+                        Menu {
+                            if artist.trackerStats != nil {
+                                Button { showStats = true } label: { Label("Stats", systemImage: "chart.bar.xaxis") }
+                            }
+                            if hasTimeline {
+                                Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
+                            }
+                            Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .frame(width: 44, height: 44)
+                                .accessibilityHidden(true)
+                        }
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .accessibilityLabel("More")
+
+                        Button {
+                            showQueue = true
+                        } label: {
+                            Image(systemName: "list.bullet")
+                                .frame(width: 44, height: 44)
+                                .accessibilityHidden(true)
+                        }
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .accessibilityLabel("Queue")
                     }
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel("Queue")
                 }
             }
         }
@@ -266,6 +295,17 @@ private struct ArtistContentView: View {
         }
         .sheet(isPresented: $showQueue) {
             QueueSheet()
+        }
+        .sheet(isPresented: $showStats) {
+            if let trackerStats = artist.trackerStats {
+                TrackerStatsSheet(stats: trackerStats)
+            }
+        }
+        .sheet(isPresented: $showTimeline) {
+            TrackerTimelineSheet(artist: artist)
+        }
+        .sheet(isPresented: $showLegend) {
+            BadgeLegendSheet()
         }
         .sheet(item: $safariItem) { item in
             SafariView(url: item.url)
@@ -331,6 +371,9 @@ private struct FilterTogglesView: View {
                     }
                     FilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tintColor: .filterBestOf) {
                         vm.toggleWorstOf()
+                    }
+                    FilterChip(label: "Grails", icon: "trophy.fill", isActive: vm.grails, tintColor: .filterGrail) {
+                        vm.toggleGrails()
                     }
                     FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
                         vm.toggleRecents()
@@ -909,7 +952,7 @@ private struct EraRowView: View {
                     }
                 }
 
-            case .version(let version, let index, let song, let eraName, let eraArt, let isLast, _):
+            case .version(let version, let index, _, let eraName, let eraArt, let isLast, _):
                 panel(isLast: isLast) {
                     VersionRowView(
                         version: version,

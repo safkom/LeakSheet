@@ -71,12 +71,16 @@ struct MiniPlayerBar: View {
 
                     // Transport controls
                     HStack(spacing: 20) {
+                        // Transport buttons carry a 44x44 hit target (HIG minimum);
+                        // the glyphs render smaller but the whole frame is tappable.
                         Button {
                             player.playPrevious()
                         } label: {
                             Image(systemName: "backward.fill")
                                 .font(.body)
                                 .foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Previous track")
@@ -84,7 +88,7 @@ struct MiniPlayerBar: View {
                         if player.loading {
                             ProgressView()
                                 .controlSize(.regular)
-                                .frame(width: 38, height: 38)
+                                .frame(width: 44, height: 44)
                         } else {
                             Button {
                                 player.togglePlay()
@@ -92,6 +96,8 @@ struct MiniPlayerBar: View {
                                 Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                     .font(.system(size: 38))
                                     .foregroundStyle(Color.lsAccent)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
@@ -103,6 +109,8 @@ struct MiniPlayerBar: View {
                             Image(systemName: "forward.fill")
                                 .font(.body)
                                 .foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Next track")

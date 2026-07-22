@@ -561,7 +561,11 @@ final class AudioEngine {
             }
         }
         if bitrateBps == nil {
-            let indicated = item.accessLog()?.events.last?.indicatedBitrate ?? -1
+            // iOS 27 deprecated the synchronous accessLog() and replaced it with
+            // fetchAccessLogWithCompletionHandler:, bridged into Swift as an async
+            // getter of the same name — so `await item.accessLog` is the modern form.
+            let log = await item.accessLog
+            let indicated = log?.events.last?.indicatedBitrate ?? -1
             bitrateBps = indicated > 0 ? indicated : nil
         }
 

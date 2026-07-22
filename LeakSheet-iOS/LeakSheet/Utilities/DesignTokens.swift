@@ -45,6 +45,8 @@ extension Color {
     static let badgeBeatOnly = Color(hue: 275/360, saturation: 0.50, brightness: 0.96)
     static let badgeStem = Color(hue: 270/360, saturation: 0.50, brightness: 0.96)
     static let badgeUnavailable = Color(hue: 0/360, saturation: 0.0, brightness: 0.88)
+    static let badgeRumored = Color(hue: 40/360, saturation: 0.45, brightness: 0.86)      // tentative amber
+    static let badgeConflicting = Color(hue: 15/360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
     // MARK: - Hex Initializer
 
@@ -63,6 +65,7 @@ extension Color {
 enum BadgeVariant: String {
     case og, lossless, hq, cd, lq, rec, beatonly, na
     case ogfile, full, tagged, stem, partial, snippet, confirmed, unavailable
+    case rumored, conflicting
 
     var color: Color {
         switch self {
@@ -82,6 +85,8 @@ enum BadgeVariant: String {
         case .snippet: .badgeSnippet
         case .confirmed: .badgeConfirmed
         case .unavailable: .badgeUnavailable
+        case .rumored: .badgeRumored
+        case .conflicting: .badgeConflicting
         }
     }
 
@@ -115,6 +120,8 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
     if a.contains("beat") { return .beatonly }
     if a.contains("partial") || a.contains("cut") { return .partial }
     if a.contains("snippet") { return .snippet }
+    if a.contains("rumored") { return .rumored }
+    if a.contains("conflicting") { return .conflicting }
     if a.contains("confirmed") { return .confirmed }
     if a.contains("unavailable") { return .unavailable }
     return .na
@@ -190,6 +197,7 @@ extension Color {
     // MARK: - Filter-specific accent colors
 
     static let filterBestOf = Color(hue: 45/360, saturation: 0.85, brightness: 0.90)
+    static let filterGrail = Color(hue: 43/360, saturation: 0.92, brightness: 0.96)   // trophy gold (grails + wanted)
     static let filterRecent = Color(hue: 140/360, saturation: 0.70, brightness: 0.80)
     static let filterNoSnippets = Color(hue: 280/360, saturation: 0.60, brightness: 0.85)
     static let filterMisc = Color(hue: 200/360, saturation: 0.65, brightness: 0.85)

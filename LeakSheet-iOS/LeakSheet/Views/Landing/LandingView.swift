@@ -60,7 +60,7 @@ struct LandingView: View {
                 if let error {
                     Text(error)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.lsError)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -157,15 +157,33 @@ struct LandingView: View {
                         withAnimation { self.error = "Failed to load tracker" }
                     }
                 }
-            case .httpError(_, let msg):
-                withAnimation { error = msg }
+            case .httpError(let status, let msg):
+                withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
             case .decodingError:
                 withAnimation { error = "Failed to parse tracker data" }
             case .invalidURL:
                 withAnimation { error = "Invalid URL" }
             }
+        } catch let urlError as URLError where urlError.code == .timedOut {
+            withAnimation { self.error = "This tracker is taking a while to load. Please try again." }
         } catch {
             withAnimation { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Maps a backend HTTP failure to a plain, actionable message. Big trackers
+    /// (e.g. Ye) can exceed the gateway timeout on a cold parse and return 5xx —
+    /// a raw "HTTP 504" means nothing to a user, so say what to do instead.
+    private static func friendlyLoadError(status: Int, fallback: String) -> String {
+        switch status {
+        case 502, 503, 504:
+            return "This tracker is large and the server timed out. Please try again."
+        case 500:
+            return "The server couldn't parse this tracker. Please try again."
+        case 404:
+            return "Tracker not found. Check the link and try again."
+        default:
+            return fallback
         }
     }
 }
