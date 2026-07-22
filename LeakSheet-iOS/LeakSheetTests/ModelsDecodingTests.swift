@@ -25,6 +25,23 @@ struct ModelsDecodingTests {
         #expect(song.songKey == nil)
     }
 
+    @Test func `song version decodes credited_artists`() throws {
+        // The backend routes a dedicated Artist column into credited_artists
+        // (distinct from featuring); verify the CodingKey maps end-to-end.
+        let song = try decodeSong(#"""
+        {"base_name": "Collab Track", "versions": [
+            {"name": "Collab Track", "credited_artists": "Some Performer", "featuring": "A Guest"}
+        ]}
+        """#)
+        #expect(song.versions.first?.creditedArtists == "Some Performer")
+        #expect(song.versions.first?.featuring == "A Guest")
+    }
+
+    @Test func `song version without credited_artists decodes`() throws {
+        let song = try decodeSong(#"{"base_name": "T", "versions": [{"name": "T"}]}"#)
+        #expect(song.versions.first?.creditedArtists == nil)
+    }
+
     @Test func `artist decodes tabs`() throws {
         let artist = try decodeArtist("""
         {"name": "Test", "slug": "test", "eras": [],

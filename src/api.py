@@ -363,15 +363,6 @@ app = FastAPI(
 # level 9 spent ~0.5s gzipping a 6.5MB artist on every warm request.
 app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000, compresslevel=6)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition", "ETag", "X-Cache-Status"],
-)
-
 
 # Expensive endpoints worth throttling: cold sheet fetches and the upstream
 # proxies. Cheap/cached endpoints (/trackers) are left alone.
@@ -444,6 +435,19 @@ def _bisect_right(sorted_ts: list[float], value: float) -> int:
 
 
 app.add_middleware(_RateLimitMiddleware)
+
+# CORS is added LAST so it is the OUTERMOST middleware: add_middleware makes the
+# last-added middleware outermost, and CORS must wrap the rate limiter so a 429
+# still carries Access-Control-Allow-Origin (else a browser sees a network error
+# instead of a clean 429).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition", "ETag", "X-Cache-Status"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +665,8 @@ async def clear_fetch_cache(request: Request):
             detail="cache clear disabled: set LEAKSHEET_ADMIN_TOKEN to enable",
         )
     provided = request.headers.get("x-admin-token", "")
-    if not hmac.compare_digest(provided, admin_token):
+    # Compare bytes: hmac.compare_digest raises TypeError on non-ASCII str.
+    if not hmac.compare_digest(provided.encode("utf-8"), admin_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="invalid or missing admin token")
     count = clear_cache()
     return {"cleared": count}

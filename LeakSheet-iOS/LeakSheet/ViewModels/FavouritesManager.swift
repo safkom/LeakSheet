@@ -326,6 +326,11 @@ final class FavouritesManager {
         }
     }
 
+    // @concurrent forces this off the caller's actor. Without it, under
+    // SWIFT_APPROACHABLE_CONCURRENCY (SE-0461) a `nonisolated async` function
+    // runs on the caller's actor — here the MainActor (save()'s Task) — so the
+    // encode + atomic write would still block the main thread.
+    @concurrent
     private nonisolated static func persist(
         _ entries: [FavouriteEntry], to file: URL, logger: Logger
     ) async {
