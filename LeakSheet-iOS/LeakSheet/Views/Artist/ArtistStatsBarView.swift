@@ -1,10 +1,22 @@
 import SwiftUI
 
-/// Stats bar showing total / available / snippets / full HQ.
+/// Stats bar showing total / available / snippets / full HQ. Tappable (when
+/// `onTap` is set) to open the full `TrackerStats` breakdown.
 struct ArtistStatsBarView: View {
     let stats: ArtistViewModel.Stats
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
+        if let onTap {
+            Button(action: onTap) { barContent }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows the full stats breakdown")
+        } else {
+            barContent
+        }
+    }
+
+    private var barContent: some View {
         GlassEffectContainer {
             HStack(spacing: 8) {
                 statItem(value: stats.total, label: "Total", color: .secondary)
