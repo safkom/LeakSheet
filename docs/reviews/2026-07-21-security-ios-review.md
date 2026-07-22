@@ -59,17 +59,36 @@ session**, plus the first deep iOS code/UX review since 2026-07-06.
 
 ## Deferred (tracked follow-ups)
 
-- **iOS pull-to-refresh + data-age** (`X-Cache-Status` is returned but ignored) — a feature
-  addition touching the reload/API flow; the known follow-up from 2026-07-20.
-- **`FlowLayout` for badge/credit pills** (Dynamic-Type wrapping) — polish.
-- **CI count gate:** the exact-count accuracy suite skips in CI (no dumps), so count-drift can
-  ship green — add a DMCA-safe synthetic count gate.
-- **iOS perf:** precomputed search index; off-main/debounced `FavouritesManager.save`.
-- **Decomposition:** `ArtistViewModel`/`ArtistView`/`SongDescriptionSheet` extract-subview seams.
-- **iOS:** volume-0 persistence + `H:MM:SS` duration parsing (`AudioEngine`).
+- **Decomposition:** `ArtistViewModel`/`ArtistView`/`SongDescriptionSheet` extract-subview seams
+  (large refactor, no behavior change).
+- **iOS XCUITest smoke** target (infra).
+
+## 2026-07-22 continuation — documentation-grounded audit + remaining follow-ups
+
+A documentation review (httpx / Starlette via Context7; Swift concurrency / SE-0461 via
+Apple/Swift docs) confirmed the httpx SSRF mechanics and Starlette middleware pattern are
+correct, and found **3 issues — now fixed & test-gated**:
+- **[regression]** `FavouritesManager.persist` was `nonisolated async`, but the target sets
+  `SWIFT_APPROACHABLE_CONCURRENCY=YES` (SE-0461), so it ran on the caller's actor (MainActor) —
+  the "off-main" save didn't leave the main thread. Marked `@concurrent`.
+- Rate-limit 429 carried no CORS header (limiter was outermost); CORS is now registered last so
+  it wraps the limiter.
+- `hmac.compare_digest` could `TypeError` on a non-ASCII admin token; compares bytes now.
+
+And the deferred follow-ups were implemented & test-gated:
+- **CI count gate** — `tests/fixtures/synthetic/era_routing.html` + placement assertions pin the
+  era-routing path (sibling eras, digit-leading names, `???` placeholders) in the offline gate.
+- **Search index** — per-song lowercased haystack precomputed off-main; ranking pinned identical
+  to inline scoring.
+- **FlowLayout** — extracted and applied to `BadgeRowView`/`MiscEntryRowView` (pills wrap at AX
+  Dynamic Type).
+- **Pull-to-refresh + data-age** — `.refreshable` rebuilds the VM from a forced refetch; an
+  "Updated N ago" chip shows freshness.
+
+Only decomposition and an iOS XCUITest smoke remain deferred.
 
 ## Verdict
 
 **Approve.** The two HIGH security issues and the HIGH iOS row-collision are fixed and
-test-gated; the rest are documented follow-ups. Offline gate 478 · accuracy 72 · iOS 195,
-all green.
+test-gated, as are the doc-audit findings and the implemented follow-ups. Latest:
+offline gate 486 · accuracy 72 · iOS 198, all green.
