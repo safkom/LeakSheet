@@ -128,6 +128,17 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 > The backend proxies audio and images server-side. It re-validates the final host after
 > redirects and rejects non-public addresses (SSRF guard) on every proxied hop.
 
+### Deployment
+
+DigitalOcean App Platform (`.do/app.yaml`): the `api` service runs the `Procfile` command
+(`gunicorn` with a single `UvicornWorker`). Single worker on purpose: the 512 MB box can't fit
+two concurrent Ye-sized cold parses (11.7 MB HTML → model tree + serialized dict each).
+CPU-bound parse/serialize work is pushed off the event loop via `asyncio.to_thread`, so the
+single worker stays responsive during a cold miss.
+
+> Note: the `Procfile` format supports no comment lines — DO's buildpack fails the whole build
+> on any non-`name: command` line. Keep it to the single `web:` entry.
+
 ---
 
 ## Data Model
