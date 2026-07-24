@@ -103,6 +103,9 @@ def _get_sheets_client() -> httpx.AsyncClient:
     if _sheets_client is None or _sheets_client.is_closed:
         _sheets_client = httpx.AsyncClient(
             follow_redirects=True,
+            # Client-level default so a future call site that forgets an
+            # explicit timeout= doesn't silently get httpx's 5s default.
+            timeout=DEFAULT_TIMEOUT,
             headers={"User-Agent": USER_AGENT},
         )
     return _sheets_client
@@ -686,19 +689,26 @@ def stale_parsed_cache_urls(limit: int) -> list[str]:
     return [url for _, url in candidates[:limit]]
 
 
-def clear_cache() -> int:
+def clear_cache() -> tuple[int, int]:
     """Remove all cached files (sheet HTML/parsed JSON and resized images).
 
-    Returns number of files deleted.
+    Returns ``(cleared, skipped)``. A file that can't be unlinked
+    (permissions, a race with concurrent eviction) is skipped and logged
+    rather than aborting the sweep partway through.
     """
     if not CACHE_DIR.exists():
-        return 0
-    count = 0
+        return 0, 0
+    cleared = 0
+    skipped = 0
     for f in CACHE_DIR.iterdir():
         if f.is_file():
-            f.unlink()
-            count += 1
-    return count
+            try:
+                f.unlink()
+                cleared += 1
+            except OSError as exc:
+                skipped += 1
+                logger.warning("cache clear: could not delete %s: %s", f.name, exc)
+    return cleared, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -1167,8 +1177,9 @@ async def _load_secondary_tabs(
                     if art_map:
                         apply_art_tab_images(artist, art_map)
         except Exception as e:
-            # Art tab optional — keep existing art_url on failure
-            logger.debug("Art tab load failed for %s: %s", url_norm[:80], e)
+            # Art tab optional — keep existing art_url on failure. WARNING so
+            # a systematically broken tab is visible at default log level.
+            logger.warning("Art tab load failed for %s: %s", url_norm[:80], e)
 
     tab_results: dict[str, list] = {}
 
@@ -1183,8 +1194,8 @@ async def _load_secondary_tabs(
                         parse_misc_tab, tab_html, kind
                     )
         except Exception as e:
-            # Content tabs optional
-            logger.debug("Content tab %s load failed: %s", gid_val, e)
+            # Content tabs optional; WARNING keeps systematic failures visible.
+            logger.warning("Content tab %s load failed: %s", gid_val, e)
 
     secondary = [_load_tab(g, k) for g, k, _n in content_tabs]
     if art_gid:

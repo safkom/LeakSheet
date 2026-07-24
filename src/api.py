@@ -666,8 +666,9 @@ async def clear_fetch_cache(request: Request):
     # Compare bytes: hmac.compare_digest raises TypeError on non-ASCII str.
     if not hmac.compare_digest(provided.encode("utf-8"), admin_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="invalid or missing admin token")
-    count = clear_cache()
-    return {"cleared": count}
+    # Off the event loop: the sweep unlinks thousands of files on a busy box.
+    cleared, skipped = await asyncio.to_thread(clear_cache)
+    return {"cleared": cleared, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------
@@ -809,7 +810,10 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
         if img.width * img.height > _IMAGE_MAX_DECODE_PIXELS:
             return data, content_type
         img.load()
-    except Exception:
+    except Exception as exc:
+        # Serve the original bytes, but leave a trace — a systematically
+        # undecodable source would otherwise be invisible.
+        logger.warning("image resize: decode failed (%s) — serving original", exc)
         return data, content_type
     if img.width <= w:
         return data, content_type
@@ -900,8 +904,9 @@ async def proxy_image(
                             content=resp.content, media_type=ct,
                             headers={**base_headers, "X-Cache-Status": "origin"},
                         )
-                except httpx.HTTPError:
-                    pass  # fall through to the original URL + Pillow path
+                except httpx.HTTPError as exc:
+                    # Fall through to the original URL + Pillow path.
+                    logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
 
         resp = await _get_proxy_client().get(url, headers=headers)
         ct = resp.headers.get("content-type", "")
@@ -1136,7 +1141,10 @@ async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
         if size and size.isdigit():
             result["file_size"] = int(size)
         return result
-    except Exception:
+    except Exception as exc:
+        # None → caller 404s; log so a persistent provider outage is
+        # distinguishable from a genuinely missing file.
+        logger.warning("pillows HEAD fallback failed for %s: %s", file_url[:80], exc)
         return None
 
 

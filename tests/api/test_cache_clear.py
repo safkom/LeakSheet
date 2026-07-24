@@ -47,7 +47,7 @@ class TestCacheClearAuthorized:
 
         r = api_client.post("/cache/clear", headers={"X-Admin-Token": _TOKEN})
         assert r.status_code == 200
-        assert r.json()["cleared"] == 3
+        assert r.json() == {"cleared": 3, "skipped": 0}
         assert list(api.CACHE_DIR.iterdir()) == []
 
     def test_clear_empty_cache_is_zero(self, api_client, monkeypatch):
