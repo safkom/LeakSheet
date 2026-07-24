@@ -124,7 +124,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "mirrors": "alt_links",
     "mirror": "alt_links",
 
-    # Streaming (treated as availability info or skipped)
+    # Streaming availability (Yes/No) → SongVersion.streaming
     "streaming": "streaming",
     "streaming?": "streaming",
     "in circulation": "available_length",  # Yung Lean

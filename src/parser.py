@@ -120,7 +120,7 @@ def _extract_class_colors(html: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 class _TableExtractor(HTMLParser):
-    """Extract rows from the first <table> in a Google Sheets HTML export.
+    """Extract rows from every <table> in a Google Sheets HTML export.
 
     Each row is a list of _Cell objects containing text, links, and CSS class.
     """
@@ -302,10 +302,7 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     """Fast table extraction via lxml (≈10x quicker than html.parser)."""
     if not html_content.strip():
         return []
-    try:
-        doc = _lxml_html.fromstring(html_content)
-    except etree.ParserError:
-        return []
+    doc = _lxml_html.fromstring(html_content)
     rows: list[list[_Cell]] = []
     for tr in doc.iter("tr"):
         current: list[_Cell] = []
@@ -326,17 +323,26 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
 
 
 def extract_table(html_content: str, color_map: dict[str, str] | None = None) -> list[list[_Cell]]:
-    """Parse HTML and return all table rows as lists of _Cell.
+    """Parse HTML and return the rows of every <table> as lists of _Cell.
 
-    Uses lxml when available (much faster on large exports), falling back to
-    the stdlib HTMLParser implementation otherwise.
+    Rows from all tables are concatenated in document order (tracker exports
+    render one logical table, occasionally split across elements).
+
+    Uses lxml when available (≈10x quicker than html.parser); falls back to
+    the stdlib HTMLParser implementation when lxml is absent or rejects the
+    input — e.g. lxml raises ValueError for str input that starts with an
+    XML declaration (``<?xml …?>``), which some mirrored exports carry.
 
     If *color_map* is provided (from `_extract_class_colors`), each cell's
     `bg_color` is resolved from its CSS class at construction time.
     """
+    rows: list[list[_Cell]] | None = None
     if _lxml_html is not None:
-        rows = _extract_table_lxml(html_content)
-    else:
+        try:
+            rows = _extract_table_lxml(html_content)
+        except (etree.ParserError, ValueError):
+            rows = None  # malformed for lxml — retry with the lenient stdlib parser
+    if rows is None:
         parser = _TableExtractor()
         parser.feed(html_content)
         rows = parser.rows
@@ -1492,7 +1498,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 )
             ):
                 text = filled[0].text.strip().strip("|").strip()
-                notices.append(Notice(text=text, link=None, kind="info"))
+                # Dedupe against header notices and repeated banner rows —
+                # _extract_header_notices has its own seen-set, but this
+                # append site bypasses it.
+                if text.lower() not in {n.text.lower() for n in notices}:
+                    notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
         # Check for era header FIRST (2026-07-20 review: before the section-
@@ -2088,12 +2098,14 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
 
     avail_text = _get_cell_text(row, col_map.get("available_length", -1))
     quality_text = _get_cell_text(row, col_map.get("quality", -1))
+    streaming_text = _get_cell_text(row, col_map.get("streaming", -1)).strip().lower()
+    streaming = {"yes": True, "no": False}.get(streaming_text)
     rating = None
     if avail_text and "quality" not in col_map:
         # Travis-style trackers fold quality (and a fan star rating) into the
         # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
         avail_text, split_quality, rating = _split_compound_availability(avail_text)
-        quality_text = quality_text or split_quality or ""
+        quality_text = split_quality or ""
 
     version = SongVersion(
         name=title,
@@ -2115,6 +2127,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,
         available_length=avail_text or None,
         quality=quality_text or None,
+        streaming=streaming,
         rating=rating,
         links=merged_links,
         quality_color=_get_cell(row, col_map.get("quality", -1)).bg_color if col_map.get("quality") is not None else None,

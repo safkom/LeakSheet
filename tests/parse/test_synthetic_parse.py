@@ -245,3 +245,53 @@ class TestEraRoutingFixture:
 
     def test_passes_health_invariants(self, routing):
         assert_healthy(routing)
+
+
+# ---------------------------------------------------------------------------
+# Streaming column (2026-07-24 review: value was silently dropped before)
+# ---------------------------------------------------------------------------
+
+class TestStreamingColumn:
+    HTML = """
+    <table>
+      <tr><td>Era</td><td>Name</td><td>Quality</td><td>Streaming</td><td>Links</td></tr>
+      <tr><td>Neon Nights</td><td>Glass City</td><td>CD Quality</td><td>Yes</td><td></td></tr>
+      <tr><td>Neon Nights</td><td>Static Dreams</td><td>CD Quality</td><td>No</td><td></td></tr>
+      <tr><td>Neon Nights</td><td>Blank Tape</td><td>CD Quality</td><td></td><td></td></tr>
+    </table>
+    """
+
+    def test_streaming_yes_no_maps_to_song_version(self):
+        artist = parse_sheet(self.HTML, "SynthWave")
+        songs = {
+            s.base_name: s
+            for e in artist.eras
+            for sec in e.sections
+            for s in sec.songs
+        }
+        assert songs["Glass City"].versions[0].streaming is True
+        assert songs["Static Dreams"].versions[0].streaming is False
+        assert songs["Blank Tape"].versions[0].streaming is None
+
+    def test_streaming_column_is_not_reported_dropped(self):
+        artist = parse_sheet(self.HTML, "SynthWave")
+        assert "Streaming" not in artist.parse_metadata.dropped_columns
+
+
+# ---------------------------------------------------------------------------
+# Notice dedupe — the pre-era banner append site must not duplicate notices
+# ---------------------------------------------------------------------------
+
+class TestNoticeDedupe:
+    def test_repeated_banner_rows_produce_one_notice(self):
+        html = """
+        <table>
+          <tr><td>Era</td><td>Name</td><td>Quality</td></tr>
+          <tr><td>| Last Updated: 2026-01-01 | Hover over the headers for info |</td><td></td><td></td></tr>
+          <tr><td>| Last Updated: 2026-01-01 | Hover over the headers for info |</td><td></td><td></td></tr>
+          <tr><td>Neon Nights</td><td>Glass City</td><td>CD Quality</td></tr>
+        </table>
+        """
+        artist = parse_sheet(html, "SynthWave")
+        banner = [n for n in artist.notices if "last updated" in n.text.lower()]
+        assert len(banner) == 1
