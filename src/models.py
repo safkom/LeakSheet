@@ -275,12 +275,13 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
-        # stats/stats_raw/highlighted_producers are INTERNAL-only (2026-07-24
-        # review): no client reads them, but the tracker-declared stats power
-        # the starved-era health check in tests/_health.py and the accuracy
-        # harness — so they stay parsed, just off the wire.
-        for internal in ("stats", "stats_raw", "highlighted_producers"):
-            kwargs = _with_excluded(kwargs, internal)
+        # stats/stats_raw/highlighted_producers STAY on the wire even though
+        # no client reads them (2026-07-24 review): the /sheet warm path
+        # serves the parsed-cache file's raw bytes as the response, so cache
+        # and wire are the same serialization — excluding them here would
+        # also strip them from the cache round-trip, silently blinding the
+        # starved-era health check (tests/_health.py) and census has_stats
+        # on every cache hit. Clients just ignore them.
         d = super().model_dump(**kwargs)
         d["sections"] = [
             {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}

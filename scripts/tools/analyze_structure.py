@@ -44,7 +44,7 @@ def analyze_tracker(url):
         print(f"\nEra at row {idx}: {name}")
         for j, cell in enumerate(row):
             txt = cell.text[:150] if cell.text else ''
-            print(f"  col[{j}]: class=\"{cell.css_class}\" text=\"{txt}\" links={len(cell.links)}")
+            print(f"  col[{j}]: text=\"{txt}\" links={len(cell.links)}")
 
     # 4. Check for img in the raw HTML around each era
     # Find img src URLs near first era

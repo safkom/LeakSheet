@@ -297,19 +297,26 @@ class TestNoticeDedupe:
 
 
 # ---------------------------------------------------------------------------
-# Wire-payload exclusions (2026-07-24 review): internal-only fields stay off
-# the serialized /sheet payload but remain on the model for the health harness
+# Wire payload (2026-07-24 review): dead per-version color fields are gone;
+# era stats stay serialized because cache bytes ARE the wire bytes and the
+# health harness reads stats off cache-hit artists (see Era.dict comment)
 # ---------------------------------------------------------------------------
 
-class TestWirePayloadExclusions:
-    def test_internal_era_fields_are_off_the_wire(self, main):
+class TestWirePayload:
+    def test_color_fields_removed_from_versions(self, main):
         payload = main.model_dump()
-        era = payload["eras"][0]
-        for key in ("stats", "stats_raw", "highlighted_producers"):
-            assert key not in era, f"{key} must not be serialized"
-        version = era["sections"][0]["songs"][0]["versions"][0]
+        version = payload["eras"][0]["sections"][0]["songs"][0]["versions"][0]
         for key in ("quality_color", "available_length_color"):
             assert key not in version, f"{key} was removed from the model"
-        # Still available internally — the starved-era health check needs it.
-        assert hasattr(main.eras[0], "stats")
-        assert hasattr(main.eras[0], "stats_raw")
+
+    def test_era_stats_survive_the_cache_round_trip(self, main):
+        # The parsed-JSON cache stores model_dump() and the API serves those
+        # raw bytes; stats must survive dump → validate or the starved-era
+        # health check goes blind on cache hits.
+        from src.models import Artist
+        reloaded = Artist.model_validate(main.model_dump())
+        era_with_stats = next((e for e in main.eras if e.stats is not None), None)
+        if era_with_stats is not None:
+            match = next(e for e in reloaded.eras if e.name == era_with_stats.name)
+            assert match.stats == era_with_stats.stats
+            assert match.stats_raw == era_with_stats.stats_raw
