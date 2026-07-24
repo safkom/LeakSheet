@@ -2,12 +2,12 @@
 """Dump raw table rows from any tracker HTML file.
 
 Usage:
-    python -m tests.tools.dump_raw_table [--tracker NAME] [--rows N] [--cols N]
+    python3 scripts/tools/dump_raw_table.py [--tracker NAME] [--rows N] [--cols N]
 
 Examples:
-    python -m tests.tools.dump_raw_table
-    python -m tests.tools.dump_raw_table --tracker "Baby Keem" --rows 20
-    python -m tests.tools.dump_raw_table --tracker "Ye" --rows 10 --cols 5
+    python3 scripts/tools/dump_raw_table.py
+    python3 scripts/tools/dump_raw_table.py --tracker "Baby Keem" --rows 20
+    python3 scripts/tools/dump_raw_table.py --tracker "Ye" --rows 10 --cols 5
 """
 
 import argparse

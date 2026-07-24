@@ -3,12 +3,19 @@
 Fetches HTML table data from Google Sheets /htmlview URLs and custom
 tracker domains (e.g. yetracker.net).
 
-Strategy:
-1. Fetch the base htmlview page (JS-rendered, no table)
-2. Extract sheet GIDs from the page
-3. Fetch /htmlview/sheet?headers=true&gid=<GID> for server-rendered HTML with <table>
-4. Extract artist name from <title>
-5. Pass HTML to parser
+Strategy (async pipeline; the sync entry points are thin wrappers over it):
+1. Serve from the parsed-JSON disk cache when fresh.
+2. If the URL carries an explicit GID, try that tab first — unless the
+   workbook's tab listing classifies it as a content tab (Misc etc.), in
+   which case fall through to discovery.
+3. Otherwise fetch the base htmlview page, discover all GIDs plus named tabs,
+   and fetch every candidate concurrently — consuming results in priority
+   order (the "Unreleased" tab first) and cancelling the rest once a winner
+   (most eras, minimum threshold) parses.
+4. Load secondary tabs concurrently: Art (with pHash verification) and every
+   content tab; badge tabs stamp highlights onto existing songs.
+5. Cache both the winning HTML and the parsed result; a size-capped eviction
+   keeps the cache directory bounded.
 """
 
 from __future__ import annotations

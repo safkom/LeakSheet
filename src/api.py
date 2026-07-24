@@ -2,9 +2,12 @@
 
 Endpoints:
   POST /sheet       — send a tracker URL, get parsed Artist JSON back
-  GET  /image-proxy — proxy images through backend (CORS bypass)
-  GET  /stream      — proxy audio from supported file hosts (CORS bypass)
-  POST /cache/clear — clear the URL fetch cache
+                      (ETag / stale-while-revalidate)
+  GET  /trackers    — TrackerHub discovery list, best-first
+  GET  /stream      — proxy audio/video from supported file hosts (Range support)
+  GET  /image-proxy — proxy images through backend (width buckets, disk cache)
+  GET  /metadata    — file metadata from provider APIs (incl. media_kind)
+  POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
 Note: In production (DO App Platform), these are served under /api/* via
 ingress routing.  The /api prefix is stripped by the platform before reaching
@@ -642,7 +645,7 @@ async def parse_sheet(
 
 
 # ---------------------------------------------------------------------------
-# POST /api/cache/clear — clear the fetch cache
+# POST /cache/clear — clear the fetch cache (served as /api/cache/clear in prod)
 # ---------------------------------------------------------------------------
 
 @app.post("/cache/clear")

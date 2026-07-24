@@ -41,6 +41,6 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      # The locked public URL set only (excludes the slow full-registry sweep,
-      # which needs the gitignored artists.ndjson and is a local-only tool).
+      # The locked public URL set only (excludes the slow full TrackerHub
+      # sweep, which is a deliberate local/cron-scale run, not a PR gate).
       - run: pytest -m "live and not slow" -ra

@@ -2135,7 +2135,8 @@ def _add_version_to_era(
 
 # Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
 # every entry in it — including the wanted section — is stamped GRAIL.
-# Splitting the combined tab by its internal sections is a known follow-up.
+# Follow-up (tracked in README's roadmap note): split combined tabs by their
+# internal section labels instead of stamping one badge across the whole tab.
 _BADGE_BY_TAB_KIND = {
     "best_of": Badge.BEST,
     "worst_of": Badge.WORST,

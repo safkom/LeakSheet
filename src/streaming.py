@@ -211,7 +211,7 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
 )
 
 # pixeldrain.com — /u/ is a single file, /l/ is a list (intentionally not
-# matched here; lists are ignored this round).
+# matched here; multi-file lists are deliberately unsupported).
 _PIXELDRAIN_PATTERN = re.compile(
     r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
 )
@@ -357,7 +357,8 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
 
     # krakenfiles has no metadata API (the view page only yields a filename);
     # clients fall back to player-derived format info for kraken links.
-    # drive.google.com also has no metadata provider this round.
+    # drive.google.com has no metadata provider (Drive exposes no public
+    # file-metadata API without auth).
     return None
 
 
