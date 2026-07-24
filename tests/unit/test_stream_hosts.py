@@ -171,8 +171,20 @@ class TestGdriveMetadataResolution:
 
 
 class TestStreamAllowlist:
-    @pytest.mark.parametrize("host", ["pixeldrain.com", "drive.google.com", "drive.usercontent.google.com"])
-    def test_new_hosts_allowed(self, host):
+    def test_allowlist_is_exactly_the_resolver_output_hosts(self):
+        # Single source of truth (2026-07-24): the proxy allowlist IS the set
+        # of hosts resolve_stream_url can emit — nothing more, nothing less.
+        assert _STREAM_ALLOWED_DOMAINS == {
+            "api.pillows.su",
+            "temp.imgur.gg",
+            "music.froste.lol",
+            "krakenfiles.com",
+            "pixeldrain.com",
+            "drive.google.com",
+        }
+
+    @pytest.mark.parametrize("host", sorted(_STREAM_ALLOWED_DOMAINS))
+    def test_allowed_hosts_pass(self, host):
         assert _is_allowed_domain(f"https://{host}/some/path", _STREAM_ALLOWED_DOMAINS) is True
 
     def test_evil_domain_rejected(self):

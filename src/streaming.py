@@ -42,6 +42,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from src.config import USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 
@@ -223,12 +225,26 @@ _GDRIVE_FILE_D_PATTERN = re.compile(
 )
 _GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+# Every host `resolve_stream_url` can emit. The API's stream-proxy allowlist
+# is this set, so resolver and allowlist can't drift (they had: four stale
+# entries accumulated in the hand-maintained copy).
+ALLOWED_STREAM_HOSTS = frozenset({
+    "api.pillows.su",     # pillows.su / pillowcase.su both resolve here
+    "temp.imgur.gg",      # imgur.gg always resolves here (imgur.gg API 404s)
+    "music.froste.lol",
+    "krakenfiles.com",    # view URL passes through; CDN host validated by
+                          # _KRAKEN_CDN_AUDIO_PATTERN when resolved lazily
+    "pixeldrain.com",
+    "drive.google.com",   # uc?export=download form; the usercontent.google.com
+                          # confirm retry is validated inside _fetch_gdrive
+})
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 _STREAM_TIMEOUT = 30.0
-_STREAM_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+_STREAM_USER_AGENT = USER_AGENT  # shared backend UA from src.config
 
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {

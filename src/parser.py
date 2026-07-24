@@ -1262,6 +1262,26 @@ def _detect_header_row(rows: list[list[_Cell]]) -> tuple[int, dict[str, int]]:
     return 0, col_map
 
 
+def _first_row_image(row: list[_Cell], prefer_idx: int | None = None) -> str | None:
+    """First image URL found in *row* — the cover-art candidate for an
+    auto-created era.
+
+    With *prefer_idx*, that cell's image wins before the left-to-right scan
+    (Travis-style headers embed the art in the name cell). Previously this
+    scan was copy-pasted at three call sites.
+    """
+    if prefer_idx is not None:
+        cell = _get_cell(row, prefer_idx)
+        if cell.images:
+            return cell.images[0]
+    for idx, cell in enumerate(row):
+        if idx == prefer_idx:
+            continue
+        if cell.images:
+            return cell.images[0]
+    return None
+
+
 def _parse_era_header_row(
     row: list[_Cell], col_map: dict[str, int]
 ) -> tuple[Era, bool]:
@@ -1638,13 +1658,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             name_idx = col_map.get("name", 1)
                             timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                             timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                            # Scan for cover art
-                            _era_art_url_candidate = None
-                            for cell in row:
-                                if cell.images and not _era_art_url_candidate:
-                                    _era_art_url_candidate = cell.images[0]
-                                    break
-                            new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
+                            new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
@@ -1676,13 +1690,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     name_idx = col_map.get("name", 1)
                     timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                     timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                    # Scan for cover art
-                    _era_art_url_candidate = None
-                    for cell in row:
-                        if cell.images and not _era_art_url_candidate:
-                            _era_art_url_candidate = cell.images[0]
-                            break
-                    new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
+                    new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
                     eras.append(new_era)
                     _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
@@ -1713,17 +1721,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # Create a new era, capture description, and scan for art image.
                     notes_idx = col_map.get("notes", 2)
                     desc_text = _get_cell_text(row, notes_idx)
-                    # Scan cells for cover art (same logic as _is_era_header path)
-                    _era_art_url = None
-                    _name_cell_ml = _get_cell(row, name_col_idx)
-                    if _name_cell_ml.images and name_first_line:
-                        _era_art_url = _name_cell_ml.images[0]
-                    for col_idx, cell in enumerate(row):
-                        if col_idx == name_col_idx:
-                            continue
-                        if cell.images and not _era_art_url:
-                            _era_art_url = cell.images[0]
-                            break
+                    _era_art_url = _first_row_image(row, prefer_idx=name_col_idx)
                     new_era = Era(
                         name=name_first_line,
                         art_url=_era_art_url,

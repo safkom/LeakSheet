@@ -22,12 +22,14 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlparse, urlencode
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+from src.config import USER_AGENT
 from src.models import Artist, TabSection
 from src.parser import (
     apply_art_tab_images,
@@ -46,7 +48,6 @@ from src.parser import (
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Size cap for the sheet HTML + parsed-JSON cache (2026-07-20 review: the
@@ -923,6 +924,26 @@ class AccessDeniedError(FetchError):
     pass
 
 
+def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
+    """Map an httpx exception onto the typed FetchError hierarchy.
+
+    Single source for the mapping both async entry points use — this block
+    used to be copy-pasted per function and drifted between copies.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        raise NetworkError(f"Request timed out: {exc}") from exc
+    if isinstance(exc, httpx.ConnectError):
+        raise NetworkError(f"Cannot connect to {url}: {exc}") from exc
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 403:
+            raise AccessDeniedError(f"Access denied (403): {url}") from exc
+        if code == 404:
+            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        raise NetworkError(f"HTTP {code}: {exc}") from exc
+    raise exc
+
+
 # ---------------------------------------------------------------------------
 # Async variants
 # ---------------------------------------------------------------------------
@@ -995,16 +1016,8 @@ async def async_fetch_sheet_html(
             f"Tried GIDs: {gids}. Last error: {last_error}"
         )
 
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+    except httpx.HTTPError as e:
+        _raise_fetch_error(e, url)
 
 
 async def _verify_art_images_async(
@@ -1414,13 +1427,5 @@ async def async_fetch_and_parse(
             await _async_set_cached_parsed(url_norm, artist)
         return artist
 
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+    except httpx.HTTPError as e:
+        _raise_fetch_error(e, url)

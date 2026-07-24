@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
+from src.config import USER_AGENT
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
@@ -55,6 +56,7 @@ from src.fetcher import (
     stale_parsed_cache_urls,
 )
 from src.streaming import (
+    ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
     PublicOnlyAsyncTransport,
     close_shared_client,
@@ -217,6 +219,16 @@ def _fix_audio_mime(
 
 
 # ---------------------------------------------------------------------------
+# Client-side Cache-Control policies, one per endpoint family
+# ---------------------------------------------------------------------------
+
+_CC_SHEET = "public, max-age=300"       # /sheet — short; SWR handles freshness
+_CC_IMAGE = "public, max-age=86400"     # /image-proxy — immutable art, 1 day
+_CC_METADATA = "public, max-age=3600"   # /metadata + /trackers — hourly TTL caches
+_CC_TRACKERS_STALE = "public, max-age=600"  # /trackers stale fallback — retry sooner
+
+
+# ---------------------------------------------------------------------------
 # SSRF protection — domain allowlists for proxy endpoints
 # ---------------------------------------------------------------------------
 
@@ -239,24 +251,8 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
     "google.com",
 }
 
-_STREAM_ALLOWED_DOMAINS = {
-    # Exact hostnames allowed for stream proxy
-    "pillows.su",
-    "pillowcase.su",
-    "api.pillows.su",
-    "imgur.gg",
-    "temp.imgur.gg",
-    "music.froste.lol",
-    "krakenfiles.com",
-    # Note: the krakenfiles CDN host is *.krakencloud.net (constrained by
-    # _KRAKEN_CDN_AUDIO_PATTERN in streaming.py), not cdn.krakenfiles.com —
-    # that stale entry never matched and was removed.
-    "pixeldrain.com",
-    "drive.google.com",
-    # The virus-scan interstitial confirm retry targets this host — see
-    # streaming._fetch_gdrive / _GDRIVE_ALLOWED_HOSTS.
-    "drive.usercontent.google.com",
-}
+# Single source of truth: the hosts resolve_stream_url can emit.
+_STREAM_ALLOWED_DOMAINS = ALLOWED_STREAM_HOSTS
 
 
 def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
@@ -302,6 +298,8 @@ def _get_proxy_client() -> httpx.AsyncClient:
             # connect rather than proxied back.
             transport=PublicOnlyAsyncTransport(),
             headers={
+                # Deliberately browser-like (not the shared LeakSheet UA):
+                # Google image CDNs vary caching/format behavior by UA.
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
             },
@@ -564,7 +562,7 @@ async def parse_sheet(
                         headers={
                             "ETag": f'"{server_etag}"',
                             "X-Cache-Status": "validated",
-                            "Cache-Control": "public, max-age=300",
+                            "Cache-Control": _CC_SHEET,
                         },
                     )
 
@@ -593,7 +591,7 @@ async def parse_sheet(
                 headers={
                     "ETag": f'"{etag}"',
                     "X-Cache-Status": "stale" if is_stale else "hit",
-                    "Cache-Control": "public, max-age=300",
+                    "Cache-Control": _CC_SHEET,
                     "Server-Timing": timer.server_timing_header(),
                 },
             )
@@ -637,7 +635,7 @@ async def parse_sheet(
         data, etag = await asyncio.to_thread(_serialize_and_hash)
     response.headers["ETag"] = f'"{etag}"'
     response.headers["X-Cache-Status"] = "miss"
-    response.headers["Cache-Control"] = "public, max-age=300"
+    response.headers["Cache-Control"] = _CC_SHEET
     response.headers["Server-Timing"] = timer.server_timing_header()
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
     return data
@@ -854,7 +852,7 @@ async def proxy_image(
 
     width = _snap_image_width(w) if w else None
     base_headers = {
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": _CC_IMAGE,
         "Access-Control-Allow-Origin": "*",
     }
 
@@ -936,7 +934,7 @@ async def proxy_image(
 # GET /api/metadata — fetch audio file metadata from provider APIs
 # ---------------------------------------------------------------------------
 
-_METADATA_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+_METADATA_USER_AGENT = USER_AGENT  # shared backend UA from src.config
 
 
 class _TTLCache:
@@ -1160,7 +1158,7 @@ async def proxy_metadata(
             content=cached,
             media_type="application/json",
             headers={
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "hit",
             },
         )
@@ -1187,7 +1185,7 @@ async def proxy_metadata(
                         content=payload,
                         media_type="application/json",
                         headers={
-                            "Cache-Control": "public, max-age=3600",
+                            "Cache-Control": _CC_METADATA,
                             "X-Cache-Status": "miss",
                         },
                     )
@@ -1213,7 +1211,7 @@ async def proxy_metadata(
             content=payload,
             media_type="application/json",
             headers={
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "miss",
             },
         )
@@ -1323,7 +1321,7 @@ async def list_trackers():
             content=cached,
             media_type="application/json",
             headers={
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "hit",
             },
         )
@@ -1345,7 +1343,7 @@ async def list_trackers():
             content=payload,
             media_type="application/json",
             headers={
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "miss",
             },
         )
@@ -1356,7 +1354,7 @@ async def list_trackers():
                 content=_trackers_stale,
                 media_type="application/json",
                 headers={
-                    "Cache-Control": "public, max-age=600",
+                    "Cache-Control": _CC_TRACKERS_STALE,
                     "X-Cache-Status": "stale",
                 },
             )
@@ -1580,6 +1578,25 @@ async def proxy_stream(
     else:
         _disposition = None
 
+    async def _iter_upstream():
+        """Prepend the sniffed first chunk, then relay the upstream body."""
+        if _prepend_chunk:
+            yield _prepend_chunk
+        async for chunk in _stream_iter:
+            yield chunk
+
+    async def _closing(iterator):
+        """Relay *iterator*, guaranteeing the upstream response is closed.
+
+        Every response path below wraps its byte source in this — previously
+        each branch had its own near-identical generator.
+        """
+        try:
+            async for chunk in iterator:
+                yield chunk
+        finally:
+            await resp.aclose()
+
     # ---------- upstream DID handle Range → pass through as-is ----------
     if resp.status_code == 206:
         headers: dict[str, str] = {"Accept-Ranges": "bytes"}
@@ -1603,17 +1620,8 @@ async def proxy_stream(
             if cl:
                 headers["Content-Length"] = cl
 
-        async def _iter_passthrough():
-            try:
-                if _prepend_chunk:
-                    yield _prepend_chunk
-                async for chunk in _stream_iter:
-                    yield chunk
-            finally:
-                await resp.aclose()
-
         return StreamingResponse(
-            _iter_passthrough(),
+            _closing(_iter_upstream()),
             status_code=206,
             headers=headers,
             media_type=ct or "application/octet-stream",
@@ -1630,17 +1638,8 @@ async def proxy_stream(
         if total_size is not None:
             headers["Content-Length"] = str(total_size)
 
-        async def _iter_full():
-            try:
-                if _prepend_chunk:
-                    yield _prepend_chunk
-                async for chunk in _stream_iter:
-                    yield chunk
-            finally:
-                await resp.aclose()
-
         return StreamingResponse(
-            _iter_full(),
+            _closing(_iter_upstream()),
             status_code=200,
             headers=headers,
             media_type=ct or "application/octet-stream",
@@ -1659,15 +1658,6 @@ async def proxy_stream(
             headers={"Content-Range": f"bytes */{cr_total}"},
         )
 
-    # Build a unified source iterator (prepend chunk + rest of stream).
-    # The slice logic below must operate on the FULL byte-offset stream,
-    # so we iterate through _prepend_chunk first then _stream_iter.
-    async def _source_iter():
-        if _prepend_chunk:
-            yield _prepend_chunk
-        async for chunk in _stream_iter:
-            yield chunk
-
     if plan.kind == "full":
         # Cannot synthesise a valid 206 (unknown total, or header ignored).
         # Return the full stream from byte 0 as HTTP 200, which correctly
@@ -1675,13 +1665,6 @@ async def proxy_stream(
         # interprets HTTP 200 to a Range request as "full file from byte 0";
         # returning partial data here would corrupt its byte-offset-to-
         # timestamp mapping.
-        async def _iter_full_unknown():
-            try:
-                async for chunk in _source_iter():
-                    yield chunk
-            finally:
-                await resp.aclose()
-
         _unknown_headers: dict[str, str] = {
             "Accept-Ranges": "bytes",
             "Content-Type": ct or "application/octet-stream",
@@ -1690,7 +1673,7 @@ async def proxy_stream(
             _unknown_headers["Content-Disposition"] = _disposition
 
         return StreamingResponse(
-            _iter_full_unknown(),
+            _closing(_iter_upstream()),
             status_code=200,
             headers=_unknown_headers,
             media_type=ct or "application/octet-stream",
@@ -1701,17 +1684,9 @@ async def proxy_stream(
     range_start, range_end = plan.start, plan.end
     content_length = range_end - range_start + 1
 
-    async def _iter_range():
-        try:
-            async for portion in _slice_byte_stream(
-                _source_iter(), range_start, range_end
-            ):
-                yield portion
-        finally:
-            await resp.aclose()
-
+    # The slice operates on the FULL byte-offset stream (prepend chunk first).
     return StreamingResponse(
-        _iter_range(),
+        _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
         status_code=206,
         headers={
             "Accept-Ranges": "bytes",
