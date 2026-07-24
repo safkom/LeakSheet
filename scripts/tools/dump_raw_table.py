@@ -2,12 +2,12 @@
 """Dump raw table rows from any tracker HTML file.
 
 Usage:
-    python -m tests.tools.dump_raw_table [--tracker NAME] [--rows N] [--cols N]
+    python3 scripts/tools/dump_raw_table.py [--tracker NAME] [--rows N] [--cols N]
 
 Examples:
-    python -m tests.tools.dump_raw_table
-    python -m tests.tools.dump_raw_table --tracker "Baby Keem" --rows 20
-    python -m tests.tools.dump_raw_table --tracker "Ye" --rows 10 --cols 5
+    python3 scripts/tools/dump_raw_table.py
+    python3 scripts/tools/dump_raw_table.py --tracker "Baby Keem" --rows 20
+    python3 scripts/tools/dump_raw_table.py --tracker "Ye" --rows 10 --cols 5
 """
 
 import argparse
@@ -26,7 +26,6 @@ def main() -> None:
     parser.add_argument("--rows", type=int, default=50, help="Max rows to display (default: 50)")
     parser.add_argument("--cols", type=int, default=12, help="Max columns to display (default: 12)")
     parser.add_argument("--start", type=int, default=0, help="Starting row index (default: 0)")
-    parser.add_argument("--show-classes", action="store_true", help="Show CSS classes for each cell")
     parser.add_argument("--show-links", action="store_true", help="Show extracted links for each cell")
     args = parser.parse_args()
 
@@ -60,8 +59,6 @@ def main() -> None:
                 text = cell.text[:60] + "..." if len(cell.text) > 60 else cell.text
                 if args.show_links and cell.links:
                     text += f" [+{len(cell.links)} links]"
-                if args.show_classes and cell.css_class:
-                    text += f" <{cell.css_class}>"
                 cells_display.append(text)
 
             print(f"Row {i:4d}: {cells_display}")

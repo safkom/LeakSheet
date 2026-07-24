@@ -20,7 +20,6 @@ from src.models import (
     Artist,
     Badge,
     Era,
-    EraStats,
     MiscEntry,
     Notice,
     ParseMetadata,
@@ -59,71 +58,13 @@ _MAX_UNMATCHED_ROWS = 50
 
 
 # ---------------------------------------------------------------------------
-# Stylesheet color extraction
-# ---------------------------------------------------------------------------
-
-# Match CSS class rules like ".s263{...; background-color:#4caf50; ...}"
-_CSS_CLASS_RULE_RE = re.compile(
-    r"\.(s\d+)\s*\{([^}]+)\}",
-    re.DOTALL,
-)
-_BG_COLOR_RE = re.compile(
-    r"background-color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))",
-    re.IGNORECASE,
-)
-# Colors considered "default" / neutral — skip these (won't provide UX value)
-_NEUTRAL_HEX = frozenset({
-    "#ffffff", "#fff", "#000000", "#000",
-    "#fafafa", "#f8f9fa", "#f3f3f3", "#eeeeee",
-    "#cccccc", "#1e1e1e", "#1a1a1a", "#1f1f1f",
-    "#2a2a2a", "#161616", "#0f0f0f", "#0d0d0d",
-})
-
-
-def _extract_class_colors(html: str) -> dict[str, str]:
-    """Parse the <style> section of a Google Sheets HTML export and return
-    a mapping of {css_class_name: hex_background_color} for non-neutral cells.
-
-    Only classes with an explicit, non-neutral background-color are included.
-    """
-    result: dict[str, str] = {}
-    # Find the first <style> block
-    style_match = re.search(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
-    if not style_match:
-        return result
-
-    style_text = style_match.group(1)
-    for m in _CSS_CLASS_RULE_RE.finditer(style_text):
-        cls = m.group(1)  # e.g. "s263"
-        decl = m.group(2)
-        bg_match = _BG_COLOR_RE.search(decl)
-        if not bg_match:
-            continue
-        color = bg_match.group(1).strip().lower()
-        # Convert rgb(...) to hex
-        if color.startswith("rgb"):
-            try:
-                nums = re.findall(r"\d+", color)
-                if len(nums) >= 3:
-                    r, g, b = int(nums[0]), int(nums[1]), int(nums[2])
-                    color = f"#{r:02x}{g:02x}{b:02x}"
-            except ValueError:
-                continue
-        if color in _NEUTRAL_HEX:
-            continue
-        result[cls] = color
-
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Low-level HTML table extraction
 # ---------------------------------------------------------------------------
 
 class _TableExtractor(HTMLParser):
-    """Extract rows from the first <table> in a Google Sheets HTML export.
+    """Extract rows from every <table> in a Google Sheets HTML export.
 
-    Each row is a list of _Cell objects containing text, links, and CSS class.
+    Each row is a list of _Cell objects containing text, links, and images.
     """
 
     def __init__(self) -> None:
@@ -137,7 +78,6 @@ class _TableExtractor(HTMLParser):
         self._cell_text = ""
         self._cell_links: list[str] = []
         self._cell_images: list[str] = []
-        self._cell_class = ""
         self._colspan = 1
         self._a_href = ""
 
@@ -156,7 +96,6 @@ class _TableExtractor(HTMLParser):
             self._cell_links = []
             self._cell_link_lines = []
             self._cell_images = []
-            self._cell_class = a.get("class", "")
             try:
                 self._colspan = int(a.get("colspan", "1") or "1")
             except (ValueError, TypeError):
@@ -189,7 +128,6 @@ class _TableExtractor(HTMLParser):
                 links=list(self._cell_links),
                 link_lines=list(self._cell_link_lines),
                 images=list(self._cell_images),
-                css_class=self._cell_class,
             )
             self._current_row.append(cell)
             # Fill colspan with empty cells
@@ -209,8 +147,8 @@ class _TableExtractor(HTMLParser):
 
 
 class _Cell:
-    """A single table cell with text content, extracted links, images, CSS class, and bg color."""
-    __slots__ = ("text", "links", "link_lines", "images", "css_class", "bg_color")
+    """A single table cell with text content, extracted links, and images."""
+    __slots__ = ("text", "links", "link_lines", "images")
 
     def __init__(
         self,
@@ -218,15 +156,11 @@ class _Cell:
         links: list[str] | None = None,
         link_lines: list[int] | None = None,
         images: list[str] | None = None,
-        css_class: str = "",
-        bg_color: str | None = None,
     ) -> None:
         self.text = text
         self.links = links or []
         self.link_lines = link_lines or []
         self.images = images or []
-        self.css_class = css_class
-        self.bg_color = bg_color
 
     def __repr__(self) -> str:
         parts = [f"Cell({self.text!r}"]
@@ -295,7 +229,6 @@ def _cell_from_td(td) -> _Cell:
         links=links,
         link_lines=link_lines,
         images=images,
-        css_class=td.get("class", ""),
     )
 
 
@@ -303,10 +236,7 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     """Fast table extraction via lxml (≈10x quicker than html.parser)."""
     if not html_content.strip():
         return []
-    try:
-        doc = _lxml_html.fromstring(html_content)
-    except etree.ParserError:
-        return []
+    doc = _lxml_html.fromstring(html_content)
     rows: list[list[_Cell]] = []
     for tr in doc.iter("tr"):
         current: list[_Cell] = []
@@ -326,28 +256,27 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     return rows
 
 
-def extract_table(html_content: str, color_map: dict[str, str] | None = None) -> list[list[_Cell]]:
-    """Parse HTML and return all table rows as lists of _Cell.
+def extract_table(html_content: str) -> list[list[_Cell]]:
+    """Parse HTML and return the rows of every <table> as lists of _Cell.
 
-    Uses lxml when available (much faster on large exports), falling back to
-    the stdlib HTMLParser implementation otherwise.
+    Rows from all tables are concatenated in document order (tracker exports
+    render one logical table, occasionally split across elements).
 
-    If *color_map* is provided (from `_extract_class_colors`), each cell's
-    `bg_color` is resolved from its CSS class at construction time.
+    Uses lxml when available (≈10x quicker than html.parser); falls back to
+    the stdlib HTMLParser implementation when lxml is absent or rejects the
+    input — e.g. lxml raises ValueError for str input that starts with an
+    XML declaration (``<?xml …?>``), which some mirrored exports carry.
     """
+    rows: list[list[_Cell]] | None = None
     if _lxml_html is not None:
-        rows = _extract_table_lxml(html_content)
-    else:
+        try:
+            rows = _extract_table_lxml(html_content)
+        except (etree.ParserError, ValueError):
+            rows = None  # malformed for lxml — retry with the lenient stdlib parser
+    if rows is None:
         parser = _TableExtractor()
         parser.feed(html_content)
         rows = parser.rows
-    if not color_map:
-        return rows
-    # Resolve bg_color for every cell whose class is in color_map
-    for row in rows:
-        for cell in row:
-            if cell.css_class and cell.css_class in color_map:
-                cell.bg_color = color_map[cell.css_class]
     return rows
 
 
@@ -1333,6 +1262,26 @@ def _detect_header_row(rows: list[list[_Cell]]) -> tuple[int, dict[str, int]]:
     return 0, col_map
 
 
+def _first_row_image(row: list[_Cell], prefer_idx: int | None = None) -> str | None:
+    """First image URL found in *row* — the cover-art candidate for an
+    auto-created era.
+
+    With *prefer_idx*, that cell's image wins before the left-to-right scan
+    (Travis-style headers embed the art in the name cell). Previously this
+    scan was copy-pasted at three call sites.
+    """
+    if prefer_idx is not None:
+        cell = _get_cell(row, prefer_idx)
+        if cell.images:
+            return cell.images[0]
+    for idx, cell in enumerate(row):
+        if idx == prefer_idx:
+            continue
+        if cell.images:
+            return cell.images[0]
+    return None
+
+
 def _parse_era_header_row(
     row: list[_Cell], col_map: dict[str, int]
 ) -> tuple[Era, bool]:
@@ -1432,8 +1381,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     This is the main entry point for parsing a single tracker.
     """
     # Extract cell background colors from the stylesheet (non-neutral only)
-    color_map = _extract_class_colors(html_content)
-    rows = extract_table(html_content, color_map)
+    rows = extract_table(html_content)
     if not rows:
         return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
 
@@ -1493,7 +1441,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 )
             ):
                 text = filled[0].text.strip().strip("|").strip()
-                notices.append(Notice(text=text, link=None, kind="info"))
+                # Dedupe against header notices and repeated banner rows —
+                # _extract_header_notices has its own seen-set, but this
+                # append site bypasses it.
+                if text.lower() not in {n.text.lower() for n in notices}:
+                    notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
         # Check for era header FIRST (2026-07-20 review: before the section-
@@ -1706,13 +1658,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             name_idx = col_map.get("name", 1)
                             timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                             timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                            # Scan for cover art
-                            _era_art_url_candidate = None
-                            for cell in row:
-                                if cell.images and not _era_art_url_candidate:
-                                    _era_art_url_candidate = cell.images[0]
-                                    break
-                            new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
+                            new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
@@ -1744,13 +1690,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     name_idx = col_map.get("name", 1)
                     timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
                     timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                    # Scan for cover art
-                    _era_art_url_candidate = None
-                    for cell in row:
-                        if cell.images and not _era_art_url_candidate:
-                            _era_art_url_candidate = cell.images[0]
-                            break
-                    new_era = Era(name=row_era, timeline=timeline, art_url=_era_art_url_candidate, sections=[Section()])
+                    new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
                     eras.append(new_era)
                     _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
@@ -1781,17 +1721,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # Create a new era, capture description, and scan for art image.
                     notes_idx = col_map.get("notes", 2)
                     desc_text = _get_cell_text(row, notes_idx)
-                    # Scan cells for cover art (same logic as _is_era_header path)
-                    _era_art_url = None
-                    _name_cell_ml = _get_cell(row, name_col_idx)
-                    if _name_cell_ml.images and name_first_line:
-                        _era_art_url = _name_cell_ml.images[0]
-                    for col_idx, cell in enumerate(row):
-                        if col_idx == name_col_idx:
-                            continue
-                        if cell.images and not _era_art_url:
-                            _era_art_url = cell.images[0]
-                            break
+                    _era_art_url = _first_row_image(row, prefer_idx=name_col_idx)
                     new_era = Era(
                         name=name_first_line,
                         art_url=_era_art_url,
@@ -2089,12 +2019,14 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
 
     avail_text = _get_cell_text(row, col_map.get("available_length", -1))
     quality_text = _get_cell_text(row, col_map.get("quality", -1))
+    streaming_text = _get_cell_text(row, col_map.get("streaming", -1)).strip().lower()
+    streaming = {"yes": True, "no": False}.get(streaming_text)
     rating = None
     if avail_text and "quality" not in col_map:
         # Travis-style trackers fold quality (and a fan star rating) into the
         # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
         avail_text, split_quality, rating = _split_compound_availability(avail_text)
-        quality_text = quality_text or split_quality or ""
+        quality_text = split_quality or ""
 
     version = SongVersion(
         name=title,
@@ -2116,10 +2048,9 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,
         available_length=avail_text or None,
         quality=quality_text or None,
+        streaming=streaming,
         rating=rating,
         links=merged_links,
-        quality_color=_get_cell(row, col_map.get("quality", -1)).bg_color if col_map.get("quality") is not None else None,
-        available_length_color=_get_cell(row, col_map.get("available_length", -1)).bg_color if col_map.get("available_length") is not None else None,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )
@@ -2204,7 +2135,8 @@ def _add_version_to_era(
 
 # Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
 # every entry in it — including the wanted section — is stamped GRAIL.
-# Splitting the combined tab by its internal sections is a known follow-up.
+# Follow-up (tracked in README's roadmap note): split combined tabs by their
+# internal section labels instead of stamping one badge across the whole tab.
 _BADGE_BY_TAB_KIND = {
     "best_of": Badge.BEST,
     "worst_of": Badge.WORST,

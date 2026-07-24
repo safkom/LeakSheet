@@ -3,12 +3,19 @@
 Fetches HTML table data from Google Sheets /htmlview URLs and custom
 tracker domains (e.g. yetracker.net).
 
-Strategy:
-1. Fetch the base htmlview page (JS-rendered, no table)
-2. Extract sheet GIDs from the page
-3. Fetch /htmlview/sheet?headers=true&gid=<GID> for server-rendered HTML with <table>
-4. Extract artist name from <title>
-5. Pass HTML to parser
+Strategy (async pipeline; the sync entry points are thin wrappers over it):
+1. Serve from the parsed-JSON disk cache when fresh.
+2. If the URL carries an explicit GID, try that tab first — unless the
+   workbook's tab listing classifies it as a content tab (Misc etc.), in
+   which case fall through to discovery.
+3. Otherwise fetch the base htmlview page, discover all GIDs plus named tabs,
+   and fetch every candidate concurrently — consuming results in priority
+   order (the "Unreleased" tab first) and cancelling the rest once a winner
+   (most eras, minimum threshold) parses.
+4. Load secondary tabs concurrently: Art (with pHash verification) and every
+   content tab; badge tabs stamp highlights onto existing songs.
+5. Cache both the winning HTML and the parsed result; a size-capped eviction
+   keeps the cache directory bounded.
 """
 
 from __future__ import annotations
@@ -22,12 +29,14 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlparse, urlencode
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+from src.config import USER_AGENT
 from src.models import Artist, TabSection
 from src.parser import (
     apply_art_tab_images,
@@ -46,7 +55,6 @@ from src.parser import (
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Size cap for the sheet HTML + parsed-JSON cache (2026-07-20 review: the
@@ -102,6 +110,9 @@ def _get_sheets_client() -> httpx.AsyncClient:
     if _sheets_client is None or _sheets_client.is_closed:
         _sheets_client = httpx.AsyncClient(
             follow_redirects=True,
+            # Client-level default so a future call site that forgets an
+            # explicit timeout= doesn't silently get httpx's 5s default.
+            timeout=DEFAULT_TIMEOUT,
             headers={"User-Agent": USER_AGENT},
         )
     return _sheets_client
@@ -459,19 +470,6 @@ def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
     return None
 
 
-def _get_misc_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str]]:
-    """Return [(gid, kind)] for Misc / Music Videos tabs, misc first."""
-    tabs: list[tuple[str, str]] = []
-    for gid, name in named_tabs.items():
-        clean = _clean_tab_name(name)
-        if clean in _MISC_TAB_NAMES:
-            tabs.append((gid, "misc"))
-        elif clean in _MUSIC_VIDEO_TAB_NAMES:
-            tabs.append((gid, "music_videos"))
-    tabs.sort(key=lambda pair: 0 if pair[1] == "misc" else 1)
-    return tabs
-
-
 # Kind resolution order for content tabs; earlier entries sort first in the
 # API's tabs list (misc keeps its historical first position).
 _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
@@ -492,10 +490,9 @@ _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
 def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
     """Return [(gid, kind, display_name)] for every parseable content tab.
 
-    Supersets :func:`_get_misc_tabs` with the extra tab kinds (released,
-    best_of, worst_of, stems, other). Tabs not in any keyword set — the main
-    tracker, Art, and the deliberately-excluded non-song tabs — are omitted.
-    Sorted by kind resolution order (misc first), then by gid for stability.
+    Tabs not in any keyword set — the main tracker, Art, and the
+    deliberately-excluded non-song tabs — are omitted. Sorted by kind
+    resolution order (misc first), then by gid for stability.
     """
     order = {kind: i for i, (_, kind) in enumerate(_CONTENT_TAB_KINDS)}
     tabs: list[tuple[str, str, str]] = []
@@ -507,28 +504,6 @@ def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
                 break
     tabs.sort(key=lambda t: (order[t[1]], t[0]))
     return tabs
-
-
-def _infer_artist_from_sheet(html: str) -> str | None:
-    """Try to infer artist name from sheet content (header row era names).
-
-    For multi-sheet workbooks, the page <title> may not match the actual
-    sheet content. This looks at era headers for clues.
-    """
-    # Look for sheet tab names in the HTML
-    # Google Sheets htmlview includes sheet names in the page
-    tab_pattern = re.compile(r'class="[^"]*sheet-tab[^"]*"[^>]*>([^<]+)<', re.I)
-    tabs = tab_pattern.findall(html)
-    if tabs:
-        # The sheet tab name often contains the artist name
-        for tab in tabs:
-            cleaned = tab.strip()
-            for suffix in TITLE_SUFFIXES:
-                if cleaned.endswith(suffix):
-                    cleaned = cleaned[:-len(suffix)].strip()
-            if cleaned and len(cleaned) > 1:
-                return cleaned
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -721,19 +696,26 @@ def stale_parsed_cache_urls(limit: int) -> list[str]:
     return [url for _, url in candidates[:limit]]
 
 
-def clear_cache() -> int:
+def clear_cache() -> tuple[int, int]:
     """Remove all cached files (sheet HTML/parsed JSON and resized images).
 
-    Returns number of files deleted.
+    Returns ``(cleared, skipped)``. A file that can't be unlinked
+    (permissions, a race with concurrent eviction) is skipped and logged
+    rather than aborting the sweep partway through.
     """
     if not CACHE_DIR.exists():
-        return 0
-    count = 0
+        return 0, 0
+    cleared = 0
+    skipped = 0
     for f in CACHE_DIR.iterdir():
         if f.is_file():
-            f.unlink()
-            count += 1
-    return count
+            try:
+                f.unlink()
+                cleared += 1
+            except OSError as exc:
+                skipped += 1
+                logger.warning("cache clear: could not delete %s: %s", f.name, exc)
+    return cleared, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -768,12 +750,6 @@ def get_cached_age(url: str) -> float | None:
         except (json.JSONDecodeError, OSError):
             pass
     return None
-
-
-def get_cached_parsed_relaxed(url: str, max_age: float = STALE_CACHE_TTL) -> Artist | None:
-    """Return cached parsed Artist if within max_age, ignoring default TTL."""
-    url_norm = _normalize_url(url)
-    return _get_cached_parsed(url_norm, cache_ttl=max_age)
 
 
 def get_cached_parsed_bytes(
@@ -823,32 +799,21 @@ async def async_get_cached_age(url: str) -> float | None:
     return await asyncio.to_thread(get_cached_age, url)
 
 
-async def async_get_cached_parsed_relaxed(
-    url: str, max_age: float = STALE_CACHE_TTL
-) -> Artist | None:
-    """Async variant of get_cached_parsed_relaxed."""
-    return await asyncio.to_thread(get_cached_parsed_relaxed, url, max_age)
-
-
 # ---------------------------------------------------------------------------
-# Shared parse helpers (used by both sync and async paths)
+# Shared parse helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_artist_name(html: str, title: str, artist_name_override: str | None) -> str:
-    """Determine the artist name from page HTML and title, with an optional override.
+def _resolve_artist_name(title: str, artist_name_override: str | None) -> str:
+    """Determine the artist name, with an optional caller override.
 
     Priority:
     1. ``artist_name_override`` if provided.
-    2. Name scraped directly from the sheet (first non-header name-column value).
-    3. Name inferred from the page ``<title>`` after stripping common suffixes.
+    2. Name inferred from the page ``<title>`` after stripping common
+       suffixes/prefixes (see ``_infer_artist_name``).
     """
-    name = artist_name_override
-    if not name:
-        name = _infer_artist_name(title)
-        sheet_artist = _infer_artist_from_sheet(html)
-        if sheet_artist and sheet_artist.lower() != name.lower():
-            name = sheet_artist
-    return name
+    if artist_name_override:
+        return artist_name_override
+    return _infer_artist_name(title)
 
 
 def _prioritize_gids(
@@ -887,6 +852,25 @@ def _prioritize_gids(
 # Public API
 # ---------------------------------------------------------------------------
 
+def _run_sync(coro_factory):
+    """Run an async-pipeline coroutine from synchronous code (CLI scripts).
+
+    Creates a private event loop via ``asyncio.run`` and closes the shared
+    AsyncClient inside that loop afterwards — the pooled client is loop-bound
+    once used, so leaving it open would break the next sync call. Never call
+    this from async code; use the ``async_*`` functions directly.
+    """
+    async def _runner():
+        global _sheets_client
+        try:
+            return await coro_factory()
+        finally:
+            if _sheets_client is not None and not _sheets_client.is_closed:
+                await _sheets_client.aclose()
+            _sheets_client = None
+    return asyncio.run(_runner())
+
+
 def fetch_sheet_html(
     url: str,
     *,
@@ -895,105 +879,10 @@ def fetch_sheet_html(
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
 ) -> tuple[str, str]:
-    """Fetch the HTML table content from a Google Sheets tracker URL.
-
-    Args:
-        url: The tracker URL (Google Sheets htmlview or custom domain).
-        gid: Specific sheet GID. If None, auto-discovered from the page.
-        timeout: HTTP request timeout in seconds.
-        cache_ttl: Cache time-to-live in seconds (0 to disable).
-        use_cache: Whether to use file-based caching.
-
-    Returns:
-        Tuple of (html_content, page_title).
-
-    Raises:
-        ValueError: If no table data can be found.
-        httpx.HTTPError: On network errors.
-    """
-    # Extract GID from original URL BEFORE normalization strips query/fragment
-    if not gid:
-        gid = _extract_gid_from_url(url)
-
-    url = _normalize_url(url)
-
-    # Check cache first
-    if use_cache and cache_ttl > 0:
-        cached = _get_cached(url, cache_ttl)
-        if cached is not None:
-            return cached
-
-    client = httpx.Client(
-        follow_redirects=True,
-        timeout=timeout,
-        headers={"User-Agent": USER_AGENT},
-    )
-
-    try:
-        if gid:
-            # Direct fetch with known GID
-            sheet_url = _build_sheet_html_url(url, gid)
-            r = client.get(sheet_url)
-            r.raise_for_status()
-            title_match = TITLE_PATTERN.search(r.text)
-            title = title_match.group(1) if title_match else ""
-            if use_cache:
-                _set_cache(url, r.text, title)
-            return r.text, title
-
-        # Step 1: Fetch the base page to discover GIDs
-        r = client.get(url)
-        r.raise_for_status()
-        base_html = r.text
-        title_match = TITLE_PATTERN.search(base_html)
-        title = title_match.group(1) if title_match else ""
-
-        # If the base page already has tables (local file or direct sheet), return it
-        if "<table" in base_html.lower():
-            if use_cache:
-                _set_cache(url, base_html, title)
-            return base_html, title
-
-        # Step 2: Discover GIDs
-        gids = _discover_gids(base_html)
-
-        if not gids:
-            # Try gid=0 as fallback
-            gids = ["0"]
-
-        # Step 3: Fetch the sheet HTML with the first GID
-        # Try each GID until we find one that works
-        last_error = None
-        for try_gid in gids:
-            try:
-                sheet_url = _build_sheet_html_url(url, try_gid)
-                r = client.get(sheet_url)
-                if r.status_code == 200 and "<table" in r.text.lower():
-                    if use_cache:
-                        _set_cache(url, r.text, title)
-                    return r.text, title
-            except (httpx.HTTPError, ValueError, KeyError) as e:
-                last_error = e
-                continue
-
-        raise NoTablesError(
-            f"No valid sheet data found at {url}. "
-            f"Tried GIDs: {gids}. Last error: {last_error}"
-        )
-    except NoTablesError:
-        raise
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
-    finally:
-        client.close()
+    """Synchronous wrapper around :func:`async_fetch_sheet_html` (CLI scripts)."""
+    return _run_sync(lambda: async_fetch_sheet_html(
+        url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+    ))
 
 
 def fetch_and_parse(
@@ -1006,226 +895,16 @@ def fetch_and_parse(
     use_cache: bool = True,
     write_cache: bool | None = None,
 ) -> Artist:
-    """Fetch a tracker URL and parse it into an Artist model.
+    """Synchronous wrapper around :func:`async_fetch_and_parse` (CLI scripts).
 
-    Args:
-        url: The tracker URL.
-        artist_name: Override artist name (if None, inferred from page title).
-        gid: Specific sheet GID (if None, auto-discovered).
-        timeout: HTTP timeout in seconds.
-        cache_ttl: Cache TTL in seconds.
-        use_cache: Whether to read from the file-based cache.
-        write_cache: Whether to write to the cache; defaults to ``use_cache``.
-            Force-refresh sets ``use_cache=False`` but ``write_cache=True`` so
-            the fresh parse still repopulates the cache for the next reader.
-
-    Returns:
-        Parsed Artist object.
+    This used to be a separate ~340-line sync pipeline that had drifted from
+    the async one (it ignored ``artist_name`` on one fallback branch and never
+    fetched content tabs). Delegating guarantees parity.
     """
-    if write_cache is None:
-        write_cache = use_cache
-    # Extract GID from original URL BEFORE normalization strips query/fragment
-    if not gid:
-        gid = _extract_gid_from_url(url)
-    url_norm = _normalize_url(url)
-
-    # Check parsed result cache first (skip entire parse pipeline)
-    if use_cache and cache_ttl > 0:
-        cached_artist = _get_cached_parsed(url_norm, cache_ttl)
-        if cached_artist is not None:
-            cached_artist.source_url = url
-            return cached_artist
-
-    # The first GID with tables might be a landing page (Doja Cat, Sabrina
-    # Carpenter, etc.), so we try multiple GIDs and pick the best result.
-    client = httpx.Client(
-        follow_redirects=True,
-        timeout=timeout,
-        headers={"User-Agent": USER_AGENT},
-    )
-
-    try:
-        # If a specific GID was requested, try it first.
-        # If it produces 0 eras, fall through to GID discovery.
-        if gid:
-            try:
-                html, title = fetch_sheet_html(url, gid=gid, timeout=timeout,
-                                                cache_ttl=cache_ttl, use_cache=use_cache)
-                # Per-GID sub-pages don't embed the workbook's tab listing
-                # (only the base /htmlview page does), so a link straight to
-                # the Misc/Music-Videos tab (e.g. copied from the browser
-                # while viewing it) can only be told apart from the main tab
-                # by asking the base page. This matters because parse_sheet's
-                # Era/Name/Available/Quality columns are similar enough to
-                # the misc-tab grammar that it can extract a plausible-
-                # looking but wrong "eras" list from that tab.
-                named_tabs: dict[str, str] = {}
-                try:
-                    base_resp = client.get(url_norm)
-                    base_resp.raise_for_status()
-                    named_tabs = _discover_named_tabs(base_resp.text)
-                except httpx.HTTPError:
-                    pass  # Can't tell — fall back to trusting parse_sheet below
-                gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
-                if not gid_is_misc_tab:
-                    name = _resolve_artist_name(html, title, artist_name)
-                    artist = parse_sheet(html, name)
-                    if artist.eras:
-                        # Before returning, check if this page reveals a better
-                        # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
-                        unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
-                        if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                            artist.source_url = url
-                            if write_cache:
-                                _set_cached_parsed(url_norm, artist)
-                            return artist
-                        # A better "Unreleased" tab exists — fall through to full discovery
-                    # GID produced 0 eras — fall through to GID discovery below
-                # else: gid is the Misc/Music-Videos tab itself — skip
-                # straight to full discovery below.
-            except (FetchError, httpx.HTTPError, ValueError):
-                pass  # GID failed — fall through to GID discovery
-
-        # Step 1: Fetch the base page to discover GIDs
-        r = client.get(url_norm)
-        r.raise_for_status()
-        base_html = r.text
-        title_match = TITLE_PATTERN.search(base_html)
-        title = title_match.group(1) if title_match else ""
-
-        # If the base page already has tables, try parsing directly
-        if "<table" in base_html.lower():
-            name = _resolve_artist_name(base_html, title, artist_name)
-            artist = parse_sheet(base_html, name)
-            if artist.eras:
-                artist.source_url = url
-                if write_cache:
-                    _set_cache(url_norm, base_html, title)
-                    _set_cached_parsed(url_norm, artist)
-                return artist
-
-        # Step 2: Discover GIDs and prioritize tracker tab
-        gids = _discover_gids(base_html)
-        if not gids:
-            gids = ["0"]
-
-        # Content tabs are only fetched on the async path; the sync path
-        # (offline tools, tests) skips them.
-        gids, art_gid, unreleased_gid, _content_tabs = _prioritize_gids(base_html, gids)
-
-        # Step 3: Try each GID, pick the one that produces the most eras
-        best_artist: Artist | None = None
-        best_eras = 0
-        best_html = ""
-
-        for try_gid in gids:
-            try:
-                sheet_url = _build_sheet_html_url(url_norm, try_gid)
-                logger.debug("Trying GID %s (%s)", try_gid, sheet_url)
-
-                # Check cache for this specific GID URL
-                if use_cache and cache_ttl > 0:
-                    cached = _get_cached(sheet_url, cache_ttl)
-                    if cached is not None:
-                        sheet_html, _ = cached
-                    else:
-                        resp = client.get(sheet_url)
-                        if resp.status_code != 200 or "<table" not in resp.text.lower():
-                            continue
-                        sheet_html = resp.text
-                        if use_cache:
-                            _set_cache(sheet_url, sheet_html, title)
-                else:
-                    resp = client.get(sheet_url)
-                    if resp.status_code != 200 or "<table" not in resp.text.lower():
-                        continue
-                    sheet_html = resp.text
-
-                name = _resolve_artist_name(sheet_html, title, artist_name)
-                candidate = parse_sheet(sheet_html, name)
-
-                n_eras = len(candidate.eras)
-                n_songs = sum(
-                    len(section.songs)
-                    for era in candidate.eras
-                    for section in era.sections
-                )
-
-                logger.debug("GID %s → %d eras, %d songs", try_gid, n_eras, n_songs)
-                if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
-                    best_eras = n_eras
-                    best_artist = candidate
-                    best_html = sheet_html
-
-                # Unreleased tab wins as long as it has at least 1 era —
-                # prevents Recents/landing tabs from outcompeting it on era count.
-                if try_gid == unreleased_gid and n_eras >= 1:
-                    logger.debug("Selected unreleased GID %s (%d eras)", try_gid, n_eras)
-                    break
-                # Otherwise stop once we have a solid result (≥5 eras)
-                elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
-                    break
-
-            except (httpx.HTTPError, ValueError, KeyError):
-                logger.debug("GID %s fetch/parse failed, trying next", try_gid)
-                continue
-
-        if best_artist and best_eras > 0:
-            best_artist.source_url = url
-            # Fetch Art tab and upgrade era.art_url to high-quality images
-            if art_gid:
-                try:
-                    art_sheet_url = _build_sheet_html_url(url_norm, art_gid)
-                    art_cached = (
-                        _get_cached(art_sheet_url, cache_ttl)
-                        if use_cache and cache_ttl > 0
-                        else None
-                    )
-                    if art_cached:
-                        art_html = art_cached[0]
-                    else:
-                        art_resp = client.get(art_sheet_url)
-                        if art_resp.status_code == 200 and "<table" in art_resp.text.lower():
-                            art_html = art_resp.text
-                            if use_cache:
-                                _set_cache(art_sheet_url, art_html, title)
-                        else:
-                            art_html = ""
-                    if art_html:
-                        art_map = parse_art_tab(art_html)
-                        if art_map:
-                            apply_art_tab_images(best_artist, art_map)
-                except (httpx.HTTPError, ValueError, KeyError):
-                    pass  # Art tab fetch failed — not critical, keep existing art_url
-            # Cache the best result under the original URL
-            if write_cache and best_html:
-                _set_cache(url_norm, best_html, title)
-            if write_cache:
-                _set_cached_parsed(url_norm, best_artist)
-            return best_artist
-
-        # Nothing worked — return whatever the first GID gave us
-        html, title = fetch_sheet_html(url, timeout=timeout,
-                                        cache_ttl=cache_ttl, use_cache=use_cache)
-        name = _resolve_artist_name(html, title)
-        artist = parse_sheet(html, name)
-        artist.source_url = url
-        if write_cache:
-            _set_cached_parsed(url_norm, artist)
-        return artist
-
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
-    finally:
-        client.close()
+    return _run_sync(lambda: async_fetch_and_parse(
+        url, artist_name=artist_name, gid=gid, timeout=timeout,
+        cache_ttl=cache_ttl, use_cache=use_cache, write_cache=write_cache,
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1260,6 +939,26 @@ class InvalidURLError(FetchError):
 class AccessDeniedError(FetchError):
     """Sheet is private, banned, or access-restricted (HTTP 403)."""
     pass
+
+
+def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
+    """Map an httpx exception onto the typed FetchError hierarchy.
+
+    Single source for the mapping both async entry points use — this block
+    used to be copy-pasted per function and drifted between copies.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        raise NetworkError(f"Request timed out: {exc}") from exc
+    if isinstance(exc, httpx.ConnectError):
+        raise NetworkError(f"Cannot connect to {url}: {exc}") from exc
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code == 403:
+            raise AccessDeniedError(f"Access denied (403): {url}") from exc
+        if code == 404:
+            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        raise NetworkError(f"HTTP {code}: {exc}") from exc
+    raise exc
 
 
 # ---------------------------------------------------------------------------
@@ -1334,16 +1033,8 @@ async def async_fetch_sheet_html(
             f"Tried GIDs: {gids}. Last error: {last_error}"
         )
 
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+    except httpx.HTTPError as e:
+        _raise_fetch_error(e, url)
 
 
 async def _verify_art_images_async(
@@ -1493,8 +1184,9 @@ async def _load_secondary_tabs(
                     if art_map:
                         apply_art_tab_images(artist, art_map)
         except Exception as e:
-            # Art tab optional — keep existing art_url on failure
-            logger.debug("Art tab load failed for %s: %s", url_norm[:80], e)
+            # Art tab optional — keep existing art_url on failure. WARNING so
+            # a systematically broken tab is visible at default log level.
+            logger.warning("Art tab load failed for %s: %s", url_norm[:80], e)
 
     tab_results: dict[str, list] = {}
 
@@ -1509,8 +1201,8 @@ async def _load_secondary_tabs(
                         parse_misc_tab, tab_html, kind
                     )
         except Exception as e:
-            # Content tabs optional
-            logger.debug("Content tab %s load failed: %s", gid_val, e)
+            # Content tabs optional; WARNING keeps systematic failures visible.
+            logger.warning("Content tab %s load failed: %s", gid_val, e)
 
     secondary = [_load_tab(g, k) for g, k, _n in content_tabs]
     if art_gid:
@@ -1609,7 +1301,7 @@ async def async_fetch_and_parse(
                 pass  # Can't tell — fall back to trusting parse_sheet below
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
             if not gid_is_misc_tab:
-                name = _resolve_artist_name(html, title, artist_name)
+                name = _resolve_artist_name(title, artist_name)
                 with t.phase("parse"):
                     artist = await asyncio.to_thread(parse_sheet, html, name)
                 if artist.eras:
@@ -1651,7 +1343,7 @@ async def async_fetch_and_parse(
 
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():
-            name = _resolve_artist_name(base_html, title, artist_name)
+            name = _resolve_artist_name(title, artist_name)
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name)
             if artist.eras:
@@ -1694,7 +1386,7 @@ async def async_fetch_and_parse(
                     continue
                 result_gid, sheet_html = result
                 try:
-                    name = _resolve_artist_name(sheet_html, title, artist_name)
+                    name = _resolve_artist_name(title, artist_name)
                     with t.phase("parse"):
                         candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
                     n_eras = len(candidate.eras)
@@ -1746,20 +1438,12 @@ async def async_fetch_and_parse(
         html, title = await async_fetch_sheet_html(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )
-        name = _resolve_artist_name(html, title, artist_name)
+        name = _resolve_artist_name(title, artist_name)
         artist = await asyncio.to_thread(parse_sheet, html, name)
         artist.source_url = url
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)
         return artist
 
-    except httpx.TimeoutException as e:
-        raise NetworkError(f"Request timed out: {e}") from e
-    except httpx.ConnectError as e:
-        raise NetworkError(f"Cannot connect to {url}: {e}") from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 403:
-            raise AccessDeniedError(f"Access denied (403): {url}") from e
-        if e.response.status_code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from e
-        raise NetworkError(f"HTTP {e.response.status_code}: {e}") from e
+    except httpx.HTTPError as e:
+        _raise_fetch_error(e, url)

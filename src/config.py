@@ -5,6 +5,11 @@ from pathlib import Path
 # Project root directory
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+# Shared User-Agent for all backend HTTP traffic (sheet fetches, stream
+# proxying, metadata lookups). The image proxy uses its own browser-like UA —
+# see api._get_proxy_client.
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+
 # Default trackers directory
 TRACKERS_DIR = ROOT_DIR / "Trackers"
 
@@ -124,7 +129,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "mirrors": "alt_links",
     "mirror": "alt_links",
 
-    # Streaming (treated as availability info or skipped)
+    # Streaming availability (Yes/No) → SongVersion.streaming
     "streaming": "streaming",
     "streaming?": "streaming",
     "in circulation": "available_length",  # Yung Lean

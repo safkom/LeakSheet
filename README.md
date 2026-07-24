@@ -123,6 +123,8 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
 | `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata` |
 | `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
+| `LEAKSHEET_PREWARM_INTERVAL` | `3600` | Seconds between prewarm passes |
+| `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 
 > The backend proxies audio and images server-side. It re-validates the final host after
@@ -178,10 +180,14 @@ the census harness stays importable under `tests/tools/`):
 |---|---|
 | `tests/tools/census.py` | Per-tracker content census + gzipped live snapshots (accuracy baselines) |
 | `scripts/tools/trackerhub_sweep.py` | Sweep every up-to-date TrackerHub tracker: health, columns, tabs, date formats |
+| `scripts/tools/verify_live.py` | Parse a live tracker and print a health summary |
+| `scripts/tools/quick_inspect.py` | Quick parse output for the known local trackers |
 | `scripts/tools/dump_raw_table.py` | Dump raw HTML table rows |
 | `scripts/tools/inspect_eras.py` | Show eras with song/version counts |
 | `scripts/tools/inspect_songs.py` | Inspect parsed songs with filters |
 | `scripts/tools/diff_trackers.py` | Compare column layouts across trackers |
+| `scripts/tools/analyze_structure.py` | Dump era-stats / global-stats / image structure of a live tracker |
+| `scripts/tools/debug_zero_eras.py` / `deep_investigate.py` / `investigate_mismatch.py` | Row-level drill-downs for era-routing regressions |
 
 ```bash
 python3 -m tests.tools.census --fixtures          # offline census of local dumps

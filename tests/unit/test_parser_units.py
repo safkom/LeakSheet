@@ -882,6 +882,18 @@ class TestExtractTable:
         assert rows[1][2].text.strip() == "note text"
         assert rows[1][3].text.strip() == "CD Quality"
 
+    def test_xml_declaration_falls_back_to_stdlib_parser(self):
+        """lxml raises ValueError for str input carrying an encoding
+        declaration; extract_table must fall back to the stdlib parser
+        instead of propagating (seen on mirrored exports)."""
+        html = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<html><body><table><tr><td>Era</td><td>Name</td></tr></table></body></html>"
+        )
+        rows = extract_table(html)
+        assert rows[0][0].text == "Era"
+        assert rows[0][1].text == "Name"
+
 
 class TestColumnHeaderNormalization:
     """2026-07-20 sweep findings: colon-suffixed headers ('Track Titles:',

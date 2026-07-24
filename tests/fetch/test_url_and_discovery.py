@@ -17,7 +17,6 @@ from src.fetcher import (
     _extract_sheet_id,
     _get_art_tab_gid,
     _get_content_tabs,
-    _get_misc_tabs,
     _get_unreleased_tab_gid,
     _normalize_url,
     _prioritize_gids,
@@ -82,7 +81,7 @@ class TestTabDiscovery:
         tabs = _discover_named_tabs(self.BASE)
         assert _get_unreleased_tab_gid(tabs) == "100"
         assert _get_art_tab_gid(tabs) == "300"        # emoji stripped before match
-        assert _get_misc_tabs(tabs) == [("200", "misc")]
+        assert _get_content_tabs(tabs) == [("200", "misc", "Misc")]
 
     def test_prioritize_puts_unreleased_first_and_drops_secondary(self):
         gids = _discover_gids(self.BASE)
@@ -217,6 +216,3 @@ class TestContentTabClassification:
 
     def test_main_and_art_tabs_not_content(self):
         assert self._tabs(g1="Unreleased", g2="Art") == []
-
-    def test_legacy_get_misc_tabs_shape_unchanged(self):
-        assert _get_misc_tabs({"1": "Misc.", "2": "📻 Released"}) == [("1", "misc")]

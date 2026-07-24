@@ -58,12 +58,11 @@ class TestMainTabAttributes:
         assert debut.name == "Debut Era"
         assert [s.base_name for s in debut.songs] == ["Sunrise", "Nightfall", "Echoes"]
 
-    def test_badge_quality_and_color(self, main):
+    def test_badge_and_quality(self, main):
         sunrise = main.eras[0].songs[0]
         v = sunrise.primary
         assert sunrise.badge == Badge.BEST          # ⭐ prefix
         assert v.quality == "High Quality"
-        assert v.quality_color == "#4caf50"          # from the .s10 CSS class
         assert v.available_length == "Full"
         assert v.track_length == "3:14"
         assert v.leak_date == "2019-01-01"
@@ -245,3 +244,79 @@ class TestEraRoutingFixture:
 
     def test_passes_health_invariants(self, routing):
         assert_healthy(routing)
+
+
+# ---------------------------------------------------------------------------
+# Streaming column (2026-07-24 review: value was silently dropped before)
+# ---------------------------------------------------------------------------
+
+class TestStreamingColumn:
+    HTML = """
+    <table>
+      <tr><td>Era</td><td>Name</td><td>Quality</td><td>Streaming</td><td>Links</td></tr>
+      <tr><td>Neon Nights</td><td>Glass City</td><td>CD Quality</td><td>Yes</td><td></td></tr>
+      <tr><td>Neon Nights</td><td>Static Dreams</td><td>CD Quality</td><td>No</td><td></td></tr>
+      <tr><td>Neon Nights</td><td>Blank Tape</td><td>CD Quality</td><td></td><td></td></tr>
+    </table>
+    """
+
+    def test_streaming_yes_no_maps_to_song_version(self):
+        artist = parse_sheet(self.HTML, "SynthWave")
+        songs = {
+            s.base_name: s
+            for e in artist.eras
+            for sec in e.sections
+            for s in sec.songs
+        }
+        assert songs["Glass City"].versions[0].streaming is True
+        assert songs["Static Dreams"].versions[0].streaming is False
+        assert songs["Blank Tape"].versions[0].streaming is None
+
+    def test_streaming_column_is_not_reported_dropped(self):
+        artist = parse_sheet(self.HTML, "SynthWave")
+        assert "Streaming" not in artist.parse_metadata.dropped_columns
+
+
+# ---------------------------------------------------------------------------
+# Notice dedupe — the pre-era banner append site must not duplicate notices
+# ---------------------------------------------------------------------------
+
+class TestNoticeDedupe:
+    def test_repeated_banner_rows_produce_one_notice(self):
+        html = """
+        <table>
+          <tr><td>Era</td><td>Name</td><td>Quality</td></tr>
+          <tr><td>| Last Updated: 2026-01-01 | Hover over the headers for info |</td><td></td><td></td></tr>
+          <tr><td>| Last Updated: 2026-01-01 | Hover over the headers for info |</td><td></td><td></td></tr>
+          <tr><td>Neon Nights</td><td>Glass City</td><td>CD Quality</td></tr>
+        </table>
+        """
+        artist = parse_sheet(html, "SynthWave")
+        banner = [n for n in artist.notices if "last updated" in n.text.lower()]
+        assert len(banner) == 1
+
+
+# ---------------------------------------------------------------------------
+# Wire payload (2026-07-24 review): dead per-version color fields are gone;
+# era stats stay serialized because cache bytes ARE the wire bytes and the
+# health harness reads stats off cache-hit artists (see Era.dict comment)
+# ---------------------------------------------------------------------------
+
+class TestWirePayload:
+    def test_color_fields_removed_from_versions(self, main):
+        payload = main.model_dump()
+        version = payload["eras"][0]["sections"][0]["songs"][0]["versions"][0]
+        for key in ("quality_color", "available_length_color"):
+            assert key not in version, f"{key} was removed from the model"
+
+    def test_era_stats_survive_the_cache_round_trip(self, main):
+        # The parsed-JSON cache stores model_dump() and the API serves those
+        # raw bytes; stats must survive dump → validate or the starved-era
+        # health check goes blind on cache hits.
+        from src.models import Artist
+        reloaded = Artist.model_validate(main.model_dump())
+        era_with_stats = next((e for e in main.eras if e.stats is not None), None)
+        if era_with_stats is not None:
+            match = next(e for e in reloaded.eras if e.name == era_with_stats.name)
+            assert match.stats == era_with_stats.stats
+            assert match.stats_raw == era_with_stats.stats_raw
