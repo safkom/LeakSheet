@@ -8,7 +8,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     let sourceUrl: String?
     let eras: [Era]
     let trackerStats: TrackerStats?
-    let parseMetadata: ParseMetadata?
     let notices: [Notice]?
     let totalSongs: Int?
     let totalVersions: Int?
@@ -33,7 +32,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
         case name, slug, eras, notices, tabs
         case sourceUrl = "source_url"
         case trackerStats = "tracker_stats"
-        case parseMetadata = "parse_metadata"
         case totalSongs = "total_songs"
         case totalVersions = "total_versions"
         case miscEntries = "misc_entries"
@@ -55,10 +53,7 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
     let altNames: [String]?
     let description: String?
     let timeline: [TimelineEvent]?
-    let statsRaw: String?
-    let stats: EraStats?
     let artUrl: String?
-    let highlightedProducers: [String]?
     let sections: [Section]?
     let songCount: Int?
     let versionCount: Int?
@@ -78,11 +73,9 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, description, timeline, stats, sections
+        case name, description, timeline, sections
         case altNames = "alt_names"
-        case statsRaw = "stats_raw"
         case artUrl = "art_url"
-        case highlightedProducers = "highlighted_producers"
         case songCount = "song_count"
         case versionCount = "version_count"
     }
@@ -124,11 +117,6 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     let songKey: String?
     let versions: [SongVersion]
     let badge: String?
-    let availableLength: String?
-    let quality: String?
-    let trackLength: String?
-    let leakDate: String?
-    let fileDate: String?
 
     var id: String { baseName }
 
@@ -176,13 +164,9 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case versions, badge, quality
+        case versions, badge
         case baseName = "base_name"
         case songKey = "song_key"
-        case availableLength = "available_length"
-        case trackLength = "track_length"
-        case leakDate = "leak_date"
-        case fileDate = "file_date"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -203,11 +187,7 @@ extension Song {
         let kept = versions.filter(filter)
         guard !kept.isEmpty else { return nil }
         // Uses the synthesized memberwise initializer
-        return Song(
-            baseName: baseName, songKey: songKey, versions: kept, badge: badge,
-            availableLength: availableLength, quality: quality,
-            trackLength: trackLength, leakDate: leakDate, fileDate: fileDate
-        )
+        return Song(baseName: baseName, songKey: songKey, versions: kept, badge: badge)
     }
 }
 
@@ -241,6 +221,8 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let leakDate: String?
     let availableLength: String?
     let quality: String?
+    /// Streaming Yes/No from a main-tab Streaming column (backend 2026-07-24).
+    let streaming: Bool?
     let links: [String]?
     let dateOfRecording: String?
     let type: String?
@@ -308,7 +290,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, links, type, sources, rating
+        case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, streaming, links, type, sources, rating
         case creditedArtists = "credited_artists"
         case versionTag = "version_tag"
         case altTitles = "alt_titles"
@@ -386,6 +368,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
             leakDate: date,
             availableLength: available,
             quality: quality,
+            streaming: streaming,
             links: links,
             dateOfRecording: nil,
             type: entryType,
@@ -442,33 +425,12 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
     }
 }
 
-// MARK: - EraStats
-
-nonisolated struct EraStats: Codable, Hashable, Sendable {
-    let ogFiles: Int?
-    let full: Int?
-    let tagged: Int?
-    let partial: Int?
-    let snippets: Int?
-    let stemBounces: Int?
-    let unavailable: Int?
-    let total: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case full, tagged, partial, snippets, unavailable, total
-        case ogFiles = "og_files"
-        case stemBounces = "stem_bounces"
-    }
-}
-
 // MARK: - TrackerStats
 
 nonisolated struct TrackerStats: Codable, Hashable, Sendable {
     // Links
-    let totalLinks: Int?
     let missingLinks: Int?
     let sourcesNeeded: Int?
-    let notAvailableLinks: Int?
     // Quality
     let lossless: Int?
     let cdQuality: Int?
@@ -477,7 +439,6 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
     let recordings: Int?
     let notAvailableQuality: Int?
     // Availability
-    let totalFull: Int?
     let ogFiles: Int?
     let stemBounces: Int?
     let full: Int?
@@ -494,39 +455,16 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case lossless, full, tagged, partial, snippets, unavailable, recordings, special, wanted, grails
-        case totalLinks = "total_links"
         case missingLinks = "missing_links"
         case sourcesNeeded = "sources_needed"
-        case notAvailableLinks = "not_available_links"
         case cdQuality = "cd_quality"
         case highQuality = "high_quality"
         case lowQuality = "low_quality"
         case notAvailableQuality = "not_available_quality"
-        case totalFull = "total_full"
         case ogFiles = "og_files"
         case stemBounces = "stem_bounces"
         case bestOf = "best_of"
         case worstOf = "worst_of"
-    }
-}
-
-// MARK: - ParseMetadata
-
-nonisolated struct ParseMetadata: Codable, Hashable, Sendable {
-    let totalRows: Int?
-    let songRows: Int?
-    let skippedRows: Int?
-    let unmatchedRows: [String]?
-    let footerRows: Int?
-    let fuzzyMatchedRows: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case totalRows = "total_rows"
-        case songRows = "song_rows"
-        case skippedRows = "skipped_rows"
-        case unmatchedRows = "unmatched_rows"
-        case footerRows = "footer_rows"
-        case fuzzyMatchedRows = "fuzzy_matched_rows"
     }
 }
 
@@ -537,7 +475,10 @@ nonisolated struct Notice: Codable, Identifiable, Hashable, Sendable {
     let link: String?
     let kind: String?
 
-    var id: String { text }
+    /// Composite identity: two notices with the same text but different kind
+    /// or link must not collide in a ForEach (SwiftUI silently drops
+    /// duplicate IDs, losing the second banner).
+    var id: String { "\(kind ?? "info")::\(text)::\(link ?? "")" }
 
     var isAlert: Bool { kind == "alert" }
 }
@@ -560,13 +501,11 @@ nonisolated struct DiscoveryArtist: Codable, Identifiable, Sendable {
     let credit: String?
     let best: Bool?
     let upToDate: Bool?
-    let workingLinks: Bool?
 
     var id: String { url }
 
     enum CodingKeys: String, CodingKey {
         case name, url, credit, best
         case upToDate = "up_to_date"
-        case workingLinks = "working_links"
     }
 }

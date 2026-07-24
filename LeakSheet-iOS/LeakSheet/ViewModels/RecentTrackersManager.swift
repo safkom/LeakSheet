@@ -97,15 +97,6 @@ final class RecentTrackersManager {
         save()
     }
 
-    /// Removes the entry with the given identity (`RecentTracker.id`) —
-    /// matching on `id` directly, rather than recomputing a normalized key
-    /// from a raw sourceUrl, keeps this in lockstep with `saveTracker` and
-    /// `deduplicated`, which both key on `id` too.
-    func remove(id: String) {
-        trackers.removeAll { $0.id == id }
-        save()
-    }
-
     // MARK: - Identity & dedup
 
     nonisolated static func identityKey(sourceUrl: String, slug: String) -> String {

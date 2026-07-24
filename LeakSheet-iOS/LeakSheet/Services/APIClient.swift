@@ -21,7 +21,6 @@ actor APIClient {
     }
 
     private static var sheetEndpoint: URL { makeEndpoint("sheet") }
-    private static var cacheClearEndpoint: URL { makeEndpoint("cache/clear") }
 
     private static func makeEndpoint(_ path: String) -> URL {
         if let url = URL(string: "\(baseURL)/\(path)") {
@@ -267,19 +266,6 @@ actor APIClient {
         try JSONDecoder().decode([DiscoveryArtist].self, from: data)
     }
 
-    // MARK: - Stream URL
-
-    nonisolated func streamURL(for originalLink: String) -> URL? {
-        Self._streamURL(for: originalLink)
-    }
-
-    private nonisolated static func _streamURL(for originalLink: String) -> URL? {
-        guard StreamResolver.isStreamableURL(originalLink),
-              let encoded = originalLink.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-        else { return nil }
-        return URL(string: "\(baseURL)/stream?url=\(encoded)")
-    }
-
     /// Strip the optional `W/` weak prefix and surrounding quotes from an
     /// HTTP ETag header value, preserving inner content. Returns nil when the
     /// header is missing or empty.
@@ -297,27 +283,6 @@ actor APIClient {
         try? JSONDecoder().decode(ErrorResponse.self, from: data)
     }
 
-    // MARK: - Clear Cache
-
-    func clearCache() async throws -> Int {
-        var request = URLRequest(url: Self.cacheClearEndpoint)
-        request.httpMethod = "POST"
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.httpError(status: 0, message: "Unexpected response type")
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            throw APIError.httpError(status: httpResponse.statusCode, message: "Cache clear failed")
-        }
-
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let cleared = json["cleared"] as? Int {
-            return cleared
-        }
-        return 0
-    }
 }
 
 // MARK: - Errors
@@ -326,14 +291,12 @@ enum APIError: LocalizedError, Sendable {
     case invalidURL
     case notModified(etag: String?)
     case httpError(status: Int, message: String)
-    case decodingError
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: "Invalid URL"
         case .notModified: "Not modified"
         case .httpError(_, let message): message
-        case .decodingError: "Failed to decode response"
         }
     }
 }

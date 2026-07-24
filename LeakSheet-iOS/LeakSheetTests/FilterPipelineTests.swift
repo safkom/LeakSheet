@@ -20,24 +20,20 @@ struct FilterPipelineTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: altTitles,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: leakDate,
-            availableLength: available, quality: quality,
+            availableLength: available, quality: quality, streaming: nil,
             links: link.map { [$0] }, dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
     }
 
     private func song(_ baseName: String, versions: [SongVersion]) -> Song {
-        Song(
-            baseName: baseName, songKey: nil, versions: versions, badge: nil,
-            availableLength: nil, quality: nil, trackLength: nil,
-            leakDate: nil, fileDate: nil
-        )
+        Song(baseName: baseName, songKey: nil, versions: versions, badge: nil)
     }
 
     private func era(_ name: String, songs: [Song]) -> Era {
         Era(
             name: name, altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: songs)],
             songCount: nil, versionCount: nil
         )
@@ -60,7 +56,7 @@ struct FilterPipelineTests {
         ])
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
-            eras: [eraA, eraB], trackerStats: nil, parseMetadata: nil,
+            eras: [eraA, eraB], trackerStats: nil,
             notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil,
             tabs: nil
         )
@@ -241,7 +237,7 @@ struct FilterPipelineTests {
         ])
         let a = Artist(
             name: "PH", slug: "ph", sourceUrl: nil, eras: [mysteryEra],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
         let vm = ArtistViewModel(artist: a)
@@ -319,7 +315,7 @@ struct TabModeFilterTests {
         )
         return Artist(
             name: "Test", slug: "test", sourceUrl: nil, eras: [],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil,
             miscEntries: [entry("Old Flat Misc", tab: "misc")],
             tabs: [released, stems]
@@ -368,7 +364,7 @@ struct WorstOfFilterTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: "High Quality",
+            availableLength: "Full", quality: "High Quality", streaming: nil,
             links: ["https://pillows.su/f/a"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
@@ -377,26 +373,22 @@ struct WorstOfFilterTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: "Low Quality",
+            availableLength: "Full", quality: "Low Quality", streaming: nil,
             links: ["https://pillows.su/f/b"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
         let era = Era(
             name: "Era A", altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: [
-                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil,
-                     availableLength: nil, quality: nil, trackLength: nil,
-                     leakDate: nil, fileDate: nil),
-                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil,
-                     availableLength: nil, quality: nil, trackLength: nil,
-                     leakDate: nil, fileDate: nil),
+                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil),
+                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil),
             ])],
             songCount: nil, versionCount: nil
         )
         return Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [era],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
     }
@@ -412,7 +404,7 @@ struct WorstOfFilterTests {
     @Test func `badge tab kinds are hidden from available tabs`() async {
         let tabbed = Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil,
             tabs: [
                 TabSection(kind: "released", name: "Released", entries: []),
@@ -434,21 +426,19 @@ struct CrossEraIndexTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: nil, links: nil,
+            availableLength: "Full", quality: nil, streaming: nil, links: nil,
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
         return Song(
             baseName: name, songKey: key,
-            versions: Array(repeating: v, count: versions), badge: nil,
-            availableLength: nil, quality: nil, trackLength: nil,
-            leakDate: nil, fileDate: nil
+            versions: Array(repeating: v, count: versions), badge: nil
         )
     }
 
     private func era(_ name: String, songs: [Song]) -> Era {
         Era(
             name: name, altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: songs)],
             songCount: nil, versionCount: nil
         )
@@ -464,7 +454,7 @@ struct CrossEraIndexTests {
                     song("Unique", key: "unique"),
                 ]),
             ],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }

@@ -6,18 +6,13 @@ extension Color {
     // Core palette (OLED dark)
     static let lsBackground = Color.black                          // #000000
     static let lsCard = Color(hex: 0x0F0F0F)                     // #0f0f0f
-    static let lsCardHover = Color(hex: 0x1A1A1A)                // #1a1a1a
     static let lsBorder = Color(hex: 0x242424)                   // #242424
-    static let lsPlayer = Color(hex: 0x080808)                   // #080808
 
     // Text
-    static let lsForeground = Color(hex: 0xE8E8E8)              // #e8e8e8
-    static let lsMuted = Color(hex: 0x8C8C8C)                   // #8c8c8c
     static let lsDim = Color(hex: 0x595959)                     // #595959
 
     // Accent
     static let lsPrimary = Color(hue: 220/360, saturation: 0.70, brightness: 0.96)  // ~#5894f5
-    static let lsPrimaryHover = Color(hue: 220/360, saturation: 0.60, brightness: 0.89)
 
     // Semantic
     static let lsAccent = lsPrimary

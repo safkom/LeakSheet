@@ -159,8 +159,6 @@ struct LandingView: View {
                 }
             case .httpError(let status, let msg):
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
-            case .decodingError:
-                withAnimation { error = "Failed to parse tracker data" }
             case .invalidURL:
                 withAnimation { error = "Invalid URL" }
             }

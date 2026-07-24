@@ -558,7 +558,7 @@ private struct ErasListView: View {
     /// Multi-version songs expand/collapse; single-version songs play (or
     /// show the description when not streamable).
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
-        if song.versions.count > 1 {
+        if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
@@ -1041,7 +1041,7 @@ struct NoticeBannerView: View {
     /// Parent owns the presentation (in-app Safari sheet).
     var onOpenLink: (URL) -> Void
 
-    private var isAlert: Bool { notice.kind == "alert" }
+    private var isAlert: Bool { notice.isAlert }
     private var tintColor: Color { isAlert ? .orange : Color(hex: 0x94A3B8) }
     private var bgColor: Color { isAlert ? Color.orange.opacity(0.10) : Color(hex: 0x94A3B8).opacity(0.12) }
 

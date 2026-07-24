@@ -27,7 +27,7 @@ struct SongRowView: View {
     }
 
     private var hasMultiple: Bool {
-        song.versions.count > 1
+        song.hasMultipleVersions
     }
 
     /// The first alternate title that differs from the base name — leaks are

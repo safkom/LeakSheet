@@ -25,11 +25,9 @@ final class AudioEngine {
     var isPlaying = false
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
-    var buffered: Double = 0
     var loading = false
     var error = ""
     var streamUrl = ""
-    var volume: Float = 1.0
     var originalQuality = false
     /// Format info read from the live AVPlayerItem once playback is ready —
     /// the fallback source for File Info when a provider has no metadata API.
@@ -73,7 +71,6 @@ final class AudioEngine {
     private var cachedArtwork: MPMediaItemArtwork?
 
     private init() {
-        volume = Self.loadVolume()
         setupRemoteCommands()
         setupInterruptionHandling()
     }
@@ -91,7 +88,6 @@ final class AudioEngine {
         self.eraName = eraName
         self.artUrl = artUrl
         currentTime = 0
-        buffered = 0
         error = ""
         originalQuality = false
         streamFormat = nil
@@ -210,7 +206,6 @@ final class AudioEngine {
         isPlaying = false
         currentTime = 0
         duration = 0
-        buffered = 0
         loading = false
         error = ""
         streamUrl = ""
@@ -226,12 +221,6 @@ final class AudioEngine {
     /// the invalidation when the queue didn't actually change.
     private func syncQueue() {
         queue = logic.queue
-    }
-
-    func setVolume(_ vol: Float) {
-        volume = max(0, min(1, vol))
-        player?.volume = volume
-        Self.saveVolume(volume)
     }
 
     /// Called when the app moves to background — pauses playback (background audio continues via AVSession).
@@ -315,16 +304,6 @@ final class AudioEngine {
         play(target)
     }
 
-    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
-        logic.setEraSongs(EraSongContext(
-            eraName: eraName,
-            artistName: artistName,
-            artUrl: artUrl,
-            versions: versions,
-            artistSlug: artistSlug
-        ))
-    }
-
     /// Atomic equivalent of `setEraSongs` followed by `playTrack`, kept as a
     /// single method so callers can't accidentally play a track without
     /// the era context that drives auto-advance.
@@ -386,7 +365,6 @@ final class AudioEngine {
         }
 
         player?.replaceCurrentItem(with: item)
-        player?.volume = volume
         player?.actionAtItemEnd = .none
 
         // Time observer (~10Hz for UI, now-playing updated less frequently)
@@ -822,19 +800,6 @@ final class AudioEngine {
 
     private func clearNowPlayingInfo() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-    }
-
-    // MARK: - Volume Persistence
-
-    private static func loadVolume() -> Float {
-        // Distinguish "never set" from "muted to 0" — UserDefaults.float returns
-        // 0 for both, which previously reset a fully-muted user back to 1.0.
-        guard UserDefaults.standard.object(forKey: "leaksheet_volume") != nil else { return 1.0 }
-        return min(1, max(0, UserDefaults.standard.float(forKey: "leaksheet_volume")))
-    }
-
-    private static func saveVolume(_ v: Float) {
-        UserDefaults.standard.set(v, forKey: "leaksheet_volume")
     }
 
     // MARK: - Duration Parsing

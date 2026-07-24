@@ -580,7 +580,7 @@ final class ArtistViewModel {
 
     private func appendSongRows(_ rows: inout [EraRow], songs: [Song], eraName: String, eraArt: String?, ordinal: inout Int) {
         for song in songs {
-            let hasMultiple = song.versions.count > 1
+            let hasMultiple = song.hasMultipleVersions
             let expanded = hasMultiple && isSongExpanded(eraName: eraName, ordinal: ordinal)
             rows.append(.song(
                 song, eraName: eraName, eraArt: eraArt,
