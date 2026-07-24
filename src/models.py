@@ -110,10 +110,6 @@ class SongVersion(BaseModel):
     streaming: bool | None = Field(None, description="Streaming Yes/No (main-tab Streaming column)")
     rating: int | None = Field(None, description="Fan star rating 1-5 (Travis-style ⭐ suffix in the availability cell)")
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
-    # Spreadsheet cell background colors (hex, e.g. "#4caf50") for quality/availability.
-    # Only set when the tracker uses custom non-neutral cell colors.
-    quality_color: str | None = Field(None, description="Background hex color of the quality cell")
-    available_length_color: str | None = Field(None, description="Background hex color of the available_length cell")
     # Carti-specific fields
     date_of_recording: str | None = Field(None, description="Date of recording (Carti tracker)")
     type: str | None = Field(None, description="Song type (Carti tracker)")
@@ -279,6 +275,12 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
+        # stats/stats_raw/highlighted_producers are INTERNAL-only (2026-07-24
+        # review): no client reads them, but the tracker-declared stats power
+        # the starved-era health check in tests/_health.py and the accuracy
+        # harness — so they stay parsed, just off the wire.
+        for internal in ("stats", "stats_raw", "highlighted_producers"):
+            kwargs = _with_excluded(kwargs, internal)
         d = super().model_dump(**kwargs)
         d["sections"] = [
             {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}

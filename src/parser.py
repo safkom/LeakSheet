@@ -58,71 +58,13 @@ _MAX_UNMATCHED_ROWS = 50
 
 
 # ---------------------------------------------------------------------------
-# Stylesheet color extraction
-# ---------------------------------------------------------------------------
-
-# Match CSS class rules like ".s263{...; background-color:#4caf50; ...}"
-_CSS_CLASS_RULE_RE = re.compile(
-    r"\.(s\d+)\s*\{([^}]+)\}",
-    re.DOTALL,
-)
-_BG_COLOR_RE = re.compile(
-    r"background-color\s*:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]+\)|rgba\([^)]+\))",
-    re.IGNORECASE,
-)
-# Colors considered "default" / neutral — skip these (won't provide UX value)
-_NEUTRAL_HEX = frozenset({
-    "#ffffff", "#fff", "#000000", "#000",
-    "#fafafa", "#f8f9fa", "#f3f3f3", "#eeeeee",
-    "#cccccc", "#1e1e1e", "#1a1a1a", "#1f1f1f",
-    "#2a2a2a", "#161616", "#0f0f0f", "#0d0d0d",
-})
-
-
-def _extract_class_colors(html: str) -> dict[str, str]:
-    """Parse the <style> section of a Google Sheets HTML export and return
-    a mapping of {css_class_name: hex_background_color} for non-neutral cells.
-
-    Only classes with an explicit, non-neutral background-color are included.
-    """
-    result: dict[str, str] = {}
-    # Find the first <style> block
-    style_match = re.search(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
-    if not style_match:
-        return result
-
-    style_text = style_match.group(1)
-    for m in _CSS_CLASS_RULE_RE.finditer(style_text):
-        cls = m.group(1)  # e.g. "s263"
-        decl = m.group(2)
-        bg_match = _BG_COLOR_RE.search(decl)
-        if not bg_match:
-            continue
-        color = bg_match.group(1).strip().lower()
-        # Convert rgb(...) to hex
-        if color.startswith("rgb"):
-            try:
-                nums = re.findall(r"\d+", color)
-                if len(nums) >= 3:
-                    r, g, b = int(nums[0]), int(nums[1]), int(nums[2])
-                    color = f"#{r:02x}{g:02x}{b:02x}"
-            except ValueError:
-                continue
-        if color in _NEUTRAL_HEX:
-            continue
-        result[cls] = color
-
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Low-level HTML table extraction
 # ---------------------------------------------------------------------------
 
 class _TableExtractor(HTMLParser):
     """Extract rows from every <table> in a Google Sheets HTML export.
 
-    Each row is a list of _Cell objects containing text, links, and CSS class.
+    Each row is a list of _Cell objects containing text, links, and images.
     """
 
     def __init__(self) -> None:
@@ -136,7 +78,6 @@ class _TableExtractor(HTMLParser):
         self._cell_text = ""
         self._cell_links: list[str] = []
         self._cell_images: list[str] = []
-        self._cell_class = ""
         self._colspan = 1
         self._a_href = ""
 
@@ -155,7 +96,6 @@ class _TableExtractor(HTMLParser):
             self._cell_links = []
             self._cell_link_lines = []
             self._cell_images = []
-            self._cell_class = a.get("class", "")
             try:
                 self._colspan = int(a.get("colspan", "1") or "1")
             except (ValueError, TypeError):
@@ -188,7 +128,6 @@ class _TableExtractor(HTMLParser):
                 links=list(self._cell_links),
                 link_lines=list(self._cell_link_lines),
                 images=list(self._cell_images),
-                css_class=self._cell_class,
             )
             self._current_row.append(cell)
             # Fill colspan with empty cells
@@ -208,8 +147,8 @@ class _TableExtractor(HTMLParser):
 
 
 class _Cell:
-    """A single table cell with text content, extracted links, images, CSS class, and bg color."""
-    __slots__ = ("text", "links", "link_lines", "images", "css_class", "bg_color")
+    """A single table cell with text content, extracted links, and images."""
+    __slots__ = ("text", "links", "link_lines", "images")
 
     def __init__(
         self,
@@ -217,15 +156,11 @@ class _Cell:
         links: list[str] | None = None,
         link_lines: list[int] | None = None,
         images: list[str] | None = None,
-        css_class: str = "",
-        bg_color: str | None = None,
     ) -> None:
         self.text = text
         self.links = links or []
         self.link_lines = link_lines or []
         self.images = images or []
-        self.css_class = css_class
-        self.bg_color = bg_color
 
     def __repr__(self) -> str:
         parts = [f"Cell({self.text!r}"]
@@ -294,7 +229,6 @@ def _cell_from_td(td) -> _Cell:
         links=links,
         link_lines=link_lines,
         images=images,
-        css_class=td.get("class", ""),
     )
 
 
@@ -322,7 +256,7 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     return rows
 
 
-def extract_table(html_content: str, color_map: dict[str, str] | None = None) -> list[list[_Cell]]:
+def extract_table(html_content: str) -> list[list[_Cell]]:
     """Parse HTML and return the rows of every <table> as lists of _Cell.
 
     Rows from all tables are concatenated in document order (tracker exports
@@ -332,9 +266,6 @@ def extract_table(html_content: str, color_map: dict[str, str] | None = None) ->
     the stdlib HTMLParser implementation when lxml is absent or rejects the
     input — e.g. lxml raises ValueError for str input that starts with an
     XML declaration (``<?xml …?>``), which some mirrored exports carry.
-
-    If *color_map* is provided (from `_extract_class_colors`), each cell's
-    `bg_color` is resolved from its CSS class at construction time.
     """
     rows: list[list[_Cell]] | None = None
     if _lxml_html is not None:
@@ -346,13 +277,6 @@ def extract_table(html_content: str, color_map: dict[str, str] | None = None) ->
         parser = _TableExtractor()
         parser.feed(html_content)
         rows = parser.rows
-    if not color_map:
-        return rows
-    # Resolve bg_color for every cell whose class is in color_map
-    for row in rows:
-        for cell in row:
-            if cell.css_class and cell.css_class in color_map:
-                cell.bg_color = color_map[cell.css_class]
     return rows
 
 
@@ -1437,8 +1361,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     This is the main entry point for parsing a single tracker.
     """
     # Extract cell background colors from the stylesheet (non-neutral only)
-    color_map = _extract_class_colors(html_content)
-    rows = extract_table(html_content, color_map)
+    rows = extract_table(html_content)
     if not rows:
         return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
 
@@ -2130,8 +2053,6 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         streaming=streaming,
         rating=rating,
         links=merged_links,
-        quality_color=_get_cell(row, col_map.get("quality", -1)).bg_color if col_map.get("quality") is not None else None,
-        available_length_color=_get_cell(row, col_map.get("available_length", -1)).bg_color if col_map.get("available_length") is not None else None,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )

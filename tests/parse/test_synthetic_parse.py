@@ -58,12 +58,11 @@ class TestMainTabAttributes:
         assert debut.name == "Debut Era"
         assert [s.base_name for s in debut.songs] == ["Sunrise", "Nightfall", "Echoes"]
 
-    def test_badge_quality_and_color(self, main):
+    def test_badge_and_quality(self, main):
         sunrise = main.eras[0].songs[0]
         v = sunrise.primary
         assert sunrise.badge == Badge.BEST          # ⭐ prefix
         assert v.quality == "High Quality"
-        assert v.quality_color == "#4caf50"          # from the .s10 CSS class
         assert v.available_length == "Full"
         assert v.track_length == "3:14"
         assert v.leak_date == "2019-01-01"
@@ -295,3 +294,22 @@ class TestNoticeDedupe:
         artist = parse_sheet(html, "SynthWave")
         banner = [n for n in artist.notices if "last updated" in n.text.lower()]
         assert len(banner) == 1
+
+
+# ---------------------------------------------------------------------------
+# Wire-payload exclusions (2026-07-24 review): internal-only fields stay off
+# the serialized /sheet payload but remain on the model for the health harness
+# ---------------------------------------------------------------------------
+
+class TestWirePayloadExclusions:
+    def test_internal_era_fields_are_off_the_wire(self, main):
+        payload = main.model_dump()
+        era = payload["eras"][0]
+        for key in ("stats", "stats_raw", "highlighted_producers"):
+            assert key not in era, f"{key} must not be serialized"
+        version = era["sections"][0]["songs"][0]["versions"][0]
+        for key in ("quality_color", "available_length_color"):
+            assert key not in version, f"{key} was removed from the model"
+        # Still available internally — the starved-era health check needs it.
+        assert hasattr(main.eras[0], "stats")
+        assert hasattr(main.eras[0], "stats_raw")
