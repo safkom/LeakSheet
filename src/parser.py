@@ -20,7 +20,6 @@ from src.models import (
     Artist,
     Badge,
     Era,
-    EraStats,
     MiscEntry,
     Notice,
     ParseMetadata,
