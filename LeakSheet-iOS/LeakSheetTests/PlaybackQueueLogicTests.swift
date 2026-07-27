@@ -8,7 +8,7 @@ import Testing
 private func version(_ name: String, tag: String? = nil, notes: String? = nil) -> SongVersion {
     SongVersion(
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
-        collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil, notes: notes, ogFilename: nil,
+        collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: notes, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
         availableLength: nil, quality: nil, streaming: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )

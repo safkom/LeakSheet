@@ -1933,9 +1933,13 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     badge, after_badge = extract_badge(raw_name)
 
     # Parse credits and alt titles from the multi-line name
-    title, featuring, producers, collaboration, refs, alt_titles = (
-        parse_song_credits(after_badge)
-    )
+    credits = parse_song_credits(after_badge)
+    title = credits.title
+    featuring = credits.featuring
+    producers = credits.producers
+    collaboration = credits.collaboration
+    refs = credits.refs
+    alt_titles = credits.alt_titles
 
     # Check for "(unfinished)" or "[unfinished]" in alt_titles or title.
     # These are status tags, not alternative names — remove from alt_titles
@@ -2037,6 +2041,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         credited_artists=credited_artists,
         collaboration=collaboration,
         refs=refs,
+        director=credits.director,
         alt_titles=alt_titles,
         notes=notes_text,
         og_filename=og_filenames[0] if og_filenames else None,

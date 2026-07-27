@@ -211,19 +211,19 @@ class TestSongCreditParsing:
     def test_full_credits(self):
         from src.models import parse_song_credits
         raw = "10 in a Benz \n(with Go Getters) (feat. Rhymefest) (prod. Kanye West & Andy C.)\n(On 10 in a Benz)"
-        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
-        assert title == "10 in a Benz"
-        assert feat == "Rhymefest"
-        assert prod == "Kanye West & Andy C."
-        assert collab == "Go Getters"
-        assert refs is None
-        assert alts == ["On 10 in a Benz"]
+        c = parse_song_credits(raw)
+        assert c.title == "10 in a Benz"
+        assert c.featuring == "Rhymefest"
+        assert c.producers == "Kanye West & Andy C."
+        assert c.collaboration == "Go Getters"
+        assert c.refs is None
+        assert c.alt_titles == ["On 10 in a Benz"]
 
     def test_feat_and_prod_only(self):
         from src.models import parse_song_credits
-        title, feat, prod, collab, refs, alts = parse_song_credits("3 Minutes of Watts\n(feat. J-Rock) (prod. Don-P)")
-        assert title == "3 Minutes of Watts"
-        assert feat == "J-Rock" and prod == "Don-P" and collab is None and alts == []
+        c = parse_song_credits("3 Minutes of Watts\n(feat. J-Rock) (prod. Don-P)")
+        assert c.title == "3 Minutes of Watts"
+        assert c.featuring == "J-Rock" and c.producers == "Don-P" and c.collaboration is None and c.alt_titles == []
 
     def test_prod_on_separate_line(self):
         from src.models import parse_song_credits
@@ -237,8 +237,8 @@ class TestSongCreditParsing:
 
     def test_ref_credits(self):
         from src.models import parse_song_credits
-        title, feat, prod, collab, refs, alts = parse_song_credits("RATHER LIE [Clean](ref. Keith Lawson)")
-        assert title == "RATHER LIE [Clean]" and refs == "Keith Lawson"
+        c = parse_song_credits("RATHER LIE [Clean](ref. Keith Lawson)")
+        assert c.title == "RATHER LIE [Clean]" and c.refs == "Keith Lawson"
 
     def test_alt_title_only(self):
         from src.models import parse_song_credits
@@ -247,16 +247,16 @@ class TestSongCreditParsing:
 
     def test_multiple_alt_titles(self):
         from src.models import parse_song_credits
-        title, feat, prod, collab, refs, alts = parse_song_credits("I'm Him\n(prod. Hykeem Carter)\n(I'm The Man, Thank God)")
+        c = parse_song_credits("I'm Him\n(prod. Hykeem Carter)\n(I'm The Man, Thank God)")
         # 2026-07-17 (PR #10): comma-separated parenthetical aliases split into
         # individual alt titles — see TestCommaAltTitles for the stay-whole guards.
-        assert title == "I'm Him" and prod == "Hykeem Carter" and alts == ["I'm The Man", "Thank God"]
+        assert c.title == "I'm Him" and c.producers == "Hykeem Carter" and c.alt_titles == ["I'm The Man", "Thank God"]
 
     def test_no_credits(self):
         from src.models import parse_song_credits
-        title, feat, prod, collab, refs, alts = parse_song_credits("Ain't No Money")
-        assert title == "Ain't No Money"
-        assert (feat, prod, collab, refs, alts) == (None, None, None, None, [])
+        c = parse_song_credits("Ain't No Money")
+        assert c.title == "Ain't No Money"
+        assert (c.featuring, c.producers, c.collaboration, c.refs, c.alt_titles) == (None, None, None, None, [])
 
     def test_remix_stays_in_title(self):
         from src.models import parse_song_credits
@@ -266,10 +266,10 @@ class TestSongCreditParsing:
     def test_complex_featuring(self):
         from src.models import parse_song_credits
         raw = "All I Need \n(with Go Getters) (feat. Kanye West, Mikkey Halsted, Taji & Miss Criss) (prod. AllDay & Kanye West) \n(All I Have)"
-        title, feat, prod, collab, refs, alts = parse_song_credits(raw)
-        assert title == "All I Need"
-        assert "Kanye West" in feat and "Mikkey Halsted" in feat
-        assert collab == "Go Getters" and "AllDay" in prod and alts == ["All I Have"]
+        c = parse_song_credits(raw)
+        assert c.title == "All I Need"
+        assert "Kanye West" in c.featuring and "Mikkey Halsted" in c.featuring
+        assert c.collaboration == "Go Getters" and "AllDay" in c.producers and c.alt_titles == ["All I Have"]
 
     def test_artist_prefix_stays_in_title(self):
         from src.models import parse_song_credits
@@ -278,8 +278,74 @@ class TestSongCreditParsing:
 
     def test_carti_format(self):
         from src.models import parse_song_credits
-        title, feat, prod, collab, refs, alts = parse_song_credits("36 Villainz\n(prod. Cold Hart & DJ Anuedy)\n(36IllVillianz)")
-        assert title == "36 Villainz" and prod == "Cold Hart & DJ Anuedy" and alts == ["36IllVillianz"]
+        c = parse_song_credits("36 Villainz\n(prod. Cold Hart & DJ Anuedy)\n(36IllVillianz)")
+        assert c.title == "36 Villainz" and c.producers == "Cold Hart & DJ Anuedy" and c.alt_titles == ["36IllVillianz"]
+
+
+class TestBracketStyleCredits:
+    """Bracket-delimited credits — the Travis Scott tracker's house style.
+
+    Before this was supported, every '[prod. X]' line fell through to
+    alt_titles and the app rendered it as 'aka [prod. Allen Ritter]'
+    (1097 of 1311 Travis versions).
+    """
+
+    def test_bracket_prod(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("90210 [Demo 8]\n[prod. Allen Ritter]")
+        assert c.title == "90210 [Demo 8]"
+        assert c.producers == "Allen Ritter"
+        assert c.alt_titles == []
+
+    def test_bracket_feat_ref_with(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Song\n[feat. Young Thug] [ref. Kacy Hill] [with Go Getters]")
+        assert c.featuring == "Young Thug"
+        assert c.refs == "Kacy Hill"
+        assert c.collaboration == "Go Getters"
+        assert c.alt_titles == []
+
+    def test_bracket_director(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("silent film [Music Video]\n[dir. Ovrkast.]")
+        assert c.director == "Ovrkast." and c.alt_titles == []
+
+    def test_paren_director(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("Clip\n(dir. Dave Meyers)").director == "Dave Meyers"
+
+    def test_mixed_delimiters_in_one_name(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Maria I'm Drunk [Demo 2]\n(feat. Young Thug)\n[prod. Metro Boomin]")
+        assert c.featuring == "Young Thug"
+        assert c.producers == "Metro Boomin"
+        assert c.alt_titles == []
+
+    def test_version_tag_is_not_a_credit(self):
+        from src.models import parse_song_credits
+        # Bracket support must not touch [V1] / [Demo 8] / [Clean] tags.
+        c = parse_song_credits("Dis Side [Demo]\n[prod. Ging]")
+        assert c.title == "Dis Side [Demo]" and c.producers == "Ging"
+
+    def test_mismatched_delimiters_still_parse(self):
+        from src.models import parse_song_credits
+        # Hand-typed sheets mix the styles by accident — three such rows
+        # exist on the live Travis tracker ("[prod. Travis Scott)").
+        assert parse_song_credits("Song\n[prod. Nobody)").producers == "Nobody"
+        assert parse_song_credits("Song\n(prod. Nobody]").producers == "Nobody"
+
+    def test_multiline_credit_is_not_parsed(self):
+        from src.models import parse_song_credits
+        # A credit whose closer is on the next line stays an alt title:
+        # spanning newlines would let an unclosed "(prod. " swallow real
+        # alt-title lines. One such row exists on Travis; not worth it.
+        c = parse_song_credits("Song\n[prod. TM88,\nMacnificent]")
+        assert c.producers is None
+
+    def test_genuine_alt_title_still_survives(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("???\n[prod. Ging]\n(Flavors)")
+        assert c.producers == "Ging" and c.alt_titles == ["Flavors"]
 
 
 class TestTimelineParsing:
@@ -550,34 +616,34 @@ class TestCommaAltTitles:
 
     def test_comma_separated_alt_titles_split(self):
         from src.models import parse_song_credits
-        _, _, _, _, _, alts = parse_song_credits("???\n(Time2Time, Bon Iver Demo)")
-        assert alts == ["Time2Time", "Bon Iver Demo"]
+        c = parse_song_credits("???\n(Time2Time, Bon Iver Demo)")
+        assert c.alt_titles == ["Time2Time", "Bon Iver Demo"]
 
     def test_volume_continuation_kept_whole(self):
         from src.models import parse_song_credits
-        _, _, _, _, _, alts = parse_song_credits("Some Song\n(Meet The Woo, Vol. 2)")
-        assert alts == ["Meet The Woo, Vol. 2"]
+        c = parse_song_credits("Some Song\n(Meet The Woo, Vol. 2)")
+        assert c.alt_titles == ["Meet The Woo, Vol. 2"]
 
     def test_numeric_comma_kept_whole(self):
         from src.models import parse_song_credits
-        _, _, _, _, _, alts = parse_song_credits("Some Song\n(10,000 Days)")
-        assert alts == ["10,000 Days"]
+        c = parse_song_credits("Some Song\n(10,000 Days)")
+        assert c.alt_titles == ["10,000 Days"]
 
     def test_roman_numeral_continuation_kept_whole(self):
         from src.models import parse_song_credits
-        _, _, _, _, _, alts = parse_song_credits("Song\n(Hell Of A Life, Pt. II)")
-        assert alts == ["Hell Of A Life, Pt. II"]
+        c = parse_song_credits("Song\n(Hell Of A Life, Pt. II)")
+        assert c.alt_titles == ["Hell Of A Life, Pt. II"]
 
     def test_worded_ordinal_continuation_kept_whole(self):
         from src.models import parse_song_credits
-        _, _, _, _, _, alts = parse_song_credits("Song\n(The Story, Part Two)")
-        assert alts == ["The Story, Part Two"]
+        c = parse_song_credits("Song\n(The Story, Part Two)")
+        assert c.alt_titles == ["The Story, Part Two"]
 
     def test_feat_credit_commas_unaffected(self):
         from src.models import parse_song_credits
-        _, feat, _, _, _, alts = parse_song_credits("Some Song\n(feat. Rhymefest, Kanye West)")
-        assert feat == "Rhymefest, Kanye West"
-        assert alts == []
+        c = parse_song_credits("Some Song\n(feat. Rhymefest, Kanye West)")
+        assert c.featuring == "Rhymefest, Kanye West"
+        assert c.alt_titles == []
 
 
 class TestSongKey:

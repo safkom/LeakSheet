@@ -18,6 +18,9 @@ struct CreditTagsView: View {
             if let refs = version.refs, !refs.isEmpty {
                 creditTag(type: .refs, text: refs)
             }
+            if let director = version.director, !director.isEmpty {
+                creditTag(type: .director, text: director)
+            }
             if let credited = version.creditedArtists, !credited.isEmpty {
                 creditTag(type: .creditedArtists, text: credited)
             }
