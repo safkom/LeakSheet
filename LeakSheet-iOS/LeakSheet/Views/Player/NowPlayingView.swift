@@ -334,10 +334,7 @@ struct NowPlayingView: View {
     }
 
     private var artPlaceholder: some View {
-        Image(systemName: "music.note")
+        ArtworkPlaceholder(cornerRadius: 0)
             .font(.system(size: 48))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.lsCard)
     }
 }

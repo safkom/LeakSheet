@@ -46,11 +46,11 @@ struct TrackerStatsSheet: View {
 
     private var badgeRows: [BadgeRow] {
         [
-            BadgeRow(badge: .best, label: "Best Of", value: stats.bestOf ?? 0),
-            BadgeRow(badge: .special, label: "Special", value: stats.special ?? 0),
+            BadgeRow(badge: .best, label: Badge.best.label, value: stats.bestOf ?? 0),
+            BadgeRow(badge: .special, label: Badge.special.label, value: stats.special ?? 0),
             BadgeRow(badge: .grail, label: "Grails", value: stats.grails ?? 0),
-            BadgeRow(badge: .wanted, label: "Wanted", value: stats.wanted ?? 0),
-            BadgeRow(badge: .worst, label: "Worst Of", value: stats.worstOf ?? 0),
+            BadgeRow(badge: .wanted, label: Badge.wanted.label, value: stats.wanted ?? 0),
+            BadgeRow(badge: .worst, label: Badge.worst.label, value: stats.worstOf ?? 0),
         ].filter { $0.value > 0 }
     }
 

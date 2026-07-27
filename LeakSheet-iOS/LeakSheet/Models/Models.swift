@@ -423,6 +423,19 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
     var isBestOf: Bool {
         self == .best || self == .special
     }
+
+    /// Canonical display label — the single source for every sheet that
+    /// lists badges (description, legend, tracker stats).
+    var label: String {
+        switch self {
+        case .best: "Best Of"
+        case .special: "Special"
+        case .worst: "Worst Of"
+        case .grail: "Grail"
+        case .wanted: "Wanted"
+        case .ai: "AI"
+        }
+    }
 }
 
 // MARK: - TrackerStats

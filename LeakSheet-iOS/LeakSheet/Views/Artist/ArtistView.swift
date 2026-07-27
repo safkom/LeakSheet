@@ -129,7 +129,7 @@ private struct ArtistContentView: View {
                 // Notices
                 if let notices = artist.notices, !notices.isEmpty {
                     VStack(spacing: 4) {
-                        ForEach(notices, id: \.text) { notice in
+                        ForEach(notices) { notice in
                             NoticeBannerView(notice: notice) { url in
                                 safariItem = SafariItem(url: url)
                             }
@@ -510,7 +510,10 @@ private struct ErasListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasActiveFilters: Bool {
-        vm.bestOf || vm.worstOf || vm.noSnippets
+        // Must list EVERY chip that can empty the list, or the empty state
+        // claims "No Songs" (tracker is empty) when the truth is "No Matches"
+        // (your filter hid everything) — grails was missing.
+        vm.bestOf || vm.worstOf || vm.grails || vm.noSnippets
     }
 
     var body: some View {

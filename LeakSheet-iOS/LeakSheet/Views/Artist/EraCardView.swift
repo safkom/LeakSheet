@@ -76,10 +76,7 @@ struct EraCardView: View {
                     onColorExtracted?(color)
                 }
             } else {
-                Image(systemName: "music.note")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.lsCard)
+                ArtworkPlaceholder(cornerRadius: 0)
             }
         }
         .frame(width: expanded ? 96 : 64, height: expanded ? 96 : 64)
@@ -221,14 +218,7 @@ private struct CachedEraImage: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                // lsCard is near-black (#0f0f0f) — on its own it reads as a
-                // plain black square while loading, and stays that way
-                // forever if the load fails. A subtle icon keeps it visibly
-                // a placeholder instead of looking broken.
-                Image(systemName: "music.note")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.lsCard)
+                ArtworkPlaceholder(cornerRadius: 0)
             }
         }
         .task(id: url) {

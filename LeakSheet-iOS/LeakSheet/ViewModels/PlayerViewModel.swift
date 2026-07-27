@@ -116,9 +116,6 @@ final class PlayerViewModel {
 
     /// Format seconds as "m:ss".
     static func formatTime(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
+        Format.time(seconds)
     }
 }

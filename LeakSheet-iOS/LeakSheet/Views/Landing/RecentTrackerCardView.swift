@@ -71,12 +71,7 @@ struct RecentTrackerCardView: View {
     }
 
     private var initialsPlaceholder: some View {
-        let initials = entry.name
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-            .joined()
-        return Text(initials)
+        Text(Format.initials(entry.name))
             .font(.subheadline.bold())
             .foregroundStyle(.secondary)
             .frame(width: 48, height: 48)

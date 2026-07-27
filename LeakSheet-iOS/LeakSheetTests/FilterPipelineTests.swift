@@ -510,4 +510,76 @@ struct LeakDateParsingTests {
         #expect(ArtistViewModel.parseLeakDate("n/a") == 0)
         #expect(ArtistViewModel.parseLeakDate("") == 0)
     }
+
+    // 2026-07-24: two forms the web reference parses (via Date.parse) that
+    // iOS previously year-bucketed.
+    @Test func iso8601WithTimeParsesToDayPrecision() {
+        let a = ArtistViewModel.parseLeakDate("2023-03-20T14:30:00Z")
+        let b = ArtistViewModel.parseLeakDate("2023-03-21T14:30:00Z")
+        #expect(a > 0)
+        #expect(b - a == 86_400)
+    }
+
+    @Test func dayFirstOrderingParsesToDayPrecision() {
+        let a = ArtistViewModel.parseLeakDate("20 Mar 2023")
+        #expect(a == ArtistViewModel.parseLeakDate("Mar 20, 2023"))
+    }
+
+    // DateFormatter is lenient enough to accept these two without dedicated
+    // formatters — pinned so a future formatter change can't silently
+    // regress them to year-bucketing.
+    @Test func leniencyAcceptedFormsKeepDayPrecision() {
+        #expect(ArtistViewModel.parseLeakDate("Mar 20 2023") ==
+                ArtistViewModel.parseLeakDate("Mar 20, 2023"))
+        #expect(ArtistViewModel.parseLeakDate("2023/03/20") ==
+                ArtistViewModel.parseLeakDate("2023-03-20"))
+    }
+}
+
+// MARK: - Badge display logic (SPEC §12)
+
+@Suite("Badge dedupe")
+struct BadgeLogicTests {
+    @Test func qualityIsPrimaryWhenMeaningful() {
+        let p = BadgeLogic.primaryPill(quality: "CD Quality", availability: "Full")
+        #expect(p == BadgeLogic.Pill(text: "CD Quality", isQuality: true))
+    }
+
+    @Test(arguments: ["", "Not Available", "n/a", "N/A"])
+    func availabilityStandsInWhenQualityIsEmptyOrNA(_ quality: String) {
+        let p = BadgeLogic.primaryPill(quality: quality, availability: "Snippet")
+        #expect(p == BadgeLogic.Pill(text: "Snippet", isQuality: false))
+    }
+
+    @Test func noPillWhenBothAreEmptyOrNA() {
+        #expect(BadgeLogic.primaryPill(quality: nil, availability: nil) == nil)
+        #expect(BadgeLogic.primaryPill(quality: "N/A", availability: "n/a") == nil)
+    }
+
+    @Test func availabilityPillSuppressedWhenItDuplicatesQuality() {
+        #expect(BadgeLogic.availabilityPill(quality: "OG File", availability: "OG File") == nil)
+    }
+
+    @Test func availabilityPillSuppressedWhenItAddsNothing() {
+        // Not in the informative whitelist — the quality pill already says it.
+        #expect(BadgeLogic.availabilityPill(quality: "CD Quality", availability: "Yes") == nil)
+        #expect(BadgeLogic.availabilityPill(quality: "CD Quality", availability: "n/a") == nil)
+    }
+
+    @Test func availabilityPillShownWhenItAddsInformation() {
+        let p = BadgeLogic.availabilityPill(quality: "CD Quality", availability: "Snippet")
+        #expect(p == BadgeLogic.Pill(text: "Snippet", isQuality: false))
+    }
+
+    @Test func availabilityPillSuppressedWhenNoQualityPillIsShown() {
+        // Availability already took the primary slot — don't render it twice.
+        #expect(BadgeLogic.availabilityPill(quality: "", availability: "Full") == nil)
+    }
+
+    @Test func britishRumouredSpellingIsClassified() {
+        // 8 real occurrences in the census data fell through to the default
+        // style before the "rumo" prefix match.
+        #expect(availabilityVariant("Rumoured") == .rumored)
+        #expect(availabilityVariant("Rumored") == .rumored)
+    }
 }

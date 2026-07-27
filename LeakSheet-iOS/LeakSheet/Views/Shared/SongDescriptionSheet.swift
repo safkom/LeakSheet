@@ -31,14 +31,7 @@ struct SongDescriptionSheet: View {
 
     private var badgeInfo: (emoji: String, label: String)? {
         guard let b = payload.version.badge, let badge = Badge(rawValue: b) else { return nil }
-        switch badge {
-        case .best: return ("⭐", "Best Of")
-        case .special: return ("✨", "Special")
-        case .worst: return ("🗑️", "Worst Of")
-        case .grail: return ("🏆", "Grail")
-        case .wanted: return ("🏅", "Wanted")
-        case .ai: return ("🤖", "AI")
-        }
+        return (badge.emoji, badge.label)
     }
 
     private var displayName: String {
@@ -91,11 +84,8 @@ struct SongDescriptionSheet: View {
                         VStack(spacing: 12) {
                             if let artUrl = payload.eraArt, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 640) {
                                 CachedImage(url: url, maxPixelSize: 640) {
-                                    Image(systemName: "music.note")
+                                    ArtworkPlaceholder(cornerRadius: 0)
                                         .font(.largeTitle)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .background(Color.lsCard)
                                 }
                                 .frame(width: 160, height: 160)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -151,13 +141,24 @@ struct SongDescriptionSheet: View {
                         // Status badges (quality + availability + fan rating) — prominent
                         if payload.version.quality != nil || payload.version.availableLength != nil || payload.version.rating != nil {
                             FlowLayout(spacing: 6) {
-                                if let q = payload.version.quality, !q.isEmpty {
-                                    let variant = qualityVariant(q)
-                                    badgePill(text: q, variant: variant)
+                                // Same dedupe rules as the song rows (SPEC §12),
+                                // rendered at this sheet's larger pill size.
+                                if let primary = BadgeLogic.primaryPill(
+                                    quality: payload.version.quality,
+                                    availability: payload.version.availableLength
+                                ) {
+                                    badgePill(
+                                        text: primary.text,
+                                        variant: primary.isQuality
+                                            ? qualityVariant(primary.text)
+                                            : availabilityVariant(primary.text)
+                                    )
                                 }
-                                if let a = payload.version.availableLength, !a.isEmpty {
-                                    let variant = availabilityVariant(a)
-                                    badgePill(text: a, variant: variant)
+                                if let avail = BadgeLogic.availabilityPill(
+                                    quality: payload.version.quality,
+                                    availability: payload.version.availableLength
+                                ) {
+                                    badgePill(text: avail.text, variant: availabilityVariant(avail.text))
                                 }
                                 if let rating = payload.version.rating {
                                     ratingPill(rating)
@@ -251,7 +252,7 @@ struct SongDescriptionSheet: View {
                                         HStack(spacing: 6) {
                                             Image(systemName: "link")
                                                 .font(.caption2)
-                                            Text(linkDomain(link.raw))
+                                            Text(Format.shortHost(link.raw))
                                                 .font(.caption)
                                         }
                                         .foregroundStyle(Color.lsAccent)
@@ -488,7 +489,9 @@ struct SongDescriptionSheet: View {
 
     @ViewBuilder
     private var detailGrid: some View {
-        let dateLabels: Set<String> = ["File Date", "Leak Date", "Recording"]
+        // Date cells are shown verbatim, digits or not: trackers legitimately
+        // write "Spring", "Late 2004 sessions", "Ooc" — the web reference
+        // renders them, and hiding them silently loses tracker information.
         let items: [(String, String)] = [
             ("Version", payload.version.versionTag),
             ("Duration", payload.version.trackLength),
@@ -498,9 +501,6 @@ struct SongDescriptionSheet: View {
             ("Recording", payload.version.dateOfRecording),
         ].compactMap { label, val in
             guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
-            // Drop junk in date cells (some sheets carry "Ooc", "z", etc.);
-            // a real date always contains at least one digit.
-            if dateLabels.contains(label), !v.contains(where: \.isNumber) { return nil }
             return (label, v)
         }
 
@@ -562,10 +562,6 @@ struct SongDescriptionSheet: View {
         }
     }
 
-    private func linkDomain(_ urlString: String) -> String {
-        guard let url = URL(string: urlString), let host = url.host else { return urlString }
-        return host.replacingOccurrences(of: "www.", with: "")
-    }
 }
 
 // MARK: - File Info section
@@ -743,9 +739,7 @@ nonisolated enum FileInfoRows {
     static func formatDuration(_ raw: String) -> String {
         let trimmed = raw.hasSuffix("s") ? String(raw.dropLast()) : raw
         guard let seconds = Double(trimmed), seconds.isFinite, seconds >= 0 else { return raw }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
+        return Format.time(seconds)
     }
 }
 
@@ -771,7 +765,7 @@ private struct EvidenceSection: View {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.caption2)
-                            Text(source.label.isEmpty ? shortHost(source.url) : source.label)
+                            Text(source.label.isEmpty ? Format.shortHost(source.url) : source.label)
                                 .font(.caption)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
@@ -792,9 +786,6 @@ private struct EvidenceSection: View {
         }
     }
 
-    private func shortHost(_ urlString: String) -> String {
-        URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
-    }
 }
 
 // FlowLayout moved to Views/Shared/FlowLayout.swift (shared with BadgeRowView

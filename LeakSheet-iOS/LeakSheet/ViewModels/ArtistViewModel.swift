@@ -856,11 +856,7 @@ final class ArtistViewModel {
             entries = artist.miscEntries ?? []
         }
         if state.noSnippets {
-            entries = entries.filter { e in
-                let al = (e.available ?? "").lowercased()
-                let q = (e.quality ?? "").lowercased()
-                return !(al.contains("snippet") || al.contains("unavailable") || q.contains("not available"))
-            }
+            entries = entries.filter { !isSnippetLike(available: $0.available, quality: $0.quality) }
         }
         if state.bestOf {
             // Match only best/special emojis — the same set the song-version
@@ -922,12 +918,9 @@ final class ArtistViewModel {
 
     // MARK: - Private helpers
 
-    // Matches web's BEST_OF_BADGES = new Set(['best', 'special'])
-    private nonisolated static let bestOfBadges: Set<Badge> = [.best, .special]
-
+    // Badge.isBestOf is the single predicate (matches web's BEST_OF_BADGES).
     private nonisolated static func isBestOfVersion(_ v: SongVersion) -> Bool {
-        guard let badge = v.badge.flatMap({ Badge(rawValue: $0) }) else { return false }
-        return bestOfBadges.contains(badge)
+        v.badge.flatMap { Badge(rawValue: $0) }?.isBestOf ?? false
     }
 
     private nonisolated static func isWorstOfVersion(_ v: SongVersion) -> Bool {
@@ -993,10 +986,15 @@ final class ArtistViewModel {
         return 0
     }
 
-    private nonisolated static func shouldFilterForNoSnippets(_ v: SongVersion) -> Bool {
-        let al = (v.availableLength ?? "").lowercased()
-        let q = (v.quality ?? "").lowercased()
+    /// Shared No-Snippets predicate for song versions AND misc entries.
+    nonisolated static func isSnippetLike(available: String?, quality: String?) -> Bool {
+        let al = (available ?? "").lowercased()
+        let q = (quality ?? "").lowercased()
         return al.contains("snippet") || al.contains("unavailable") || q.contains("not available")
+    }
+
+    private nonisolated static func shouldFilterForNoSnippets(_ v: SongVersion) -> Bool {
+        isSnippetLike(available: v.availableLength, quality: v.quality)
     }
 
     // MARK: - Date parsing (cached formatters, safe to call from any thread)
@@ -1056,10 +1054,33 @@ final class ArtistViewModel {
         return f
     }()
 
+    // "20 Mar 2023" / "20 March 2023" — day-first ordering, which none of the
+    // month-first formatters accept (it degraded to year-only).
+    private nonisolated static let _dayFirstFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "d MMM yyyy"
+        return f
+    }()
+
+    // Full ISO-8601 with a time component ("2023-03-20T14:30:00Z"). The web
+    // reference gets these free via Date.parse; _isoFmt's strict "yyyy-MM-dd"
+    // rejects them, so they too fell back to the bare-year bucket.
+    // DateFormatter (not ISO8601DateFormatter) because only the former is
+    // Sendable, which a nonisolated static requires under Swift 6.
+    private nonisolated static let _iso8601Fmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        return f
+    }()
+
     // Internal (not private) so LeakSheetTests can pin the accepted formats.
     nonisolated static func parseLeakDate(_ dateStr: String) -> TimeInterval {
         if let d = _slashFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _isoFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
+        if let d = _iso8601Fmt.date(from: dateStr) { return d.timeIntervalSince1970 }
+        if let d = _dayFirstFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _abbrevMonthDayFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _fullMonthDayFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _monthYearFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
