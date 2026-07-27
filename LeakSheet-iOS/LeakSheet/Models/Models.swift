@@ -124,10 +124,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
 
     var computedBadge: Badge? {
         if let b = badge { return Badge(rawValue: b) }
-        for v in versions {
-            if let b = v.badge { return Badge(rawValue: b) }
-        }
-        return nil
+        return Badge.mostSignificant(in: versions)
     }
 
     var isStreamable: Bool {
@@ -186,8 +183,13 @@ extension Song {
     nonisolated func withFilteredVersions(_ filter: (SongVersion) -> Bool) -> Song? {
         let kept = versions.filter(filter)
         guard !kept.isEmpty else { return nil }
-        // Uses the synthesized memberwise initializer
-        return Song(baseName: baseName, songKey: songKey, versions: kept, badge: badge)
+        // The row must wear a badge that belongs to the versions it actually
+        // shows. Carrying the whole song's badge through made Best Of display
+        // 🗑️ on songs kept for a ✨ version (Ye "Hurricane" in DONDA [V3]).
+        // Fall back to the song badge only when no kept version carries one,
+        // so filters like No Snippets don't strip a song's badge entirely.
+        let keptBadge = Badge.mostSignificant(in: kept)?.rawValue ?? badge
+        return Song(baseName: baseName, songKey: songKey, versions: kept, badge: keptBadge)
     }
 }
 
@@ -422,6 +424,30 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
 
     var isBestOf: Bool {
         self == .best || self == .special
+    }
+
+    /// Display precedence when one song carries several differently-badged
+    /// versions (common on big trackers — Ye's "Hurricane" has best, special
+    /// AND worst versions). Positive badges outrank negative ones: a song
+    /// with a ⭐ version should not be labelled 🗑️ just because a worse
+    /// version happens to come first in the list. Mirrors the backend's
+    /// `Song.badge` ordering.
+    var displayPriority: Int {
+        switch self {
+        case .grail: 0
+        case .best: 1
+        case .special: 2
+        case .wanted: 3
+        case .worst: 4
+        case .ai: 5
+        }
+    }
+
+    /// Highest-precedence badge across *versions*, or nil when none carry one.
+    static func mostSignificant(in versions: [SongVersion]) -> Badge? {
+        versions
+            .compactMap { $0.badge.flatMap(Badge.init(rawValue:)) }
+            .min { $0.displayPriority < $1.displayPriority }
     }
 
     /// Canonical display label — the single source for every sheet that

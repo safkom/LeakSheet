@@ -5,10 +5,13 @@ import SwiftUI
 struct EraCardView: View {
     let era: Era
     let expanded: Bool
-    let stats: ArtistViewModel.Stats
     /// Precomputed display colors (derived once per era when the dominant
     /// color is extracted) — nil until the first extraction lands.
     var displayColors: EraDisplayColors?
+    /// Optional line under the title. Content-tab pages (Misc / Released /
+    /// Stems / Fakes) use it for the entry count; the main era list has no
+    /// subtitle and passes nil.
+    var subtitle: String?
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
 
@@ -95,6 +98,12 @@ struct EraCardView: View {
 
             if !expanded, let alts = era.altNames, !alts.isEmpty {
                 altNamesLabel(alts, lineLimit: 1)
+            }
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(bodyColor.opacity(0.85))
             }
         }
     }

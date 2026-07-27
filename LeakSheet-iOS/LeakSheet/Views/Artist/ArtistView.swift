@@ -12,6 +12,11 @@ import SwiftUI
 /// invalidation boundary with the others or with this screen's own `@State`.
 struct ArtistView: View {
     let artist: Artist
+    /// View model built during the landing screen's own loading state, so the
+    /// pushed screen renders content on its first frame instead of showing a
+    /// second "Preparing…" spinner. Nil only for entry points that push an
+    /// artist without preparing one first.
+    var preparedVM: ArtistViewModel?
     @State private var displayed: Artist?
     @State private var vm: ArtistViewModel?
     @State private var lastUpdated: Date?
@@ -23,7 +28,7 @@ struct ArtistView: View {
 
     var body: some View {
         Group {
-            if let vm {
+            if let vm = vm ?? preparedVM {
                 ArtistContentView(
                     artist: current, vm: vm,
                     lastUpdated: lastUpdated,
@@ -41,12 +46,32 @@ struct ArtistView: View {
         .task(id: artist.slug) {
             if vm == nil {
                 displayed = artist
-                vm = await ArtistViewModel.make(artist: artist)
+                // Already prepared upstream in the common path; only build
+                // here for entry points that pushed without preparing.
+                if let preparedVM {
+                    vm = preparedVM
+                } else {
+                    vm = await ArtistViewModel.make(artist: artist)
+                }
                 if let url = artist.sourceUrl {
                     lastUpdated = await CacheService.shared.getCachedTracker(for: url)?.timestamp
                 }
             }
+            // Content is on screen by now; warm the covers the user is about
+            // to scroll to. Cancelled automatically when the screen goes away.
+            await Self.prefetchEraArt(for: current)
         }
+    }
+
+    /// Pull every era cover into the image cache at the size the era cards
+    /// request, so scrolling doesn't trigger a fetch per row.
+    private static func prefetchEraArt(for artist: Artist) async {
+        let urls = artist.eras.compactMap { era -> URL? in
+            guard let art = era.artUrl else { return nil }
+            return APIClient.shared.imageProxyURL(for: art, width: 320)
+        }
+        guard !urls.isEmpty else { return }
+        await ImageCache.shared.prefetch(urls, maxPixelSize: 320)
     }
 
     /// Force-refetch the tracker (bypassing the ETag/cache), rebuild the view
@@ -609,6 +634,7 @@ private struct MiscListView: View {
     let onOpenLink: (MiscLink) -> Void
 
     @Environment(PlayerViewModel.self) private var player
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Expanded era groups — presentation-only, keyed on eraName. A live
     /// search expands everything so results are never hidden, and a page
     /// with a single group starts open.
@@ -616,6 +642,23 @@ private struct MiscListView: View {
 
     private func isExpanded(_ eraName: String, groupCount: Int) -> Bool {
         vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
+    }
+
+    /// A minimal `Era` so a content-tab group renders through the same
+    /// `EraCardView` as the main list. Only name and art matter here — the
+    /// card reads nothing else, and the group's own entries are rendered
+    /// below the card rather than from `sections`.
+    private func eraForGroup(_ group: MiscEraGroup) -> Era {
+        Era(
+            name: group.eraName.isEmpty ? "Other" : group.eraName,
+            altNames: nil,
+            description: nil,
+            timeline: nil,
+            artUrl: eraArtByLowercasedName[group.eraName.lowercased()] ?? nil,
+            sections: nil,
+            songCount: nil,
+            versionCount: nil
+        )
     }
 
     var body: some View {
@@ -635,60 +678,31 @@ private struct MiscListView: View {
                 .padding(.top, 40)
             }
         } else {
-            // Era-card accordion — the same mental model as the main eras
-            // view: one collapsible card per era, entries inside. Groups are
-            // prebuilt off-main in the filter pipeline (miscEraGroups).
+            // Era-card accordion — literally the same EraCardView the main
+            // eras list uses (glass, extracted era colors, cover art), so a
+            // content tab is visually a page of the same app, not a
+            // different-looking list. Groups are prebuilt off-main in the
+            // filter pipeline (miscEraGroups).
             let groups = vm.content.miscEraGroups
             ForEach(groups) { group in
-                Button {
-                    withAnimation(.default) {
-                        if expandedEras.contains(group.eraName) {
-                            expandedEras.remove(group.eraName)
-                        } else {
-                            expandedEras.insert(group.eraName)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        if let art = eraArtByLowercasedName[group.eraName.lowercased()] ?? nil {
-                            CachedImage(url: APIClient.shared.imageProxyURL(for: art, width: 128)) {
-                                Color.lsCard
+                let expanded = isExpanded(group.eraName, groupCount: groups.count)
+                EraCardView(
+                    era: eraForGroup(group),
+                    expanded: expanded,
+                    displayColors: vm.eraDisplay[group.eraName],
+                    subtitle: "\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")",
+                    onTap: {
+                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
+                            if expandedEras.contains(group.eraName) {
+                                expandedEras.remove(group.eraName)
+                            } else {
+                                expandedEras.insert(group.eraName)
                             }
-                            .frame(width: 44, height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        } else {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.lsCard)
-                                .frame(width: 44, height: 44)
-                                .overlay {
-                                    Image(systemName: "music.note.list")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
                         }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(group.eraName.isEmpty ? "Other" : group.eraName)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(vm.eraDisplay[group.eraName]?.readableHeader ?? .primary)
-                                .lineLimit(1)
-                            Text("\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isExpanded(group.eraName, groupCount: groups.count) ? 0 : -90))
+                    },
+                    onColorExtracted: { color in
+                        vm.setEraColor(eraName: group.eraName, dominant: color)
                     }
-                    .padding(12)
-                    .background(Color.lsCard.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-                .accessibilityValue(
-                    isExpanded(group.eraName, groupCount: groups.count)
-                        ? "Expanded" : "Collapsed"
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -892,7 +906,6 @@ private struct EraRowView: View {
                 EraCardView(
                     era: filtered.era,
                     expanded: expanded,
-                    stats: filtered.stats,
                     displayColors: displayColors,
                     onTap: { onCardTap(filtered.era.name) },
                     onColorExtracted: { color in onColorExtracted(filtered.era.name, color) }

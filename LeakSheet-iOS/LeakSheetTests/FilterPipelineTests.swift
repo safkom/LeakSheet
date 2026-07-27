@@ -576,6 +576,54 @@ struct BadgeLogicTests {
         #expect(BadgeLogic.availabilityPill(quality: "", availability: "Full") == nil)
     }
 
+    // Regression: Ye "Hurricane" in DONDA [V3] carries worst, special AND
+    // plain versions. Its song-level badge is 'worst' (first badged version
+    // wins server-side), so filtering to Best Of kept the ✨ version but the
+    // row still displayed 🗑️.
+    @Test func filteredRowTakesItsBadgeFromTheKeptVersions() {
+        func v(_ tag: String, _ badge: String?) -> SongVersion {
+            SongVersion(
+                name: "Hurricane", versionTag: tag, badge: badge, featuring: nil,
+                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                availableLength: "Full", quality: "CD Quality", streaming: nil,
+                links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+            )
+        }
+        let song = Song(
+            baseName: "Hurricane", songKey: "hurricane",
+            versions: [v("V78", "worst"), v("V99", "special"), v("V101", nil)],
+            badge: "worst"
+        )
+        let bestOf = song.withFilteredVersions { $0.badge == "special" || $0.badge == "best" }
+        #expect(bestOf?.computedBadge == .special)
+
+        let worstOf = song.withFilteredVersions { $0.badge == "worst" }
+        #expect(worstOf?.computedBadge == .worst)
+
+        // A filter that keeps only unbadged versions still reports the song's
+        // own badge — the song IS badged, just not on these rows.
+        let plain = song.withFilteredVersions { $0.badge == nil }
+        #expect(plain?.computedBadge == .worst)
+    }
+
+    @Test func mostSignificantPrefersPositiveBadges() {
+        func v(_ badge: String?) -> SongVersion {
+            SongVersion(
+                name: "x", versionTag: nil, badge: badge, featuring: nil,
+                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                availableLength: nil, quality: nil, streaming: nil, links: nil,
+                dateOfRecording: nil, type: nil, sources: nil, rating: nil
+            )
+        }
+        #expect(Badge.mostSignificant(in: [v("worst"), v("best")]) == .best)
+        #expect(Badge.mostSignificant(in: [v("ai"), v("grail"), v("best")]) == .grail)
+        #expect(Badge.mostSignificant(in: [v(nil), v(nil)]) == nil)
+    }
+
     @Test func britishRumouredSpellingIsClassified() {
         // 8 real occurrences in the census data fell through to the default
         // style before the "rumo" prefix match.

@@ -142,6 +142,12 @@ struct NowPlayingView: View {
                             )
                             .font(.caption.weight(.medium))
                             .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
+                            // The row's other controls compress this label until
+                            // "Original" wraps onto a second line inside the
+                            // glass capsule; pin it to one line at its natural
+                            // width and let the row lay out around it.
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                         }

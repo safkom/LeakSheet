@@ -72,6 +72,40 @@ actor ImageCache {
         memCache.object(forKey: Self.cacheKey(url, maxPixelSize))
     }
 
+    /// Warm the cache for images the user is about to scroll past.
+    ///
+    /// Without this, every cover only starts loading when its row appears, so
+    /// a first pass down a 40-era tracker is a sequence of pop-ins even though
+    /// the cache is working — the cache was simply never given the URLs ahead
+    /// of time. Already-cached URLs cost nothing (loadImage returns the memory
+    /// hit immediately), and the disk URLCache means a later launch skips the
+    /// network entirely. Concurrency is bounded so prefetching never starves
+    /// the image the user is actually looking at.
+    ///
+    /// Cancellable: the caller's `.task` cancels this when the screen goes
+    /// away, so a discarded tracker stops fetching.
+    func prefetch(_ urls: [URL], maxPixelSize: Int, concurrency: Int = 4) async {
+        var pending = urls.filter { memCache.object(forKey: Self.cacheKey($0, maxPixelSize)) == nil }
+        guard !pending.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            var inFlight = 0
+            while !pending.isEmpty || inFlight > 0 {
+                if Task.isCancelled { break }
+                while inFlight < concurrency, let next = pending.popLast() {
+                    inFlight += 1
+                    group.addTask { [weak self] in
+                        _ = await self?.loadImage(from: next, maxPixelSize: maxPixelSize)
+                    }
+                }
+                if inFlight > 0 {
+                    await group.next()
+                    inFlight -= 1
+                }
+            }
+            group.cancelAll()
+        }
+    }
+
     /// Loads an image, using memory cache → disk/network, decoded at most
     /// `maxPixelSize` on its longest side.
     func loadImage(from url: URL, maxPixelSize: Int = 1280) async -> UIImage? {
