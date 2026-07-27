@@ -6,18 +6,13 @@ extension Color {
     // Core palette (OLED dark)
     static let lsBackground = Color.black                          // #000000
     static let lsCard = Color(hex: 0x0F0F0F)                     // #0f0f0f
-    static let lsCardHover = Color(hex: 0x1A1A1A)                // #1a1a1a
     static let lsBorder = Color(hex: 0x242424)                   // #242424
-    static let lsPlayer = Color(hex: 0x080808)                   // #080808
 
     // Text
-    static let lsForeground = Color(hex: 0xE8E8E8)              // #e8e8e8
-    static let lsMuted = Color(hex: 0x8C8C8C)                   // #8c8c8c
     static let lsDim = Color(hex: 0x595959)                     // #595959
 
     // Accent
     static let lsPrimary = Color(hue: 220/360, saturation: 0.70, brightness: 0.96)  // ~#5894f5
-    static let lsPrimaryHover = Color(hue: 220/360, saturation: 0.60, brightness: 0.89)
 
     // Semantic
     static let lsAccent = lsPrimary
@@ -120,7 +115,7 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
     if a.contains("beat") { return .beatonly }
     if a.contains("partial") || a.contains("cut") { return .partial }
     if a.contains("snippet") { return .snippet }
-    if a.contains("rumored") { return .rumored }
+    if a.contains("rumo") { return .rumored }  // rumored + British "rumoured"
     if a.contains("conflicting") { return .conflicting }
     if a.contains("confirmed") { return .confirmed }
     if a.contains("unavailable") { return .unavailable }
@@ -201,6 +196,37 @@ extension Color {
     static let filterRecent = Color(hue: 140/360, saturation: 0.70, brightness: 0.80)
     static let filterNoSnippets = Color(hue: 280/360, saturation: 0.60, brightness: 0.85)
     static let filterMisc = Color(hue: 200/360, saturation: 0.65, brightness: 0.85)
+}
+
+// MARK: - Shared formatters
+
+/// Tiny cross-cutting formatters with one definition each — these were
+/// previously copy-pasted across the player, description sheet, and landing
+/// views, and had already drifted apart.
+nonisolated enum Format {
+    /// Seconds → "m:ss" (e.g. 139.8 → "2:19").
+    static func time(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return "\(mins):\(String(format: "%02d", secs))"
+    }
+
+    /// Host without the "www." prefix, for compact link labels. Strips only a
+    /// leading "www." — the old copies used replacingOccurrences, which also
+    /// mangled hosts containing "www." mid-string.
+    static func shortHost(_ urlString: String) -> String {
+        guard let url = URL(string: urlString), let host = url.host else { return urlString }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    /// Up to two uppercased initials from a display name.
+    static func initials(_ name: String) -> String {
+        name.split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first.map { String($0).uppercased() } }
+            .joined()
+    }
 }
 
 // MARK: - String Slugify

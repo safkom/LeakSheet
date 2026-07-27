@@ -31,14 +31,7 @@ struct SongDescriptionSheet: View {
 
     private var badgeInfo: (emoji: String, label: String)? {
         guard let b = payload.version.badge, let badge = Badge(rawValue: b) else { return nil }
-        switch badge {
-        case .best: return ("⭐", "Best Of")
-        case .special: return ("✨", "Special")
-        case .worst: return ("🗑️", "Worst Of")
-        case .grail: return ("🏆", "Grail")
-        case .wanted: return ("🏅", "Wanted")
-        case .ai: return ("🤖", "AI")
-        }
+        return (badge.emoji, badge.label)
     }
 
     private var displayName: String {
@@ -91,11 +84,8 @@ struct SongDescriptionSheet: View {
                         VStack(spacing: 12) {
                             if let artUrl = payload.eraArt, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 640) {
                                 CachedImage(url: url, maxPixelSize: 640) {
-                                    Image(systemName: "music.note")
+                                    ArtworkPlaceholder(cornerRadius: 0)
                                         .font(.largeTitle)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .background(Color.lsCard)
                                 }
                                 .frame(width: 160, height: 160)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -151,13 +141,24 @@ struct SongDescriptionSheet: View {
                         // Status badges (quality + availability + fan rating) — prominent
                         if payload.version.quality != nil || payload.version.availableLength != nil || payload.version.rating != nil {
                             FlowLayout(spacing: 6) {
-                                if let q = payload.version.quality, !q.isEmpty {
-                                    let variant = qualityVariant(q)
-                                    badgePill(text: q, variant: variant)
+                                // Same dedupe rules as the song rows (SPEC §12),
+                                // rendered at this sheet's larger pill size.
+                                if let primary = BadgeLogic.primaryPill(
+                                    quality: payload.version.quality,
+                                    availability: payload.version.availableLength
+                                ) {
+                                    badgePill(
+                                        text: primary.text,
+                                        variant: primary.isQuality
+                                            ? qualityVariant(primary.text)
+                                            : availabilityVariant(primary.text)
+                                    )
                                 }
-                                if let a = payload.version.availableLength, !a.isEmpty {
-                                    let variant = availabilityVariant(a)
-                                    badgePill(text: a, variant: variant)
+                                if let avail = BadgeLogic.availabilityPill(
+                                    quality: payload.version.quality,
+                                    availability: payload.version.availableLength
+                                ) {
+                                    badgePill(text: avail.text, variant: availabilityVariant(avail.text))
                                 }
                                 if let rating = payload.version.rating {
                                     ratingPill(rating)
@@ -251,7 +252,7 @@ struct SongDescriptionSheet: View {
                                         HStack(spacing: 6) {
                                             Image(systemName: "link")
                                                 .font(.caption2)
-                                            Text(linkDomain(link.raw))
+                                            Text(Format.shortHost(link.raw))
                                                 .font(.caption)
                                         }
                                         .foregroundStyle(Color.lsAccent)
@@ -372,7 +373,7 @@ struct SongDescriptionSheet: View {
                 .ignoresSafeArea()
             )
             .navigationTitle("Description")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -488,7 +489,9 @@ struct SongDescriptionSheet: View {
 
     @ViewBuilder
     private var detailGrid: some View {
-        let dateLabels: Set<String> = ["File Date", "Leak Date", "Recording"]
+        // Date cells are shown verbatim, digits or not: trackers legitimately
+        // write "Spring", "Late 2004 sessions", "Ooc" — the web reference
+        // renders them, and hiding them silently loses tracker information.
         let items: [(String, String)] = [
             ("Version", payload.version.versionTag),
             ("Duration", payload.version.trackLength),
@@ -498,9 +501,6 @@ struct SongDescriptionSheet: View {
             ("Recording", payload.version.dateOfRecording),
         ].compactMap { label, val in
             guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
-            // Drop junk in date cells (some sheets carry "Ooc", "z", etc.);
-            // a real date always contains at least one digit.
-            if dateLabels.contains(label), !v.contains(where: \.isNumber) { return nil }
             return (label, v)
         }
 
@@ -562,240 +562,4 @@ struct SongDescriptionSheet: View {
         }
     }
 
-    private func linkDomain(_ urlString: String) -> String {
-        guard let url = URL(string: urlString), let host = url.host else { return urlString }
-        return host.replacingOccurrences(of: "www.", with: "")
-    }
 }
-
-// MARK: - File Info section
-
-/// Stream file info (container, codec, bitrate, sample rate, …) for the
-/// version's streamable link. Loads from the backend /metadata endpoint;
-/// when the provider has no metadata API (krakenfiles), falls back to the
-/// format info the player captured for the currently playing track.
-/// Separate View type so its async load state invalidates only this section.
-private struct FileInfoSection: View {
-    let version: SongVersion
-
-    @Environment(PlayerViewModel.self) private var player
-
-    private enum LoadState: Equatable {
-        case loading
-        case loaded(rows: [FileInfoRows.Row], source: String)
-        case unavailable
-    }
-
-    @State private var state: LoadState = .loading
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch state {
-            case .loading:
-                HStack(spacing: 8) {
-                    Text("File Info")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-            case .loaded(let rows, let source):
-                Text("File Info")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
-                    ForEach(rows) { row in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.label)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.tertiary)
-                            Text(row.value)
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(Color.lsCard)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                Text(source)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            case .unavailable:
-                Text("File Info")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("File info unavailable")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .task(id: version.id) { await load() }
-        .onChange(of: player.streamFormat) { _, newFormat in
-            // The user may start playing this version while the sheet is up —
-            // upgrade an empty section with the freshly captured format.
-            guard state == .unavailable || state == .loading,
-                  let format = newFormat, format.trackKey == version.id else { return }
-            let rows = FileInfoRows.rows(from: format)
-            if !rows.isEmpty {
-                state = .loaded(rows: rows, source: "from player")
-            }
-        }
-    }
-
-    private func load() async {
-        guard let link = version.streamableLink else {
-            state = .unavailable
-            return
-        }
-        // try? on purpose: a metadata failure is never worth surfacing in the
-        // sheet — we just fall through to the player.
-        if let meta = try? await APIClient.shared.fetchMetadata(for: link) {
-            let rows = FileInfoRows.rows(from: meta)
-            if !rows.isEmpty {
-                let provider = meta.provider.map { "via \(FileInfoRows.providerName($0))" } ?? "via provider"
-                state = .loaded(rows: rows, source: provider)
-                return
-            }
-        }
-        if player.currentTrack?.id == version.id, let format = player.streamFormat {
-            let rows = FileInfoRows.rows(from: format)
-            if !rows.isEmpty {
-                state = .loaded(rows: rows, source: "from player")
-                return
-            }
-        }
-        // The concurrent onChange(of: player.streamFormat) handler may have
-        // already published a good result while this awaited fetchMetadata —
-        // don't clobber it just because this path came up empty.
-        if state == .loading {
-            state = .unavailable
-        }
-    }
-}
-
-/// Row building for the File Info section — pure and unit-testable.
-nonisolated enum FileInfoRows {
-    struct Row: Equatable, Identifiable {
-        let label: String
-        let value: String
-        var id: String { label }
-    }
-
-    static func rows(from meta: FileMetadata) -> [Row] {
-        var rows: [Row] = []
-        func add(_ label: String, _ value: String?) {
-            if let value, !value.isEmpty { rows.append(Row(label: label, value: value)) }
-        }
-        add("Container", meta.container)
-        if let codec = meta.codec {
-            let profile = meta.codecProfile.map { " (\($0))" } ?? ""
-            add("Codec", codec + profile)
-        }
-        add("Bitrate", meta.bitrate)
-        add("Sample Rate", meta.sampleRate)
-        add("Bit Depth", meta.bitsPerSample)
-        add("Channels", meta.channels.map(String.init))
-        add("Lossless", meta.lossless.map { $0 ? "Yes" : "No" })
-        add("Duration", meta.duration.map(formatDuration))
-        // froste analysis extras
-        if meta.bitrate == nil {
-            add("Est. Bitrate", meta.estimatedBitrate.map { "\($0) kbps" })
-        }
-        add("Freq. Cutoff", meta.frequencyCutoff.map { String(format: "%.1f kHz", $0) })
-        add("Quality Check", meta.qualityMismatch.map { $0 ? "Mismatch" : "OK" })
-        // imgur file facts
-        add("File Size", meta.fileSize.map {
-            ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file)
-        })
-        add("MIME Type", meta.mimeType)
-        add("Filename", meta.filename)
-        return rows
-    }
-
-    static func rows(from format: StreamFormatInfo) -> [Row] {
-        var rows: [Row] = []
-        if let codec = format.codec {
-            rows.append(Row(label: "Codec", value: codec))
-        }
-        if let bps = format.indicatedBitrateBps {
-            rows.append(Row(label: "Bitrate", value: "\(Int((bps / 1000).rounded())) kbps"))
-        }
-        if let rate = format.sampleRateHz {
-            rows.append(Row(label: "Sample Rate", value: "\(Int(rate)) Hz"))
-        }
-        if let channels = format.channels {
-            rows.append(Row(label: "Channels", value: String(channels)))
-        }
-        return rows
-    }
-
-    static func providerName(_ provider: String) -> String {
-        switch provider {
-        case "pillows": return "pillows.su"
-        case "froste": return "froste.lol"
-        case "imgur": return "imgur.gg"
-        default: return provider
-        }
-    }
-
-    /// "139.8073469387755s" → "2:19"; passthrough for anything unparseable.
-    static func formatDuration(_ raw: String) -> String {
-        let trimmed = raw.hasSuffix("s") ? String(raw.dropLast()) : raw
-        guard let seconds = Double(trimmed), seconds.isFinite, seconds >= 0 else { return raw }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
-    }
-}
-
-// MARK: - Evidence section
-
-/// Labeled provenance links from the tracker's Sources column. Separate View
-/// type so the (potentially long) link list is its own invalidation boundary.
-private struct EvidenceSection: View {
-    let sources: [SourceRef]
-    /// Parent owns the in-app Safari sheet.
-    var onOpenLink: (URL) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Evidence")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ForEach(sources, id: \.url) { source in
-                if let url = URL(string: source.url) {
-                    Button {
-                        onOpenLink(url)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text.magnifyingglass")
-                                .font(.caption2)
-                            Text(source.label.isEmpty ? shortHost(source.url) : source.label)
-                                .font(.caption)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            Image(systemName: "arrow.up.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .foregroundStyle(Color.lsAccent)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.lsCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private func shortHost(_ urlString: String) -> String {
-        URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
-    }
-}
-
-// FlowLayout moved to Views/Shared/FlowLayout.swift (shared with BadgeRowView
-// and MiscEntryRowView so pills wrap at large Dynamic Type).

@@ -18,7 +18,10 @@ struct LandingView: View {
     @State private var loadPhase: APIClient.LoadPhase?
     @State private var error: String?
 
-    var onArtistLoaded: (Artist) -> Void
+    /// Async so the caller can finish preparing the artist screen (building
+    /// its view model) while this screen's loading state is still up — one
+    /// loading state per tracker, not two.
+    var onArtistLoaded: (Artist) async -> Void
     var onBrowseTapped: () -> Void = {}
     @Binding var pendingBrowse: PendingBrowse?
 
@@ -136,13 +139,13 @@ struct LandingView: View {
                 await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
-            onArtistLoaded(result.artist)
+            await onArtistLoaded(result.artist)
         } catch let apiError as APIError {
             switch apiError {
             case .notModified:
                 if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed) {
                     recents.saveTracker(artist: cachedArtist)
-                    onArtistLoaded(cachedArtist)
+                    await onArtistLoaded(cachedArtist)
                 } else {
                     // ETag matched but local copy is gone — refetch unconditionally.
                     await CacheService.shared.removeTracker(for: trimmed)
@@ -152,15 +155,13 @@ struct LandingView: View {
                             await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
                         }
                         recents.saveTracker(artist: result.artist)
-                        onArtistLoaded(result.artist)
+                        await onArtistLoaded(result.artist)
                     } catch {
                         withAnimation { self.error = "Failed to load tracker" }
                     }
                 }
             case .httpError(let status, let msg):
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
-            case .decodingError:
-                withAnimation { error = "Failed to parse tracker data" }
             case .invalidURL:
                 withAnimation { error = "Invalid URL" }
             }

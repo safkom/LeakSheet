@@ -45,12 +45,12 @@ struct BadgeLegendSheet: View {
     }
 
     private static let badges: [BadgeTerm] = [
-        .init(badge: .best, name: "Best Of", detail: "A standout track."),
-        .init(badge: .special, name: "Special", detail: "Notable or highlighted."),
-        .init(badge: .grail, name: "Grail", detail: "A highly sought-after holy grail."),
-        .init(badge: .wanted, name: "Wanted", detail: "Actively wanted by the community."),
-        .init(badge: .worst, name: "Worst Of", detail: "Widely disliked."),
-        .init(badge: .ai, name: "AI", detail: "AI-generated — not an authentic leak."),
+        .init(badge: .best, name: Badge.best.label, detail: "A standout track."),
+        .init(badge: .special, name: Badge.special.label, detail: "Notable or highlighted."),
+        .init(badge: .grail, name: Badge.grail.label, detail: "A highly sought-after holy grail."),
+        .init(badge: .wanted, name: Badge.wanted.label, detail: "Actively wanted by the community."),
+        .init(badge: .worst, name: Badge.worst.label, detail: "Widely disliked."),
+        .init(badge: .ai, name: Badge.ai.label, detail: "AI-generated — not an authentic leak."),
     ]
 
     var body: some View {
@@ -72,7 +72,7 @@ struct BadgeLegendSheet: View {
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Legend")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }

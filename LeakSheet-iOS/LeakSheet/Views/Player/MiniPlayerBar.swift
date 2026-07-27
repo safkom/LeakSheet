@@ -133,10 +133,7 @@ struct MiniPlayerBar: View {
     }
 
     private var artPlaceholder: some View {
-        Image(systemName: "music.note")
-            .foregroundStyle(.secondary)
+        ArtworkPlaceholder(cornerRadius: 6)
             .frame(width: 40, height: 40)
-            .background(Color.lsCard)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

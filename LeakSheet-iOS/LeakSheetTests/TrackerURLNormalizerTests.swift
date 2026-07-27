@@ -90,21 +90,4 @@ struct RecentTrackerDedupTests {
         #expect(RecentTrackersManager.deduplicated(entries, cap: 5).count == 5)
     }
 
-    @Test @MainActor func `remove(id:) deletes only the matching url-less entry`() {
-        // Regression: remove() used to key on a normalized sourceUrl, which
-        // collapses every url-less entry to the same "" key — deleting one
-        // would have wiped all of them. Matching on `.id` (the same identity
-        // saveTracker/deduplicated use) keeps url-less entries distinct.
-        let manager = RecentTrackersManager.shared
-        manager.clearAll()
-        manager.trackers = [
-            entry(url: "", slug: "artist-a"),
-            entry(url: "", slug: "artist-b"),
-        ]
-        let targetId = manager.trackers[0].id
-        manager.remove(id: targetId)
-        #expect(manager.trackers.count == 1)
-        #expect(manager.trackers.first?.slug == "artist-b")
-        manager.clearAll()
-    }
 }

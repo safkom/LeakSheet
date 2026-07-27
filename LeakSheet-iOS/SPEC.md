@@ -2,7 +2,7 @@
 
 > Reference spec for the maintained native client.
 > Target: SwiftUI, iOS 27+, Swift 6, Liquid Glass design language.
-> Last verified against source: 2026-07-21.
+> Last verified against source: 2026-07-25.
 
 ---
 
@@ -17,26 +17,30 @@
   is a `@MainActor @Observable` singleton (not an actor); `PlaybackQueueLogic` is a pure value type
 - **Audio:** `@MainActor @Observable AudioEngine` singleton with AVPlayer
 - **Models:** `nonisolated` Codable structs (opt out of default MainActor isolation)
+- **Filter pipeline:** `nonisolated static` and pure — `FilterPipeline.swift`
+  takes an `Artist` + `FilterState` and returns computed content; the view
+  model holds only MainActor state
 - **Dependencies:** Zero third-party
 
-### File Structure (42 files)
+### File Structure (52 files)
 ```
 LeakSheet/
 ├── LeakSheetApp.swift
-├── ContentView.swift
+├── ContentView.swift               # NavigationStack root; prepares the artist VM before pushing
 ├── Models/
-│   ├── Models.swift              # Artist, Era, Section, Song, SongVersion, Badge, MiscEntry, TabSection…
-│   └── StreamResolver.swift      # Streamable URL pattern matching (host parity w/ src/streaming.py)
+│   ├── Models.swift                # Artist, Era, Section, Song, SongVersion, Badge, MiscEntry, TabSection…
+│   └── StreamResolver.swift        # Streamable-link classification (host parity w/ src/streaming.py)
 ├── Services/
-│   ├── APIClient.swift           # HTTP client actor (sheet, image-proxy, metadata, stream, trackers)
-│   ├── AudioEngine.swift         # @MainActor: AVPlayer + MPNowPlayingInfoCenter + video + queue
-│   ├── CacheService.swift        # Disk cache actor with ETag validation (v2, SHA-256 keys)
-│   ├── ImageCache.swift          # Actor: NSCache + URLSession + ImageIO downsample
-│   └── PlaybackQueueLogic.swift  # Pure value type: queue / era-rollover / list auto-advance
+│   ├── APIClient.swift             # HTTP client actor (sheet, image-proxy, metadata, trackers)
+│   ├── AudioEngine.swift           # @MainActor: AVPlayer + MPNowPlayingInfoCenter + video + queue
+│   ├── CacheService.swift          # Disk cache actor with ETag validation (v2, SHA-256 keys)
+│   ├── ImageCache.swift            # Actor: NSCache + URLCache + ImageIO downsample + prefetch
+│   └── PlaybackQueueLogic.swift    # Pure value type: queue / era-rollover / list auto-advance
 ├── ViewModels/
-│   ├── ArtistViewModel.swift     # Search, filter, recents, era row state (~980 lines)
-│   ├── PlayerViewModel.swift     # Thin @Observable wrapper over AudioEngine
-│   ├── FavouritesManager.swift   # UserDefaults persistence singleton
+│   ├── ArtistViewModel.swift       # MainActor state: chips, debounce, era rows, colors
+│   ├── FilterPipeline.swift        # The pure off-main half: filter / search / recents / stats / dates
+│   ├── PlayerViewModel.swift       # Thin @Observable façade over AudioEngine
+│   ├── FavouritesManager.swift     # File-backed JSON persistence singleton
 │   └── RecentTrackersManager.swift
 ├── Views/
 │   ├── Landing/
@@ -45,34 +49,43 @@ LeakSheet/
 │   │   ├── BrowseArtistsView.swift     # Explore Trackers — GET /trackers (TrackerHub)
 │   │   └── RecentTrackerCardView.swift
 │   ├── Artist/
-│   │   ├── ArtistView.swift             # Flattened LazyVStack of EraRows; search/filter/misc branches
+│   │   ├── ArtistView.swift            # Screen shell + ArtistContentView
+│   │   ├── ArtistContentLists.swift    # Filters / search / eras / content tabs / recents branches
+│   │   ├── ArtistRowViews.swift        # EraRowView, FilterChip, NoticeBannerView
 │   │   ├── ArtistStatsBarView.swift
-│   │   ├── EraCardView.swift
+│   │   ├── EraCardView.swift           # Glass era card — used by the era list AND content tabs
 │   │   ├── SongRowView.swift
 │   │   ├── VersionRowView.swift
 │   │   ├── BadgeRowView.swift
-│   │   ├── CreditTagsView.swift         # feat / prod / with / ref / artist (credited_artists)
-│   │   ├── MiscEntryRowView.swift       # Misc / Music-Videos tab entry row
-│   │   └── SongContextMenu.swift        # Shared context menu + 3-dot menu
+│   │   ├── CreditTagsView.swift        # feat / prod / with / ref / artist (credited_artists)
+│   │   ├── MiscEntryRowView.swift      # Content-tab entry row
+│   │   └── SongContextMenu.swift       # Shared context menu + 3-dot menu
 │   ├── Player/
 │   │   ├── MiniPlayerBar.swift
-│   │   ├── NowPlayingView.swift         # Full-screen now-playing
-│   │   └── VideoSurfaceView.swift       # Inline video at native aspect
+│   │   ├── NowPlayingView.swift        # Full-screen now-playing
+│   │   └── VideoSurfaceView.swift      # Inline video at native aspect
 │   └── Shared/
-│       ├── CachedImage.swift            # ImageCache-backed AsyncImage replacement
-│       ├── SongDescriptionSheet.swift   # Full metadata; includes FlowLayout
+│       ├── CachedImage.swift           # ImageCache-backed image view
+│       ├── BadgePill.swift             # BadgePill, DedupedBadgePills, ArtworkPlaceholder
+│       ├── FlowLayout.swift            # Wrapping layout for pill rows
+│       ├── SongDescriptionSheet.swift  # Full metadata sheet
+│       ├── SongInfoSections.swift      # FileInfoSection / FileInfoRows / EvidenceSection
+│       ├── TrackerStatsSheet.swift
+│       ├── TrackerTimelineSheet.swift
+│       ├── BadgeLegendSheet.swift
 │       ├── QueueSheet.swift
 │       ├── FavouritesView.swift
-│       ├── EmbedPlayerView.swift        # Embedded web player fallback
-│       ├── SafariView.swift             # SFSafariViewController wrapper
-│       └── SettingsView.swift           # Cache clear, autoplay, streaming mode, about
+│       ├── EmbedPlayerView.swift       # Embedded web player fallback
+│       ├── SafariView.swift            # SFSafariViewController wrapper
+│       └── SettingsView.swift          # Backend URL, cache clear, autoplay, streaming mode
 └── Utilities/
-    ├── DesignTokens.swift        # Color/spacing constants, CreditType
-    ├── EraColorExtractor.swift   # Dominant color from cover art
+    ├── DesignTokens.swift        # Colors, BadgeVariant, CreditType, Format helpers
+    ├── BadgeLogic.swift          # SPEC §12 badge dedupe rules
+    ├── EraColorExtractor.swift   # Median-cut dominant color from cover art
     ├── EraDisplayColors.swift    # Derived readable era gradient/text colors
-    ├── MiscLinkClassifier.swift  # Classifies misc links (video/archive/stream)
+    ├── MiscLinkClassifier.swift  # Classifies misc links (video/archive/stream/embed)
     ├── TrackerURLNormalizer.swift
-    └── Haptics.swift             # UIKit haptic feedback helpers
+    └── Haptics.swift
 ```
 
 ---
@@ -89,22 +102,26 @@ ContentView (NavigationStack root)
 
   → .navigationDestination(for: Artist.self) →
 
-  ArtistView (system back gesture)
-  ├── NoticeBanner         — alert/info dismissible banners
+  ArtistView (system back gesture) — content on the first frame; its view model
+  is built while the landing spinner is still up, so there is ONE loading state
+  ├── NoticeBanner         — alert/info banners (not dismissible)
   ├── ArtistStatsBar       — total / available / snippets / full HQ
   ├── .searchable()        — debounced search with filter toggles (Liquid Glass)
-  ├── FilterChips          — Best Of / Recents / No Snippets (Liquid Glass tinted)
-  ├── Content tabs         — Released / Stems / Misc / Music Videos (chips → pages)
+  ├── FilterChips          — Best Of / Worst Of / Grails / Recents / No Snippets
+  ├── Content tabs         — Released / Stems / Misc / Music Videos / Fakes …
+  │                          (chips → pages; each page is EraCard accordions,
+  │                          the same card the main era list uses)
   └── ScrollView
        └── LazyVStack of EraRows (flattened: card → section → song → version)
             ├── Cover art + gradient (dominant color)
             ├── Title + alt names + timeline
             ├── Collapsible description
             └── SongList
-                 ├── Section headers (sticky)
+                 ├── Section headers (inline; the list is one flat LazyVStack,
+                 │   so nothing is pinned)
                  └── SongRows
                       ├── Badge + title + version tag + badges + length
-                      ├── Swipe right = play, left = queue
+                      ├── Swipe right = play; swipe left = favourite, then queue
                       ├── Long-press = SongContextMenu
                       └── Expand → VersionRows
                            ├── BadgeRow (quality + availability)
@@ -243,14 +260,14 @@ songs: [Song]
 ### Song
 ```
 base_name: String
+song_key: String                // stable cross-era identity ("" for placeholders)
 versions: [SongVersion]
-badge: String? (computed)       // from any version
-available_length: String?       // from primary version
-quality: String?
-track_length: String?
-leak_date: String?
-file_date: String?
+badge: String? (computed)       // highest-precedence badge across versions:
+                                // grail > best > special > wanted > worst > ai
 ```
+> The server also emits `available_length` / `quality` / `track_length` /
+> `leak_date` / `file_date` mirrors of the primary version. iOS does not decode
+> them — rows read the version they actually display.
 
 ### SongVersion
 ```
@@ -271,12 +288,16 @@ file_date: String?
 leak_date: String?
 available_length: String?       // "Full", "Partial", "Snippet", "Confirmed", etc.
 quality: String?                // "CD Quality", "High Quality", "OG File", etc.
+streaming: Bool?                // Streaming Yes/No column (main tab)
+rating: Int?                    // fan star rating 1-5 (Travis-style ⭐ suffix)
 links: [String]
-quality_color: String?          // hex background color
-available_length_color: String?
+sources: [SourceRef]            // labeled evidence links (Sources column)
+og_filenames: [String]          // all OG names; og_filename is the legacy first
 date_of_recording: String?      // Carti-specific
 type: String?                   // Carti-specific
 ```
+> Credits parse from either bracket style — `(prod. X)` and `[prod. X]` — since
+> the Travis tracker uses square brackets.
 
 ### Badge (String enum)
 ```
@@ -288,17 +309,11 @@ wanted   — 🏅 / 🥇 / 🥉
 ai       — 🤖
 ```
 
-### EraStats
-```
-og_files: Int
-full: Int
-tagged: Int
-partial: Int
-snippets: Int
-stem_bounces: Int
-unavailable: Int
-total: Int (computed)           // sum of all
-```
+### EraStats / ParseMetadata (server-side only)
+The tracker-declared per-era stats block and the parse diagnostics are still
+emitted by the API (its own health harness reads them), but **iOS does not
+decode either** — no screen shows them. Era counts on screen come from
+`ArtistViewModel.computeEraStats`, which counts the parsed versions.
 
 ### TrackerStats
 ```
@@ -311,12 +326,8 @@ total_full, og_files, stem_bounces, full, tagged, partial, snippets, unavailable
 // Badges
 best_of, special, grails, wanted, worst_of: Int
 ```
-
-### ParseMetadata
-```
-total_rows, song_rows, skipped_rows, footer_rows, fuzzy_matched_rows: Int
-unmatched_rows: [String]
-```
+> iOS decodes everything above except `total_links`, `not_available_links` and
+> `total_full`, which no screen renders.
 
 ### Notice
 ```
@@ -336,10 +347,10 @@ event: String
 name: String
 url: String
 credit: String?
-links_work: Int?                // 0/1 flag
-updated: Int?                   // 0/1 flag
+up_to_date: Bool?               // TrackerHub freshness flag
 best: Bool?                     // recommended tracker
 ```
+> `working_links` is also emitted; iOS does not decode it.
 
 ---
 
@@ -376,7 +387,10 @@ streamable hosts.
 ### Background Audio
 - AVAudioSession category: `.playback`
 - MPNowPlayingInfoCenter: title (with badge emoji + version tag), artist, album (era name), artwork (proxied cover art)
-- MPRemoteCommandCenter: play, pause, nextTrack, previousTrack (restart if >3s), seekForward (+10s), seekBackward (-10s), changePlaybackPosition
+- MPRemoteCommandCenter: play, pause, nextTrack, previousTrack (restart if >3s),
+  changePlaybackPosition. skipForward / skipBackward are explicitly DISABLED so
+  the lock screen shows track-skip controls rather than 15s jump buttons.
+- UIBackgroundModes: `audio` only — the app schedules no background work
 
 ### Quality Switching
 - Compressed stream (default) via `/api/stream`
@@ -397,38 +411,52 @@ streamable hosts.
 | EraCard header | Toggle expand | — | — | — |
 
 ### Context Menu Items (SongContextMenu.swift — shared)
-1. ▶ Play / ⏸ Pause (if currently playing)
+1. Play (streamable versions only)
 2. Add to Queue
-3. ♥ Favourite / Unfavourite
-4. ℹ Show Description
-5. 🔗 Copy Link (if links exist)
-6. 🌐 Open in Safari (if links exist)
-7. ⬇ Download (if streamable)
+3. Favourite / Unfavourite
+4. Details
 
-Used as both `.contextMenu` and `ThreeDotMenu` (ellipsis button) on SongRowView and VersionRowView.
+Used as both `.contextMenu` and `ThreeDotMenu` (ellipsis button) on SongRowView
+and VersionRowView. Link actions (copy / open / download) live in the details
+sheet, which lists every link with its own affordance.
 
 ### Haptic Feedback
-- Swipe trigger: `.medium` impact
-- Long-press: `.light` impact
-- Favourite toggle: `.light` impact
-- Error: `.error` notification
+`Haptics.light()` only — row taps, chip toggles, favourite toggles. Heavier
+impact and notification styles were defined but never called.
 
 ---
 
 ## 6. Search & Filtering
 
-### Search Scoring (3 tiers)
-1. **Tier 1 (exact start, score 100):** base_name starts with query
-2. **Tier 2 (word boundary, score 60):** query matches start of any word in name/alt_titles/credits
-3. **Tier 3 (substring, score 30):** query found anywhere in name/alt_titles/featured/producers/collaboration/refs/notes
+### Search Scoring
+Ranked tiers, highest first (`FilterPipeline.scoreSong`):
 
-Pre-build search index per song (lowercased concatenation of all searchable fields).
-Debounce: 200ms via Task.sleep.
+| Score | Match |
+|---|---|
+| 100 | base name equals the query |
+| 90  | base name starts with the query |
+| 70  | a word in the base name starts with the query |
+| 60  | base name contains the query |
+| 40  | an alt title contains the query |
+| 20  | a credit (feat / prod / collab / ref) contains the query |
+| 20  | notes contain the query |
+
+A per-song lowercased haystack is precomputed off-main (`Precomputed.searchIndex`)
+and is pinned by test to rank identically to the inline scorer.
+Debounce: 200 ms via `Task.sleep`.
 
 ### Filter Toggles
-- **Best Of:** Show only songs with badge ∈ {best, special}
-- **Recents:** Show only songs with leak_date in last 30 days (parse "Month DD, YYYY" or "YYYY-MM-DD")
-- **No Snippets:** Hide songs where ALL versions have available_length containing "snippet" (case-insensitive)
+- **Best Of:** keep versions badged best or special (`Badge.isBestOf`)
+- **Worst Of:** keep versions badged worst
+- **Grails:** keep versions badged grail or wanted
+- **Recents:** every dated version, newest first — a sorted view, not a
+  time-boxed window
+- **No Snippets:** drop versions whose availability contains "snippet" or
+  "unavailable", or whose quality is "not available" — applied per version
+  (the same predicate filters misc entries)
+
+Filtering is per **version**: a song survives if any of its versions do, and
+the row then shows a badge belonging to the versions it kept.
 
 ---
 
@@ -443,21 +471,28 @@ Debounce: 200ms via Task.sleep.
 - TTL: 7 days; multiple trackers cached concurrently; size reporting in Settings
 
 ### Favourites
-- UserDefaults with key `leaksheet_favourites`
-- Array of FavouriteEntry: { key, artistSlug, artistName, sourceUrl, eraName, eraArt, song, addedAt }
+- File-backed JSON at `Application Support/leaksheet/favourites.json`
+  (the old UserDefaults key `leaksheet_favourites` is read once, to migrate)
+- Writes are debounced and run off the main actor (`@concurrent`)
 - Composite key: `{artistSlug}::{eraName}::{baseName}`
 
 ### Recent Trackers
-- UserDefaults with key `leaksheet_recent_trackers`
-- Cap: 20 entries
-- Each: { url, artistName, slug, totalSongs, totalVersions, timestamp }
+- UserDefaults key `leaksheet_recent_trackers`, cap 20
+- Each: { sourceUrl, artistName, slug, artUrl, totalSongs, totalVersions,
+  availableCount, snippetCount, confirmedCount }
+- Identity is the normalized URL, so one tracker never appears twice
 
-### Volume
-- UserDefaults with key `leaksheet_volume` (Float 0-1)
+### Images
+- `ImageCache`: NSCache in memory (128 MB) over a 150 MB `URLCache` on disk
+- Decoded through ImageIO at fixed pixel buckets [128, 320, 640, 1280, 1600]
+- Era covers are **prefetched** for the whole tracker once the artist screen
+  appears, so scrolling doesn't fetch per row
+- Kept in preference to iOS 27's `AsyncImage` HTTP caching, which caches bytes
+  but does no bucketed downsampling — bounding the bitmap is the point
 
 ### Era Colors
-- In-memory dictionary + UserDefaults (max 200 entries)
-- Key: art_url → Value: dominant color hex
+- In-memory dictionary + UserDefaults (`leaksheet_era_rgb_v3`, max 200 entries)
+- Key: art_url → Value: dominant RGB
 
 ---
 
@@ -499,9 +534,10 @@ Stem:          HSL(270, 55%, 78%)   — light purple
 
 ### Typography
 ```
-Display (headings): SF Pro Rounded Bold/Heavy (replaces Outfit)
-Body:               SF Pro (system default, replaces Inter)
-Base size:          14pt (body), scalable with Dynamic Type
+System (SF Pro) throughout, via semantic text styles only — no custom fonts
+and no .rounded design. Weight carries hierarchy (.semibold / .bold titles).
+Everything scales with Dynamic Type; pill rows use FlowLayout so they wrap
+instead of clipping at accessibility sizes.
 ```
 
 ### Spacing & Radius
@@ -544,33 +580,34 @@ Components using Liquid Glass:
 
 ## 9. Era Color Extraction
 
-1. Load cover art via AsyncImage / URLSession
-2. Get UIImage, crop to center 50% area
-3. Sample pixels (stride every 4th pixel)
-4. Build hue histogram, find dominant bucket
-5. Compute HSL variants:
-   - Background: HSL(hue, 30%, 8%) — very dark tinted
-   - Border: HSL(hue, 40%, 15%)
-   - Text accent: HSL(hue, 60%, 70%)
-   - Gradient: linear from bg color to transparent
-6. Cache: artUrl → color in UserDefaults (max 200)
+`EraColorExtractor` (actor) — a median-cut (ColorThief-style) reduction, not a
+hue histogram:
+
+1. Cover art is decoded by `ImageCache` at the 320 px bucket
+2. Pixels are sampled and recursively split along their widest channel
+3. The largest resulting bucket's mean RGB is the dominant color
+4. Cached as RGB under `leaksheet_era_rgb_v3` in UserDefaults (max 200)
+
+`EraDisplayColors.derive(from:)` then produces the card's palette by scaling
+that RGB (title / body / border / gradient), and runs each result through the
+WCAG contrast helpers so text stays legible on the tint it sits on. Extracted
+colors are buffered and flushed once per frame — applying them per-card as they
+land tripped SwiftUI's "glassEffect() tried to update multiple times per
+frame" fault.
 
 ---
 
 ## 10. Animations
 
-### Equalizer Bars (playing indicator)
-- 2 bars oscillating height 3pt ↔ 12pt
-- Different animation durations (0.4s, 0.5s) for variety
-- Respect `UIAccessibility.isReduceMotionEnabled`
-
-### Stagger Entry
-- Era cards: delay = index * 0.05s, ease-out
-- Song rows: similar stagger within era
+### Now-playing indicator
+- SF Symbol with `.symbolEffect(.variableColor.iterative)`, gated on
+  `accessibilityReduceMotion`
 
 ### Accordion Expand
-- `withAnimation(.easeInOut(duration: 0.25))`
-- Height transition for version list
+- `withAnimation(.spring(duration: 0.3, bounce: 0.1))`, skipped under Reduce
+  Motion
+- The glass shape stays constant; the outer `clipShape` squares the card's
+  bottom corners when expanded, so the glass effect itself never re-shapes
 
 ### Fade Transitions
 - `.transition(.opacity)` for conditional content
@@ -615,6 +652,9 @@ else                → na
 ```
 
 ### Availability → Variant
+> Also matched, beyond the table below: "rumo…" (covers both *Rumored* and the
+> British *Rumoured*) and "conflicting" (Conflicting Sources) — both checked
+> before "confirmed".
 ```
 contains "og file"  → ogfile
 equals "full"       → full
@@ -629,9 +669,24 @@ else                → na
 ```
 
 ### Display Logic
-1. If quality is empty/"Not Available": show availability badge only
-2. If quality == availability (same text): show quality only
-3. Otherwise: show quality badge + availability badge side by side
+Implemented in `BadgeLogic` (Utilities) and rendered by `BadgePill` /
+`DedupedBadgePills`; matches the web reference's `effectiveBadge` /
+`getAvailBadge`.
+
+**Primary pill**
+1. Quality, when it says something — i.e. not empty, "Not Available" or "N/A"
+2. Otherwise availability stands in (styled as availability)
+3. If neither carries information, no pill
+
+**Secondary availability pill** — shown only when *all* hold:
+- a quality pill is showing, and
+- availability differs from the quality text, and
+- the value adds information: one of og file(s), full, tagged, stem /
+  stem bounce(s), beat only, partial, snippet, confirmed, unavailable
+
+Applied everywhere versions are listed: song rows, version rows, queue,
+favourites, misc rows, and the details sheet (which renders the same decision
+at a larger pill size).
 
 ---
 

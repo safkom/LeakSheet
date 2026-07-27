@@ -5,10 +5,13 @@ import SwiftUI
 struct EraCardView: View {
     let era: Era
     let expanded: Bool
-    let stats: ArtistViewModel.Stats
     /// Precomputed display colors (derived once per era when the dominant
     /// color is extracted) — nil until the first extraction lands.
     var displayColors: EraDisplayColors?
+    /// Optional line under the title. Content-tab pages (Misc / Released /
+    /// Stems / Fakes) use it for the entry count; the main era list has no
+    /// subtitle and passes nil.
+    var subtitle: String?
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
 
@@ -76,10 +79,7 @@ struct EraCardView: View {
                     onColorExtracted?(color)
                 }
             } else {
-                Image(systemName: "music.note")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.lsCard)
+                ArtworkPlaceholder(cornerRadius: 0)
             }
         }
         .frame(width: expanded ? 96 : 64, height: expanded ? 96 : 64)
@@ -98,6 +98,12 @@ struct EraCardView: View {
 
             if !expanded, let alts = era.altNames, !alts.isEmpty {
                 altNamesLabel(alts, lineLimit: 1)
+            }
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(bodyColor.opacity(0.85))
             }
         }
     }
@@ -221,14 +227,7 @@ private struct CachedEraImage: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                // lsCard is near-black (#0f0f0f) — on its own it reads as a
-                // plain black square while loading, and stays that way
-                // forever if the load fails. A subtle icon keeps it visibly
-                // a placeholder instead of looking broken.
-                Image(systemName: "music.note")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.lsCard)
+                ArtworkPlaceholder(cornerRadius: 0)
             }
         }
         .task(id: url) {

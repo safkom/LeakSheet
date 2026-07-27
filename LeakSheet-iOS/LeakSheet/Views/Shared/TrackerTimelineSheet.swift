@@ -34,7 +34,7 @@ struct TrackerTimelineSheet: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Timeline")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }

@@ -19,7 +19,6 @@ final class PlayerViewModel {
     var isPlaying: Bool { engine.isPlaying }
     var currentTime: TimeInterval { engine.currentTime }
     var duration: TimeInterval { engine.duration }
-    var buffered: Double { engine.buffered }
     var loading: Bool { engine.loading }
     var error: String { engine.error }
     var queue: [QueueItem] { engine.queue }
@@ -62,10 +61,6 @@ final class PlayerViewModel {
         engine.stopTrack()
     }
 
-    func setVolume(_ v: Float) {
-        engine.setVolume(v)
-    }
-
     func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
         engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
     }
@@ -102,10 +97,6 @@ final class PlayerViewModel {
         engine.playCompressedStream()
     }
 
-    func setEraSongs(eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
-        engine.setEraSongs(eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
-    }
-
     /// Set era context and start playback in a single call so the two states
     /// can never be observed out of sync. Prefer this over calling
     /// `setEraSongs(...)` followed by `playTrack(...)`.
@@ -125,9 +116,6 @@ final class PlayerViewModel {
 
     /// Format seconds as "m:ss".
     static func formatTime(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
+        Format.time(seconds)
     }
 }

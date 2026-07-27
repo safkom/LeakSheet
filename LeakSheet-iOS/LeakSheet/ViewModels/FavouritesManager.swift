@@ -66,6 +66,7 @@ final class FavouritesManager {
                 leakDate: leakDate,
                 availableLength: availableLength,
                 quality: quality,
+                streaming: nil,
                 links: links,
                 dateOfRecording: nil,
                 type: nil,
@@ -107,10 +108,6 @@ final class FavouritesManager {
     /// Check if a version is favourited by deriving its base name.
     func isFavouritedByVersion(_ version: SongVersion, artistSlug: String, eraName: String) -> Bool {
         isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: version.derivedBaseName)
-    }
-
-    func favouritesForArtist(_ slug: String) -> [FavouriteEntry] {
-        entries.filter { $0.artistSlug == slug }
     }
 
     /// Group by artist → era, for global favourites panel. Use `groupedByArtist` for the cached version.

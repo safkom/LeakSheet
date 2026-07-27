@@ -57,29 +57,10 @@ struct FavouritesView: View {
                                                         .font(.caption2)
                                                         .foregroundStyle(.secondary)
                                                         .lineLimit(1)
-                                                    // Inline quality/availability badges
-                                                    HStack(spacing: 4) {
-                                                        if let q = entry.quality, !q.isEmpty {
-                                                            let variant = qualityVariant(q)
-                                                            Text(q)
-                                                                .font(.caption2.weight(.medium))
-                                                                .padding(.horizontal, 4)
-                                                                .padding(.vertical, 1)
-                                                                .background(variant.background)
-                                                                .foregroundStyle(variant.foreground)
-                                                                .clipShape(Capsule())
-                                                        }
-                                                        if let a = entry.availableLength, !a.isEmpty {
-                                                            let variant = availabilityVariant(a)
-                                                            Text(a)
-                                                                .font(.caption2.weight(.medium))
-                                                                .padding(.horizontal, 4)
-                                                                .padding(.vertical, 1)
-                                                                .background(variant.background)
-                                                                .foregroundStyle(variant.foreground)
-                                                                .clipShape(Capsule())
-                                                        }
-                                                    }
+                                                    DedupedBadgePills(
+                                                        quality: entry.quality,
+                                                        availability: entry.availableLength
+                                                    )
                                                 }
                                                 Spacer()
                                                 if entry.toSongVersion != nil {
@@ -115,7 +96,7 @@ struct FavouritesView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Favourites (\(favourites.entries.count))")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .sheet(item: $showDescription) { payload in
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)
@@ -139,10 +120,7 @@ struct FavouritesView: View {
     }
 
     private var favArtPlaceholder: some View {
-        Image(systemName: "music.note")
-            .foregroundStyle(.secondary)
+        ArtworkPlaceholder(cornerRadius: 6)
             .frame(width: 40, height: 40)
-            .background(Color.lsCard)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

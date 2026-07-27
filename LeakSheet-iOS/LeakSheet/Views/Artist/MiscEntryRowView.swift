@@ -36,13 +36,17 @@ struct MiscEntryRowView: View {
                     if let type = entry.entryType, !type.isEmpty {
                         typePill(type)
                     }
-                    if let quality = entry.quality, !quality.isEmpty {
-                        badgePill(quality, variant: qualityVariant(quality))
-                            .accessibilityLabel("Quality: \(quality)")
+                    if let primary = BadgeLogic.primaryPill(quality: entry.quality, availability: entry.available) {
+                        BadgePill(
+                            text: primary.text,
+                            variant: primary.isQuality
+                                ? qualityVariant(primary.text)
+                                : availabilityVariant(primary.text),
+                            accessibilityPrefix: primary.isQuality ? "Quality" : "Availability"
+                        )
                     }
-                    if let avail = entry.available, !avail.isEmpty {
-                        badgePill(avail, variant: availabilityVariant(avail))
-                            .accessibilityLabel("Availability: \(avail)")
+                    if let avail = BadgeLogic.availabilityPill(quality: entry.quality, availability: entry.available) {
+                        BadgePill(text: avail.text, variant: availabilityVariant(avail.text), accessibilityPrefix: "Availability")
                     }
                 }
 
@@ -70,13 +74,7 @@ struct MiscEntryRowView: View {
 
     private func thumbnail(url: URL) -> some View {
         CachedImage(url: url, maxPixelSize: 128) {
-            // Bare lsCard (#0f0f0f) reads as a broken black square while
-            // loading or after a failed load — a subtle icon keeps it
-            // legible as a placeholder (see U-5).
-            Image(systemName: "music.note")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.lsCard)
+            ArtworkPlaceholder(cornerRadius: 6)
         }
         .frame(width: 44, height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -143,17 +141,6 @@ struct MiscEntryRowView: View {
             .clipShape(Capsule())
             .fixedSize()
             .accessibilityLabel("Type: \(type)")
-    }
-
-    private func badgePill(_ text: String, variant: BadgeVariant) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(variant.foreground)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(variant.background)
-            .clipShape(Capsule())
-            .fixedSize()
     }
 
     private func metaText(_ text: String, icon: String) -> some View {

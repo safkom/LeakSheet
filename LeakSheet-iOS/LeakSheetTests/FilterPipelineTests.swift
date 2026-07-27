@@ -20,24 +20,20 @@ struct FilterPipelineTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: altTitles,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: leakDate,
-            availableLength: available, quality: quality,
+            availableLength: available, quality: quality, streaming: nil,
             links: link.map { [$0] }, dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
     }
 
     private func song(_ baseName: String, versions: [SongVersion]) -> Song {
-        Song(
-            baseName: baseName, songKey: nil, versions: versions, badge: nil,
-            availableLength: nil, quality: nil, trackLength: nil,
-            leakDate: nil, fileDate: nil
-        )
+        Song(baseName: baseName, songKey: nil, versions: versions, badge: nil)
     }
 
     private func era(_ name: String, songs: [Song]) -> Era {
         Era(
             name: name, altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: songs)],
             songCount: nil, versionCount: nil
         )
@@ -60,7 +56,7 @@ struct FilterPipelineTests {
         ])
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
-            eras: [eraA, eraB], trackerStats: nil, parseMetadata: nil,
+            eras: [eraA, eraB], trackerStats: nil,
             notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil,
             tabs: nil
         )
@@ -241,7 +237,7 @@ struct FilterPipelineTests {
         ])
         let a = Artist(
             name: "PH", slug: "ph", sourceUrl: nil, eras: [mysteryEra],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
         let vm = ArtistViewModel(artist: a)
@@ -319,7 +315,7 @@ struct TabModeFilterTests {
         )
         return Artist(
             name: "Test", slug: "test", sourceUrl: nil, eras: [],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil,
             miscEntries: [entry("Old Flat Misc", tab: "misc")],
             tabs: [released, stems]
@@ -368,7 +364,7 @@ struct WorstOfFilterTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: "High Quality",
+            availableLength: "Full", quality: "High Quality", streaming: nil,
             links: ["https://pillows.su/f/a"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
@@ -377,26 +373,22 @@ struct WorstOfFilterTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: "Low Quality",
+            availableLength: "Full", quality: "Low Quality", streaming: nil,
             links: ["https://pillows.su/f/b"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
         )
         let era = Era(
             name: "Era A", altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: [
-                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil,
-                     availableLength: nil, quality: nil, trackLength: nil,
-                     leakDate: nil, fileDate: nil),
-                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil,
-                     availableLength: nil, quality: nil, trackLength: nil,
-                     leakDate: nil, fileDate: nil),
+                Song(baseName: "Good", songKey: nil, versions: [good], badge: nil),
+                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil),
             ])],
             songCount: nil, versionCount: nil
         )
         return Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [era],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
     }
@@ -412,7 +404,7 @@ struct WorstOfFilterTests {
     @Test func `badge tab kinds are hidden from available tabs`() async {
         let tabbed = Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil,
             tabs: [
                 TabSection(kind: "released", name: "Released", entries: []),
@@ -434,21 +426,19 @@ struct CrossEraIndexTests {
             producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
-            availableLength: "Full", quality: nil, links: nil,
+            availableLength: "Full", quality: nil, streaming: nil, links: nil,
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
         return Song(
             baseName: name, songKey: key,
-            versions: Array(repeating: v, count: versions), badge: nil,
-            availableLength: nil, quality: nil, trackLength: nil,
-            leakDate: nil, fileDate: nil
+            versions: Array(repeating: v, count: versions), badge: nil
         )
     }
 
     private func era(_ name: String, songs: [Song]) -> Era {
         Era(
             name: name, altNames: nil, description: nil, timeline: nil,
-            statsRaw: nil, stats: nil, artUrl: nil, highlightedProducers: nil,
+            artUrl: nil,
             sections: [Section(name: "", group: nil, songs: songs)],
             songCount: nil, versionCount: nil
         )
@@ -464,7 +454,7 @@ struct CrossEraIndexTests {
                     song("Unique", key: "unique"),
                 ]),
             ],
-            trackerStats: nil, parseMetadata: nil, notices: nil,
+            trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
@@ -519,5 +509,125 @@ struct LeakDateParsingTests {
         // …and true garbage sorts to the bottom.
         #expect(ArtistViewModel.parseLeakDate("n/a") == 0)
         #expect(ArtistViewModel.parseLeakDate("") == 0)
+    }
+
+    // 2026-07-24: two forms the web reference parses (via Date.parse) that
+    // iOS previously year-bucketed.
+    @Test func iso8601WithTimeParsesToDayPrecision() {
+        let a = ArtistViewModel.parseLeakDate("2023-03-20T14:30:00Z")
+        let b = ArtistViewModel.parseLeakDate("2023-03-21T14:30:00Z")
+        #expect(a > 0)
+        #expect(b - a == 86_400)
+    }
+
+    @Test func dayFirstOrderingParsesToDayPrecision() {
+        let a = ArtistViewModel.parseLeakDate("20 Mar 2023")
+        #expect(a == ArtistViewModel.parseLeakDate("Mar 20, 2023"))
+    }
+
+    // DateFormatter is lenient enough to accept these two without dedicated
+    // formatters — pinned so a future formatter change can't silently
+    // regress them to year-bucketing.
+    @Test func leniencyAcceptedFormsKeepDayPrecision() {
+        #expect(ArtistViewModel.parseLeakDate("Mar 20 2023") ==
+                ArtistViewModel.parseLeakDate("Mar 20, 2023"))
+        #expect(ArtistViewModel.parseLeakDate("2023/03/20") ==
+                ArtistViewModel.parseLeakDate("2023-03-20"))
+    }
+}
+
+// MARK: - Badge display logic (SPEC §12)
+
+@Suite("Badge dedupe")
+struct BadgeLogicTests {
+    @Test func qualityIsPrimaryWhenMeaningful() {
+        let p = BadgeLogic.primaryPill(quality: "CD Quality", availability: "Full")
+        #expect(p == BadgeLogic.Pill(text: "CD Quality", isQuality: true))
+    }
+
+    @Test(arguments: ["", "Not Available", "n/a", "N/A"])
+    func availabilityStandsInWhenQualityIsEmptyOrNA(_ quality: String) {
+        let p = BadgeLogic.primaryPill(quality: quality, availability: "Snippet")
+        #expect(p == BadgeLogic.Pill(text: "Snippet", isQuality: false))
+    }
+
+    @Test func noPillWhenBothAreEmptyOrNA() {
+        #expect(BadgeLogic.primaryPill(quality: nil, availability: nil) == nil)
+        #expect(BadgeLogic.primaryPill(quality: "N/A", availability: "n/a") == nil)
+    }
+
+    @Test func availabilityPillSuppressedWhenItDuplicatesQuality() {
+        #expect(BadgeLogic.availabilityPill(quality: "OG File", availability: "OG File") == nil)
+    }
+
+    @Test func availabilityPillSuppressedWhenItAddsNothing() {
+        // Not in the informative whitelist — the quality pill already says it.
+        #expect(BadgeLogic.availabilityPill(quality: "CD Quality", availability: "Yes") == nil)
+        #expect(BadgeLogic.availabilityPill(quality: "CD Quality", availability: "n/a") == nil)
+    }
+
+    @Test func availabilityPillShownWhenItAddsInformation() {
+        let p = BadgeLogic.availabilityPill(quality: "CD Quality", availability: "Snippet")
+        #expect(p == BadgeLogic.Pill(text: "Snippet", isQuality: false))
+    }
+
+    @Test func availabilityPillSuppressedWhenNoQualityPillIsShown() {
+        // Availability already took the primary slot — don't render it twice.
+        #expect(BadgeLogic.availabilityPill(quality: "", availability: "Full") == nil)
+    }
+
+    // Regression: Ye "Hurricane" in DONDA [V3] carries worst, special AND
+    // plain versions. Its song-level badge is 'worst' (first badged version
+    // wins server-side), so filtering to Best Of kept the ✨ version but the
+    // row still displayed 🗑️.
+    @Test func filteredRowTakesItsBadgeFromTheKeptVersions() {
+        func v(_ tag: String, _ badge: String?) -> SongVersion {
+            SongVersion(
+                name: "Hurricane", versionTag: tag, badge: badge, featuring: nil,
+                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                availableLength: "Full", quality: "CD Quality", streaming: nil,
+                links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+            )
+        }
+        let song = Song(
+            baseName: "Hurricane", songKey: "hurricane",
+            versions: [v("V78", "worst"), v("V99", "special"), v("V101", nil)],
+            badge: "worst"
+        )
+        let bestOf = song.withFilteredVersions { $0.badge == "special" || $0.badge == "best" }
+        #expect(bestOf?.computedBadge == .special)
+
+        let worstOf = song.withFilteredVersions { $0.badge == "worst" }
+        #expect(worstOf?.computedBadge == .worst)
+
+        // A filter that keeps only unbadged versions still reports the song's
+        // own badge — the song IS badged, just not on these rows.
+        let plain = song.withFilteredVersions { $0.badge == nil }
+        #expect(plain?.computedBadge == .worst)
+    }
+
+    @Test func mostSignificantPrefersPositiveBadges() {
+        func v(_ badge: String?) -> SongVersion {
+            SongVersion(
+                name: "x", versionTag: nil, badge: badge, featuring: nil,
+                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                availableLength: nil, quality: nil, streaming: nil, links: nil,
+                dateOfRecording: nil, type: nil, sources: nil, rating: nil
+            )
+        }
+        #expect(Badge.mostSignificant(in: [v("worst"), v("best")]) == .best)
+        #expect(Badge.mostSignificant(in: [v("ai"), v("grail"), v("best")]) == .grail)
+        #expect(Badge.mostSignificant(in: [v(nil), v(nil)]) == nil)
+    }
+
+    @Test func britishRumouredSpellingIsClassified() {
+        // 8 real occurrences in the census data fell through to the default
+        // style before the "rumo" prefix match.
+        #expect(availabilityVariant("Rumoured") == .rumored)
+        #expect(availabilityVariant("Rumored") == .rumored)
     }
 }

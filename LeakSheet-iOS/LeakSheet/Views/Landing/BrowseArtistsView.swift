@@ -51,7 +51,7 @@ struct BrowseArtistsView: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     // Initials
-                                    Text(initials(artist.name))
+                                    Text(Format.initials(artist.name))
                                         .font(.caption.bold())
                                         .foregroundStyle(.secondary)
                                         .frame(width: 36, height: 36)
@@ -118,7 +118,7 @@ struct BrowseArtistsView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Explore Trackers")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
         }
         .task { await loadArtists() }
         .onAppear { loadingUrl = "" }
@@ -144,10 +144,4 @@ struct BrowseArtistsView: View {
         }
     }
 
-    private func initials(_ name: String) -> String {
-        name.split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-            .joined()
-    }
 }
