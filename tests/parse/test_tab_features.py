@@ -130,6 +130,79 @@ class TestBadgeTabAnnotation:
         artist = self._artist()
         assert apply_badge_tab(artist, "released", [self._entry("Jail")]) == 0
 
+    def test_leading_badge_emoji_still_matches(self):
+        from src.parser import apply_badge_tab
+        # Highlight tabs routinely prefix every row ("🏆 Snaily [V2]"). The
+        # emoji is part of the raw name, so keying on it matched nothing —
+        # 11 of 11 Steve Lacy rows silently missed before this was stripped.
+        artist = self._artist()
+        applied = apply_badge_tab(artist, "grails", [self._entry("🏆 New Slaves", era="Yeezus")])
+        assert applied == 1
+        assert artist.eras[1].sections[0].songs[0].versions[0].badge == "grail"
+
+    def test_emoji_on_the_main_tab_song_also_matches(self):
+        from src.models import Artist, Era, Section, Song, SongVersion
+        from src.parser import apply_badge_tab
+        artist = Artist(name="T", slug="t", eras=[Era(name="E", sections=[Section(
+            songs=[Song(base_name="🏆 Emoji Titled", versions=[SongVersion(name="Emoji Titled")])]
+        )])])
+        assert apply_badge_tab(artist, "grails", [self._entry("Emoji Titled", era="E")]) == 1
+
+
+class TestCombinedGrailsWantedTab:
+    """A combined "Grails / Wanted" tab classifies as one kind but carries
+    two badge blocks — 28 of 415 TrackerHub trackers ship one."""
+
+    @staticmethod
+    def _entries():
+        from tests.conftest import read_synthetic
+        return parse_misc_tab(read_synthetic("grails_wanted_tab"), "grails")
+
+    def test_section_labels_captured(self):
+        entries = self._entries()
+        assert [e.section for e in entries] == (
+            ["Grails"] * 3 + ["Wanted"] * 3
+        )
+        # Separator rows are not entries themselves.
+        assert "Grails" not in [e.name for e in entries]
+        assert "Wanted" not in [e.name for e in entries]
+
+    def test_row_emoji_wins_over_tab_kind(self):
+        from src.models import Badge
+        from src.parser import _badge_for_entry
+        by_name = {e.name: e for e in self._entries()}
+        assert _badge_for_entry(by_name["🏅 Wanted Song"], Badge.GRAIL) == Badge.WANTED
+        assert _badge_for_entry(by_name["🥇 Second Wanted"], Badge.GRAIL) == Badge.WANTED
+        assert _badge_for_entry(by_name["🏆 Grail Song"], Badge.GRAIL) == Badge.GRAIL
+
+    def test_section_label_is_the_fallback_when_a_row_has_no_emoji(self):
+        from src.models import Badge
+        from src.parser import _badge_for_entry
+        by_name = {e.name: e for e in self._entries()}
+        assert _badge_for_entry(by_name["Section Only Wanted"], Badge.GRAIL) == Badge.WANTED
+        assert _badge_for_entry(by_name["Section Only Grail"], Badge.GRAIL) == Badge.GRAIL
+
+    def test_tab_kind_is_the_last_resort(self):
+        from src.models import Badge, MiscEntry
+        from src.parser import _badge_for_entry
+        bare = MiscEntry(name="Plain", era_name="E", source_tab="grails")
+        assert _badge_for_entry(bare, Badge.GRAIL) == Badge.GRAIL
+
+    def test_end_to_end_split_across_the_era_tree(self):
+        from src.models import Artist, Era, Section, Song, SongVersion
+        from src.parser import apply_badge_tab
+        names = ["Grail Song", "Second Grail", "Section Only Grail",
+                 "Wanted Song", "Second Wanted", "Section Only Wanted"]
+        artist = Artist(name="T", slug="t", eras=[Era(name="Debut Era", sections=[Section(
+            songs=[Song(base_name=n, versions=[SongVersion(name=n)]) for n in names]
+        )])])
+        assert apply_badge_tab(artist, "grails", self._entries()) == 6
+        got = {s.base_name: s.versions[0].badge for s in artist.eras[0].sections[0].songs}
+        assert got == {
+            "Grail Song": "grail", "Second Grail": "grail", "Section Only Grail": "grail",
+            "Wanted Song": "wanted", "Second Wanted": "wanted", "Section Only Wanted": "wanted",
+        }
+
 
 class TestTabColumnVariants:
     """Real-world column variants from the 2026-07-18 review: Carti's

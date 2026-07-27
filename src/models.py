@@ -325,6 +325,13 @@ class MiscEntry(BaseModel):
     own column sets and are kept fully separate from the era/song tree.
     """
     era_name: str = Field("", description="Era label from the last era header row")
+    section: str = Field(
+        "",
+        description=(
+            "Label from the last section separator row, e.g. the 'Grails' / "
+            "'Wanted' blocks inside a combined highlight tab"
+        ),
+    )
     name: str = Field(..., description="Entry title")
     notes: str | None = Field(None, description="Description text")
     entry_type: str | None = Field(None, description="Type column, e.g. 'Released', 'Freestyle', 'Book'")

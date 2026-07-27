@@ -2138,10 +2138,6 @@ def _add_version_to_era(
 # Badge tabs — Best Of / Worst Of / Special / Grails / Wanted annotate songs
 # ---------------------------------------------------------------------------
 
-# Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
-# every entry in it — including the wanted section — is stamped GRAIL.
-# Follow-up (tracked in README's roadmap note): split combined tabs by their
-# internal section labels instead of stamping one badge across the whole tab.
 _BADGE_BY_TAB_KIND = {
     "best_of": Badge.BEST,
     "worst_of": Badge.WORST,
@@ -2149,6 +2145,36 @@ _BADGE_BY_TAB_KIND = {
     "grails": Badge.GRAIL,
     "wanted": Badge.WANTED,
 }
+
+# Separator-row labels inside a highlight tab map to the same badges as the
+# tab kinds do — see BADGE_SECTION_LABELS in parse_misc_tab.
+_BADGE_BY_SECTION_LABEL = {
+    "grails": Badge.GRAIL,
+    "grail": Badge.GRAIL,
+    "wanted": Badge.WANTED,
+    "best of": Badge.BEST,
+    "worst of": Badge.WORST,
+    "special": Badge.SPECIAL,
+    "notable": Badge.SPECIAL,
+}
+
+
+def _badge_for_entry(entry: MiscEntry, tab_default: Badge) -> Badge:
+    """Resolve one highlight-tab row's badge.
+
+    28 of 415 trackers ship a combined "Grails / Wanted" tab, which
+    classifies as kind ``grails``. Its rows carry their own signal: each is
+    emoji-prefixed (🏆 grail vs 🏅/🥇/🥉 wanted) and the two blocks are
+    introduced by a "Grails" / "Wanted" separator row. Row emoji wins, then
+    the section label, then the tab's own kind.
+    """
+    badge, _ = extract_badge(entry.name)
+    if badge is not None:
+        return badge
+    labelled = _BADGE_BY_SECTION_LABEL.get(entry.section.strip().lower())
+    if labelled is not None:
+        return labelled
+    return tab_default
 
 
 def apply_badge_tabs(
@@ -2162,6 +2188,10 @@ def apply_badge_tabs(
     across the tracker. Placeholder tracks ("???", "untitled", …) are never
     badge targets, and songs that already carry any badge (inline emoji from
     the main tab) are left untouched. Returns the number of songs annotated.
+
+    Both sides of the match drop their leading badge emoji first: highlight
+    tabs routinely prefix every row ("🏆 Snaily [V2]"), and that emoji is
+    part of the raw name, so keying on it matched nothing at all.
     """
     if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
         return 0
@@ -2172,9 +2202,10 @@ def apply_badge_tabs(
         era_key = _era_match_key(era.name)
         for section in era.sections:
             for song in section.songs:
-                if song.base_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
+                _, song_name = extract_badge(song.base_name)
+                if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
                     continue
-                song_key = _song_match_key(song.base_name)
+                song_key = _song_match_key(song_name)
                 if not song_key:
                     continue
                 by_era_and_name.setdefault((era_key, song_key), song)
@@ -2182,11 +2213,12 @@ def apply_badge_tabs(
 
     applied = 0
     for kind, entries in tabs:
-        badge = _BADGE_BY_TAB_KIND.get(kind)
-        if badge is None:
+        tab_default = _BADGE_BY_TAB_KIND.get(kind)
+        if tab_default is None:
             continue
         for entry in entries:
-            _, base_name = extract_version_tag(entry.name)
+            _, entry_name = extract_badge(entry.name)
+            _, base_name = extract_version_tag(entry_name)
             song_key = _song_match_key(base_name)
             if not song_key:
                 continue
@@ -2199,7 +2231,7 @@ def apply_badge_tabs(
                 continue
             if any(v.badge is not None for v in song.versions):
                 continue
-            song.versions[0].badge = badge
+            song.versions[0].badge = _badge_for_entry(entry, tab_default)
             applied += 1
     return applied
 
@@ -2244,6 +2276,12 @@ _MISC_COLUMN_ALIASES = {
     # Deliberately unmapped (no MiscEntry field, dropped): BPM, Key
     # (Ye/Kendrick Stems), Made By/Creator (Fakes).
 }
+
+# Highlight-block labels that appear as lone-cell separator rows inside a
+# badge tab. A combined "Grails / Wanted" tab uses them to divide its halves.
+BADGE_SECTION_LABELS = frozenset({
+    "grails", "grail", "wanted", "best of", "worst of", "special", "notable",
+})
 
 # Era header rows in these tabs carry per-era stats in the era column,
 # e.g. "3 Released 0 Unreleased 0 BTS 0 On Streaming".
@@ -2305,6 +2343,7 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
     entries: list[MiscEntry] = []
     current_era = ""
+    current_section = ""
 
     for row in rows[header_idx + 1:]:
         if all(not c.text.strip() for c in row):
@@ -2312,6 +2351,17 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
         era_text = cell_text(row, "era")
         name = cell_text(row, "name")
+
+        # Section separator: a lone cell naming a highlight block. Combined
+        # "Grails / Wanted" tabs use these to divide the two halves; the
+        # column varies (Notes on Steve Lacy/MAVI, Title on Travis), so match
+        # on "exactly one non-empty cell" rather than a fixed column.
+        lone = [c.text.strip() for c in row if c.text.strip()]
+        if len(lone) == 1:
+            _, label = extract_badge(lone[0])
+            if label.lower() in BADGE_SECTION_LABELS:
+                current_section = label
+                continue
 
         # Era header row: stats text in the era column, era name in the name
         # column (mirrors the main tab's grammar).
@@ -2346,6 +2396,7 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
         entries.append(MiscEntry(
             era_name=current_era,
+            section=current_section,
             name=name.split("\n")[0].strip(),
             notes=opt("notes"),
             entry_type=opt("entry_type"),
