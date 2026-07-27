@@ -118,7 +118,7 @@ struct BrowseArtistsView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Explore Trackers")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
         }
         .task { await loadArtists() }
         .onAppear { loadingUrl = "" }

@@ -96,7 +96,7 @@ struct FavouritesView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Favourites (\(favourites.entries.count))")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .sheet(item: $showDescription) { payload in
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)

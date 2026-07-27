@@ -22,7 +22,7 @@ struct EmbedPlayerView: View {
             EmbedWebView(url: item.embedURL)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(item.title)
-                .navigationBarTitleDisplayMode(.inline)
+                .toolbarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Done") { dismiss() }

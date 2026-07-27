@@ -105,7 +105,7 @@ struct TrackerStatsSheet: View {
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Stats")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }

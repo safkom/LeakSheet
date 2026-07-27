@@ -2,11 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Audio only. "fetch" and "processing" were declared but unused: the
+	     app registers no BGTaskScheduler identifiers and runs no background
+	     work, so they were entitlements we never exercised. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
-		<string>fetch</string>
-		<string>processing</string>
 	</array>
 </dict>
 </plist>

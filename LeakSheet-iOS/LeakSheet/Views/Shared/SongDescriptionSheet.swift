@@ -373,7 +373,7 @@ struct SongDescriptionSheet: View {
                 .ignoresSafeArea()
             )
             .navigationTitle("Description")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {

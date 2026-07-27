@@ -81,7 +81,7 @@ struct QueueSheet: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Queue (\(player.queue.count))")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if !player.queue.isEmpty {

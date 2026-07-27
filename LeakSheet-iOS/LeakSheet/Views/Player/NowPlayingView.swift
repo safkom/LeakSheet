@@ -230,7 +230,7 @@ struct NowPlayingView: View {
                 }
                 .ignoresSafeArea()
             )
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
