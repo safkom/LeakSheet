@@ -1,6 +1,10 @@
 """LeakSheet — Configuration and path management."""
 
+import os
+import time
 from pathlib import Path
+from typing import Iterable
+from urllib.parse import urlparse
 
 # Project root directory
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,6 +25,79 @@ TRACKERHUB_URL = (
     "1Z8aANbxXbnUGoZPRvJfWL3gz6jrzPPrwVt3d0c1iJ_4/htmlview/sheet"
     "?headers=true&gid=1884837542"
 )
+
+# ---------------------------------------------------------------------------
+# Sheet-fetch host allowlist
+# ---------------------------------------------------------------------------
+#
+# POST /sheet takes a URL from the caller and fetches it, so without this the
+# backend is an SSRF sink: cloud metadata (169.254.169.254) and RFC1918 hosts
+# are reachable, any internal page holding a <table> comes back parsed, and
+# the distinct 404/502/403 mappings make it an internal port scanner.
+#
+# Almost every tracker is on docs.google.com (413 of the 414 in the 2026-07-20
+# TrackerHub sweep). The rest are custom domains, so the allowlist is seeded
+# with the known ones and extended at runtime from the TrackerHub feed — a
+# newly listed tracker works without a deploy. LEAKSHEET_EXTRA_SHEET_HOSTS
+# (comma-separated) is the operator escape hatch.
+_SHEET_HOST_SEED = frozenset({
+    "docs.google.com",
+    "drive.google.com",
+    "yetracker.net",          # README's CLI example
+    "deftonestracker.net",    # only non-Google host in the 2026-07-20 sweep
+})
+
+# Hosts harvested from the TrackerHub feed, and when that last happened.
+_tracker_hosts: set[str] = set()
+_tracker_hosts_at: float = 0.0
+
+# Don't let a miss-triggered refresh become an amplification vector.
+TRACKER_HOST_REFRESH_INTERVAL = 900.0  # 15 minutes
+
+
+def _env_sheet_hosts() -> set[str]:
+    raw = os.environ.get("LEAKSHEET_EXTRA_SHEET_HOSTS", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def register_tracker_hosts(urls: Iterable[str]) -> int:
+    """Record the hosts of TrackerHub-listed trackers as fetchable.
+
+    Returns the number of hosts now known. Called whenever the feed is
+    parsed, so the normal /trackers path keeps the allowlist warm.
+    """
+    global _tracker_hosts_at
+    for url in urls:
+        host = urlparse(url).hostname
+        if host:
+            _tracker_hosts.add(host.lower())
+    _tracker_hosts_at = time.time()
+    return len(_tracker_hosts)
+
+
+def tracker_hosts_are_stale() -> bool:
+    """True when a miss is worth one TrackerHub refresh."""
+    return time.time() - _tracker_hosts_at > TRACKER_HOST_REFRESH_INTERVAL
+
+
+def sheet_host_allowed(host: str | None) -> bool:
+    """True if *host* may be fetched by the sheet pipeline."""
+    if not host:
+        return False
+    host = host.lower()
+    return (
+        host in _SHEET_HOST_SEED
+        or host in _tracker_hosts
+        or host in _env_sheet_hosts()
+    )
+
+
+def reset_tracker_hosts() -> None:
+    """Drop the harvested host set — tests only."""
+    global _tracker_hosts_at
+    _tracker_hosts.clear()
+    _tracker_hosts_at = 0.0
+
 
 # Known tracker files and their artist names
 KNOWN_TRACKERS: dict[str, str] = {

@@ -27,6 +27,7 @@ from src.models import (
     Song,
     SongVersion,
     SourceRef,
+    TrackerEntry,
     TrackerStats,
     VERSION_TAG_PATTERN,
     _split_alt_aliases,
@@ -2519,4 +2520,60 @@ def parse_file(path: Path | str, artist_name: str) -> Artist:
     return parse_sheet(html_content, artist_name)
 
 
+# ---------------------------------------------------------------------------
+# TrackerHub master sheet — the tracker discovery feed
+# ---------------------------------------------------------------------------
 
+def _parse_yes_no(text: str) -> bool | None:
+    t = text.strip().lower()
+    if t.startswith("yes"):
+        return True
+    if t.startswith("no"):
+        return False
+    return None
+
+
+_TRACKER_STAR_CHARS = "\u2b50\ufe0f "  # star + variation selector + space
+
+
+def parse_trackerhub(html: str) -> list[TrackerEntry]:
+    """Parse the TrackerHub sheet into tracker entries.
+
+    Rows: [Trackers (name + link, star prefix = featured), Credits,
+    Up To Date?, Working Links?]. Banner/header rows carry no credit and
+    no Yes/No flags, which is what filters them out.
+
+    Lives here rather than in the API layer because the fetcher needs it too:
+    the hosts of the trackers listed here are what /sheet is allowed to fetch
+    (see config.sheet_host_allowed).
+    """
+    entries: list[TrackerEntry] = []
+    for row in extract_table(html):
+        if not row:
+            continue
+        name_cell = row[0]
+        raw_name = name_cell.text.strip()
+        if not raw_name or not name_cell.links:
+            continue
+        credit = row[1].text.strip() if len(row) > 1 else ""
+        up_to_date = _parse_yes_no(row[2].text) if len(row) > 2 else None
+        working_links = _parse_yes_no(row[3].text) if len(row) > 3 else None
+        # Banner rows (rules text, discord invites) have a name/link but
+        # neither credits nor status flags — real tracker rows always have
+        # at least one of them.
+        if not credit and up_to_date is None and working_links is None:
+            continue
+        best = raw_name.startswith("\u2b50")
+        name = raw_name.lstrip(_TRACKER_STAR_CHARS).strip()
+        if not name:
+            continue
+        entries.append(TrackerEntry(
+            name=name,
+            url=_clean_link(name_cell.links[0]),
+            credit=credit or None,
+            best=best,
+            up_to_date=up_to_date,
+            working_links=working_links,
+        ))
+    entries.sort(key=lambda e: (not e.best, e.name.lower()))
+    return entries

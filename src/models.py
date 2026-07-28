@@ -368,6 +368,17 @@ class TabSection(BaseModel):
     entries: list[MiscEntry] = Field(default_factory=list)
 
 
+class TrackerEntry(BaseModel):
+    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
+
+    name: str
+    url: str
+    credit: str | None = None
+    best: bool = False
+    up_to_date: bool | None = None
+    working_links: bool | None = None
+
+
 class Notice(BaseModel):
     """An announcement notice extracted from a tracker header."""
     text: str = Field(..., description="Notice display text")

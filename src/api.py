@@ -39,7 +39,8 @@ from pydantic import BaseModel, Field
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
-from src.config import USER_AGENT
+from src.config import USER_AGENT, register_tracker_hosts
+from src.parser import parse_trackerhub
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
@@ -1238,84 +1239,6 @@ async def proxy_metadata(
 # ---------------------------------------------------------------------------
 
 
-class TrackerEntry(BaseModel):
-    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
-
-    name: str
-    url: str
-    credit: str | None = None
-    best: bool = False
-    up_to_date: bool | None = None
-    working_links: bool | None = None
-
-
-def _unwrap_google_redirect(url: str) -> str:
-    """Resolve a google.com/url?q=… redirect to its target URL."""
-    from urllib.parse import parse_qs, urlparse
-    try:
-        parsed = urlparse(url)
-        if parsed.hostname in ("www.google.com", "google.com") and parsed.path == "/url":
-            target = parse_qs(parsed.query).get("q")
-            if target:
-                return target[0]
-    except (ValueError, TypeError):
-        pass
-    return url
-
-
-def _parse_yes_no(text: str) -> bool | None:
-    t = text.strip().lower()
-    if t.startswith("yes"):
-        return True
-    if t.startswith("no"):
-        return False
-    return None
-
-
-_TRACKER_STAR_CHARS = "⭐️ "  # ⭐ + variation selector + space
-
-
-def _parse_trackerhub(html: str) -> list[TrackerEntry]:
-    """Parse the TrackerHub sheet into tracker entries.
-
-    Rows: [Trackers (name + link, ⭐ prefix = featured), Credits,
-    Up To Date?, Working Links?]. Banner/header rows carry no credit and
-    no Yes/No flags, which is what filters them out.
-    """
-    from src.parser import extract_table
-
-    entries: list[TrackerEntry] = []
-    for row in extract_table(html):
-        if not row:
-            continue
-        name_cell = row[0]
-        raw_name = name_cell.text.strip()
-        if not raw_name or not name_cell.links:
-            continue
-        credit = row[1].text.strip() if len(row) > 1 else ""
-        up_to_date = _parse_yes_no(row[2].text) if len(row) > 2 else None
-        working_links = _parse_yes_no(row[3].text) if len(row) > 3 else None
-        # Banner rows (rules text, discord invites) have a name/link but
-        # neither credits nor status flags — real tracker rows always have
-        # at least one of them.
-        if not credit and up_to_date is None and working_links is None:
-            continue
-        best = raw_name.startswith("⭐")
-        name = raw_name.lstrip(_TRACKER_STAR_CHARS).strip()
-        if not name:
-            continue
-        entries.append(TrackerEntry(
-            name=name,
-            url=_unwrap_google_redirect(name_cell.links[0]),
-            credit=credit or None,
-            best=best,
-            up_to_date=up_to_date,
-            working_links=working_links,
-        ))
-    entries.sort(key=lambda e: (not e.best, e.name.lower()))
-    return entries
-
-
 _trackers_cache = _TTLCache(ttl=3600.0, max_entries=1)
 # Last successful payload, kept indefinitely as a fallback for upstream errors.
 _trackers_stale: str | None = None
@@ -1344,9 +1267,14 @@ async def list_trackers():
         )
         if resp.status_code != 200:
             raise NetworkError(f"TrackerHub returned {resp.status_code}")
-        entries = await asyncio.to_thread(_parse_trackerhub, resp.text)
+        entries = await asyncio.to_thread(parse_trackerhub, resp.text)
         if not entries:
             raise ParseError("No tracker rows parsed from TrackerHub")
+        # Every listed tracker becomes fetchable by /sheet — this is the warm
+        # path for the host allowlist (see config.sheet_host_allowed).
+        await asyncio.to_thread(
+            register_tracker_hosts, [e.url for e in entries]
+        )
         payload = json.dumps([e.model_dump() for e in entries])
         _trackers_cache.set("trackers", payload)
         _trackers_stale = payload

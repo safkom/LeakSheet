@@ -36,14 +36,22 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from src.config import USER_AGENT
+from src.config import (
+    TRACKERHUB_URL,
+    USER_AGENT,
+    register_tracker_hosts,
+    sheet_host_allowed,
+    tracker_hosts_are_stale,
+)
 from src.models import Artist, Section, TabSection
+from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
     apply_art_tab_images,
     apply_badge_tabs,
     parse_art_tab,
     parse_misc_tab,
     parse_sheet,
+    parse_trackerhub,
     _era_match_key,
     _song_match_key,
 )
@@ -115,8 +123,55 @@ def _get_sheets_client() -> httpx.AsyncClient:
             # explicit timeout= doesn't silently get httpx's 5s default.
             timeout=DEFAULT_TIMEOUT,
             headers={"User-Agent": USER_AGENT},
+            # The host allowlist is checked once, up front; this rejects
+            # non-public destinations at connect on EVERY redirect hop, so an
+            # allowed host cannot 30x the fetch into RFC1918 or link-local.
+            transport=PublicOnlyAsyncTransport(retries=1),
         )
     return _sheets_client
+
+
+async def _refresh_tracker_hosts() -> None:
+    """Harvest fetchable hosts from the TrackerHub feed (best effort).
+
+    Lets a tracker added to the community feed work without a redeploy. Only
+    called on an allowlist miss and throttled by
+    ``TRACKER_HOST_REFRESH_INTERVAL``, so a flood of bogus hosts can't turn
+    this into an amplifier.
+    """
+    try:
+        client = _get_sheets_client()
+        resp = await client.get(TRACKERHUB_URL, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        entries = await asyncio.to_thread(parse_trackerhub, resp.text)
+        known = await asyncio.to_thread(
+            register_tracker_hosts, [e.url for e in entries]
+        )
+        logger.info("TrackerHub host refresh: %d hosts known", known)
+    except Exception as e:
+        # Never let feed trouble turn a valid tracker URL into a hard error
+        # any earlier than it already would be.
+        logger.warning("TrackerHub host refresh failed: %s", e)
+        register_tracker_hosts([])  # stamp the attempt so we don't hot-loop
+
+
+async def _assert_sheet_host_allowed(url: str) -> None:
+    """Reject a sheet URL whose host isn't an allowed tracker host.
+
+    Raises :class:`InvalidURLError`, which the API maps to 400.
+    """
+    host = urlparse(url).hostname
+    if sheet_host_allowed(host):
+        return
+    if tracker_hosts_are_stale():
+        await _refresh_tracker_hosts()
+        if sheet_host_allowed(host):
+            return
+    raise InvalidURLError(
+        f"host not allowed for tracker fetching: {host}. Trackers listed on "
+        f"TrackerHub are accepted automatically; add others via "
+        f"LEAKSHEET_EXTRA_SHEET_HOSTS."
+    )
 
 
 # Regex to extract sheet GIDs from the htmlview page JS
@@ -1008,6 +1063,7 @@ async def async_fetch_sheet_html(
         gid = _extract_gid_from_url(url)
 
     url = _normalize_url(url)
+    await _assert_sheet_host_allowed(url)
 
     if use_cache and cache_ttl > 0:
         cached = await _async_get_cached(url, cache_ttl)
@@ -1419,6 +1475,7 @@ async def async_fetch_and_parse(
     if not gid:
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
+    await _assert_sheet_host_allowed(url_norm)
 
     # Check parsed result cache first (skip entire parse pipeline)
     if use_cache and cache_ttl > 0:

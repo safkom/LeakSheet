@@ -139,3 +139,46 @@ class TestErrorMapping:
         monkeypatch.setattr(api, "async_fetch_and_parse", raiser)
         r = api_client.post("/sheet", json={"url": URL})
         assert r.status_code == status
+
+
+class TestSSRFGuard:
+    """/sheet fetches a caller-supplied URL, so the host allowlist is the
+    boundary between "tracker reader" and "internal HTTP client". These run
+    against the REAL fetch pipeline — nothing is stubbed — so a regression
+    that removes the guard fails here rather than silently reaching out."""
+
+    @pytest.fixture(autouse=True)
+    def _no_feed_refresh(self, monkeypatch):
+        # An unknown host normally buys one TrackerHub refresh; stub it so the
+        # offline gate stays offline and the assertion is about the guard.
+        from src import fetcher
+        from src.config import register_tracker_hosts, reset_tracker_hosts
+
+        async def _noop():
+            register_tracker_hosts([])
+
+        reset_tracker_hosts()
+        monkeypatch.setattr(fetcher, "_refresh_tracker_hosts", _noop)
+        yield
+        reset_tracker_hosts()
+
+    @pytest.mark.parametrize("url", [
+        "http://169.254.169.254/latest/meta-data/",   # cloud metadata
+        "http://127.0.0.1:8000/admin",                # loopback
+        "http://10.0.0.5/internal",                   # RFC1918
+        "https://evil.example/sheet",                 # arbitrary public host
+    ])
+    def test_disallowed_hosts_are_rejected(self, api_client, url):
+        r = api_client.post("/sheet", json={"url": url})
+        assert r.status_code == 400
+        assert "host not allowed" in r.json()["detail"]
+
+    def test_rejection_happens_before_any_request(self, api_client, monkeypatch):
+        from src import fetcher
+
+        def _boom():
+            raise AssertionError("no HTTP client may be built for a blocked host")
+
+        monkeypatch.setattr(fetcher, "_get_sheets_client", _boom)
+        r = api_client.post("/sheet", json={"url": "http://169.254.169.254/"})
+        assert r.status_code == 400

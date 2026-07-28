@@ -20,7 +20,7 @@ import asyncio
 import httpx
 import pytest
 
-from src.api import _parse_trackerhub
+from src.parser import parse_trackerhub
 from src.config import TRACKERHUB_URL
 from src.fetcher import FetchError, async_fetch_and_parse
 from tests._health import live_violations
@@ -35,7 +35,7 @@ async def _sweep() -> tuple[list[str], list[str], int]:
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as hub_client:
         resp = await hub_client.get(TRACKERHUB_URL, headers={"Accept": "text/html"})
         resp.raise_for_status()
-    entries = _parse_trackerhub(resp.text)
+    entries = parse_trackerhub(resp.text)
     targets = [e for e in entries if e.up_to_date] or entries
     assert targets, "TrackerHub parsed to zero entries — endpoint or parser broke"
 

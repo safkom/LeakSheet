@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api as api
-from src.api import _parse_trackerhub, _parse_yes_no, _unwrap_google_redirect, app
+from src.api import app
+from src.parser import _clean_link, _parse_yes_no, parse_trackerhub
 
 REDIRECT = (
     "https://www.google.com/url?q=https://docs.google.com/spreadsheets/d/"
@@ -30,7 +31,7 @@ FIXTURE_HTML = """
 
 class TestUnwrapGoogleRedirect:
     def test_unwraps_q_param(self):
-        assert _unwrap_google_redirect(REDIRECT) == (
+        assert _clean_link(REDIRECT) == (
             "https://docs.google.com/spreadsheets/d/"
             "1UBHQ067bIEDH3TapHIt3MCdwDNRe30Qv0VdBP9JLgFM/edit"
             "?gid=1520634709#gid=1520634709"
@@ -38,11 +39,11 @@ class TestUnwrapGoogleRedirect:
 
     def test_passthrough_direct_url(self):
         url = "https://docs.google.com/spreadsheets/d/ABC/edit"
-        assert _unwrap_google_redirect(url) == url
+        assert _clean_link(url) == url
 
     def test_passthrough_google_non_redirect(self):
         url = "https://www.google.com/search?q=hello"
-        assert _unwrap_google_redirect(url) == url
+        assert _clean_link(url) == url
 
 
 class TestParseYesNo:
@@ -57,7 +58,7 @@ class TestParseYesNo:
 
 class TestParseTrackerhub:
     def test_fixture(self):
-        entries = _parse_trackerhub(FIXTURE_HTML)
+        entries = parse_trackerhub(FIXTURE_HTML)
         names = [e.name for e in entries]
         # header, banner rows, and the link-less row are dropped
         assert names == ["50 Cent", "Deftones", "Flagless Artist", "Plain Artist"]
@@ -85,7 +86,7 @@ class TestParseTrackerhub:
         assert flagless.working_links is None
 
     def test_empty_html(self):
-        assert _parse_trackerhub("<html><body></body></html>") == []
+        assert parse_trackerhub("<html><body></body></html>") == []
 
 
 class FakeResponse:
