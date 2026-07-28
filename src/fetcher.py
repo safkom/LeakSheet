@@ -52,6 +52,7 @@ from src.parser import (
     parse_misc_tab,
     parse_sheet,
     parse_trackerhub,
+    _MAX_UNMATCHED_ROWS,
     _era_match_key,
     _song_match_key,
 )
@@ -1320,24 +1321,56 @@ def _hub_workbook_candidates(
     named_tabs: dict[str, str],
     *,
     winner_gid: str | None,
+    hub_gid: str | None,
     art_gid: str | None,
     content_gids: set[str],
 ) -> list[tuple[str, str]]:
     """Sibling tabs worth parsing as extra catalogue pages, in tab order.
 
-    Everything already handled elsewhere is dropped: the winning tab, Art,
-    every classified content tab, and the deliberately-excluded non-song
-    tabs. What is left is unclassified — which in a hub workbook is exactly
-    where the songs live.
+    Everything already handled elsewhere is dropped: the winning tab, the
+    hub itself, Art, every classified content tab, and the deliberately-
+    excluded non-song tabs. What is left is unclassified — which in a hub
+    workbook is exactly where the songs live.
     """
     return [
         (gid, name)
         for gid, name in named_tabs.items()
         if gid != winner_gid
+        and gid != hub_gid
         and gid != art_gid
         and gid not in content_gids
         and _clean_tab_name(name) not in _EXCLUDED_TAB_NAMES
     ]
+
+
+def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
+    """Fold a sibling tab's row accounting into the artist's.
+
+    Without this, ``parse_metadata`` would describe only the winning tab while
+    ``eras`` spans several, silently breaking the row-accounting identity
+    (total == song + skipped + footer + other) that makes data loss
+    measurable — and the skipped-ratio health check with it.
+    """
+    base, more = artist.parse_metadata, extra.parse_metadata
+    if more is None:
+        return
+    if base is None:
+        artist.parse_metadata = more.model_copy(deep=True)
+        return
+    base.total_rows += more.total_rows
+    base.song_rows += more.song_rows
+    base.skipped_rows += more.skipped_rows
+    base.footer_rows += more.footer_rows
+    base.other_rows += more.other_rows
+    base.fuzzy_matched_rows += more.fuzzy_matched_rows
+    base.unmatched_rows_total += more.unmatched_rows_total
+    # unmatched_rows is a capped sample, not a total — keep the same cap.
+    room = _MAX_UNMATCHED_ROWS - len(base.unmatched_rows)
+    if room > 0:
+        base.unmatched_rows.extend(more.unmatched_rows[:room])
+    for col in more.dropped_columns:
+        if col not in base.dropped_columns:
+            base.dropped_columns.append(col)
 
 
 def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
@@ -1362,6 +1395,8 @@ def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
         else:
             target.sections.append(Section(name=tab_name, songs=songs))
         merged += len(songs)
+    if merged:
+        _merge_parse_metadata(artist, extra)
     return merged
 
 
@@ -1410,25 +1445,26 @@ async def _aggregate_hub_workbook(
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 
     # A tab whose songs the winner already has is a filtered view of it
-    # ("Recent"-style duplicates), not extra catalogue.
-    main_keys = {
-        _song_match_key(song.base_name)
-        for era in artist.eras
-        for section in era.sections
-        for song in section.songs
-    }
+    # ("Recent"-style duplicates), not extra catalogue. Unidentifiable titles
+    # ("???", "??") all key to "" — they are excluded from the comparison, or
+    # a whole tab of mystery tracks would read as one big duplicate.
+    def _keys(a: Artist) -> set[str]:
+        return {
+            k
+            for era in a.eras
+            for section in era.sections
+            for song in section.songs
+            if (k := _song_match_key(song.base_name))
+        }
+
+    main_keys = _keys(artist)
     total = 0
     for entry in loaded:
         if entry is None:
             continue
         display, extra = entry
-        keys = {
-            _song_match_key(song.base_name)
-            for era in extra.eras
-            for section in era.sections
-            for song in section.songs
-        }
-        if not keys or keys <= main_keys:
+        keys = _keys(extra)
+        if keys and keys <= main_keys:
             logger.debug("Hub tab %r adds nothing new — skipped", display)
             continue
         merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
@@ -1657,6 +1693,7 @@ async def async_fetch_and_parse(
                     _hub_workbook_candidates(
                         named_tabs,
                         winner_gid=best_gid,
+                        hub_gid=hub_gid,
                         art_gid=art_gid,
                         content_gids={g for g, _k, _n in content_tabs},
                     ),

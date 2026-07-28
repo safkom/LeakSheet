@@ -2324,6 +2324,9 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
     entries: list[MiscEntry] = []
     current_era = ""
     current_section = ""
+    # Only highlight tabs carry block separators; elsewhere a lone "Special"
+    # cell is an entry, not a label.
+    is_badge_tab = kind in _BADGE_BY_TAB_KIND
 
     for row in rows[header_idx + 1:]:
         if all(not c.text.strip() for c in row):
@@ -2337,7 +2340,7 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
         # column varies (Notes on Steve Lacy/MAVI, Title on Travis), so match
         # on "exactly one non-empty cell" rather than a fixed column.
         lone = [c.text.strip() for c in row if c.text.strip()]
-        if len(lone) == 1:
+        if is_badge_tab and len(lone) == 1:
             _, label = extract_badge(lone[0])
             if label.lower() in BADGE_SECTION_LABELS:
                 current_section = label

@@ -200,3 +200,79 @@ class TestSourceUrlAndResilience:
         artist = await _fetch(client, patch_sheets_client)
         assert artist.total_songs == 4
         assert len(artist.misc_entries) == 2
+
+
+class TestHubWorkbookAccounting:
+    """The merged artist's parse_metadata must describe the WHOLE artist.
+
+    parse_metadata is what makes silent data loss measurable (the identity
+    total == song + skipped + footer + other). Left describing only the
+    winning tab, it would under-report every hub workbook — and the
+    skipped-ratio health check reads it.
+    """
+
+    async def test_row_accounting_covers_merged_tabs(
+        self, workbook_client, patch_sheets_client
+    ):
+        workbook = {
+            "100": read_synthetic("hub_tab"),
+            "500": read_synthetic("catalogue_tab"),
+            "600": read_synthetic("main_tab"),
+        }
+        names = {"100": "Main", "500": "Rare & Lost", "600": "Leaks"}
+        artist = await _fetch(
+            workbook_client(workbook, tab_names=names), patch_sheets_client
+        )
+        md = artist.parse_metadata
+        assert md is not None
+        # Identity holds across the merge.
+        assert md.total_rows == (
+            md.song_rows + md.skipped_rows + md.footer_rows + md.other_rows
+        )
+        # And it counts the sibling's rows, not just the winner's.
+        assert md.song_rows == artist.total_versions
+
+    def test_hub_tab_is_not_re_fetched_as_a_candidate(self):
+        from src import fetcher
+
+        names = {"100": "Main", "500": "Rare & Lost", "600": "Leaks"}
+        cands = fetcher._hub_workbook_candidates(
+            names, winner_gid="600", hub_gid="100", art_gid=None, content_gids=set()
+        )
+        assert [g for g, _ in cands] == ["500"]
+
+
+class TestHubDuplicateGuard:
+    async def test_mystery_titled_tab_is_not_read_as_a_duplicate(
+        self, workbook_client, patch_sheets_client, tmp_path
+    ):
+        """A sibling tab of unidentifiable titles must still merge.
+
+        "???" and "??" both normalise to the empty key, so comparing raw key
+        sets made a whole tab of mystery tracks look like one big duplicate of
+        any main tab that had a single "???" row.
+        """
+        mystery = (
+            "<html><body><table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Available</td>"
+            "<td>Quality</td><td>Link(s)</td></tr>"
+            "<tr><td>2 Full</td><td>Vault</td><td></td><td></td><td></td><td></td></tr>"
+            "<tr><td>Vault</td><td>???</td><td></td><td>Full</td><td>High Quality</td>"
+            "<td><a href='https://pillows.su/f/m1'>a</a></td></tr>"
+            "<tr><td>Vault</td><td>??</td><td></td><td>Full</td><td>High Quality</td>"
+            "<td><a href='https://pillows.su/f/m2'>b</a></td></tr>"
+            "</table></body></html>"
+        )
+        main_with_placeholder = read_synthetic("main_tab").replace(
+            "<td>Debut Era</td><td>⭐ Sunrise</td>", "<td>Debut Era</td><td>???</td>", 1
+        )
+        workbook = {
+            "100": read_synthetic("hub_tab"),
+            "600": main_with_placeholder,
+            "700": mystery,
+        }
+        names = {"100": "Main", "600": "Leaks", "700": "Vault Tapes"}
+        artist = await _fetch(
+            workbook_client(workbook, tab_names=names), patch_sheets_client
+        )
+        assert "Vault" in [e.name for e in artist.eras]
