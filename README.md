@@ -122,13 +122,17 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 |---|---|---|
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
 | `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata` |
+| `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
+| `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the TrackerHub feed |
 | `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
 | `LEAKSHEET_PREWARM_INTERVAL` | `3600` | Seconds between prewarm passes |
 | `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 
-> The backend proxies audio and images server-side. It re-validates the final host after
-> redirects and rejects non-public addresses (SSRF guard) on every proxied hop.
+> The backend fetches URLs server-side, so every outbound path is guarded: `/sheet` only
+> fetches allowlisted tracker hosts (built-in seed + the TrackerHub feed +
+> `LEAKSHEET_EXTRA_SHEET_HOSTS`), and the audio/image proxies re-validate the final host
+> after redirects. Non-public addresses are rejected on every hop.
 
 ### Deployment
 

@@ -374,6 +374,37 @@ _rate_hits: dict[str, list[float]] = {}
 _rate_last_prune = 0.0
 
 
+def _client_ip(scope) -> str:
+    """The address to bucket a request under.
+
+    In prod the app sits behind a platform router, so ``scope["client"]`` is
+    that router for EVERY request — bucketing on it puts the whole internet in
+    one bucket and the limiter throttles all users at once. X-Forwarded-For
+    fixes that but is caller-controlled, so it is only consulted when the
+    operator states how many proxies to trust via
+    ``LEAKSHEET_TRUSTED_PROXY_HOPS``: the value is counted from the RIGHT,
+    which is the part a client cannot forge.
+    """
+    client = scope.get("client")
+    peer = client[0] if client else "unknown"
+    try:
+        hops = int(os.environ.get("LEAKSHEET_TRUSTED_PROXY_HOPS", "0") or 0)
+    except ValueError:
+        hops = 0
+    if hops <= 0:
+        return peer
+    for key, value in scope.get("headers", ()):
+        if key != b"x-forwarded-for":
+            continue
+        chain = [p.strip() for p in value.decode("latin-1").split(",") if p.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
+        # Fewer entries than declared: the request didn't come through the
+        # expected chain, so nothing in it is trustworthy.
+        return peer
+    return peer
+
+
 class _RateLimitMiddleware:
     """Opt-in sliding-window per-IP rate limiter (pure ASGI so it never buffers
     the streaming response body).
@@ -382,6 +413,9 @@ class _RateLimitMiddleware:
     to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
     (see Procfile), so in-process counters are authoritative. The limit is read
     per request so it can be tuned without a redeploy.
+
+    Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
+    :func:`_client_ip`, without which every caller shares one bucket.
     """
 
     def __init__(self, app):
@@ -408,8 +442,7 @@ class _RateLimitMiddleware:
         path = scope.get("path", "").rstrip("/")
         if not any(path.endswith(p) for p in _RATE_LIMIT_PATHS):
             return False
-        client = scope.get("client")
-        ip = client[0] if client else "unknown"
+        ip = _client_ip(scope)
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_S
         hits = _rate_hits.setdefault(ip, [])
