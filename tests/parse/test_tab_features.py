@@ -7,7 +7,13 @@ the Ye / Travis / Kendrick / Carti trackers.
 """
 
 from src.models import Artist, MiscEntry, TabSection
-from src.parser import parse_misc_tab
+from src.parser import apply_badge_tabs, parse_misc_tab
+
+
+def apply_badge_tab(artist, kind, entries) -> int:
+    """Single-tab view of apply_badge_tabs — readability for these cases."""
+    return apply_badge_tabs(artist, [(kind, entries)])
+
 
 # NOTE: tab *discovery* tests (JS unescaping, emoji cleaning, kind
 # classification) live in tests/fetch/test_url_and_discovery.py — this module
@@ -88,7 +94,6 @@ class TestBadgeTabAnnotation:
         return MiscEntry(name=name, era_name=era, source_tab="best_of")
 
     def test_era_scoped_match_stamps_badge(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         applied = apply_badge_tab(artist, "best_of", [self._entry("Hurricane", era="Yeezus")])
         assert applied == 1
@@ -99,39 +104,33 @@ class TestBadgeTabAnnotation:
         assert artist.eras[0].sections[0].songs[0].versions[0].badge is None
 
     def test_unique_name_matches_without_era(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         applied = apply_badge_tab(artist, "worst_of", [self._entry("Jail")])
         assert applied == 1
         assert artist.eras[0].sections[0].songs[1].versions[0].badge == "worst"
 
     def test_ambiguous_name_without_era_is_skipped(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         # "Hurricane" exists in two eras — no era given → no guess
         assert apply_badge_tab(artist, "best_of", [self._entry("Hurricane")]) == 0
 
     def test_existing_badge_never_overwritten(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         assert apply_badge_tab(artist, "worst_of", [self._entry("Starred", era="Yeezus")]) == 0
         starred = artist.eras[1].sections[0].songs[2]
         assert starred.versions[0].badge == "best"
 
     def test_version_tags_stripped_before_matching(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         applied = apply_badge_tab(artist, "grails", [self._entry("New Slaves [V2]", era="Yeezus")])
         assert applied == 1
         assert artist.eras[1].sections[0].songs[0].versions[0].badge == "grail"
 
     def test_unknown_kind_is_noop(self):
-        from src.parser import apply_badge_tab
         artist = self._artist()
         assert apply_badge_tab(artist, "released", [self._entry("Jail")]) == 0
 
     def test_leading_badge_emoji_still_matches(self):
-        from src.parser import apply_badge_tab
         # Highlight tabs routinely prefix every row ("🏆 Snaily [V2]"). The
         # emoji is part of the raw name, so keying on it matched nothing —
         # 11 of 11 Steve Lacy rows silently missed before this was stripped.
@@ -142,7 +141,6 @@ class TestBadgeTabAnnotation:
 
     def test_emoji_on_the_main_tab_song_also_matches(self):
         from src.models import Artist, Era, Section, Song, SongVersion
-        from src.parser import apply_badge_tab
         artist = Artist(name="T", slug="t", eras=[Era(name="E", sections=[Section(
             songs=[Song(base_name="🏆 Emoji Titled", versions=[SongVersion(name="Emoji Titled")])]
         )])])
@@ -190,7 +188,6 @@ class TestCombinedGrailsWantedTab:
 
     def test_end_to_end_split_across_the_era_tree(self):
         from src.models import Artist, Era, Section, Song, SongVersion
-        from src.parser import apply_badge_tab
         names = ["Grail Song", "Second Grail", "Section Only Grail",
                  "Wanted Song", "Second Wanted", "Section Only Wanted"]
         artist = Artist(name="T", slug="t", eras=[Era(name="Debut Era", sections=[Section(
@@ -246,7 +243,6 @@ class TestBatchedBadgeAnnotation:
     placeholder tracks are never badge targets."""
 
     def test_batched_apply_badge_tabs_single_index(self):
-        from src.parser import apply_badge_tabs
         artist = TestBadgeTabAnnotation._artist()
         entry = TestBadgeTabAnnotation._entry
         applied = apply_badge_tabs(artist, [
@@ -262,7 +258,6 @@ class TestBatchedBadgeAnnotation:
 
     def test_placeholder_songs_never_badged(self):
         from src.models import Era, Section, Song, SongVersion
-        from src.parser import apply_badge_tab
         artist = Artist(name="T", slug="t", eras=[
             Era(name="E", sections=[Section(songs=[
                 Song(base_name="Untitled", versions=[SongVersion(name="Untitled")]),

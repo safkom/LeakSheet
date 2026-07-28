@@ -430,10 +430,9 @@ class TestOgFilenameExtraction:
         notes = "OG Filename: Version A\nSome note\nOG Filename (Metadata): Version B"
         assert extract_og_filenames(notes) == ["Version A", "Version B"]
 
-    def test_single_backcompat(self):
-        from src.models import extract_og_filename, extract_og_filenames
+    def test_single_filename(self):
+        from src.models import extract_og_filenames
         notes = "OG Filename: Broke My Heart 1\nRest of note"
-        assert extract_og_filename(notes) == "Broke My Heart 1"
         assert extract_og_filenames(notes) == ["Broke My Heart 1"]
 
     def test_lines_stripped_from_notes(self):

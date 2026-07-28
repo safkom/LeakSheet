@@ -66,7 +66,7 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
-# Size cap for the sheet HTML + parsed-JSON cache (2026-07-20 review: the
+# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md; the
 # image cache has had a 200MB cap for a while, the sheet cache had none — a
 # TrackerHub sweep left ~700MB behind on a 512MB-class box). Oldest entries
 # (grouped per hash stem) are evicted first; img_* files have their own cap.
@@ -222,11 +222,9 @@ _OTHER_CONTENT_TAB_NAMES = frozenset({
 # covering trackers that only mark highlights in the dedicated tab.
 _BADGE_TAB_KINDS = frozenset({"best_of", "worst_of", "special", "grails", "wanted"})
 
-# Deliberately NOT parsed (census 2026-07-17): "recent" duplicates the main
-# tab; tracklists / album copies / groupbuys / buys / compilations / tours /
-# samples / og files (wip) / og snippets have bespoke non-song grammars; key /
-# socials / bpm & keys are lookup tables. Named here (not just described)
-# because the hub-workbook aggregation below needs the same exclusions.
+# Tabs deliberately NOT parsed — duplicates of the main tab, bespoke non-song
+# grammars, and lookup tables. A named set rather than a comment because the
+# hub-workbook aggregation needs the same exclusions. Why: docs/decisions.md.
 _EXCLUDED_TAB_NAMES = frozenset({
     "recent", "recents", "recent additions", "what's new", "whats new",
     "tracklists", "tracklist", "album copies", "compilations",
@@ -502,13 +500,12 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
 
 
 def _clean_tab_name(name: str) -> str:
-    """Normalize a sheet tab name for keyword matching (strip emoji, lower).
+    """Normalize a sheet tab name for keyword MATCHING (strip emoji, lower).
 
-    2026-07-20 sweep: also strips trailing parenthetical/bracket qualifiers —
-    '(WIP)'-suffixed content tabs ('Released (WIP)', 'Stems [WIP]', 'Art
-    (wip)') appeared 60+ times across TrackerHub and fell out of
-    classification entirely — and normalizes slash spacing so 'Grails/
-    Wanted' matches the 'grails / wanted' keyword set.
+    Also strips trailing '(WIP)'-style qualifiers and normalizes slash
+    spacing. The one normalizer for matching — see docs/decisions.md for what
+    broke when a second copy drifted. Use _display_tab_name for anything a
+    user sees; this one lowercases.
     """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
     clean = re.sub(r"[\(\[][^)\]]*[\)\]]\s*$", "", clean).strip()

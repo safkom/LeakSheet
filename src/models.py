@@ -277,7 +277,7 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
-        # stats/stats_raw/highlighted_producers STAY on the wire even though
+        # See docs/decisions.md: these STAY on the wire even though
         # no client reads them (2026-07-24 review): the /sheet warm path
         # serves the parsed-cache file's raw bytes as the response, so cache
         # and wire are the same serialization — excluding them here would
@@ -607,12 +607,9 @@ def parse_tracker_stats(
 # Song credit parsing
 # ---------------------------------------------------------------------------
 
-# Patterns for extracting credit info from song name sub-lines.
-# Trackers use either delimiter style — "(prod. X)" (Ye, Kendrick) or
-# "[prod. X]" (Travis) — and hand-typed sheets mix the two by accident
-# ("[prod. Travis Scott)"), so the closer is not required to match the
-# opener. Every pattern is anchored on its keyword, so bracket support
-# can't swallow a version tag like "[V1]" or "[Demo 8]".
+# Credits come in either delimiter style, and hand-typed sheets mix them, so
+# the closer need not match the opener. Keyword anchoring is what keeps this
+# off version tags like "[V1]". Why: docs/decisions.md.
 
 
 def _credit_pattern(keyword: str) -> "re.Pattern[str]":
@@ -808,15 +805,6 @@ def _normalize_quotes(text: str) -> str:
     for smart, straight in _SMART_QUOTES.items():
         text = text.replace(smart, straight)
     return text
-
-
-def extract_og_filename(notes: str) -> str | None:
-    """Extract the first OG Filename from notes text (legacy single-value API).
-
-    Returns the filename string or None.
-    """
-    filenames = extract_og_filenames(notes)
-    return filenames[0] if filenames else None
 
 
 def _clean_og_name(name: str) -> str:

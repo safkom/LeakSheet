@@ -334,10 +334,10 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Prewarm loop (2026-07-20 review): frequently-updated trackers otherwise
-    # always serve stale-first once per TTL window. Disable with
-    # LEAKSHEET_PREWARM=0. The loop sleeps BEFORE its first pass, so startup
-    # (and TestClient contexts) never fire network work.
+    # Prewarm loop — keeps hot trackers out of the stale-first window.
+    # LEAKSHEET_PREWARM=0 disables. It sleeps BEFORE its first pass, so
+    # startup and TestClient contexts never fire network work.
+    # Why: docs/decisions.md.
     prewarm_task: asyncio.Task | None = None
     if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
         prewarm_task = asyncio.create_task(_prewarm_loop())
@@ -713,8 +713,7 @@ async def clear_fetch_cache(request: Request):
 # ---------------------------------------------------------------------------
 
 # Width buckets bound the cache cardinality; clients snap to the next bucket.
-# 1600 added 2026-07-17: the old 1280 top bucket sat below iPhone full-screen
-# width (~1290px), so Now Playing art was upscaled on device.
+# The top bucket must stay above iPhone full-screen width. Why: docs/decisions.md.
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024

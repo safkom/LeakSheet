@@ -23,7 +23,6 @@ from src.streaming import (
     GdriveInterstitialError,
     _is_gdrive_playable_content_type,
     build_gdrive_confirm_url,
-    is_gdrive_url,
     parse_gdrive_confirm_form,
     resolve_metadata_url,
     resolve_stream_url,
@@ -152,11 +151,6 @@ class TestGdriveStreamResolution:
 
     def test_unrelated_drive_path_not_matched(self):
         assert resolve_stream_url("https://drive.google.com/drive/folders/xyz") is None
-
-    def test_is_gdrive_url_helper(self):
-        assert is_gdrive_url("https://drive.google.com/file/d/abc123/view") is True
-        assert is_gdrive_url("https://drive.google.com/open?id=abc123") is True
-        assert is_gdrive_url("https://pixeldrain.com/u/abc123") is False
 
 
 class TestGdriveMetadataResolution:

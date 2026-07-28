@@ -1449,14 +1449,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
-        # Check for era header FIRST (2026-07-20 review: before the section-
-        # separator check — a sparse 2-cell header like stats + 'Collaboration
-        # with X' otherwise gets swallowed as a separator and the era is never
-        # created; a genuine separator row never carries era stats in col 0).
-        # Must also come before the footer check, since Carti era stats contain
-        # "Total Full" which is also a footer keyword. Also resets footer
-        # state — if data resumes after a footer-like row, it's a new era,
-        # not leftover footer.
+        # Era header is checked FIRST — before the separator and footer
+        # checks, both of which would otherwise swallow it. Matching one also
+        # resets footer state. Why: docs/decisions.md.
         if _is_era_header(row):
             in_footer = False
             current_era, needs_backfill = _parse_era_header_row(row, col_map)
@@ -1519,13 +1514,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             row_era_norm = _normalize_unicode(row_era).lower()
             row_era_stripped = _era_match_key(row_era)
 
-            # Positional-exact prior (2026-07-20 review: Glocky, NBA
-            # Youngboy): if the value names the era we're currently under —
-            # any of its own key forms — it belongs there. Sibling eras that
-            # share a stripped key ("Fre3$tyle [V2]"/"[V3]", "38 Baby 2
-            # [V1] / …"/"[V3] / Post") otherwise route every bare row to
-            # whichever sibling registered the shared key first, starving
-            # the rest.
+            # Positional-exact prior: a value naming the era we are
+            # currently under belongs there, ahead of any sibling that
+            # registered a shared key first. Why: docs/decisions.md.
             matched_era = None
             if current_era is not None:
                 own_keys = _era_own_keys_cache.get(id(current_era))
@@ -1550,14 +1541,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if matched_era is None and row_era_stripped != row_era_norm:
                     matched_era = era_by_key_fallback.get(row_era_stripped)
 
-            # Positional prior before the global fuzzy search (2026-07-20
-            # review, 50 Cent): a row-era value that fuzzy-matches the era
-            # we're currently under is an abbreviation of that header (e.g.
-            # "Get Rich Or Die Tryin' OST" rows directly beneath the "Get
-            # Rich Or Die Tryin' Soundtrack" header). The global search would
-            # let a similarly-worded sibling era outscore it ("Get Rich Or
-            # Die Tryin'", 4/4 words = 1.0 vs the header's 4/5 = 0.8) and
-            # silently steal every song, starving the real era.
+            # Fuzzy positional prior, ahead of the global fuzzy search: a
+            # value that fuzzy-matches the current header is an abbreviation
+            # of it, and a similarly-worded sibling would outscore it.
+            # Why: docs/decisions.md.
             if matched_era is None and current_era is not None:
                 cur_key = _era_match_key(current_era.name) if current_era.name else ""
                 if cur_key and _fuzzy_era_match(row_era_norm, {cur_key: current_era}):
@@ -1634,11 +1621,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
-                            # 2026-07-20 review: keep the row's own song — this
-                            # branch used to drop the parsed version on the
-                            # floor (silent data loss, not even counted as
-                            # skipped). The no-current-era auto-create path
-                            # below has always kept it; the two now agree.
+                            # Auto-created eras keep the row's own song —
+                            # dropping it here was silent data loss.
+                            # Why: docs/decisions.md.
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                     elif version:
@@ -1971,18 +1956,17 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
 
-    # Dedicated File Name / Instrumental Name column (2026-07-20 sweep,
-    # user-confirmed): same concept as the 'OG Filename:' notes convention —
-    # column values lead, notes-derived names follow, no duplicates.
+    # Dedicated File Name / Instrumental Name column: same concept as the
+    # 'OG Filename:' notes convention — column values lead, notes-derived
+    # names follow, no duplicates. Why: docs/decisions.md.
     og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
     if og_col_text:
         col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
         og_filenames = col_names + [n for n in og_filenames if n not in col_names]
 
-    # Dedicated credit columns (2026-07-20 sweep, user-confirmed): a
-    # Producer column fills producers only when the name-cell '(prod. …)'
-    # credit didn't; Artist/Credited Artist columns carry the row's
-    # performer into the additive credited_artists field.
+    # Dedicated credit columns: a Producer column fills producers only when
+    # the inline '(prod. …)' didn't; Artist/Credited Artist columns carry the
+    # row's performer, which is NOT a feature. Why: docs/decisions.md.
     if not producers:
         producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
     credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
@@ -2235,11 +2219,6 @@ def apply_badge_tabs(
             song.versions[0].badge = _badge_for_entry(entry, tab_default)
             applied += 1
     return applied
-
-
-def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
-    """Single-tab convenience wrapper around :func:`apply_badge_tabs`."""
-    return apply_badge_tabs(artist, [(kind, entries)])
 
 
 # ---------------------------------------------------------------------------
