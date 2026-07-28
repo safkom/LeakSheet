@@ -1393,7 +1393,17 @@ def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
             artist.eras.append(era)
             by_key[_era_match_key(era.name)] = era
         else:
-            target.sections.append(Section(name=tab_name, songs=songs))
+            # Reuse a same-named section rather than adding a second one:
+            # the iOS row id is era+group+name, so a duplicate name silently
+            # drops rows from the list.
+            existing = next(
+                (s for s in target.sections if s.name == tab_name and not s.group),
+                None,
+            )
+            if existing is not None:
+                existing.songs.extend(songs)
+            else:
+                target.sections.append(Section(name=tab_name, songs=songs))
         merged += len(songs)
     if merged:
         _merge_parse_metadata(artist, extra)

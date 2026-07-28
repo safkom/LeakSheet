@@ -276,3 +276,27 @@ class TestHubDuplicateGuard:
             workbook_client(workbook, tab_names=names), patch_sheets_client
         )
         assert "Vault" in [e.name for e in artist.eras]
+
+
+class TestHubSectionIdentity:
+    def test_same_named_tabs_reuse_one_section(self):
+        """Two siblings merging into one era must not create two sections
+        with the same name — the iOS row id is era+group+name, so a duplicate
+        silently drops rows from the list."""
+        from src.fetcher import _merge_aggregated_eras
+        from src.models import Artist, Era, Section, Song, SongVersion
+
+        def artist_with(era_name, *songs):
+            return Artist(name="T", slug="t", eras=[Era(name=era_name, sections=[
+                Section(songs=[
+                    Song(base_name=n, versions=[SongVersion(name=n)]) for n in songs
+                ])
+            ])])
+
+        target = artist_with("Debut Era", "One")
+        _merge_aggregated_eras(target, "Extras", artist_with("Debut Era", "Two"))
+        _merge_aggregated_eras(target, "Extras", artist_with("Debut Era", "Three"))
+
+        named = [s for s in target.eras[0].sections if s.name == "Extras"]
+        assert len(named) == 1
+        assert [s.base_name for s in named[0].songs] == ["Two", "Three"]
