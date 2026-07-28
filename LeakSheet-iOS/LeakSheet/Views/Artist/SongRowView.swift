@@ -31,7 +31,9 @@ struct SongRowView: View {
     }
 
     /// The first alternate title that differs from the base name — leaks are
-    /// often known by several names, so a subtle "aka" hint aids recognition.
+    /// often known by several names, so a subtle hint aids recognition. It
+    /// sits on its own line under the title: inline it stole width from the
+    /// name on every row, and the repeated "aka" prefix read as noise.
     private var akaTitle: String? {
         for v in song.versions {
             if let alt = v.altTitles?.first(where: {
@@ -62,15 +64,15 @@ struct SongRowView: View {
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    if let aka = akaTitle {
-                        Text("aka \(aka)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            // Yield width to the title so the hint truncates first.
-                            .layoutPriority(-1)
-                    }
+                }
+
+                if let aka = akaTitle {
+                    Text(aka)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityLabel("Also known as \(aka)")
                 }
 
                 // Second line: quality/avail badges (single-version only; multi-version shows on each VersionRowView)
