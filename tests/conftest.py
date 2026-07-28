@@ -104,8 +104,14 @@ def build_htmlview_base(tabs: dict[str, str], *, title: str = "Synth Tracker - G
     is what makes ``_discover_gids`` / ``_discover_named_tabs`` /
     ``_prioritize_gids`` exercise their real code paths.
     """
+    # JS-string escaping, not HTML escaping: the listing lives inside a
+    # <script>, where browsers do not decode entities, and Google emits tab
+    # names raw there ("Rare & Lost", not "Rare &amp; Lost").
+    def _js(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
     pushes = "\n".join(
-        f'items.push({{name: "{_html.escape(name)}", '
+        f'items.push({{name: "{_js(name)}", '
         f'pageUrl: "/htmlview/sheet?headers=true&gid={gid}", gid: "{gid}"}});'
         for gid, name in tabs.items()
     )

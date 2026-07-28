@@ -1,0 +1,31 @@
+<!--
+  Synthetic combined "Grails / Wanted" highlight tab, reproducing the shape
+  verified on the live Steve Lacy, Travis Scott and MAVI trackers (2026-07-27).
+
+  28 of 415 TrackerHub trackers ship one of these. It classifies as a single
+  tab kind ("grails"), but carries TWO badge blocks. Both real-world signals
+  are present here:
+    * a lone-cell separator row naming the block — the column varies by
+      tracker (Notes on Lacy/MAVI, Title on Travis), so both are exercised;
+    * a leading badge emoji on each row (U+1F3C6 grail, U+1F3C5/U+1F947/
+      U+1F949 wanted).
+
+  "Section Only" rows deliberately carry NO emoji, so the section-label
+  fallback is exercised rather than shadowed by the emoji path.
+
+  Expected: 6 MiscEntry rows — 3 with section "Grails", 3 with "Wanted".
+-->
+<html><head><title>SynthWave Tracker - Google Drive</title></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Track Length</td><td>Leak Date</td></tr>
+<tr><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td></td><td></td><td>Grails</td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>🏆 Grail Song</td><td>Never surfaced.</td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>🏆 Second Grail [V2]</td><td>Snippet only.</td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>Section Only Grail</td><td>No emoji on this row.</td><td></td><td></td></tr>
+<tr><td></td><td>Wanted</td><td></td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>🏅 Wanted Song</td><td>Rumoured.</td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>🥇 Second Wanted</td><td>Mentioned in an interview.</td><td></td><td></td></tr>
+<tr><td>Debut Era</td><td>Section Only Wanted</td><td>No emoji on this row.</td><td></td><td></td></tr>
+</table>
+</body></html>

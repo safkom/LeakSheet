@@ -42,3 +42,51 @@ class TestRateLimit:
             assert r.headers.get("retry-after") == "60"
         finally:
             api._rate_hits.clear()
+
+
+class TestClientIPResolution:
+    """Which address a request is bucketed under.
+
+    In prod the app sits behind a platform router, so scope["client"] is that
+    router for every request — bucketing on it would throttle all users at
+    once. X-Forwarded-For is caller-controlled, so it is only trusted when the
+    operator declares how many proxy hops to count from the right.
+    """
+
+    @staticmethod
+    def _scope(peer: str, xff: str | None = None):
+        headers = [(b"host", b"example.com")]
+        if xff is not None:
+            headers.append((b"x-forwarded-for", xff.encode()))
+        return {"type": "http", "client": (peer, 1234), "headers": headers}
+
+    def test_peer_used_when_no_hops_configured(self, monkeypatch):
+        monkeypatch.delenv("LEAKSHEET_TRUSTED_PROXY_HOPS", raising=False)
+        scope = self._scope("10.0.0.1", "1.2.3.4, 5.6.7.8")
+        assert api._client_ip(scope) == "10.0.0.1"
+
+    def test_rightmost_entry_is_taken_for_one_hop(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "1")
+        scope = self._scope("10.0.0.1", "1.2.3.4, 5.6.7.8")
+        assert api._client_ip(scope) == "5.6.7.8"
+
+    def test_spoofed_prefix_cannot_shift_the_bucket(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "1")
+        # A client prepending junk only pollutes entries the count skips over.
+        a = api._client_ip(self._scope("10.0.0.1", "9.9.9.9, 5.6.7.8"))
+        b = api._client_ip(self._scope("10.0.0.1", "8.8.8.8, 5.6.7.8"))
+        assert a == b == "5.6.7.8"
+
+    def test_short_chain_falls_back_to_peer(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "2")
+        # Only one entry but two hops declared — the request did not come
+        # through the expected chain, so nothing in the header is trusted.
+        assert api._client_ip(self._scope("10.0.0.1", "1.2.3.4")) == "10.0.0.1"
+
+    def test_missing_header_falls_back_to_peer(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "1")
+        assert api._client_ip(self._scope("10.0.0.1")) == "10.0.0.1"
+
+    def test_garbage_hop_count_is_ignored(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "not-a-number")
+        assert api._client_ip(self._scope("10.0.0.1", "1.2.3.4")) == "10.0.0.1"

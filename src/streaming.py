@@ -311,11 +311,6 @@ def _extract_gdrive_id(link: str) -> str | None:
     return file_id
 
 
-def is_gdrive_url(link: str) -> bool:
-    """Return True if *link* is a recognised Google Drive file share URL."""
-    return _extract_gdrive_id(link) is not None
-
-
 def resolve_metadata_url(link: str) -> dict[str, str] | None:
     """Convert a file-sharing link to its provider metadata API URL.
 

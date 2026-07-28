@@ -210,6 +210,8 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let producers: String?
     let collaboration: String?
     let refs: String?
+    /// Director credit, from "[dir. Name]" on music-video and visual rows.
+    let director: String?
     /// Performer from a dedicated Artist / Credited Artist column (collab-style
     /// trackers) — distinct from `featuring`; added backend-side 2026-07-20.
     let creditedArtists: String?
@@ -292,7 +294,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, notes, samples, quality, streaming, links, type, sources, rating
+        case name, badge, featuring, producers, collaboration, refs, director, notes, samples, quality, streaming, links, type, sources, rating
         case creditedArtists = "credited_artists"
         case versionTag = "version_tag"
         case altTitles = "alt_titles"
@@ -359,6 +361,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
             producers: nil,
             collaboration: nil,
             refs: nil,
+            director: nil,
             creditedArtists: nil,
             altTitles: nil,
             notes: notes,

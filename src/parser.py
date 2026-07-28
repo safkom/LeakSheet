@@ -27,6 +27,7 @@ from src.models import (
     Song,
     SongVersion,
     SourceRef,
+    TrackerEntry,
     TrackerStats,
     VERSION_TAG_PATTERN,
     _split_alt_aliases,
@@ -1448,14 +1449,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     notices.append(Notice(text=text, link=None, kind="info"))
                 continue
 
-        # Check for era header FIRST (2026-07-20 review: before the section-
-        # separator check — a sparse 2-cell header like stats + 'Collaboration
-        # with X' otherwise gets swallowed as a separator and the era is never
-        # created; a genuine separator row never carries era stats in col 0).
-        # Must also come before the footer check, since Carti era stats contain
-        # "Total Full" which is also a footer keyword. Also resets footer
-        # state — if data resumes after a footer-like row, it's a new era,
-        # not leftover footer.
+        # Era header is checked FIRST — before the separator and footer
+        # checks, both of which would otherwise swallow it. Matching one also
+        # resets footer state. Why: docs/decisions.md.
         if _is_era_header(row):
             in_footer = False
             current_era, needs_backfill = _parse_era_header_row(row, col_map)
@@ -1518,13 +1514,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
             row_era_norm = _normalize_unicode(row_era).lower()
             row_era_stripped = _era_match_key(row_era)
 
-            # Positional-exact prior (2026-07-20 review: Glocky, NBA
-            # Youngboy): if the value names the era we're currently under —
-            # any of its own key forms — it belongs there. Sibling eras that
-            # share a stripped key ("Fre3$tyle [V2]"/"[V3]", "38 Baby 2
-            # [V1] / …"/"[V3] / Post") otherwise route every bare row to
-            # whichever sibling registered the shared key first, starving
-            # the rest.
+            # Positional-exact prior: a value naming the era we are
+            # currently under belongs there, ahead of any sibling that
+            # registered a shared key first. Why: docs/decisions.md.
             matched_era = None
             if current_era is not None:
                 own_keys = _era_own_keys_cache.get(id(current_era))
@@ -1549,14 +1541,10 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 if matched_era is None and row_era_stripped != row_era_norm:
                     matched_era = era_by_key_fallback.get(row_era_stripped)
 
-            # Positional prior before the global fuzzy search (2026-07-20
-            # review, 50 Cent): a row-era value that fuzzy-matches the era
-            # we're currently under is an abbreviation of that header (e.g.
-            # "Get Rich Or Die Tryin' OST" rows directly beneath the "Get
-            # Rich Or Die Tryin' Soundtrack" header). The global search would
-            # let a similarly-worded sibling era outscore it ("Get Rich Or
-            # Die Tryin'", 4/4 words = 1.0 vs the header's 4/5 = 0.8) and
-            # silently steal every song, starving the real era.
+            # Fuzzy positional prior, ahead of the global fuzzy search: a
+            # value that fuzzy-matches the current header is an abbreviation
+            # of it, and a similarly-worded sibling would outscore it.
+            # Why: docs/decisions.md.
             if matched_era is None and current_era is not None:
                 cur_key = _era_match_key(current_era.name) if current_era.name else ""
                 if cur_key and _fuzzy_era_match(row_era_norm, {cur_key: current_era}):
@@ -1633,11 +1621,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
-                            # 2026-07-20 review: keep the row's own song — this
-                            # branch used to drop the parsed version on the
-                            # floor (silent data loss, not even counted as
-                            # skipped). The no-current-era auto-create path
-                            # below has always kept it; the two now agree.
+                            # Auto-created eras keep the row's own song —
+                            # dropping it here was silent data loss.
+                            # Why: docs/decisions.md.
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                     elif version:
@@ -1933,9 +1919,13 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     badge, after_badge = extract_badge(raw_name)
 
     # Parse credits and alt titles from the multi-line name
-    title, featuring, producers, collaboration, refs, alt_titles = (
-        parse_song_credits(after_badge)
-    )
+    credits = parse_song_credits(after_badge)
+    title = credits.title
+    featuring = credits.featuring
+    producers = credits.producers
+    collaboration = credits.collaboration
+    refs = credits.refs
+    alt_titles = credits.alt_titles
 
     # Check for "(unfinished)" or "[unfinished]" in alt_titles or title.
     # These are status tags, not alternative names — remove from alt_titles
@@ -1966,18 +1956,17 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
 
-    # Dedicated File Name / Instrumental Name column (2026-07-20 sweep,
-    # user-confirmed): same concept as the 'OG Filename:' notes convention —
-    # column values lead, notes-derived names follow, no duplicates.
+    # Dedicated File Name / Instrumental Name column: same concept as the
+    # 'OG Filename:' notes convention — column values lead, notes-derived
+    # names follow, no duplicates. Why: docs/decisions.md.
     og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
     if og_col_text:
         col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
         og_filenames = col_names + [n for n in og_filenames if n not in col_names]
 
-    # Dedicated credit columns (2026-07-20 sweep, user-confirmed): a
-    # Producer column fills producers only when the name-cell '(prod. …)'
-    # credit didn't; Artist/Credited Artist columns carry the row's
-    # performer into the additive credited_artists field.
+    # Dedicated credit columns: a Producer column fills producers only when
+    # the inline '(prod. …)' didn't; Artist/Credited Artist columns carry the
+    # row's performer, which is NOT a feature. Why: docs/decisions.md.
     if not producers:
         producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
     credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
@@ -2037,6 +2026,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         credited_artists=credited_artists,
         collaboration=collaboration,
         refs=refs,
+        director=credits.director,
         alt_titles=alt_titles,
         notes=notes_text,
         og_filename=og_filenames[0] if og_filenames else None,
@@ -2133,10 +2123,6 @@ def _add_version_to_era(
 # Badge tabs — Best Of / Worst Of / Special / Grails / Wanted annotate songs
 # ---------------------------------------------------------------------------
 
-# Note: a combined "Grails / Wanted" tab classifies as kind "grails", so
-# every entry in it — including the wanted section — is stamped GRAIL.
-# Follow-up (tracked in README's roadmap note): split combined tabs by their
-# internal section labels instead of stamping one badge across the whole tab.
 _BADGE_BY_TAB_KIND = {
     "best_of": Badge.BEST,
     "worst_of": Badge.WORST,
@@ -2144,6 +2130,36 @@ _BADGE_BY_TAB_KIND = {
     "grails": Badge.GRAIL,
     "wanted": Badge.WANTED,
 }
+
+# Separator-row labels inside a highlight tab map to the same badges as the
+# tab kinds do — see BADGE_SECTION_LABELS in parse_misc_tab.
+_BADGE_BY_SECTION_LABEL = {
+    "grails": Badge.GRAIL,
+    "grail": Badge.GRAIL,
+    "wanted": Badge.WANTED,
+    "best of": Badge.BEST,
+    "worst of": Badge.WORST,
+    "special": Badge.SPECIAL,
+    "notable": Badge.SPECIAL,
+}
+
+
+def _badge_for_entry(entry: MiscEntry, tab_default: Badge) -> Badge:
+    """Resolve one highlight-tab row's badge.
+
+    28 of 415 trackers ship a combined "Grails / Wanted" tab, which
+    classifies as kind ``grails``. Its rows carry their own signal: each is
+    emoji-prefixed (🏆 grail vs 🏅/🥇/🥉 wanted) and the two blocks are
+    introduced by a "Grails" / "Wanted" separator row. Row emoji wins, then
+    the section label, then the tab's own kind.
+    """
+    badge, _ = extract_badge(entry.name)
+    if badge is not None:
+        return badge
+    labelled = _BADGE_BY_SECTION_LABEL.get(entry.section.strip().lower())
+    if labelled is not None:
+        return labelled
+    return tab_default
 
 
 def apply_badge_tabs(
@@ -2157,6 +2173,10 @@ def apply_badge_tabs(
     across the tracker. Placeholder tracks ("???", "untitled", …) are never
     badge targets, and songs that already carry any badge (inline emoji from
     the main tab) are left untouched. Returns the number of songs annotated.
+
+    Both sides of the match drop their leading badge emoji first: highlight
+    tabs routinely prefix every row ("🏆 Snaily [V2]"), and that emoji is
+    part of the raw name, so keying on it matched nothing at all.
     """
     if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
         return 0
@@ -2167,9 +2187,10 @@ def apply_badge_tabs(
         era_key = _era_match_key(era.name)
         for section in era.sections:
             for song in section.songs:
-                if song.base_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
+                _, song_name = extract_badge(song.base_name)
+                if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
                     continue
-                song_key = _song_match_key(song.base_name)
+                song_key = _song_match_key(song_name)
                 if not song_key:
                     continue
                 by_era_and_name.setdefault((era_key, song_key), song)
@@ -2177,11 +2198,12 @@ def apply_badge_tabs(
 
     applied = 0
     for kind, entries in tabs:
-        badge = _BADGE_BY_TAB_KIND.get(kind)
-        if badge is None:
+        tab_default = _BADGE_BY_TAB_KIND.get(kind)
+        if tab_default is None:
             continue
         for entry in entries:
-            _, base_name = extract_version_tag(entry.name)
+            _, entry_name = extract_badge(entry.name)
+            _, base_name = extract_version_tag(entry_name)
             song_key = _song_match_key(base_name)
             if not song_key:
                 continue
@@ -2194,14 +2216,9 @@ def apply_badge_tabs(
                 continue
             if any(v.badge is not None for v in song.versions):
                 continue
-            song.versions[0].badge = badge
+            song.versions[0].badge = _badge_for_entry(entry, tab_default)
             applied += 1
     return applied
-
-
-def apply_badge_tab(artist: Artist, kind: str, entries: list[MiscEntry]) -> int:
-    """Single-tab convenience wrapper around :func:`apply_badge_tabs`."""
-    return apply_badge_tabs(artist, [(kind, entries)])
 
 
 # ---------------------------------------------------------------------------
@@ -2239,6 +2256,12 @@ _MISC_COLUMN_ALIASES = {
     # Deliberately unmapped (no MiscEntry field, dropped): BPM, Key
     # (Ye/Kendrick Stems), Made By/Creator (Fakes).
 }
+
+# Highlight-block labels that appear as lone-cell separator rows inside a
+# badge tab. A combined "Grails / Wanted" tab uses them to divide its halves.
+BADGE_SECTION_LABELS = frozenset({
+    "grails", "grail", "wanted", "best of", "worst of", "special", "notable",
+})
 
 # Era header rows in these tabs carry per-era stats in the era column,
 # e.g. "3 Released 0 Unreleased 0 BTS 0 On Streaming".
@@ -2300,6 +2323,10 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
     entries: list[MiscEntry] = []
     current_era = ""
+    current_section = ""
+    # Only highlight tabs carry block separators; elsewhere a lone "Special"
+    # cell is an entry, not a label.
+    is_badge_tab = kind in _BADGE_BY_TAB_KIND
 
     for row in rows[header_idx + 1:]:
         if all(not c.text.strip() for c in row):
@@ -2307,6 +2334,17 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
         era_text = cell_text(row, "era")
         name = cell_text(row, "name")
+
+        # Section separator: a lone cell naming a highlight block. Combined
+        # "Grails / Wanted" tabs use these to divide the two halves; the
+        # column varies (Notes on Steve Lacy/MAVI, Title on Travis), so match
+        # on "exactly one non-empty cell" rather than a fixed column.
+        lone = [c.text.strip() for c in row if c.text.strip()]
+        if is_badge_tab and len(lone) == 1:
+            _, label = extract_badge(lone[0])
+            if label.lower() in BADGE_SECTION_LABELS:
+                current_section = label
+                continue
 
         # Era header row: stats text in the era column, era name in the name
         # column (mirrors the main tab's grammar).
@@ -2341,6 +2379,7 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
 
         entries.append(MiscEntry(
             era_name=current_era,
+            section=current_section,
             name=name.split("\n")[0].strip(),
             notes=opt("notes"),
             entry_type=opt("entry_type"),
@@ -2463,4 +2502,60 @@ def parse_file(path: Path | str, artist_name: str) -> Artist:
     return parse_sheet(html_content, artist_name)
 
 
+# ---------------------------------------------------------------------------
+# TrackerHub master sheet — the tracker discovery feed
+# ---------------------------------------------------------------------------
 
+def _parse_yes_no(text: str) -> bool | None:
+    t = text.strip().lower()
+    if t.startswith("yes"):
+        return True
+    if t.startswith("no"):
+        return False
+    return None
+
+
+_TRACKER_STAR_CHARS = "\u2b50\ufe0f "  # star + variation selector + space
+
+
+def parse_trackerhub(html: str) -> list[TrackerEntry]:
+    """Parse the TrackerHub sheet into tracker entries.
+
+    Rows: [Trackers (name + link, star prefix = featured), Credits,
+    Up To Date?, Working Links?]. Banner/header rows carry no credit and
+    no Yes/No flags, which is what filters them out.
+
+    Lives here rather than in the API layer because the fetcher needs it too:
+    the hosts of the trackers listed here are what /sheet is allowed to fetch
+    (see config.sheet_host_allowed).
+    """
+    entries: list[TrackerEntry] = []
+    for row in extract_table(html):
+        if not row:
+            continue
+        name_cell = row[0]
+        raw_name = name_cell.text.strip()
+        if not raw_name or not name_cell.links:
+            continue
+        credit = row[1].text.strip() if len(row) > 1 else ""
+        up_to_date = _parse_yes_no(row[2].text) if len(row) > 2 else None
+        working_links = _parse_yes_no(row[3].text) if len(row) > 3 else None
+        # Banner rows (rules text, discord invites) have a name/link but
+        # neither credits nor status flags — real tracker rows always have
+        # at least one of them.
+        if not credit and up_to_date is None and working_links is None:
+            continue
+        best = raw_name.startswith("\u2b50")
+        name = raw_name.lstrip(_TRACKER_STAR_CHARS).strip()
+        if not name:
+            continue
+        entries.append(TrackerEntry(
+            name=name,
+            url=_clean_link(name_cell.links[0]),
+            credit=credit or None,
+            best=best,
+            up_to_date=up_to_date,
+            working_links=working_links,
+        ))
+    entries.sort(key=lambda e: (not e.best, e.name.lower()))
+    return entries

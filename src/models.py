@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -96,6 +97,7 @@ class SongVersion(BaseModel):
     )
     collaboration: str | None = Field(None, description="Collaboration artist, e.g. 'Go Getters'")
     refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
+    director: str | None = Field(None, description="Director credit on video rows, e.g. 'Dave Meyers'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
     notes: str | None = Field(None, description="Description/history text")
     og_filename: str | None = Field(None, description="First original filename from metadata (legacy single-value field)")
@@ -275,7 +277,7 @@ class Era(BaseModel):
         # letting the native pass serialize the song/version subtree first is
         # pure waste (see Artist.dict for the same optimization).
         kwargs = _with_excluded(kwargs, "sections")
-        # stats/stats_raw/highlighted_producers STAY on the wire even though
+        # See docs/decisions.md: these STAY on the wire even though
         # no client reads them (2026-07-24 review): the /sheet warm path
         # serves the parsed-cache file's raw bytes as the response, so cache
         # and wire are the same serialization — excluding them here would
@@ -323,6 +325,13 @@ class MiscEntry(BaseModel):
     own column sets and are kept fully separate from the era/song tree.
     """
     era_name: str = Field("", description="Era label from the last era header row")
+    section: str = Field(
+        "",
+        description=(
+            "Label from the last section separator row, e.g. the 'Grails' / "
+            "'Wanted' blocks inside a combined highlight tab"
+        ),
+    )
     name: str = Field(..., description="Entry title")
     notes: str | None = Field(None, description="Description text")
     entry_type: str | None = Field(None, description="Type column, e.g. 'Released', 'Freestyle', 'Book'")
@@ -357,6 +366,17 @@ class TabSection(BaseModel):
     )
     name: str = Field(..., description="Original tab display name (may include emoji)")
     entries: list[MiscEntry] = Field(default_factory=list)
+
+
+class TrackerEntry(BaseModel):
+    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
+
+    name: str
+    url: str
+    credit: str | None = None
+    best: bool = False
+    up_to_date: bool | None = None
+    working_links: bool | None = None
 
 
 class Notice(BaseModel):
@@ -587,11 +607,22 @@ def parse_tracker_stats(
 # Song credit parsing
 # ---------------------------------------------------------------------------
 
-# Patterns for extracting credit info from song name sub-lines
-_FEAT_PATTERN = re.compile(r"\((?:feat\.?|featuring|ft\.?)\s+(.+?)\)", re.IGNORECASE)
-_PROD_PATTERN = re.compile(r"\(prod\.?\s+(.+?)\)", re.IGNORECASE)
-_WITH_PATTERN = re.compile(r"\(with\s+(.+?)\)", re.IGNORECASE)
-_REF_PATTERN = re.compile(r"\(ref\.?\s+(.+?)\)", re.IGNORECASE)
+# Credits come in either delimiter style, and hand-typed sheets mix them, so
+# the closer need not match the opener. Keyword anchoring is what keeps this
+# off version tags like "[V1]". Why: docs/decisions.md.
+
+
+def _credit_pattern(keyword: str) -> "re.Pattern[str]":
+    """Build a credit regex matching `(kw value)` / `[kw value]` and mixes."""
+    return re.compile(rf"[\(\[](?:{keyword})\s+(.+?)[\)\]]", re.IGNORECASE)
+
+
+_FEAT_PATTERN = _credit_pattern(r"feat\.?|featuring|ft\.?")
+_PROD_PATTERN = _credit_pattern(r"prod\.?")
+_WITH_PATTERN = _credit_pattern(r"with")
+_REF_PATTERN = _credit_pattern(r"ref\.?")
+# Director credits sit on music-video and visual rows ("[dir. Dave Meyers]").
+_DIR_PATTERN = _credit_pattern(r"dir\.?")
 
 
 # Title continuations like "Vol. 2" / "Pt. II" / "Part Two" — a comma before
@@ -628,9 +659,19 @@ def _split_alt_aliases(text: str) -> list[str]:
     return parts
 
 
-def parse_song_credits(
-    raw_name: str,
-) -> tuple[str, str | None, str | None, str | None, str | None, list[str]]:
+class SongCredits(NamedTuple):
+    """Structured result of :func:`parse_song_credits`."""
+
+    title: str
+    featuring: str | None
+    producers: str | None
+    collaboration: str | None
+    refs: str | None
+    director: str | None
+    alt_titles: list[str]
+
+
+def parse_song_credits(raw_name: str) -> SongCredits:
     """Parse a raw multi-line song name into title + structured credits.
 
     Raw names look like:
@@ -638,7 +679,8 @@ def parse_song_credits(
         (with Go Getters) (feat. Rhymefest) (prod. Kanye West & Andy C.)
         (On 10 in a Benz)
 
-    Returns (title, featuring, producers, collaboration, refs, alt_titles).
+    Credits in bracket form ("[prod. Allen Ritter]") parse identically —
+    anything left over becomes an alt title.
     """
     text = raw_name
 
@@ -647,12 +689,14 @@ def parse_song_credits(
     prod_matches = _PROD_PATTERN.findall(text)
     with_matches = _WITH_PATTERN.findall(text)
     ref_matches = _REF_PATTERN.findall(text)
+    dir_matches = _DIR_PATTERN.findall(text)
 
     # Remove credit patterns to get clean text
     cleaned = _FEAT_PATTERN.sub("", text)
     cleaned = _PROD_PATTERN.sub("", cleaned)
     cleaned = _WITH_PATTERN.sub("", cleaned)
     cleaned = _REF_PATTERN.sub("", cleaned)
+    cleaned = _DIR_PATTERN.sub("", cleaned)
 
     # Split by newline: first line = title, rest = alt titles
     lines = [ln.strip() for ln in cleaned.split("\n")]
@@ -671,12 +715,15 @@ def parse_song_credits(
         else:
             alt_titles.append(line)
 
-    featuring = ", ".join(feat_matches) if feat_matches else None
-    producers = ", ".join(prod_matches) if prod_matches else None
-    collaboration = ", ".join(with_matches) if with_matches else None
-    refs = ", ".join(ref_matches) if ref_matches else None
-
-    return title, featuring, producers, collaboration, refs, alt_titles
+    return SongCredits(
+        title=title,
+        featuring=", ".join(feat_matches) if feat_matches else None,
+        producers=", ".join(prod_matches) if prod_matches else None,
+        collaboration=", ".join(with_matches) if with_matches else None,
+        refs=", ".join(ref_matches) if ref_matches else None,
+        director=", ".join(dir_matches) if dir_matches else None,
+        alt_titles=alt_titles,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -758,15 +805,6 @@ def _normalize_quotes(text: str) -> str:
     for smart, straight in _SMART_QUOTES.items():
         text = text.replace(smart, straight)
     return text
-
-
-def extract_og_filename(notes: str) -> str | None:
-    """Extract the first OG Filename from notes text (legacy single-value API).
-
-    Returns the filename string or None.
-    """
-    filenames = extract_og_filenames(notes)
-    return filenames[0] if filenames else None
 
 
 def _clean_og_name(name: str) -> str:

@@ -39,7 +39,8 @@ from pydantic import BaseModel, Field
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
-from src.config import USER_AGENT
+from src.config import USER_AGENT, register_tracker_hosts
+from src.parser import parse_trackerhub
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
@@ -333,10 +334,10 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Prewarm loop (2026-07-20 review): frequently-updated trackers otherwise
-    # always serve stale-first once per TTL window. Disable with
-    # LEAKSHEET_PREWARM=0. The loop sleeps BEFORE its first pass, so startup
-    # (and TestClient contexts) never fire network work.
+    # Prewarm loop — keeps hot trackers out of the stale-first window.
+    # LEAKSHEET_PREWARM=0 disables. It sleeps BEFORE its first pass, so
+    # startup and TestClient contexts never fire network work.
+    # Why: docs/decisions.md.
     prewarm_task: asyncio.Task | None = None
     if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
         prewarm_task = asyncio.create_task(_prewarm_loop())
@@ -373,6 +374,37 @@ _rate_hits: dict[str, list[float]] = {}
 _rate_last_prune = 0.0
 
 
+def _client_ip(scope) -> str:
+    """The address to bucket a request under.
+
+    In prod the app sits behind a platform router, so ``scope["client"]`` is
+    that router for EVERY request — bucketing on it puts the whole internet in
+    one bucket and the limiter throttles all users at once. X-Forwarded-For
+    fixes that but is caller-controlled, so it is only consulted when the
+    operator states how many proxies to trust via
+    ``LEAKSHEET_TRUSTED_PROXY_HOPS``: the value is counted from the RIGHT,
+    which is the part a client cannot forge.
+    """
+    client = scope.get("client")
+    peer = client[0] if client else "unknown"
+    try:
+        hops = int(os.environ.get("LEAKSHEET_TRUSTED_PROXY_HOPS", "0") or 0)
+    except ValueError:
+        hops = 0
+    if hops <= 0:
+        return peer
+    for key, value in scope.get("headers", ()):
+        if key != b"x-forwarded-for":
+            continue
+        chain = [p.strip() for p in value.decode("latin-1").split(",") if p.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
+        # Fewer entries than declared: the request didn't come through the
+        # expected chain, so nothing in it is trustworthy.
+        return peer
+    return peer
+
+
 class _RateLimitMiddleware:
     """Opt-in sliding-window per-IP rate limiter (pure ASGI so it never buffers
     the streaming response body).
@@ -381,6 +413,9 @@ class _RateLimitMiddleware:
     to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
     (see Procfile), so in-process counters are authoritative. The limit is read
     per request so it can be tuned without a redeploy.
+
+    Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
+    :func:`_client_ip`, without which every caller shares one bucket.
     """
 
     def __init__(self, app):
@@ -407,8 +442,7 @@ class _RateLimitMiddleware:
         path = scope.get("path", "").rstrip("/")
         if not any(path.endswith(p) for p in _RATE_LIMIT_PATHS):
             return False
-        client = scope.get("client")
-        ip = client[0] if client else "unknown"
+        ip = _client_ip(scope)
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_S
         hits = _rate_hits.setdefault(ip, [])
@@ -679,8 +713,7 @@ async def clear_fetch_cache(request: Request):
 # ---------------------------------------------------------------------------
 
 # Width buckets bound the cache cardinality; clients snap to the next bucket.
-# 1600 added 2026-07-17: the old 1280 top bucket sat below iPhone full-screen
-# width (~1290px), so Now Playing art was upscaled on device.
+# The top bucket must stay above iPhone full-screen width. Why: docs/decisions.md.
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
@@ -1238,84 +1271,6 @@ async def proxy_metadata(
 # ---------------------------------------------------------------------------
 
 
-class TrackerEntry(BaseModel):
-    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
-
-    name: str
-    url: str
-    credit: str | None = None
-    best: bool = False
-    up_to_date: bool | None = None
-    working_links: bool | None = None
-
-
-def _unwrap_google_redirect(url: str) -> str:
-    """Resolve a google.com/url?q=… redirect to its target URL."""
-    from urllib.parse import parse_qs, urlparse
-    try:
-        parsed = urlparse(url)
-        if parsed.hostname in ("www.google.com", "google.com") and parsed.path == "/url":
-            target = parse_qs(parsed.query).get("q")
-            if target:
-                return target[0]
-    except (ValueError, TypeError):
-        pass
-    return url
-
-
-def _parse_yes_no(text: str) -> bool | None:
-    t = text.strip().lower()
-    if t.startswith("yes"):
-        return True
-    if t.startswith("no"):
-        return False
-    return None
-
-
-_TRACKER_STAR_CHARS = "⭐️ "  # ⭐ + variation selector + space
-
-
-def _parse_trackerhub(html: str) -> list[TrackerEntry]:
-    """Parse the TrackerHub sheet into tracker entries.
-
-    Rows: [Trackers (name + link, ⭐ prefix = featured), Credits,
-    Up To Date?, Working Links?]. Banner/header rows carry no credit and
-    no Yes/No flags, which is what filters them out.
-    """
-    from src.parser import extract_table
-
-    entries: list[TrackerEntry] = []
-    for row in extract_table(html):
-        if not row:
-            continue
-        name_cell = row[0]
-        raw_name = name_cell.text.strip()
-        if not raw_name or not name_cell.links:
-            continue
-        credit = row[1].text.strip() if len(row) > 1 else ""
-        up_to_date = _parse_yes_no(row[2].text) if len(row) > 2 else None
-        working_links = _parse_yes_no(row[3].text) if len(row) > 3 else None
-        # Banner rows (rules text, discord invites) have a name/link but
-        # neither credits nor status flags — real tracker rows always have
-        # at least one of them.
-        if not credit and up_to_date is None and working_links is None:
-            continue
-        best = raw_name.startswith("⭐")
-        name = raw_name.lstrip(_TRACKER_STAR_CHARS).strip()
-        if not name:
-            continue
-        entries.append(TrackerEntry(
-            name=name,
-            url=_unwrap_google_redirect(name_cell.links[0]),
-            credit=credit or None,
-            best=best,
-            up_to_date=up_to_date,
-            working_links=working_links,
-        ))
-    entries.sort(key=lambda e: (not e.best, e.name.lower()))
-    return entries
-
-
 _trackers_cache = _TTLCache(ttl=3600.0, max_entries=1)
 # Last successful payload, kept indefinitely as a fallback for upstream errors.
 _trackers_stale: str | None = None
@@ -1344,9 +1299,14 @@ async def list_trackers():
         )
         if resp.status_code != 200:
             raise NetworkError(f"TrackerHub returned {resp.status_code}")
-        entries = await asyncio.to_thread(_parse_trackerhub, resp.text)
+        entries = await asyncio.to_thread(parse_trackerhub, resp.text)
         if not entries:
             raise ParseError("No tracker rows parsed from TrackerHub")
+        # Every listed tracker becomes fetchable by /sheet — this is the warm
+        # path for the host allowlist (see config.sheet_host_allowed).
+        await asyncio.to_thread(
+            register_tracker_hosts, [e.url for e in entries]
+        )
         payload = json.dumps([e.model_dump() for e in entries])
         _trackers_cache.set("trackers", payload)
         _trackers_stale = payload

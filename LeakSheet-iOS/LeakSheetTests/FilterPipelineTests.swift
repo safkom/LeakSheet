@@ -17,7 +17,7 @@ struct FilterPipelineTests {
     ) -> SongVersion {
         SongVersion(
             name: name, versionTag: tag, badge: badge, featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: altTitles,
+            producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: altTitles,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: leakDate,
             availableLength: available, quality: quality, streaming: nil,
@@ -361,7 +361,7 @@ struct WorstOfFilterTests {
     private func artist() -> Artist {
         let good = SongVersion(
             name: "Good", versionTag: nil, badge: "best", featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "High Quality", streaming: nil,
@@ -370,7 +370,7 @@ struct WorstOfFilterTests {
         )
         let bad = SongVersion(
             name: "Bad", versionTag: nil, badge: "worst", featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: "Low Quality", streaming: nil,
@@ -423,7 +423,7 @@ struct CrossEraIndexTests {
     private func song(_ name: String, key: String?, versions: Int = 1) -> Song {
         let v = SongVersion(
             name: name, versionTag: nil, badge: nil, featuring: nil,
-            producers: nil, collaboration: nil, refs: nil, creditedArtists: nil, altTitles: nil,
+            producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
             trackLength: nil, fileDate: nil, leakDate: nil,
             availableLength: "Full", quality: nil, streaming: nil, links: nil,
@@ -584,7 +584,7 @@ struct BadgeLogicTests {
         func v(_ tag: String, _ badge: String?) -> SongVersion {
             SongVersion(
                 name: "Hurricane", versionTag: tag, badge: badge, featuring: nil,
-                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
                 altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
                 samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
                 availableLength: "Full", quality: "CD Quality", streaming: nil,
@@ -612,7 +612,7 @@ struct BadgeLogicTests {
         func v(_ badge: String?) -> SongVersion {
             SongVersion(
                 name: "x", versionTag: nil, badge: badge, featuring: nil,
-                producers: nil, collaboration: nil, refs: nil, creditedArtists: nil,
+                producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
                 altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
                 samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
                 availableLength: nil, quality: nil, streaming: nil, links: nil,
