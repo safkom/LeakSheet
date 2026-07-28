@@ -85,7 +85,7 @@ class TestTabDiscovery:
 
     def test_prioritize_puts_unreleased_first_and_drops_secondary(self):
         gids = _discover_gids(self.BASE)
-        reordered, art_gid, unreleased_gid, misc_tabs = _prioritize_gids(self.BASE, gids)
+        reordered, art_gid, unreleased_gid, misc_tabs, _named = _prioritize_gids(self.BASE, gids)
         assert unreleased_gid == "100"
         assert art_gid == "300"
         # Post-PR #10: content tabs carry (gid, kind, display_name).
@@ -97,7 +97,7 @@ class TestTabDiscovery:
     def test_prioritize_without_unreleased_keeps_candidate_order(self):
         base = build_htmlview_base({"100": "Songs", "400": "Recent"})
         gids = _discover_gids(base)
-        reordered, art_gid, unreleased_gid, misc_tabs = _prioritize_gids(base, gids)
+        reordered, art_gid, unreleased_gid, misc_tabs, _named = _prioritize_gids(base, gids)
         assert unreleased_gid is None
         assert reordered == ["100", "400"]
 

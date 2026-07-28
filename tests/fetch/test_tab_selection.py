@@ -109,6 +109,82 @@ class TestMiscTabGidRegression:
         assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
 
 
+class TestHubWorkbook:
+    """A workbook whose main tab is a hub of category descriptions, with the
+    catalogue split across unclassified sibling tabs (Avicii, 2026-07-27).
+
+    Two things had to hold: the song-less hub must not win selection, and the
+    sibling tabs must be merged in. Before both, Avicii returned 0 songs.
+    """
+
+    HUB_WORKBOOK = {
+        "100": read_synthetic("hub_tab"),        # "Main" — eras, no songs
+        "500": read_synthetic("catalogue_tab"),  # unclassified, has songs
+        "400": read_synthetic("recent_tab"),     # deliberately excluded
+    }
+    HUB_NAMES = {"100": "Main", "500": "Rare & Lost", "400": "Recent"}
+
+    async def test_song_less_hub_never_wins_selection(
+        self, workbook_client, patch_sheets_client
+    ):
+        client = workbook_client(self.HUB_WORKBOOK, tab_names=self.HUB_NAMES)
+        artist = await _fetch(client, patch_sheets_client)
+        # "Catalogue Index" is the hub's own era — it must not be the answer.
+        assert artist.total_songs > 0
+        assert [e.name for e in artist.eras][0] != "Catalogue Index"
+
+    async def test_sibling_catalogue_tabs_are_merged(
+        self, workbook_client, patch_sheets_client
+    ):
+        workbook = dict(self.HUB_WORKBOOK)
+        workbook["600"] = read_synthetic("main_tab")
+        names = dict(self.HUB_NAMES, **{"600": "Leaks"})
+        client = workbook_client(workbook, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client)
+
+        eras = {e.name: e for e in artist.eras}
+        # main_tab's 4 songs + catalogue_tab's 3.
+        assert artist.total_songs == 7
+        # Existing era gains a section named after the sibling tab.
+        debut_sections = {s.name: len(s.songs) for s in eras["Debut Era"].sections}
+        assert debut_sections.get("Rare & Lost") == 1
+        # New era is appended whole, with no synthetic section header.
+        assert "Rarities" in eras
+        assert [s.name for s in eras["Rarities"].sections] == [""]
+
+    async def test_excluded_tabs_are_not_aggregated(
+        self, workbook_client, patch_sheets_client
+    ):
+        workbook = dict(self.HUB_WORKBOOK)
+        workbook["600"] = read_synthetic("main_tab")
+        names = dict(self.HUB_NAMES, **{"600": "Leaks"})
+        client = workbook_client(workbook, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client)
+        # gid 400 is "Recent" — a duplicate view, never extra catalogue.
+        assert "Recently Added" not in [e.name for e in artist.eras]
+
+    async def test_healthy_workbook_skips_aggregation(
+        self, workbook_client, patch_sheets_client
+    ):
+        # No hub → the unclassified "Rare & Lost" tab is left alone, so a
+        # normal tracker never pays for the extra fetches.
+        workbook = {"100": read_synthetic("main_tab"), "500": read_synthetic("catalogue_tab")}
+        client = workbook_client(workbook, tab_names={"100": "Unreleased", "500": "Rare & Lost"})
+        artist = await _fetch(client, patch_sheets_client)
+        assert artist.total_songs == 4
+        assert "Rarities" not in [e.name for e in artist.eras]
+
+    async def test_failing_sibling_tab_does_not_break_request(
+        self, workbook_client, patch_sheets_client
+    ):
+        workbook = dict(self.HUB_WORKBOOK)
+        workbook["600"] = read_synthetic("main_tab")
+        names = dict(self.HUB_NAMES, **{"600": "Leaks"})
+        client = workbook_client(workbook, tab_names=names, fail_gids={"500"})
+        artist = await _fetch(client, patch_sheets_client)
+        assert artist.total_songs == 4  # main tab only, request still succeeds
+
+
 class TestSourceUrlAndResilience:
     async def test_source_url_is_the_original(self, workbook_client, patch_sheets_client):
         client = workbook_client(WORKBOOK, tab_names=TAB_NAMES)

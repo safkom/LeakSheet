@@ -1,0 +1,20 @@
+<!--
+  Synthetic hub tab — the "Main" sheet of a multi-tab workbook, modelled on
+  the live Avicii tracker (2026-07-27).
+
+  It looks like a tracker (era column, era-header rows) but holds only
+  category descriptions: the catalogue lives in sibling tabs. It parses to
+  eras with ZERO songs, which is exactly the signal the fetcher gates on —
+  before that, this tab won selection ("main" is an unreleased-tab name) and
+  the whole workbook returned 0 songs.
+
+  Expected from parse_sheet: >= 1 era, 0 songs.
+-->
+<html><head><title>SynthWave Tracker - Google Drive</title></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Link(s)</td></tr>
+<tr><td>0 Full</td><td>Catalogue Index</td><td>(2018) (Where to find things)</td><td></td></tr>
+<tr><td>Catalogue Index</td><td></td><td>- Leaks&#10;- Rare &amp; Lost&#10;- Snippets</td><td></td></tr>
+<tr><td>Catalogue Index</td><td></td><td>- Instrumentals</td><td></td></tr>
+</table>
+</body></html>

@@ -37,7 +37,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 from src.config import USER_AGENT
-from src.models import Artist, TabSection
+from src.models import Artist, Section, TabSection
 from src.parser import (
     apply_art_tab_images,
     apply_badge_tabs,
@@ -45,6 +45,7 @@ from src.parser import (
     parse_misc_tab,
     parse_sheet,
     _era_match_key,
+    _song_match_key,
 )
 
 
@@ -145,6 +146,8 @@ _BEST_OF_TAB_NAMES = frozenset({"best of"})
 _WORST_OF_TAB_NAMES = frozenset({"worst of"})
 _STEMS_TAB_NAMES = frozenset({"stems"})
 _SPECIAL_TAB_NAMES = frozenset({"special", "notable"})
+# On-streaming catalogues, split out from the unreleased tab (Smino).
+_STREAMING_TAB_NAMES = frozenset({"streaming", "on streaming"})
 # Slash spacing is normalized to " / " by _clean_tab_name before matching;
 # "grails & wanted" observed 7x in the 2026-07-20 TrackerHub sweep.
 _GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails & wanted"})
@@ -167,7 +170,18 @@ _BADGE_TAB_KINDS = frozenset({"best_of", "worst_of", "special", "grails", "wante
 # Deliberately NOT parsed (census 2026-07-17): "recent" duplicates the main
 # tab; tracklists / album copies / groupbuys / buys / compilations / tours /
 # samples / og files (wip) / og snippets have bespoke non-song grammars; key /
-# socials / bpm & keys are lookup tables.
+# socials / bpm & keys are lookup tables. Named here (not just described)
+# because the hub-workbook aggregation below needs the same exclusions.
+_EXCLUDED_TAB_NAMES = frozenset({
+    "recent", "recents", "recent additions", "what's new", "whats new",
+    "tracklists", "tracklist", "album copies", "compilations",
+    "groupbuys", "group buys", "buys", "tours", "tour",
+    "samples", "og files", "og snippets",
+    "key", "legend", "socials", "bpm & keys", "bpm and keys",
+    "template", "templates", "credits", "changelog", "changelogs",
+    "guidelines", "tracker guidelines", "info", "about", "rules", "faq",
+    "planned", "shared", "form", "forms",
+})
 
 # Tab names that identify the main unreleased/leaks tracker sheet.
 # When discovered, this tab is tried first before any other GIDs so that
@@ -177,6 +191,10 @@ _UNRELEASED_TAB_NAMES = frozenset({
     "unreleased", "leaks", "leaked", "unreleased songs",
     "leaked songs", "all unreleased", "all unreleased songs",
     "all leaks", "main", "tracker",
+    # Trackers that split streaming from non-streaming name the primary tab
+    # for the split rather than plainly "Unreleased" (Smino).
+    "off-streaming / unreleased", "unreleased / off-streaming",
+    "off streaming / unreleased", "unreleased / off streaming",
 })
 
 # Regex to extract spreadsheet ID from Google Sheets URLs
@@ -428,21 +446,6 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
     return result
 
 
-def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
-    """Return the GID of the main unreleased/leaks tab if one exists.
-
-    Strips emoji and normalises whitespace before comparing against
-    _UNRELEASED_TAB_NAMES. Used to prefer the primary tracker sheet over
-    landing/recent tabs like Travis Scott's "Recent" sheet.
-    """
-    for gid, name in named_tabs.items():
-        clean = _EMOJI_RE.sub(" ", name).strip().lower()
-        clean = re.sub(r"\s+", " ", clean)
-        if clean in _UNRELEASED_TAB_NAMES:
-            return gid
-    return None
-
-
 def _clean_tab_name(name: str) -> str:
     """Normalize a sheet tab name for keyword matching (strip emoji, lower).
 
@@ -456,6 +459,30 @@ def _clean_tab_name(name: str) -> str:
     clean = re.sub(r"[\(\[][^)\]]*[\)\]]\s*$", "", clean).strip()
     clean = re.sub(r"\s*/\s*", " / ", clean)
     return re.sub(r"\s+", " ", clean).strip()
+
+
+def _display_tab_name(name: str) -> str:
+    """Tab name fit for display — emoji stripped, the tracker's casing kept.
+
+    `_clean_tab_name` is for *matching*, so it lowercases and drops '(WIP)'
+    suffixes; running .title() back over it mangles real names ("OG Files" →
+    "Og Files"). Section headers use this instead.
+    """
+    return re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip()
+
+
+def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
+    """Return the GID of the main unreleased/leaks tab if one exists.
+
+    Used to prefer the primary tracker sheet over landing/recent tabs like
+    Travis Scott's "Recent" sheet. Normalises through _clean_tab_name, so
+    the '(WIP)' strip applies here too — "Unreleased (WIP)" (Mag.Lo) was
+    invisible to this check while every other classifier saw it.
+    """
+    for gid, name in named_tabs.items():
+        if _clean_tab_name(name) in _UNRELEASED_TAB_NAMES:
+            return gid
+    return None
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
@@ -479,6 +506,7 @@ _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
     (_BEST_OF_TAB_NAMES, "best_of"),
     (_WORST_OF_TAB_NAMES, "worst_of"),
     (_SPECIAL_TAB_NAMES, "special"),
+    (_STREAMING_TAB_NAMES, "streaming"),
     (_GRAILS_TAB_NAMES, "grails"),
     (_WANTED_TAB_NAMES, "wanted"),
     (_STEMS_TAB_NAMES, "stems"),
@@ -818,10 +846,11 @@ def _resolve_artist_name(title: str, artist_name_override: str | None) -> str:
 
 def _prioritize_gids(
     base_html: str, gids: list[str]
-) -> tuple[list[str], str | None, str | None, list[tuple[str, str, str]]]:
+) -> tuple[list[str], str | None, str | None, list[tuple[str, str, str]], dict[str, str]]:
     """Reorder GIDs so the main tracker tab is tried first.
 
-    Returns (reordered_gids, art_gid, unreleased_gid, content_tabs) where
+    Returns (reordered_gids, art_gid, unreleased_gid, content_tabs,
+    named_tabs) where
     content_tabs is [(gid, kind, display_name)] for every parseable
     secondary tab (misc, music_videos, released, best_of, worst_of, stems,
     other). Moves the identified "Unreleased" tab GID to the front when
@@ -845,7 +874,7 @@ def _prioritize_gids(
     if unreleased_gid and unreleased_gid in gids:
         logger.debug("Unreleased tab detected (gid=%s) — trying first", unreleased_gid)
         gids = [unreleased_gid] + [g for g in gids if g != unreleased_gid]
-    return gids, art_gid, unreleased_gid, content_tabs
+    return gids, art_gid, unreleased_gid, content_tabs, named_tabs
 
 
 # ---------------------------------------------------------------------------
@@ -1234,6 +1263,133 @@ async def _load_secondary_tabs(
         )
 
 
+def _hub_workbook_candidates(
+    named_tabs: dict[str, str],
+    *,
+    winner_gid: str | None,
+    art_gid: str | None,
+    content_gids: set[str],
+) -> list[tuple[str, str]]:
+    """Sibling tabs worth parsing as extra catalogue pages, in tab order.
+
+    Everything already handled elsewhere is dropped: the winning tab, Art,
+    every classified content tab, and the deliberately-excluded non-song
+    tabs. What is left is unclassified — which in a hub workbook is exactly
+    where the songs live.
+    """
+    return [
+        (gid, name)
+        for gid, name in named_tabs.items()
+        if gid != winner_gid
+        and gid != art_gid
+        and gid not in content_gids
+        and _clean_tab_name(name) not in _EXCLUDED_TAB_NAMES
+    ]
+
+
+def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
+    """Fold one sibling tab's eras into *artist*. Returns songs merged.
+
+    An era the artist already has gains a `Section` named after the tab, so
+    the tracker's own grouping stays visible ("Pre-True" carries an
+    "Instrumentals & Acapellas" section). An era it doesn't have is appended
+    whole — its name is already unique to that tab, so a section header
+    would only add noise.
+    """
+    by_key = {_era_match_key(era.name): era for era in artist.eras}
+    merged = 0
+    for era in extra.eras:
+        songs = [song for section in era.sections for song in section.songs]
+        if not songs:
+            continue
+        target = by_key.get(_era_match_key(era.name))
+        if target is None:
+            artist.eras.append(era)
+            by_key[_era_match_key(era.name)] = era
+        else:
+            target.sections.append(Section(name=tab_name, songs=songs))
+        merged += len(songs)
+    return merged
+
+
+async def _aggregate_hub_workbook(
+    artist: Artist,
+    candidates: list[tuple[str, str]],
+    url_norm: str,
+    title: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+    t: PhaseTimer,
+) -> int:
+    """Merge sibling catalogue tabs into a hub workbook's era tree.
+
+    A few workbooks use their main tab as a hub of category descriptions and
+    split the catalogue across sibling tabs that each use the ordinary era
+    grammar (Avicii: "Avicii Leaks", "Unreleased", "Rare & Lost", …). Those
+    tabs match no keyword set, so nothing else picks them up and the tracker
+    parses to a fraction of its songs.
+
+    Only reached when the main tab is a hub — see the `hub_gid` gate in
+    async_fetch_and_parse. Best-effort throughout: a failure is logged and
+    the request still returns whatever the winning tab produced.
+    """
+    if not candidates:
+        return 0
+
+    async def _load(gid_val: str, display: str) -> tuple[str, Artist] | None:
+        try:
+            result = await _fetch_gid_page(
+                url_norm, gid_val, title, client=client, timeout=timeout,
+                cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+            )
+            if result is None:
+                return None
+            with t.phase("hub_parse"):
+                parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
+            return display, parsed
+        except Exception as e:
+            logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
+            return None
+
+    loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
+
+    # A tab whose songs the winner already has is a filtered view of it
+    # ("Recent"-style duplicates), not extra catalogue.
+    main_keys = {
+        _song_match_key(song.base_name)
+        for era in artist.eras
+        for section in era.sections
+        for song in section.songs
+    }
+    total = 0
+    for entry in loaded:
+        if entry is None:
+            continue
+        display, extra = entry
+        keys = {
+            _song_match_key(song.base_name)
+            for era in extra.eras
+            for section in era.sections
+            for song in section.songs
+        }
+        if not keys or keys <= main_keys:
+            logger.debug("Hub tab %r adds nothing new — skipped", display)
+            continue
+        merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
+        main_keys |= keys
+        total += merged
+        logger.debug("Hub tab %r merged %d songs", display, merged)
+    if total:
+        logger.info(
+            "Hub workbook %s: merged %d songs from %d sibling tabs",
+            url_norm[:80], total, len(candidates),
+        )
+    return total
+
+
 async def async_fetch_and_parse(
     url: str,
     *,
@@ -1304,7 +1460,12 @@ async def async_fetch_and_parse(
                 name = _resolve_artist_name(title, artist_name)
                 with t.phase("parse"):
                     artist = await asyncio.to_thread(parse_sheet, html, name)
-                if artist.eras:
+                # Eras alone aren't enough — a hub tab parses to eras with no
+                # songs, and accepting it here would skip discovery entirely.
+                gid_songs = sum(
+                    len(s.songs) for era in artist.eras for s in era.sections
+                )
+                if artist.eras and gid_songs:
                     # Before returning, check if this page reveals a better
                     # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
@@ -1325,7 +1486,7 @@ async def async_fetch_and_parse(
                             await _async_set_cached_parsed(url_norm, artist)
                         return artist
                     # A better "Unreleased" tab exists — fall through to full discovery
-                # GID produced 0 eras — fall through to GID discovery below
+                # GID produced 0 eras or 0 songs — fall through to discovery
             # else: gid is the Misc/Music-Videos tab itself — skip straight to
             # full discovery below, which finds the real main tab and parses
             # this tab correctly via parse_misc_tab.
@@ -1358,7 +1519,9 @@ async def async_fetch_and_parse(
             gids = ["0"]
 
         # Prioritize the "Unreleased" tab; identify Art and content-tab GIDs
-        gids, art_gid, unreleased_gid, content_tabs = _prioritize_gids(base_html, gids)
+        gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
+            base_html, gids
+        )
 
         # --- Fetch all GID pages concurrently, then parse to pick best ---
         async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
@@ -1376,7 +1539,13 @@ async def async_fetch_and_parse(
         fetch_tasks = [asyncio.create_task(_fetch_gid(g)) for g in gids]
 
         best_artist: Artist | None = None
-        best_eras = 0
+        # Rank: songs-or-not first, then era count, then song count. A tab
+        # with eras but no songs is a hub/landing page (Avicii's "Main" is a
+        # list of category descriptions) and must never beat a real
+        # catalogue tab, however many eras it appears to have.
+        best_score = (0, 0, 0)
+        best_gid: str | None = None
+        hub_gid: str | None = None
         best_html = ""
 
         try:
@@ -1397,14 +1566,20 @@ async def async_fetch_and_parse(
                     )
 
                     logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                    if n_eras > best_eras or (n_eras == best_eras and n_songs > 0):
-                        best_eras = n_eras
+                    if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
+                        hub_gid = result_gid
+                    score = (1 if n_songs else 0, n_eras, n_songs)
+                    if score > best_score:
+                        best_score = score
                         best_artist = candidate
+                        best_gid = result_gid
                         best_html = sheet_html
 
+                    if n_songs == 0:
+                        continue  # never short-circuit on a song-less tab
                     # Unreleased tab wins as long as it has at least 1 era —
                     # prevents Recents/landing tabs from outcompeting it on era count.
-                    if result_gid == unreleased_gid and n_eras >= 1:
+                    if result_gid == unreleased_gid:
                         logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
                         break
                     elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
@@ -1416,8 +1591,25 @@ async def async_fetch_and_parse(
                 task.cancel()
             await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-        if best_artist and best_eras > 0:
+        if best_artist and best_score[1] > 0:
             best_artist.source_url = url
+
+            # Hub workbook: the main tab held no songs, so the catalogue is
+            # spread across unclassified sibling tabs. Gated on that, so a
+            # healthy tracker never pays for the extra fetches.
+            if hub_gid is not None:
+                await _aggregate_hub_workbook(
+                    best_artist,
+                    _hub_workbook_candidates(
+                        named_tabs,
+                        winner_gid=best_gid,
+                        art_gid=art_gid,
+                        content_gids={g for g, _k, _n in content_tabs},
+                    ),
+                    url_norm, title,
+                    client=client, timeout=timeout, cache_ttl=cache_ttl,
+                    use_cache=use_cache, t=t,
+                )
 
             # Secondary tabs (Art + content tabs) — fetched concurrently,
             # all optional: a failure never fails the request.
