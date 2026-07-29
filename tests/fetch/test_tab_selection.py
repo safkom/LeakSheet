@@ -236,9 +236,7 @@ class TestHubWorkbookAccounting:
         from src import fetcher
 
         names = {"100": "Main", "500": "Rare & Lost", "600": "Leaks"}
-        cands = fetcher._hub_workbook_candidates(
-            names, winner_gid="600", hub_gid="100", art_gid=None, content_gids=set()
-        )
+        cands = fetcher._hub_workbook_candidates(names, {"600", "100", None})
         assert [g for g, _ in cands] == ["500"]
 
 

@@ -36,6 +36,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
@@ -393,16 +394,11 @@ def _client_ip(scope) -> str:
         hops = 0
     if hops <= 0:
         return peer
-    for key, value in scope.get("headers", ()):
-        if key != b"x-forwarded-for":
-            continue
-        chain = [p.strip() for p in value.decode("latin-1").split(",") if p.strip()]
-        if len(chain) >= hops:
-            return chain[-hops]
-        # Fewer entries than declared: the request didn't come through the
-        # expected chain, so nothing in it is trustworthy.
-        return peer
-    return peer
+    forwarded = Headers(scope=scope).get("x-forwarded-for", "")
+    chain = [p.strip() for p in forwarded.split(",") if p.strip()]
+    # Fewer entries than declared: the request didn't come through the
+    # expected chain, so nothing in it is trustworthy.
+    return chain[-hops] if len(chain) >= hops else peer
 
 
 class _RateLimitMiddleware:

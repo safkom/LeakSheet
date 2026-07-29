@@ -135,11 +135,12 @@ def _get_sheets_client() -> httpx.AsyncClient:
 async def _refresh_tracker_hosts() -> None:
     """Harvest fetchable hosts from the TrackerHub feed (best effort).
 
-    Lets a tracker added to the community feed work without a redeploy. Only
-    called on an allowlist miss and throttled by
-    ``TRACKER_HOST_REFRESH_INTERVAL``, so a flood of bogus hosts can't turn
-    this into an amplifier.
+    Lets a tracker added to the community feed work without a redeploy.
+    Self-throttled by ``TRACKER_HOST_REFRESH_INTERVAL`` so a flood of bogus
+    hosts can't turn this into an amplifier.
     """
+    if not tracker_hosts_are_stale():
+        return
     try:
         client = _get_sheets_client()
         resp = await client.get(TRACKERHUB_URL, timeout=DEFAULT_TIMEOUT)
@@ -164,10 +165,9 @@ async def _assert_sheet_host_allowed(url: str) -> None:
     host = urlparse(url).hostname
     if sheet_host_allowed(host):
         return
-    if tracker_hosts_are_stale():
-        await _refresh_tracker_hosts()
-        if sheet_host_allowed(host):
-            return
+    await _refresh_tracker_hosts()
+    if sheet_host_allowed(host):
+        return
     raise InvalidURLError(
         f"host not allowed for tracker fetching: {host}. Trackers listed on "
         f"TrackerHub are accepted automatically; add others via "
@@ -1318,29 +1318,27 @@ async def _load_secondary_tabs(
 
 
 def _hub_workbook_candidates(
-    named_tabs: dict[str, str],
-    *,
-    winner_gid: str | None,
-    hub_gid: str | None,
-    art_gid: str | None,
-    content_gids: set[str],
+    named_tabs: dict[str, str], skip_gids: set[str | None]
 ) -> list[tuple[str, str]]:
     """Sibling tabs worth parsing as extra catalogue pages, in tab order.
 
-    Everything already handled elsewhere is dropped: the winning tab, the
-    hub itself, Art, every classified content tab, and the deliberately-
-    excluded non-song tabs. What is left is unclassified — which in a hub
+    ``skip_gids`` is everything already handled elsewhere — the winning tab,
+    the hub itself, Art, every classified content tab. What is left, minus
+    the deliberately-excluded non-song tabs, is unclassified — which in a hub
     workbook is exactly where the songs live.
     """
     return [
         (gid, name)
         for gid, name in named_tabs.items()
-        if gid != winner_gid
-        and gid != hub_gid
-        and gid != art_gid
-        and gid not in content_gids
+        if gid not in skip_gids
         and _clean_tab_name(name) not in _EXCLUDED_TAB_NAMES
     ]
+
+
+_PARSE_METADATA_COUNTERS = (
+    "total_rows", "song_rows", "skipped_rows", "footer_rows",
+    "other_rows", "fuzzy_matched_rows", "unmatched_rows_total",
+)
 
 
 def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
@@ -1357,13 +1355,8 @@ def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
     if base is None:
         artist.parse_metadata = more.model_copy(deep=True)
         return
-    base.total_rows += more.total_rows
-    base.song_rows += more.song_rows
-    base.skipped_rows += more.skipped_rows
-    base.footer_rows += more.footer_rows
-    base.other_rows += more.other_rows
-    base.fuzzy_matched_rows += more.fuzzy_matched_rows
-    base.unmatched_rows_total += more.unmatched_rows_total
+    for f in _PARSE_METADATA_COUNTERS:
+        setattr(base, f, getattr(base, f) + getattr(more, f))
     # unmatched_rows is a capped sample, not a total — keep the same cap.
     room = _MAX_UNMATCHED_ROWS - len(base.unmatched_rows)
     if room > 0:
@@ -1702,10 +1695,8 @@ async def async_fetch_and_parse(
                     best_artist,
                     _hub_workbook_candidates(
                         named_tabs,
-                        winner_gid=best_gid,
-                        hub_gid=hub_gid,
-                        art_gid=art_gid,
-                        content_gids={g for g, _k, _n in content_tabs},
+                        {best_gid, hub_gid, art_gid}
+                        | {g for g, _k, _n in content_tabs},
                     ),
                     url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,

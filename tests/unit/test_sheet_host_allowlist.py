@@ -11,9 +11,9 @@ scanner. The stream and image paths were hardened in the 2026-07-21 pass;
 import pytest
 
 from src import fetcher
+from src import config
 from src.config import (
     register_tracker_hosts,
-    reset_tracker_hosts,
     sheet_host_allowed,
     tracker_hosts_are_stale,
 )
@@ -23,9 +23,8 @@ from src.fetcher import InvalidURLError, _assert_sheet_host_allowed
 @pytest.fixture(autouse=True)
 def _clean_hosts(monkeypatch):
     monkeypatch.delenv("LEAKSHEET_EXTRA_SHEET_HOSTS", raising=False)
-    reset_tracker_hosts()
-    yield
-    reset_tracker_hosts()
+    monkeypatch.setattr(config, "_tracker_hosts", set())
+    monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
 
 
 class TestAllowlistMembership:
@@ -80,7 +79,7 @@ class TestFetcherGuard:
     async def test_allowed_host_passes(self):
         await _assert_sheet_host_allowed("https://docs.google.com/spreadsheets/d/X/htmlview")
 
-    async def test_miss_triggers_one_refresh_then_succeeds(self, monkeypatch):
+    async def test_miss_triggers_a_refresh_then_succeeds(self, monkeypatch):
         calls = []
 
         async def _refresh():
@@ -91,11 +90,19 @@ class TestFetcherGuard:
         await _assert_sheet_host_allowed("https://fresh.example/sheet")
         assert calls == [1]
 
-        # Second miss inside the throttle window must not refetch the feed —
-        # otherwise a flood of bogus hosts becomes an amplifier.
-        with pytest.raises(InvalidURLError):
-            await _assert_sheet_host_allowed("https://still-unknown.example/x")
-        assert calls == [1]
+    async def test_refresh_self_throttles(self, monkeypatch):
+        # A flood of bogus hosts must not become a flood of feed fetches, so
+        # the throttle lives inside the refresh rather than at its call site.
+        fetches = []
+
+        def _client():
+            fetches.append(1)
+            raise AssertionError("should not be reached inside the window")
+
+        register_tracker_hosts([])  # stamps the clock -> not stale
+        monkeypatch.setattr(fetcher, "_get_sheets_client", _client)
+        await fetcher._refresh_tracker_hosts()
+        assert fetches == []
 
     async def test_refresh_failure_does_not_hot_loop(self, monkeypatch):
         async def _boom():
