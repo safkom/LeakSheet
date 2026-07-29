@@ -1,0 +1,44 @@
+<!--
+  Synthetic content tab reproducing the structural-row shapes found on live
+  Released / Stems / Music Videos tabs (2026-07-28). Parsed by
+  parse_misc_tab(html, "released").
+
+  These rows are NOT entries, but only the first shape was recognised, so the
+  rest surfaced as songs whose "date" was an era description and whose
+  "notes" were the era timeline:
+
+    row 2  era-stats header, vocabulary the stats regex knows ("2 Released")
+    row 5  era-stats header, vocabulary it does NOT ("1 Mixtape Tracks"),
+           with the era prose sitting in the Leak Date column — the exact
+           shape behind the reported bug
+    row 8  EMPTY era cell, era name in Title, prose in Notes (Travis style)
+    row 3  bare section label with nothing else at all
+    row 9  label whose only other text is in a column this tab never reads
+
+  And two rows that MUST survive, guarding the fix from over-reach:
+
+    row 6  "Second Era (Chopped Not Slopped)" — a song whose title collapses
+           onto its own era name once _era_match_key drops the parenthetical;
+           it carries a length and a date, so it is a song
+    row 10 a row whose only field is Type
+
+  Expected: 4 entries — Real Song One, Second Era (Chopped Not Slopped),
+  Third Song, Type Only.
+-->
+<html><head><title>SynthWave Tracker - Google Drive</title></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Track Length</td><td>Leak Date</td><td>Type</td></tr>
+
+<tr><td>2 Released 0 Unreleased</td><td>First Era</td><td>(2018) The group forms.</td><td></td><td></td><td></td></tr>
+<tr><td></td><td>Projects</td><td></td><td></td><td></td><td></td></tr>
+<tr><td>First Era</td><td>Real Song One</td><td>A real entry.</td><td>3:14</td><td>2019-01-01</td><td>Loosie</td></tr>
+
+<tr><td>1 Mixtape Tracks&#10;6 Loosies</td><td>Second Era&#10;(2020 - 2021)</td><td>(2020) The second period begins.</td><td></td><td>The earliest period of the group.</td><td>This is the earliest period.</td></tr>
+<tr><td>Second Era</td><td>Second Era (Chopped Not Slopped)</td><td>A remix, not the era.</td><td>5:06</td><td>Aug 9, 2021</td><td>Remix</td></tr>
+
+<tr><td></td><td>Third Era&#10;(2022)</td><td>(2022) The third period begins.</td><td></td><td></td><td></td></tr>
+<tr><td></td><td>Features</td><td></td><td></td><td></td><td></td></tr>
+<tr><td>Third Era</td><td>Third Song</td><td>Another real entry.</td><td>2:50</td><td>2022-05-05</td><td>Feature</td></tr>
+<tr><td>Third Era</td><td>Type Only</td><td></td><td></td><td></td><td>Freestyle</td></tr>
+</table>
+</body></html>
