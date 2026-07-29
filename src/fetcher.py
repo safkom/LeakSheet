@@ -1281,7 +1281,8 @@ async def _load_secondary_tabs(
                 _, tab_html = result
                 with t.phase("misc_parse"):
                     tab_results[gid_val] = await asyncio.to_thread(
-                        parse_misc_tab, tab_html, kind
+                        parse_misc_tab, tab_html, kind,
+                        [era.name for era in artist.eras],
                     )
         except Exception as e:
             # Content tabs optional; WARNING keeps systematic failures visible.

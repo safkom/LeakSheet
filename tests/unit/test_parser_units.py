@@ -1299,3 +1299,48 @@ class TestMiscTabUnits:
     def test_artist_default_empty(self):
         from src.models import Artist
         assert Artist(name="X", slug="x").dict()["misc_entries"] == []
+
+
+class TestContentTabEraNamesFromMainTab:
+    """A tab's own era column abbreviates: Travis's Released tab files songs
+    under "Birds" while the header row reads "Birds In The Trap Sing
+    McKnight". The column alone can't spot that header, so the main tab's era
+    names are passed in."""
+
+    HTML = (
+        "<table>"
+        "<tr><td>Era</td><td>Title</td><td>Notes</td><td>Length</td><td>Release Date</td></tr>"
+        "<tr><td>Rodeo</td><td>A Rodeo Song</td><td>n</td><td>3:00</td><td>2015</td></tr>"
+        "<tr><td></td><td>Birds In The Trap Sing McKnight</td>"
+        "<td>Sophomore studio album.</td><td></td><td></td></tr>"
+        "<tr><td>Birds</td><td>the ends</td><td>n</td><td>3:21</td><td>2016</td></tr>"
+        "</table>"
+    )
+
+    def test_abbreviated_era_header_needs_the_main_tab_names(self):
+        from src.parser import parse_misc_tab
+        # Without them the header is indistinguishable from a song.
+        assert "Birds In The Trap Sing McKnight" in [
+            e.name for e in parse_misc_tab(self.HTML, "released")
+        ]
+        # With them it is recognised and drops out.
+        entries = parse_misc_tab(
+            self.HTML, "released", ["Rodeo", "Birds In The Trap Sing McKnight"]
+        )
+        assert [e.name for e in entries] == ["A Rodeo Song", "the ends"]
+
+    def test_song_named_after_another_era_does_not_hijack_the_era(self):
+        from src.parser import parse_misc_tab
+        # A song titled like a DIFFERENT era, with no track data, must not be
+        # read as a header — that would re-file every row beneath it.
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Title</td><td>Notes</td><td>Length</td></tr>"
+            "<tr><td>Rodeo</td><td>Astroworld</td><td>A song, not the era.</td><td></td></tr>"
+            "<tr><td>Rodeo</td><td>Another Song</td><td>n</td><td>3:00</td></tr>"
+            "</table>"
+        )
+        entries = parse_misc_tab(html, "released", ["Rodeo", "Astroworld"])
+        assert [(e.era_name, e.name) for e in entries] == [
+            ("Rodeo", "Astroworld"), ("Rodeo", "Another Song")
+        ]

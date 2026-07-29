@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -500,6 +501,8 @@ SECTION_SEPARATORS = {
     "snippets", "snippet",
     "snippets/unavailable",
     "production", "productions",
+    "project", "projects",
+    "fake", "fakes",
     "other media", "other",
     "instrumentals", "instrumental",
     "remixes", "remix",
@@ -2290,11 +2293,16 @@ def _misc_header_key(text: str) -> str:
     return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
-def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
+def parse_misc_tab(
+    html: str, kind: str, artist_eras: Iterable[str] = ()
+) -> list[MiscEntry]:
     """Parse a Misc or Music Videos tab HTML export into MiscEntry rows.
 
     ``kind`` is ``"misc"`` or ``"music_videos"`` and is stamped on each entry
-    as ``source_tab``. Rows keep the literal era label from their era column
+    as ``source_tab``. ``artist_eras`` are the main tab's era names, used to
+    recognise header rows — a tab's own era column often abbreviates them
+    ("Birds" where the header reads "Birds In The Trap Sing McKnight"), so
+    the column alone can't spot every header. Rows keep the literal era label from their era column
     (or the last era header); no fuzzy matching against main-tab eras.
     """
     rows = extract_table(html)
@@ -2332,7 +2340,7 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
     # the empty-era-cell header style without a keyword list: a title naming
     # one of these is a header for rows that follow it.
     era_col = col_map.get("era", -1)
-    known_eras: set[str] = set()
+    known_eras: set[str] = {k for k in map(_era_match_key, artist_eras) if k}
     if era_col >= 0:
         for row in rows[header_idx + 1:]:
             if era_col < len(row):
@@ -2438,8 +2446,9 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
         # Header rows sometimes spill their prose into a mapped column (Baby
         # Keem's lands in Leak Date), which is why the stats shape is checked
         # structurally and not against a keyword list.
+        stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
         if name_key and name_key in known_eras and name_key != era_key:
-            if not has_track_data or _STATS_LIKE_ERA_RE.match(era_text):
+            if stats_era or (not era_text and not has_track_data):
                 current_era = first_line
                 continue
 
@@ -2451,6 +2460,11 @@ def parse_misc_tab(html: str, kind: str) -> list[MiscEntry]:
             # content here even though the header test above ignores it — a
             # row whose only field is "Freestyle" is still an entry.
             if not entry.notes and not entry.entry_type:
+                continue
+            # A known divider keyword with no track data is a label even when
+            # it carries an aside — Travis's "Project" rows explain how
+            # features are credited.
+            if first_line.lower() in SECTION_SEPARATORS:
                 continue
 
         entries.append(entry)
