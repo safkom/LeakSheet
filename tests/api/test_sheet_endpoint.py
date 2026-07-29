@@ -151,16 +151,16 @@ class TestSSRFGuard:
     def _no_feed_refresh(self, monkeypatch):
         # An unknown host normally buys one TrackerHub refresh; stub it so the
         # offline gate stays offline and the assertion is about the guard.
-        from src import fetcher
-        from src.config import register_tracker_hosts, reset_tracker_hosts
+        from src import config, fetcher
+        from src.config import register_tracker_hosts
 
         async def _noop():
             register_tracker_hosts([])
 
-        reset_tracker_hosts()
+        monkeypatch.setattr(config, "_tracker_hosts", set())
+        monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
         monkeypatch.setattr(fetcher, "_refresh_tracker_hosts", _noop)
         yield
-        reset_tracker_hosts()
 
     @pytest.mark.parametrize("url", [
         "http://169.254.169.254/latest/meta-data/",   # cloud metadata

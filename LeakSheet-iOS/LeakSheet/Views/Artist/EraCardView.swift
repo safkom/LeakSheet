@@ -108,18 +108,13 @@ struct EraCardView: View {
         }
     }
 
-    /// Alt era names prefixed with "A.K.A." so they read as aliases,
-    /// not as a second, unrelated title.
+    /// Alt era names, dimmer than the era title so they read as aliases.
+    /// The "A.K.A." prefix is gone — it repeated on every card, and the
+    /// styling already says the same thing. VoiceOver still spells it out.
     private func altNamesLabel(_ alts: [String], lineLimit: Int?) -> some View {
-        // iOS 26 deprecated `Text + Text`; compose the two styled runs into a
-        // single AttributedString instead (concatenation there is not deprecated).
-        var aka = AttributedString("A.K.A. ")
-        aka.font = .caption2.weight(.semibold)
-        aka.foregroundColor = bodyColor.opacity(0.6)
-        var names = AttributedString(alts.joined(separator: " · "))
-        names.font = .caption
-        names.foregroundColor = bodyColor.opacity(0.85)
-        return Text(aka + names)
+        Text(alts.joined(separator: " · "))
+            .font(.caption)
+            .foregroundStyle(bodyColor.opacity(0.85))
             .lineLimit(lineLimit)
             .truncationMode(.tail)
             .accessibilityLabel("Also known as \(alts.joined(separator: ", "))")

@@ -348,6 +348,47 @@ class TestBracketStyleCredits:
         assert c.producers == "Ging" and c.alt_titles == ["Flavors"]
 
 
+class TestAliasLabelStripping:
+    """Some trackers label the alias line rather than just writing it.
+
+    Travis uses "(AKA: iLLamerica)" on 220 of its 259 alias lines. The field
+    IS the alias, so the label is redundant — and a client that prefixes its
+    own "aka" rendered it twice ("aka AKA: iLLamerica").
+    """
+
+    def test_aka_label_dropped(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("iLLemerica\n(AKA: iLLamerica)").alt_titles == ["iLLamerica"]
+
+    def test_dotted_and_dashed_forms(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X\n(a.k.a. Foo)").alt_titles == ["Foo"]
+        assert parse_song_credits("X\n(AKA - Foo)").alt_titles == ["Foo"]
+
+    def test_unparenthesised_line(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X\nAKA: Bare Line").alt_titles == ["Bare Line"]
+
+    def test_label_is_dropped_before_the_comma_split(self):
+        from src.models import parse_song_credits
+        # Otherwise the first alias keeps the label and the rest don't.
+        assert parse_song_credits(
+            "X\n(AKA: First Name, Second Name)"
+        ).alt_titles == ["First Name", "Second Name"]
+
+    def test_word_starting_with_aka_is_not_a_label(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X\n(Akashic Records)").alt_titles == ["Akashic Records"]
+
+    def test_bare_label_is_kept_rather_than_emptied(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X\n(AKA)").alt_titles == ["AKA"]
+
+    def test_ordinary_alias_untouched(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("On My Own\n(My Own)").alt_titles == ["My Own"]
+
+
 class TestTimelineParsing:
     def test_ye_format(self):
         from src.models import parse_timeline
@@ -1163,6 +1204,56 @@ class TestPlaceholderGrouping:
         assert len(songs) == 1 and len(songs[0].versions) == 3
 
 
+class TestContentTabStructuralRows:
+    """Era headers and section labels must not surface as entries.
+
+    Content tabs write era headers three ways; only the first was recognised,
+    so the other two became fake songs whose "date" was the era description
+    and whose "notes" were the era timeline — visible in the app as a song
+    called "The College Dropout" with the album blurb under Leak Date.
+    """
+
+    @staticmethod
+    def _entries():
+        from src.parser import parse_misc_tab
+        from tests.conftest import read_synthetic
+        return parse_misc_tab(read_synthetic("content_tab_structure"), "released")
+
+    def test_only_real_entries_survive(self):
+        assert [e.name for e in self._entries()] == [
+            "Real Song One",
+            "Second Era (Chopped Not Slopped)",
+            "Third Song",
+            "Type Only",
+        ]
+
+    def test_headers_set_the_era_for_rows_beneath_them(self):
+        by_name = {e.name: e for e in self._entries()}
+        assert by_name["Real Song One"].era_name == "First Era"
+        assert by_name["Third Song"].era_name == "Third Era"
+
+    def test_unknown_stats_vocabulary_header_is_not_an_entry(self):
+        # "1 Mixtape Tracks" is not in the stats keyword list, and this row
+        # spills its prose into the Leak Date column. Recognised by shape.
+        names = [e.name for e in self._entries()]
+        assert "Second Era" not in names
+        assert all(e.date != "The earliest period of the group." for e in self._entries())
+
+    def test_bare_section_labels_dropped(self):
+        names = [e.name for e in self._entries()]
+        assert "Projects" not in names and "Features" not in names
+
+    def test_song_titled_like_its_own_era_is_kept(self):
+        # _era_match_key drops the parenthetical, collapsing this title onto
+        # its era name. It has a length and a date, so it is a song.
+        e = next(x for x in self._entries() if x.name.startswith("Second Era ("))
+        assert e.era_name == "Second Era" and e.length == "5:06"
+
+    def test_row_whose_only_field_is_type_is_kept(self):
+        e = next(x for x in self._entries() if x.name == "Type Only")
+        assert e.entry_type == "Freestyle"
+
+
 class TestMiscTabUnits:
     def test_empty_html(self):
         from src.parser import parse_misc_tab
@@ -1208,3 +1299,48 @@ class TestMiscTabUnits:
     def test_artist_default_empty(self):
         from src.models import Artist
         assert Artist(name="X", slug="x").dict()["misc_entries"] == []
+
+
+class TestContentTabEraNamesFromMainTab:
+    """A tab's own era column abbreviates: Travis's Released tab files songs
+    under "Birds" while the header row reads "Birds In The Trap Sing
+    McKnight". The column alone can't spot that header, so the main tab's era
+    names are passed in."""
+
+    HTML = (
+        "<table>"
+        "<tr><td>Era</td><td>Title</td><td>Notes</td><td>Length</td><td>Release Date</td></tr>"
+        "<tr><td>Rodeo</td><td>A Rodeo Song</td><td>n</td><td>3:00</td><td>2015</td></tr>"
+        "<tr><td></td><td>Birds In The Trap Sing McKnight</td>"
+        "<td>Sophomore studio album.</td><td></td><td></td></tr>"
+        "<tr><td>Birds</td><td>the ends</td><td>n</td><td>3:21</td><td>2016</td></tr>"
+        "</table>"
+    )
+
+    def test_abbreviated_era_header_needs_the_main_tab_names(self):
+        from src.parser import parse_misc_tab
+        # Without them the header is indistinguishable from a song.
+        assert "Birds In The Trap Sing McKnight" in [
+            e.name for e in parse_misc_tab(self.HTML, "released")
+        ]
+        # With them it is recognised and drops out.
+        entries = parse_misc_tab(
+            self.HTML, "released", ["Rodeo", "Birds In The Trap Sing McKnight"]
+        )
+        assert [e.name for e in entries] == ["A Rodeo Song", "the ends"]
+
+    def test_song_named_after_another_era_does_not_hijack_the_era(self):
+        from src.parser import parse_misc_tab
+        # A song titled like a DIFFERENT era, with no track data, must not be
+        # read as a header — that would re-file every row beneath it.
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Title</td><td>Notes</td><td>Length</td></tr>"
+            "<tr><td>Rodeo</td><td>Astroworld</td><td>A song, not the era.</td><td></td></tr>"
+            "<tr><td>Rodeo</td><td>Another Song</td><td>n</td><td>3:00</td></tr>"
+            "</table>"
+        )
+        entries = parse_misc_tab(html, "released", ["Rodeo", "Astroworld"])
+        assert [(e.era_name, e.name) for e in entries] == [
+            ("Rodeo", "Astroworld"), ("Rodeo", "Another Song")
+        ]

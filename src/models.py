@@ -625,6 +625,19 @@ _REF_PATTERN = _credit_pattern(r"ref\.?")
 _DIR_PATTERN = _credit_pattern(r"dir\.?")
 
 
+# Some trackers label the alias line instead of just writing it: Travis uses
+# "(AKA: iLLamerica)" on 220 of its 259 alias lines. The field IS the alias, so
+# the label is redundant — and clients that prefix their own "aka" rendered it
+# twice. Only the a.k.a. family; other lead-ins are part of the name.
+_ALIAS_LABEL_RE = re.compile(r"^\s*a\.?k\.?a\.?\s*[:\-–]?\s+", re.IGNORECASE)
+
+
+def _strip_alias_label(text: str) -> str:
+    """Drop a redundant "AKA:" lead-in from an alias. Never empties the value."""
+    stripped = _ALIAS_LABEL_RE.sub("", text, count=1).strip()
+    return stripped or text.strip()
+
+
 # Title continuations like "Vol. 2" / "Pt. II" / "Part Two" — a comma before
 # these is part of one title ("Meet The Woo, Vol. 2"), not an alias separator.
 _ALIAS_CONTINUATION_RE = re.compile(
@@ -710,10 +723,13 @@ def parse_song_credits(raw_name: str) -> SongCredits:
             continue
         # Strip wrapping parens: "(All I Have)" → "All I Have".
         # Parenthetical lines may list several aliases: "(A, B)" → two alts.
+        # The label is dropped before splitting, so "(AKA: A, B)" still
+        # yields two clean aliases rather than one labelled and one bare.
         if line.startswith("(") and line.endswith(")"):
-            alt_titles.extend(_split_alt_aliases(line[1:-1].strip()))
+            inner = _strip_alias_label(line[1:-1].strip())
+            alt_titles.extend(_split_alt_aliases(inner))
         else:
-            alt_titles.append(line)
+            alt_titles.append(_strip_alias_label(line))
 
     return SongCredits(
         title=title,

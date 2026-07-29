@@ -92,13 +92,6 @@ def sheet_host_allowed(host: str | None) -> bool:
     )
 
 
-def reset_tracker_hosts() -> None:
-    """Drop the harvested host set — tests only."""
-    global _tracker_hosts_at
-    _tracker_hosts.clear()
-    _tracker_hosts_at = 0.0
-
-
 # Known tracker files and their artist names
 KNOWN_TRACKERS: dict[str, str] = {
     "Baby Keem Music Tracker - Google Drive": "Baby Keem",
