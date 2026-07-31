@@ -3,6 +3,7 @@ agents.md
 /.claude
 /.pytest_cache
 /.cache
+/.env
 /Trackers
 *__pycache__
 ui_ideas

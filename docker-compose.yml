@@ -2,10 +2,9 @@ services:
   api:
     build: .
     restart: unless-stopped
-    environment:
-      LEAKSHEET_TRUSTED_PROXY_HOPS: "2"
-      # LEAKSHEET_RATE_LIMIT_PER_MIN: "60"
-      # LEAKSHEET_EXTRA_SHEET_HOSTS: ""
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - cache:/app/.cache
 
