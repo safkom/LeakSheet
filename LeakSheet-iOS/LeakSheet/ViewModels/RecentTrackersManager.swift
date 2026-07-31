@@ -49,10 +49,7 @@ final class RecentTrackersManager {
             self.confirmedCount = confirmedCount
         }
 
-        // Custom decode: totalVersions was added after this type started
-        // persisting to UserDefaults, so older entries on disk won't have
-        // it — fall back to totalSongs rather than dropping the whole
-        // decode (and silently wiping the user's recents list).
+        // Backward-compatible decode — see DECISIONS.md::RecentTrackersManager.swift::totalVersions-decode
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             name = try c.decode(String.self, forKey: .name)
@@ -128,11 +125,7 @@ final class RecentTrackersManager {
     // MARK: - Stats helper
 
     private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int, confirmed: Int) {
-        // Delegate to the single source of truth (ArtistViewModel.computeEraStats)
-        // so the recents card and the artist view never disagree — most notably
-        // that "confirmed" counts only non-streamable versions (a streamable
-        // "Confirmed" version is really available, and was previously
-        // double-reported here but not in the artist view).
+        // Delegates to single source of truth — see DECISIONS.md::RecentTrackersManager.swift::stats-source
         var available = 0, snippets = 0, confirmed = 0
         for era in eras {
             let s = ArtistViewModel.computeEraStats(era)

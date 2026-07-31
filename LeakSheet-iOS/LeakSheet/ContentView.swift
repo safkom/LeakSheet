@@ -50,10 +50,7 @@ struct ContentView: View {
         .environment(PlayerViewModel.shared)
         .environment(FavouritesManager.shared)
         .environment(RecentTrackersManager.shared)
-        // safeAreaBar (not overlay) registers the mini player as a bottom
-        // bar, so the system stacks the floating search field above it
-        // instead of laying it out underneath, and scroll content is
-        // automatically inset to clear the bar.
+        // safeAreaBar not overlay — see DECISIONS.md::ContentView.swift::safeAreaBar
         .safeAreaBar(edge: .bottom) {
             MiniPlayerBar()
                 .environment(PlayerViewModel.shared)

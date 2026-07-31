@@ -47,13 +47,7 @@ from src.config import USER_AGENT
 logger = logging.getLogger(__name__)
 
 
-# imgur.gg returns a `cdnUrl` in its file-metadata JSON that we then fetch
-# server-side. That value is attacker-influenceable if the imgur API is ever
-# compromised or cache-poisoned, so it must not be trusted blindly: a crafted
-# `cdnUrl` pointing at a cloud metadata endpoint (169.254.169.254) or an
-# internal service would turn this proxy into an SSRF pivot. We require https
-# and reject any destination that resolves to a non-public address. (The
-# krakenfiles path is already constrained by _KRAKEN_CDN_AUDIO_PATTERN.)
+# imgur cdnUrl SSRF guard — see docs/decisions.md::streaming.py::imgur-cdnurl-guard
 def _ip_is_public(ip_str: str) -> bool:
     """True unless *ip_str* is a private/loopback/link-local/reserved/etc. address."""
     ip = ipaddress.ip_address(ip_str)
@@ -150,11 +144,7 @@ class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
         return await super().handle_async_request(request)
 
 
-# Scraped HTML pages (krakenfiles view page, gdrive interstitial) only ever
-# carry the CDN URL / confirm form near the top. httpx transparently
-# decompresses response bodies, so an uncapped read of a gzip-bombed page could
-# unpack to hundreds of MB and OOM the worker — read at most this many
-# (decompressed) bytes.
+# Gzip-bomb cap on scraper reads — see docs/decisions.md::streaming.py::scraper-read-cap
 _SCRAPER_READ_CAP = 512 * 1024
 
 
@@ -216,10 +206,7 @@ _PIXELDRAIN_PATTERN = re.compile(
     r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
 )
 
-# drive.google.com/file/d/{id}/... — the id is captured directly; the
-# open?id=... and uc?id=... forms are handled via query-string parsing in
-# _extract_gdrive_id since the id can appear alongside other params in any
-# order.
+# gdrive URL forms — see docs/decisions.md::streaming.py::gdrive-url-forms
 _GDRIVE_FILE_D_PATTERN = re.compile(
     r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
 )
@@ -350,10 +337,7 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
             "provider": "pixeldrain",
         }
 
-    # krakenfiles has no metadata API (the view page only yields a filename);
-    # clients fall back to player-derived format info for kraken links.
-    # drive.google.com has no metadata provider (Drive exposes no public
-    # file-metadata API without auth).
+    # No metadata API for kraken/gdrive — see docs/decisions.md::streaming.py::no-metadata-hosts
     return None
 
 
@@ -533,27 +517,8 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
     raise last_err  # type: ignore[misc]
 
 
-# ---------------------------------------------------------------------------
-# drive.google.com — virus-scan interstitial bypass
-# ---------------------------------------------------------------------------
-#
-# Large or unscanned files served from drive.google.com/uc?export=download
-# return an HTML "Google Drive can't scan this file for viruses" confirmation
-# page instead of the file bytes. The page contains a hidden-input form that
-# posts (as a GET) to drive.usercontent.google.com/download with fields
-# id/export/confirm/uuid; retrying against that URL once yields the real
-# file. If the retry *also* comes back as HTML, we give up rather than ever
-# proxy HTML bytes to the client as if they were audio.
-#
-# Redirects are constrained to a fixed, literal two-host allowlist — the
-# same defense-in-depth spirit as the imgur cdnUrl guard above, but here the
-# hosts are hardcoded (never attacker-influenceable) so a simple membership
-# check on the final resolved URL is sufficient.
-
+# Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
 _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
-# Large public files are frequently served from Google's storage CDN
-# (*.googleusercontent.com). Still Google-controlled, so redirects there are
-# accepted; anything else stays rejected.
 _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
 
 
@@ -730,10 +695,7 @@ async def stream_audio(
     if range_header:
         req_headers["Range"] = range_header
 
-    # drive.google.com: dedicated path — bypasses the virus-scan interstitial,
-    # allows video/* and application/octet-stream (Drive's generic type for
-    # many audio files) in addition to audio/*, and lets 403 (permission
-    # required) pass straight through instead of becoming a generic 502.
+    # gdrive dedicated path — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
     if is_gdrive_stream_url(stream_url):
         resp = await _fetch_gdrive(stream_url, req_headers)
         try:

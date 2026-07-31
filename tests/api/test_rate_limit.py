@@ -34,11 +34,11 @@ class TestRateLimit:
         try:
             r = api_client.get(
                 "/metadata?url=https://pillows.su/f/x",
-                headers={"Origin": "http://example.com"},
+                headers={"Origin": "https://sheets.safko.eu"},
             )
             assert r.status_code == 429
             # CORS wrapped the 429 (CORS is the outermost middleware).
-            assert r.headers.get("access-control-allow-origin") == "*"
+            assert r.headers.get("access-control-allow-origin") == "https://sheets.safko.eu"
             assert r.headers.get("retry-after") == "60"
         finally:
             api._rate_hits.clear()

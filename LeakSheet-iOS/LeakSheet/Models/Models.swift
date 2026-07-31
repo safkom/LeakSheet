@@ -183,11 +183,7 @@ extension Song {
     nonisolated func withFilteredVersions(_ filter: (SongVersion) -> Bool) -> Song? {
         let kept = versions.filter(filter)
         guard !kept.isEmpty else { return nil }
-        // The row must wear a badge that belongs to the versions it actually
-        // shows. Carrying the whole song's badge through made Best Of display
-        // 🗑️ on songs kept for a ✨ version (Ye "Hurricane" in DONDA [V3]).
-        // Fall back to the song badge only when no kept version carries one,
-        // so filters like No Snippets don't strip a song's badge entirely.
+        // Kept-version badge — see DECISIONS.md::Models.swift::kept-badge
         let keptBadge = Badge.mostSignificant(in: kept)?.rawValue ?? badge
         return Song(baseName: baseName, songKey: songKey, versions: kept, badge: keptBadge)
     }

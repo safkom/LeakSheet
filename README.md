@@ -136,14 +136,18 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 
 ### Deployment
 
-DigitalOcean App Platform (`.do/app.yaml`): the `api` service runs the `Procfile` command
-(`gunicorn` with a single `UvicornWorker`). Single worker on purpose: the 512 MB box can't fit
-two concurrent Ye-sized cold parses (11.7 MB HTML → model tree + serialized dict each).
-CPU-bound parse/serialize work is pushed off the event loop via `asyncio.to_thread`, so the
-single worker stays responsive during a cold miss.
+Self-hosted via Docker Compose (`docker-compose.yml`): an `api` container (`gunicorn` with a
+single `UvicornWorker`, see `Dockerfile`) and a `web` container (`nginx` serving the built SPA
+and reverse-proxying `/api/*` to `api` with the prefix stripped, see `web/Dockerfile` and
+`web/nginx.conf`) — this replicates the same-origin `/api` routing the frontend and the
+LeakSheet-iOS app both assume. `web` publishes port `8081` on the host; a
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+(run separately, e.g. as a CasaOS app) points `sheets.safko.eu` at `http://localhost:8081`.
 
-> Note: the `Procfile` format supports no comment lines — DO's buildpack fails the whole build
-> on any non-`name: command` line. Keep it to the single `web:` entry.
+Single worker on purpose: the box can't fit two concurrent Ye-sized cold parses (11.7 MB HTML →
+model tree + serialized dict each). CPU-bound parse/serialize work is pushed off the event loop
+via `asyncio.to_thread`, so the single worker stays responsive during a cold miss.
+
 
 ---
 
@@ -197,5 +201,3 @@ the census harness stays importable under `tests/tools/`):
 python3 -m tests.tools.census --fixtures          # offline census of local dumps
 python3 scripts/tools/trackerhub_sweep.py --limit 20
 ```
-
-The latest deep-review findings live in [docs/reviews/](docs/reviews/).

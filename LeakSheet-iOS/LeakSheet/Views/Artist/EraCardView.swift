@@ -46,13 +46,7 @@ struct EraCardView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Liquid Glass + tinted gradient:
-            // glass sits directly behind content (frosted refraction layer),
-            // gradient is the deeper background that bleeds through the glass.
-            // The glass shape stays constant; the outer clipShape(cardShape)
-            // squares the bottom corners when expanded, so the glass shape
-            // itself never animates (cheaper than reshaping the effect
-            // through the expand spring, identical visual result).
+            // Glass + gradient layering — see DECISIONS.md::EraCardView.swift::glass-gradient-layering
             .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             .background {
                 cardShape.fill(eraBackground)

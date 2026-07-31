@@ -29,11 +29,7 @@ struct FlowLayout: Layout {
         let proposed = ProposedViewSize(width: bounds.width, height: bounds.height)
         let result = ensureLayout(proposal: proposed, subviews: subviews, cache: &cache)
         for (index, offset) in result.offsets.enumerated() where index < subviews.count {
-            // Place each subview with the same (clamped) size it was measured
-            // at — NOT .unspecified. An unspecified placement proposal lets a
-            // wrap-capable pill re-expand to its full single-line intrinsic
-            // width and clip off the trailing edge; proposing the measured
-            // size makes its inner Text actually wrap to the rows we sized for.
+            // Clamped placement size — see DECISIONS.md::FlowLayout.swift::clamped-sizing
             let placedSize = index < result.sizes.count ? result.sizes[index] : nil
             subviews[index].place(
                 at: CGPoint(x: bounds.minX + offset.x, y: bounds.minY + offset.y),
@@ -62,12 +58,7 @@ struct FlowLayout: Layout {
         var maxX: CGFloat = 0
 
         for subview in subviews {
-            // Measure against maxWidth, not .unspecified — an .unspecified
-            // proposal gives Text its full intrinsic (single-line) width, so
-            // a long credit pill placed first in a row would report a size
-            // wider than the container and never trigger the wrap check
-            // below. Clamping the proposal lets wrap-capable subviews (Text)
-            // report a narrower, multi-line size instead.
+            // Clamped measurement proposal — see DECISIONS.md::FlowLayout.swift::clamped-sizing
             var size = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
             size.width = min(size.width, maxWidth)
             if x + size.width > maxWidth && x > 0 {

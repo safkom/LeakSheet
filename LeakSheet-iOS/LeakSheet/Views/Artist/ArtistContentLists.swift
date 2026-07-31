@@ -322,11 +322,7 @@ struct MiscListView: View {
                 .padding(.top, 40)
             }
         } else {
-            // Era-card accordion — literally the same EraCardView the main
-            // eras list uses (glass, extracted era colors, cover art), so a
-            // content tab is visually a page of the same app, not a
-            // different-looking list. Groups are prebuilt off-main in the
-            // filter pipeline (miscEraGroups).
+            // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
             let groups = vm.content.miscEraGroups
             ForEach(groups) { group in
                 let expanded = isExpanded(group.eraName, groupCount: groups.count)

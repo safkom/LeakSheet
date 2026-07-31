@@ -73,11 +73,7 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case divider(eraName: String)
     case groupHeader(text: String, eraName: String)
     case sectionHeader(name: String, eraName: String, group: String?)
-    // `ordinal` is the song's position within its era's flattened song list.
-    // It disambiguates the identity of same-`baseName` songs — leak trackers
-    // deliberately emit several distinct "???"/"Unknown" tracks per era
-    // (parser keeps them separate), and without a positional key their EraRow
-    // ids collide, so SwiftUI's ForEach silently drops the duplicates.
+    // `ordinal` disambiguates same-baseName songs — see DECISIONS.md::ArtistViewModel.swift::song-ordinal
     case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool, ordinal: Int)
     case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool, songOrdinal: Int)
     case eraGap(eraName: String)
@@ -294,10 +290,7 @@ final class ArtistViewModel {
         self.songKeyEras = precomputed.songKeyEras
         self.searchIndex = precomputed.searchIndex
 
-        // Seed era colors from the persisted extraction cache so cards and
-        // headers are tinted on first paint without any image download.
-        // Keyed by the era's raw art URL (unique per image) rather than era
-        // name, which repeats across different artists' eras.
+        // Seed era colors from persisted cache — see DECISIONS.md::EraColorExtractor.swift::cache-key
         let cached = EraColorExtractor.cachedColors()
         for era in artist.eras {
             guard let artUrl = era.artUrl, let color = cached[artUrl] else { continue }
@@ -343,10 +336,7 @@ final class ArtistViewModel {
             applyFilters()
             return
         }
-        // Honest indicator: filtering is pending from the moment the query
-        // changes, not only after the debounce fires — previously the
-        // spinner never appeared during the 200ms window, which is most of
-        // a fast query's total latency.
+        // Honest filtering indicator — see DECISIONS.md::ArtistViewModel.swift::filtering-indicator
         if q != debouncedQuery {
             isFiltering = true
         }
@@ -385,12 +375,7 @@ final class ArtistViewModel {
         let artist = self.artist
         let eraStats = self.eraStatsByName
         let searchIndex = self.searchIndex
-        // Single-flight: wait for the previous detached pass to actually
-        // stop before starting the next one. Overlapping passes would race
-        // on the shared static DateFormatters in parseDate (DateFormatter
-        // isn't safe for concurrent use), and serializing here also means a
-        // burst of chip/search changes only ever has one compute in flight
-        // instead of piling up wasted work.
+        // Single-flight filtering — see DECISIONS.md::ArtistViewModel.swift::single-flight-filter
         filterTask = Task.detached(priority: .userInitiated) { [weak self] in
             await previousTask?.value
             guard !Task.isCancelled else { return }
@@ -471,11 +456,7 @@ final class ArtistViewModel {
         // others so the AND pipeline never intersects two badge sets.
         if bestOf { worstOf = false; grails = false }
         if !isBadgeFilterActive && !recents { expandedEra = nil }
-        // No synchronous rebuildEraRows() here: isEraExpanded treats a badge
-        // filter as "every era expanded", so rebuilding against the still-stale
-        // (unfiltered) `content` would briefly render every song in every
-        // era. applyFilters()'s completion rebuilds once `content` actually
-        // matches the new state.
+        // No sync rebuildEraRows() here — see DECISIONS.md::ArtistViewModel.swift::no-sync-rebuild
         applyFilters()
     }
 

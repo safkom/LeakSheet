@@ -184,10 +184,7 @@ private struct ArtistContentView: View {
                 FilterTogglesView(vm: vm)
                     .padding(.bottom, 8)
 
-                // Content branches follow the COMPUTED state (content.state),
-                // not the live chip flags — the chips flip instantly while
-                // the previous content stays up until the new one lands,
-                // so a branch never renders data computed for another mode.
+                // Branch on computed state — see DECISIONS.md::ArtistView.swift::content-state-branching
                 let contentState = vm.content.state
                 if contentState.misc || contentState.tabKey != nil {
                     MiscListView(
@@ -299,15 +296,8 @@ private struct ArtistContentView: View {
                 }
             }
         }
-        // navigationBarDrawer pins the search field under the navigation bar
-        // at the TOP of the screen. The default iPhone placement (and the
-        // toolbar search item's minimized form) both live in the bottom slot,
-        // where they end up behind the mini player (safeAreaBar) — the drawer
-        // is the one placement that can never collide with it.
-        // displayMode .always: the .automatic drawer minimizes into a bare
-        // black capsule behind the Dynamic Island once content scrolls
-        // (audited 2026-07-13) — keeping the field visible avoids the
-        // glitch-looking pill and makes search discoverable.
+        // navigationBarDrawer + displayMode .always — see
+        // DECISIONS.md::ArtistView.swift::search-field-placement
         .searchable(
             text: $vm.searchQuery,
             placement: .navigationBarDrawer(displayMode: .always),

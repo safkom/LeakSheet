@@ -1,0 +1,21 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      LEAKSHEET_TRUSTED_PROXY_HOPS: "2"
+      # LEAKSHEET_RATE_LIMIT_PER_MIN: "60"
+      # LEAKSHEET_EXTRA_SHEET_HOSTS: ""
+    volumes:
+      - cache:/app/.cache
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      - api
+
+volumes:
+  cache:

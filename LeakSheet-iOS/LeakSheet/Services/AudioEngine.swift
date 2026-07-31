@@ -74,10 +74,7 @@ final class AudioEngine {
         setupRemoteCommands()
         setupInterruptionHandling()
     }
-    // Note: NotificationCenter observers are intentionally not removed in a
-    // deinit. AudioEngine is a process-lifetime singleton, and the
-    // @MainActor-isolated, non-Sendable observer tokens cannot be safely
-    // touched from a nonisolated deinit under Swift 6 isolation rules.
+    // No deinit cleanup — see DECISIONS.md::AudioEngine.swift::no-deinit-cleanup
 
     // MARK: - Playback
 
@@ -132,11 +129,7 @@ final class AudioEngine {
         updateNowPlayingInfo()
         startLoadingTimeout()
 
-        // Early video hint from /metadata — the backend's stream-HEAD
-        // fallback knows the mime before AVAsset finishes loading tracks,
-        // so the Now Playing surface can show video without a late swap.
-        // The asset's own track list (captureStreamFormat) stays
-        // authoritative once loaded.
+        // Early video hint — see DECISIONS.md::AudioEngine.swift::early-video-hint
         let trackKey = version.id
         Task { [weak self] in
             guard let meta = try? await APIClient.shared.fetchMetadata(for: link),
@@ -529,11 +522,7 @@ final class AudioEngine {
                 }
                 codec = Self.codecName(CMFormatDescriptionGetMediaSubType(description))
             }
-            // estimatedDataRate reflects the container's own bitrate metadata
-            // and is available for progressive downloads right away — unlike
-            // accessLog's indicatedBitrate, which is an HLS-transfer metric
-            // that's typically empty for the plain HTTP files every supported
-            // host serves.
+            // estimatedDataRate over accessLog — see DECISIONS.md::AudioEngine.swift::bitrate-source
             if let rate = try? await audioTrack.load(.estimatedDataRate), rate > 0 {
                 bitrateBps = Double(rate)
             }

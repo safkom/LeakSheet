@@ -142,10 +142,7 @@ struct NowPlayingView: View {
                             )
                             .font(.caption.weight(.medium))
                             .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
-                            // The row's other controls compress this label until
-                            // "Original" wraps onto a second line inside the
-                            // glass capsule; pin it to one line at its natural
-                            // width and let the row lay out around it.
+                            // Pinned single-line width — see DECISIONS.md::NowPlayingView.swift::original-label-width
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 16)
@@ -303,10 +300,7 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var artworkView: some View {
         if player.hasVideo, let avPlayer = player.avPlayer {
-            // Video items (e.g. an .mp4 behind an opaque pillows id) render
-            // their picture in place of the artwork, driven by the same
-            // player as the audio path — sized to the video's own aspect
-            // ratio (16:9 fallback until the track reports its size).
+            // Video renders in place of artwork — see DECISIONS.md::NowPlayingView.swift::video-in-artwork-slot
             VideoSurfaceView(player: avPlayer)
                 .aspectRatio(player.videoAspectRatio ?? 16.0 / 9.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)

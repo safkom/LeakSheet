@@ -188,10 +188,7 @@ extension ArtistViewModel {
         /// ids would otherwise collide and be dropped by ForEach. See SearchResult.
         let songOrdinal: Int
 
-        // Stable content-derived id so SwiftUI's ForEach can diff results
-        // across filter/query changes instead of rebuilding every row each
-        // keystroke (a fresh UUID() on every rebuild caused row flicker
-        // and lost expand state).
+        // Stable content-derived id — see DECISIONS.md::FilterPipeline.swift::stable-row-id
         var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
@@ -427,10 +424,7 @@ extension ArtistViewModel {
         return f
     }()
 
-    // "Mar 20, 2023" — the DOMINANT format across live trackers (86% of all
-    // dated versions in the 2026-07-20 TrackerHub sweep, incl. the whole Ye
-    // tracker). Without it every such date degraded to year-only precision
-    // and Recents ordering within a year was arbitrary.
+    // Dominant date format — see DECISIONS.md::FilterPipeline.swift::date-format-priority
     private nonisolated static let _abbrevMonthDayFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -463,11 +457,7 @@ extension ArtistViewModel {
         return f
     }()
 
-    // Full ISO-8601 with a time component ("2023-03-20T14:30:00Z"). The web
-    // reference gets these free via Date.parse; _isoFmt's strict "yyyy-MM-dd"
-    // rejects them, so they too fell back to the bare-year bucket.
-    // DateFormatter (not ISO8601DateFormatter) because only the former is
-    // Sendable, which a nonisolated static requires under Swift 6.
+    // ISO-8601 w/ time — see DECISIONS.md::FilterPipeline.swift::iso8601-formatter
     private nonisolated static let _iso8601Fmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

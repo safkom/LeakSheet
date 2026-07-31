@@ -45,17 +45,8 @@ BADGE_EMOJI_PATTERN = re.compile(
     rf"^[\s]*{_DECORATIVE_EMOJI}[\s]*(⭐️|⭐|💎|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)[\s]*"
 )
 
-# Regex to extract version tags like [V1], [V2], [Alt.], [Radio Mix], [MASTER], etc.
-# Handles:
-#   V1, V2, v3                       — numbered versions
-#   V1-V3, V2-V25                    — version ranges with known endpoints
-#   V1-V?, V2-V?                     — version ranges with unknown upper bound
-#   V?                               — unknown version number
-#   Alt, Alt.                        — alternate versions
-#   Radio Mix, Unfinished            — descriptor versions
-#   MASTER, CD VERSION               — recording format versions (Carti tracker)
-#   Album, Clean                     — release variant versions
-#   Song 1, Song 2                   — ordered song variants (Carti tracker)
+# Version tags like [V1], [Alt.], [Radio Mix], [MASTER] — form list:
+# docs/decisions.md::models.py::VERSION_TAG_PATTERN
 VERSION_TAG_PATTERN = re.compile(
     r"\[("
     r"[Vv]\d+(?:-[Vv]?\d+|-[Vv]?\?)?"  # V1, V1-V3, V2-V25, V1-V?, V2-V?
@@ -625,10 +616,7 @@ _REF_PATTERN = _credit_pattern(r"ref\.?")
 _DIR_PATTERN = _credit_pattern(r"dir\.?")
 
 
-# Some trackers label the alias line instead of just writing it: Travis uses
-# "(AKA: iLLamerica)" on 220 of its 259 alias lines. The field IS the alias, so
-# the label is redundant — and clients that prefix their own "aka" rendered it
-# twice. Only the a.k.a. family; other lead-ins are part of the name.
+# Strips the redundant "AKA:" label — see docs/decisions.md::models.py::ALIAS_LABEL_RE
 _ALIAS_LABEL_RE = re.compile(r"^\s*a\.?k\.?a\.?\s*[:\-–]?\s+", re.IGNORECASE)
 
 
@@ -721,10 +709,7 @@ def parse_song_credits(raw_name: str) -> SongCredits:
         line = line.strip()
         if not line:
             continue
-        # Strip wrapping parens: "(All I Have)" → "All I Have".
-        # Parenthetical lines may list several aliases: "(A, B)" → two alts.
-        # The label is dropped before splitting, so "(AKA: A, B)" still
-        # yields two clean aliases rather than one labelled and one bare.
+        # Multi-alias paren splitting — see docs/decisions.md::models.py::ALIAS_LABEL_RE
         if line.startswith("(") and line.endswith(")"):
             inner = _strip_alias_label(line[1:-1].strip())
             alt_titles.extend(_split_alt_aliases(inner))
@@ -780,13 +765,7 @@ def parse_timeline(text: str) -> list[TimelineEvent]:
 # Notes metadata extraction
 # ---------------------------------------------------------------------------
 
-# OG Filename lead-in. Observed forms:
-#   "OG Filename (Metadata): Bitch Im In The CLub NEW"
-#   "OG Filename: Broke My Heart 1"
-#   "OG Filename (?): Blazin' (KW Verse)"
-#   "OG Filenames: Ohh Yeah Tellem RUFF &\nOhh Yeah Tellem RUFF 73.3"   (multi, '&' continues on next line)
-#   "OG Filename KW - Where Are We Ref (1.15.13)"                       (no colon)
-#   "OG Filename - Tel Aviv [melody demo 1]"                            (dash separator)
+# OG Filename lead-in — observed forms: docs/decisions.md::models.py::_OG_LEADIN_PATTERN
 _OG_LEADIN_PATTERN = re.compile(
     r"OG Filenames?(?:\s*\([^)]*\))?\s*(?::\s*|-\s+|\s+)",
     re.IGNORECASE,
@@ -910,10 +889,7 @@ def _clean_sample_artist(artist: str) -> str | None:
     # the next quoted title ('Mobb Deep and ' \u2192 'Mobb Deep').
     artist = artist.strip().rstrip(",;.").strip()
     artist = re.sub(r"\s+and$", "", artist, flags=re.IGNORECASE)
-    # Strip trailing sentence noise. These handle cases like "George Benson
-    # and the Common vs. Kanye\u2026" where the capture ran into prose. The "and"
-    # strip is a heuristic that may affect compound band names; "&"-joined
-    # names are unaffected.
+    # Trailing sentence-noise heuristic \u2014 see docs/decisions.md::models.py::artist-cleanup
     artist = re.sub(r"\s+and\s+.+$", "", artist, flags=re.IGNORECASE).strip()
     artist = re.sub(r"\s+vs\.?\s*.*$", "", artist, flags=re.IGNORECASE).strip()
     artist = re.sub(r"\s+feat\.?(\s+.+)?$", "", artist, flags=re.IGNORECASE).strip()

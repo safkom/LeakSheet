@@ -26,20 +26,8 @@ TRACKERHUB_URL = (
     "?headers=true&gid=1884837542"
 )
 
-# ---------------------------------------------------------------------------
-# Sheet-fetch host allowlist
-# ---------------------------------------------------------------------------
-#
-# POST /sheet takes a URL from the caller and fetches it, so without this the
-# backend is an SSRF sink: cloud metadata (169.254.169.254) and RFC1918 hosts
-# are reachable, any internal page holding a <table> comes back parsed, and
-# the distinct 404/502/403 mappings make it an internal port scanner.
-#
-# Almost every tracker is on docs.google.com (413 of the 414 in the 2026-07-20
-# TrackerHub sweep). The rest are custom domains, so the allowlist is seeded
-# with the known ones and extended at runtime from the TrackerHub feed — a
-# newly listed tracker works without a deploy. LEAKSHEET_EXTRA_SHEET_HOSTS
-# (comma-separated) is the operator escape hatch.
+# Sheet-fetch host allowlist — SSRF guard for POST /sheet.
+# Rationale, threat model: docs/reviews/2026-07-27-security-review.md
 _SHEET_HOST_SEED = frozenset({
     "docs.google.com",
     "drive.google.com",
@@ -219,10 +207,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "recording date": "date_of_recording",      # Gucci Mane
     "record date": "date_of_recording",         # 2026-07-20 sweep (4 trackers)
 
-    # Dedicated credit columns (user-confirmed 2026-07-20 sweep mappings).
-    # Producer column fills SongVersion.producers only when the name-cell
-    # '(prod. …)' credit didn't already set it; Artist columns land in the
-    # additive credited_artists field (the row's performer, NOT a feature).
+    # Dedicated credit columns — see docs/decisions.md::config.py::COLUMN_ALIASES
     "producer": "producers_col",
     "producers": "producers_col",
     "artist": "credited_artists",

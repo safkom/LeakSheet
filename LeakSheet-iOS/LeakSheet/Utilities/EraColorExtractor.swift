@@ -6,10 +6,7 @@ import UIKit
 actor EraColorExtractor {
     static let shared = EraColorExtractor()
 
-    // Cache: cacheKey → [r, g, b] in 0-1 range. Keyed by the era's raw art
-    // URL, NOT era name — era names like "Unreleased" or "Singles" repeat
-    // across different artists, and a bare-name key would let one artist's
-    // cached color leak onto another artist's same-named era.
+    // Cache keyed by art URL not era name — see DECISIONS.md::EraColorExtractor.swift::cache-key
     private var cache: [String: [Double]]
     private static let cacheKey = "leaksheet_era_rgb_v3"
 
@@ -94,12 +91,7 @@ actor EraColorExtractor {
         guard let data = context.data else { return nil }
         let pixels = data.bindMemory(to: UInt8.self, capacity: sampleW * sampleH * 4)
 
-        // Collect sampled pixels with ColorThief's filter: skip transparent
-        // and near-pure-white pixels only. A mostly-white cover keeps its
-        // off-white pixels and resolves to a neutral, and a warm multi-tone
-        // cover isn't out-voted by one small flat region (median cut groups
-        // similar tones into one box instead of splitting them across
-        // hundreds of fixed buckets).
+        // Sample filtering — see DECISIONS.md::EraColorExtractor.swift::sample-filtering
         var samples: [Pixel] = []
         samples.reserveCapacity((sampleW / 2 + 1) * (sampleH / 2 + 1))
 

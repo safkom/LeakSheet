@@ -159,11 +159,7 @@ struct FilterChip: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .foregroundStyle(isActive ? .white : .secondary)
-                // Tint via opacity keeps the glass effect structurally
-                // identical across states — switching between .clear and a
-                // color changed the effect identity and tripped the
-                // "glassEffect() tried to update multiple times per frame"
-                // fault on toggle.
+                // Tint via opacity — see DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity
                 .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }
         .buttonStyle(.plain)

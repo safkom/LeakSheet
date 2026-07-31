@@ -84,12 +84,7 @@ _MIME_CORRECTIONS: dict[str, str] = {
     "audio/x-m4a": "audio/mp4",
 }
 
-# ---------------------------------------------------------------------------
-# Audio format sniffing — magic-byte detection of actual container format.
-# Some file hosts (e.g. pillows.su) always report "audio/mp4" regardless of
-# the actual format.  Safari strictly validates Content-Type against the
-# actual data; Chrome is lenient.  We peek at the first bytes to fix the type.
-# ---------------------------------------------------------------------------
+# Audio format sniffing — see docs/decisions.md::api.py::mime-sniffing
 
 def _sniff_audio_format(header: bytes) -> str | None:
     """Detect audio format from magic bytes.  Returns corrected MIME or None."""
@@ -467,13 +462,10 @@ def _bisect_right(sorted_ts: list[float], value: float) -> int:
 
 app.add_middleware(_RateLimitMiddleware)
 
-# CORS is added LAST so it is the OUTERMOST middleware: add_middleware makes the
-# last-added middleware outermost, and CORS must wrap the rate limiter so a 429
-# still carries Access-Control-Allow-Origin (else a browser sees a network error
-# instead of a clean 429).
+# CORS added last (outermost) — see docs/decisions.md::api.py::middleware-order
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://sheets.safko.eu"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -599,10 +591,7 @@ async def parse_sheet(
                         },
                     )
 
-    # --- Stale-while-revalidate fast path ---
-    # Serves the raw cached JSON bytes: no pydantic validation, no
-    # re-serialization, no content re-hash — those cost ~400ms on a 6.5MB
-    # artist and were the bulk of warm-request latency.
+    # Stale-while-revalidate fast path — see docs/decisions.md::api.py::swr-fast-path
     if use_cache:
         timer = PhaseTimer()
         with timer.phase("cache_read"):
@@ -682,9 +671,10 @@ async def parse_sheet(
 async def clear_fetch_cache(request: Request):
     """Clear the URL fetch cache (privileged).
 
-    CORS is open (`allow_origins=["*"]`) and this mutates shared server state,
-    so an unauthenticated endpoint would let any web page flush the cache and
-    force cold refetches for everyone. Requires the admin token: set
+    This mutates shared server state, so an unauthenticated endpoint would
+    let anyone flush the cache and force cold refetches for everyone
+    (CORS only gates browser JS, not direct requests). Requires the admin
+    token: set
     ``LEAKSHEET_ADMIN_TOKEN`` and send it as the ``X-Admin-Token`` header. When
     the token is unset the endpoint is disabled (fail closed — behind a reverse
     proxy the client IP is the proxy, so loopback checks aren't trustworthy).
@@ -723,10 +713,7 @@ _IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA on the 512MB box
 # docs.google.com/sheets-images 302s to login for N>0 (see web
 # enhanceGoogleImageUrl) — those fall through to the Pillow path.
 _GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
-# Google's sizing suffix is a "="-prefixed, "-"-joined list of option tokens,
-# not just w/h/s: "no" (don't upscale), "c" (crop), "p" (padding), etc. all
-# appear with no following digits, so a token is letters + *optional* digits
-# rather than one of {s,w,h} + required digits.
+# Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
 
 
@@ -892,11 +879,7 @@ async def proxy_image(
         "Access-Control-Allow-Origin": "*",
     }
 
-    # Only width-bounded requests are disk-cached, so only they can carry an
-    # ETag — one that reflects a real, still-live cache entry rather than a
-    # pure hash of the request, otherwise an expired or /cache/clear'd entry
-    # (or an unsized request, which is never cached at all) would revalidate
-    # as unchanged forever.
+    # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
     cached = None
     if width is not None:
@@ -1021,10 +1004,7 @@ _PILLOWS_SPLIT_RE = re.compile(
 )
 
 
-# Codec is the strongest audio/video signal — mp4/mov containers hold
-# audio-only m4a files too, so an ambiguous container without codec info
-# stays "unknown". Substring-tolerant: pillows strings look like
-# "H.264 High Profile" or "AAC LC".
+# Codec regex rationale — see docs/decisions.md::api.py::video-codec-regex
 _VIDEO_CODEC_RE = re.compile(
     r"h\.?264|avc|hevc|h\.?265|av1|vp[89]|mpeg-?4 video|xvid|divx", re.IGNORECASE
 )
@@ -1469,10 +1449,7 @@ async def proxy_stream(
     try:
         resp = await stream_audio(stream_url, range_header=range_header)
     except GdriveInterstitialError as e:
-        # Google Drive returned (and kept returning, after the confirm
-        # retry) an HTML virus-scan interstitial instead of file bytes.
-        # Never proxy HTML as audio — tell the client to fall back to
-        # opening the original share link in a browser.
+        # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except ValueError as e:
@@ -1503,16 +1480,7 @@ async def proxy_stream(
     ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
     total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
 
-    # ---------------------------------------------------------------------------
-    # MIME sniffing — some hosts (e.g. pillows.su) always report "audio/mp4"
-    # regardless of actual container format.  Chrome lenient-decodes the bytes;
-    # Safari strictly validates Content-Type against actual data → "Source not
-    # supported" when an Ogg file is served as audio/mp4.
-    #
-    # When the range starts at byte 0 we can see the file header, so we read
-    # the first chunk, detect the real format from magic bytes, and correct ct.
-    # The chunk is prepended back into the stream so no bytes are lost.
-    # ---------------------------------------------------------------------------
+    # MIME sniffing on first chunk — see docs/decisions.md::api.py::mime-sniffing
     _stream_iter = resp.aiter_bytes(chunk_size=65536)
     _prepend_chunk: bytes = b""
 
@@ -1626,12 +1594,7 @@ async def proxy_stream(
         )
 
     if plan.kind == "full":
-        # Cannot synthesise a valid 206 (unknown total, or header ignored).
-        # Return the full stream from byte 0 as HTTP 200, which correctly
-        # signals that Range is not supported for this response. iOS Safari
-        # interprets HTTP 200 to a Range request as "full file from byte 0";
-        # returning partial data here would corrupt its byte-offset-to-
-        # timestamp mapping.
+        # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
         _unknown_headers: dict[str, str] = {
             "Accept-Ranges": "bytes",
             "Content-Type": ct or "application/octet-stream",

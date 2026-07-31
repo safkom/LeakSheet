@@ -97,10 +97,7 @@ actor APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         onProgress?(.connecting)
-        // Chunked delegate download: URLSession hands the body over in Data
-        // CHUNKS (one memcpy each). The previous AsyncBytes loop iterated
-        // byte-at-a-time — ~8M suspension points on a Ye-size payload,
-        // burning seconds of CPU after the network was already done.
+        // Chunked delegate download — see DECISIONS.md::APIClient.swift::chunked-download
         let downloadTask = session.dataTask(with: request)
         let (data, response) = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation {

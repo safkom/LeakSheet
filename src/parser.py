@@ -461,14 +461,7 @@ def _extract_header_notices(
 # Row classification
 # ---------------------------------------------------------------------------
 
-# Pattern for era stats rows, e.g. "0 OG File(s)1 Full0 Tagged2 Partial..."
-# or "1 Total Full0 OG File0 Partial / Cut0 Snippet3 Unavailable" (Carti)
-# Also matches variant formats found across 400+ trackers:
-#   - "3 of Leaks\n0 of Snippets" (Billie Eilish)
-#   - "0 Streaming | 1 Off-Streaming" (Joji)
-#   - "27 tracks" (Gucci Mane, Chief Keef)
-#   - "0 Released | 1 Deleted | 5 Lost" (XXXTENTACION)
-#   - "5 Leaks\n2 Snippets" (common template variant)
+# Era stats row forms across 400+ trackers — docs/decisions.md::parser.py::ERA_STATS_PATTERN
 ERA_STATS_PATTERN = re.compile(
     r"\d+\s+"
     r"("
@@ -550,11 +543,7 @@ def _is_era_header(row: list[_Cell]) -> bool:
         # If the first line doesn't start with a digit, it's likely an era name
         if not _NUMERIC_STAT_RE.match(first_line):
             return True
-        # Digit-leading lines are only stat-like when a stats keyword follows
-        # or the line is a bare number — era names DO start with digits
-        # ("38 Baby 2 [V1] / …", "808s & Heartbreak"-era variants;
-        # 2026-07-20 review, NBA Youngboy). Without this, a sparse header
-        # whose only text cell is such a name is rejected outright.
+        # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
         if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
             return True
         # Check for images (era art) — a strong signal this is an era header
@@ -1168,10 +1157,7 @@ def _register_era_keys(
         alt_key = _era_match_key(alt)
         if alt_key:
             era_by_key.setdefault(alt_key, era)
-        # Comma-separated alias lists ("Mollyworld, Balaclava Era"): register
-        # each alias in the fallback dict only — same shadowing rationale as
-        # slash parts, so a genuine standalone era declared elsewhere still
-        # claims the primary key.
+        # Comma alias list → fallback dict — see docs/decisions.md::parser.py::era-key-shadowing
         parts = _split_alt_aliases(alt)
         if len(parts) > 1:
             target = fallback_keys if fallback_keys is not None else era_by_key
@@ -1313,10 +1299,7 @@ def _parse_era_header_row(
     highlighted_producers: list[str] = []
     desc_candidates: list[str] = []
 
-    # Check name cell for images.
-    # If the cell also has usable text, the image is album art.
-    # If the cell has NO text (image-based era name like Carti's
-    # Narcissist logo), the image is the era name — not art.
+    # Image-only era name vs. album art — see docs/decisions.md::parser.py::name-cell-image
     name_cell = _get_cell(row, era_name_col)
     name_text = name_cell.text.strip()
     name_has_usable_text = bool(
@@ -1495,10 +1478,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
         era_col = col_map.get("era", 0)
         row_era = _get_cell_text(row, era_col)
 
-        # If current era needs name backfill (image-only header), assign
-        # this song row to it *before* the normal lookup — otherwise fuzzy
-        # matching can steal it for a similarly-named era (e.g. WLR [V3]
-        # swallowing WLR [V4] songs because version tags are stripped).
+        # Backfill-era priority — see docs/decisions.md::parser.py::backfill-era-priority
         if (
             row_era
             and current_era is not None
@@ -1606,18 +1586,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # and the era name doesn't look like a distinct album/era.
                     version = _parse_song_row(row, col_map)
                     if version and _looks_like_era_name(row_era):
-                        # If the row has actual song metadata (links, quality, etc.),
-                        # prefer assigning to current_era over creating a new one.
-                        # This handles trackers where song rows use different era
-                        # abbreviations than the header (e.g. Pop Smoke, Jay-Z).
+                        # Abbreviated era names on song rows — see
+                        # docs/decisions.md::parser.py::abbreviated-era-names
                         if _has_song_data(version):
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
-                            # Register this era name variant for future rows —
-                            # into the fallback dict, not the authoritative one,
-                            # so a genuine era header with the same name declared
-                            # later still claims the primary key (otherwise this
-                            # speculative mapping starves that real era).
                             era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
                         else:
                             new_era = Era(name=row_era, sections=[Section()])
@@ -1685,15 +1658,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     current_era = new_era
                 continue
 
-        # Sub-era section header OR name-column era header:
-        # era_col is empty but name_col has text, with very few filled cells.
-        # In Yung Lean, "Before Unknown Death" appears in the name column
-        # as an era header. In other trackers, this is a section label.
-        # Travis Scott tracker: era header rows have the era name on line 1
-        # and a year-range on line 2 (via a <br> tag), e.g.:
-        #   "The Graduates\n(2007 - 2009)"
-        # Sub-section rows ("Other Media", "Production", etc.) only have a
-        # single-line label with no embedded newline.
+        # Sub-era header vs. section label — see docs/decisions.md::parser.py::sub-era-header
         name_col_idx = col_map.get("name", 1)
         name_val = _get_cell_text(row, name_col_idx)
         if name_val:
@@ -1727,16 +1692,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     # "OG / Uncut Files") — add as a named section to the
                     # current era and let later song rows auto-create if needed.
                     current_era.sections.append(Section(name=name_first_line))
-                    # Register the section name as an era alias so song rows
-                    # that reference this label in their era column route here
-                    # instead of fuzzy-matching to an unrelated era (e.g. "Drake
-                    # vs. Kendrick Lamar" fuzzy-matching to "The Kendrick Lamar
-                    # EP" due to shared words). Register into the fallback dict:
-                    # it's consulted before fuzzy matching but after the
-                    # authoritative era_by_key, so a real era header sharing this
-                    # name (declared later) still wins the primary key — a
-                    # section label must never starve a genuine era (e.g. the
-                    # "War" label inside DONDA 2 vs. the standalone WAR era).
+                    # Section-label-as-alias — see docs/decisions.md::parser.py::section-label-alias
                     _register_era_keys(current_era, name_first_line, era_by_key_fallback)
                 else:
                     # No current era — create one from the name column.
@@ -1766,10 +1722,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                 current_era.sections.append(Section(name=dyn_label))
                 continue
 
-        # Positional fallback: era column is empty but current_era exists.
-        # Many trackers (Glaive, etc.) leave the era column blank for song rows
-        # and only fill it for era headers.  If the row has enough filled cells
-        # to look like a song, try to parse it and assign positionally.
+        # Positional fallback — see docs/decisions.md::parser.py::positional-fallback
         if not row_era and current_era is not None:
             version = _parse_song_row(row, col_map)
             if version and (version.name or _has_song_data(version)):
@@ -1788,10 +1741,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Step 3: detect and parse global stats row
     tracker_stats = _find_global_stats(rows)
 
-    # Step 3b: merge 0-song stub eras (from name-column era headers) into
-    # their adjacent songs-bearing eras.  Handles trackers like Travis Scott
-    # 2.0 where full era names in header rows differ from abbreviated era
-    # names used in song rows (e.g. "Birds In The Trap Sing McKnight" vs "Birds").
+    # Merge 0-song stub eras — see docs/decisions.md::parser.py::merge-stub-eras
     eras = _merge_empty_stub_eras(eras)
 
     # Step 3c: consolidate group labels within each era's sections
@@ -2272,11 +2222,7 @@ _MISC_ERA_STATS_RE = re.compile(
     r"\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
 )
 
-# "1 Mixtape Tracks", "0 Project(s)", "99 tracks" — a counted-stats cell whose
-# vocabulary the list above doesn't carry. Recognised by shape so the parser
-# doesn't need every tracker's noun; only ever used together with "the title
-# names a known era", which is what keeps real era names starting with a digit
-# ("50 Cent Presents…") from matching.
+# Shape-based stats cell match — see docs/decisions.md::parser.py::STATS_LIKE_ERA_RE
 _STATS_LIKE_ERA_RE = re.compile(r"^\s*\d+\s+\S")
 
 
@@ -2362,10 +2308,7 @@ def parse_misc_tab(
         era_text = cell_text(row, "era")
         name = cell_text(row, "name")
 
-        # Section separator: a lone cell naming a highlight block. Combined
-        # "Grails / Wanted" tabs use these to divide the two halves; the
-        # column varies (Notes on Steve Lacy/MAVI, Title on Travis), so match
-        # on "exactly one non-empty cell" rather than a fixed column.
+        # Grails/Wanted section separator — see docs/decisions.md::parser.py::grails-wanted-separator
         lone = [c.text.strip() for c in row if c.text.strip()]
         if is_badge_tab and len(lone) == 1:
             _, label = extract_badge(lone[0])
@@ -2422,30 +2365,13 @@ def parse_misc_tab(
             links=links,
             source_tab=kind,
         )
-        # Per-track data is what separates a real row from a structural one.
-        # Two fields are deliberately excluded: `notes`, because era headers
-        # carry prose too and some tabs (Fakes) have notes as their only
-        # field; and `entry_type`, because Baby Keem's Released header row
-        # puts era prose in its Type column.
+        # Structural-row detection — see docs/decisions.md::parser.py::badge-tab-structural-rows
         has_track_data = any((
             entry.date, entry.length,
             entry.available, entry.quality, entry.links,
         )) or entry.streaming is not None
 
-        # Era header written the two ways the stats check above can't see: an
-        # EMPTY era cell with the era name in the title (Travis 'Released'),
-        # or a counted-stats cell whose vocabulary isn't in the list
-        # ("1 Mixtape Tracks", Baby Keem). Both share one shape — the title
-        # names an era that OTHER rows in this tab put in their era column,
-        # while this row does not carry that era itself.
-        #
-        # The extra condition is what keeps real songs safe: "Purple Swag
-        # (Chopped Not Slopped)" keys to its own era once _era_match_key drops
-        # the parenthetical, so it needs either no track data at all, or an
-        # era cell that is visibly a stats block rather than an era name.
-        # Header rows sometimes spill their prose into a mapped column (Baby
-        # Keem's lands in Leak Date), which is why the stats shape is checked
-        # structurally and not against a keyword list.
+        # Two more era-header shapes — see docs/decisions.md::parser.py::badge-tab-structural-rows
         stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
         if name_key and name_key in known_eras and name_key != era_key:
             if stats_era or (not era_text and not has_track_data):
@@ -2453,12 +2379,7 @@ def parse_misc_tab(
                 continue
 
         if not has_track_data:
-            # Bare label with nothing at all — "Projects" and "Features"
-            # between Travis's release groups, "Music Videos" atop Chief
-            # Keef's. Judged on MAPPED fields: these rows often do have text,
-            # but in columns this tab doesn't read. `entry_type` counts as
-            # content here even though the header test above ignores it — a
-            # row whose only field is "Freestyle" is still an entry.
+            # Bare label rows — see docs/decisions.md::parser.py::badge-tab-structural-rows
             if not entry.notes and not entry.entry_type:
                 continue
             # A known divider keyword with no track data is a label even when

@@ -193,10 +193,7 @@ _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", 
 _MISC_TAB_NAMES = frozenset({"misc", "misc.", "miscellaneous"})
 _MUSIC_VIDEO_TAB_NAMES = frozenset({"music videos", "music video", "videos", "mvs"})
 
-# Extra content tabs parsed into Artist.tabs (2026-07-17, from a live tab
-# census of the Ye / Travis / Kendrick / Carti trackers). Released tabs use
-# the Misc-tab grammar; Best Of / Worst Of / Stems and the "other" set use
-# the Unreleased-tab grammar — both parse via parse_misc_tab's alias table.
+# Extra content tabs — see docs/decisions.md::fetcher.py::extra-tab-grammars
 _RELEASED_TAB_NAMES = frozenset({"released"})
 _BEST_OF_TAB_NAMES = frozenset({"best of"})
 _WORST_OF_TAB_NAMES = frozenset({"worst of"})
@@ -217,10 +214,7 @@ _OTHER_CONTENT_TAB_NAMES = frozenset({
     "ai tracks", "remixes", "edits (wip)", "edits/remasters", "edits / remasters",
 })
 
-# Tab kinds whose entries duplicate main-tab songs with a highlight (⭐/🗑/✨/
-# 🏆/🥇). These never become switchable pages — their entries are matched
-# against the era tree and stamp the corresponding badge on existing songs,
-# covering trackers that only mark highlights in the dedicated tab.
+# Badge tab kinds — see docs/decisions.md::fetcher.py::badge-tab-kinds
 _BADGE_TAB_KINDS = frozenset({"best_of", "worst_of", "special", "grails", "wanted"})
 
 # Tabs deliberately NOT parsed — duplicates of the main tab, bespoke non-song
@@ -237,10 +231,7 @@ _EXCLUDED_TAB_NAMES = frozenset({
     "planned", "shared", "form", "forms",
 })
 
-# Tab names that identify the main unreleased/leaks tracker sheet.
-# When discovered, this tab is tried first before any other GIDs so that
-# trackers with a "Recent" landing tab (e.g. Travis Scott 2.0) don't fool
-# the fetcher into treating the small Recent sheet as the primary data.
+# Main tab identification, fetch priority — see docs/decisions.md::fetcher.py::unreleased-tab-priority
 _UNRELEASED_TAB_NAMES = frozenset({
     "unreleased", "leaks", "leaked", "unreleased songs",
     "leaked songs", "all unreleased", "all unreleased songs",
@@ -1448,10 +1439,7 @@ async def _aggregate_hub_workbook(
 
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 
-    # A tab whose songs the winner already has is a filtered view of it
-    # ("Recent"-style duplicates), not extra catalogue. Unidentifiable titles
-    # ("???", "??") all key to "" — they are excluded from the comparison, or
-    # a whole tab of mystery tracks would read as one big duplicate.
+    # Duplicate-tab filtering — see docs/decisions.md::fetcher.py::duplicate-tab-keys
     def _keys(a: Artist) -> set[str]:
         return {
             k
@@ -1531,16 +1519,7 @@ async def async_fetch_and_parse(
                 html, title = await async_fetch_sheet_html(
                     url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
                 )
-            # Per-GID sub-pages don't embed the workbook's tab listing (only
-            # the base /htmlview page does), so a link straight to the
-            # Misc/Music-Videos tab (e.g. copied from the browser while
-            # viewing it) can only be told apart from the main tab by asking
-            # the base page. This matters because parse_sheet's Era/Name/
-            # Available/Quality columns are similar enough to the misc-tab
-            # grammar that it can extract a plausible-looking but wrong
-            # "eras" list from that tab, which would then short-circuit
-            # discovery of the real main tab and skip parsing this tab as
-            # misc entries entirely.
+            # Base-page tab listing needed — see docs/decisions.md::fetcher.py::gid-subpage-discovery
             named_tabs: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
@@ -1581,9 +1560,8 @@ async def async_fetch_and_parse(
                         return artist
                     # A better "Unreleased" tab exists — fall through to full discovery
                 # GID produced 0 eras or 0 songs — fall through to discovery
-            # else: gid is the Misc/Music-Videos tab itself — skip straight to
-            # full discovery below, which finds the real main tab and parses
-            # this tab correctly via parse_misc_tab.
+            # else: gid is the Misc/Music-Videos tab — fall through to full discovery,
+            # see docs/decisions.md::fetcher.py::gid-subpage-discovery
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
 
@@ -1625,18 +1603,12 @@ async def async_fetch_and_parse(
                 use_cache=use_cache, t=t,
             )
 
-        # Start every GID fetch concurrently but consume them in priority
-        # order, parsing each as it lands and cancelling the rest once a
-        # winner is found. Large trackers expose 15+ tabs; the prioritized
-        # (unreleased) tab is almost always index 0, so eagerly completing
-        # every fetch downloads megabytes that are thrown away.
+        # Priority-ordered concurrent fetch with cancellation — see
+        # docs/decisions.md::fetcher.py::gid-fetch-priority
         fetch_tasks = [asyncio.create_task(_fetch_gid(g)) for g in gids]
 
         best_artist: Artist | None = None
-        # Rank: songs-or-not first, then era count, then song count. A tab
-        # with eras but no songs is a hub/landing page (Avicii's "Main" is a
-        # list of category descriptions) and must never beat a real
-        # catalogue tab, however many eras it appears to have.
+        # Rank tuple order — see docs/decisions.md::fetcher.py::gid-fetch-priority
         best_score = (0, 0, 0)
         best_gid: str | None = None
         hub_gid: str | None = None
