@@ -34,7 +34,7 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 - 🎵 **Inline streaming** from pillows.su, imgur.gg, music.froste.lol, krakenfiles.com, pixeldrain.com, and Google Drive
 - 📊 **Live parsing** of Google Sheets trackers — no manual exports; secondary tabs (Released / Stems / Misc / Music Videos) become pages, highlight tabs (Best Of / Grails / Wanted / …) stamp badges
-- 🗂️ **Tracker discovery** via the live TrackerHub sheet (`GET /trackers`)
+- 🗂️ **Tracker discovery** via the live ArtistGrid registry (`GET /trackers`)
 - 🎨 **Per-era cover art colors** extracted on the fly
 - 🔍 **Fast search & filters** across eras, songs, and versions
 - ⭐ **Favourites & queue** persisted locally
@@ -70,7 +70,7 @@ pip install -r requirements-dev.txt
 pytest                  # offline gate: deterministic, no network, no local dumps needed
 pytest -m accuracy      # exact-count regression vs local Trackers/ dumps (skips if absent)
 pytest -m live          # fetches the locked live tracker set, drift-tolerant invariants
-pytest -m "live and slow"  # full TrackerHub sweep (deliberate, slow)
+pytest -m "live and slow"  # full ArtistGrid sweep (deliberate, slow)
 ```
 
 The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|live|accuracy`) with one
@@ -85,7 +85,7 @@ soft live job daily (`.github/workflows/tests.yml`).
 |---|---|
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` (any `/edit`/`/view` form is normalized) |
 | Custom tracker domain | sites with embedded sheets, e.g. `yetracker.net` |
-| TrackerHub registry | `GET /trackers` — live list of community trackers with up-to-date flags |
+| ArtistGrid registry | `GET /trackers` — live list of community trackers with up-to-date flags |
 | Local HTML export | `Trackers/.../sheet.html` (dev only, gitignored) |
 
 ---
@@ -109,7 +109,7 @@ The backend proxies audio so clients can play it without CORS pain.
 
 ```
 POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate)
-GET  /api/trackers           → TrackerHub discovery list (name, url, best, up-to-date flags)
+GET  /api/trackers           → ArtistGrid discovery list (name, url, best, up-to-date flags)
 GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
 GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)
 GET  /api/metadata?url=...   → File metadata from provider APIs (incl. media_kind)
@@ -123,14 +123,14 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
 | `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata` |
 | `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
-| `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the TrackerHub feed |
+| `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed |
 | `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
 | `LEAKSHEET_PREWARM_INTERVAL` | `3600` | Seconds between prewarm passes |
 | `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 
 > The backend fetches URLs server-side, so every outbound path is guarded: `/sheet` only
-> fetches allowlisted tracker hosts (built-in seed + the TrackerHub feed +
+> fetches allowlisted tracker hosts (built-in seed + the ArtistGrid feed +
 > `LEAKSHEET_EXTRA_SHEET_HOSTS`), and the audio/image proxies re-validate the final host
 > after redirects. Non-public addresses are rejected on every hop.
 
@@ -187,7 +187,7 @@ the census harness stays importable under `tests/tools/`):
 | Tool | Purpose |
 |---|---|
 | `tests/tools/census.py` | Per-tracker content census + gzipped live snapshots (accuracy baselines) |
-| `scripts/tools/trackerhub_sweep.py` | Sweep every up-to-date TrackerHub tracker: health, columns, tabs, date formats |
+| `scripts/tools/trackerhub_sweep.py` | Sweep every up-to-date ArtistGrid tracker: health, columns, tabs, date formats |
 | `scripts/tools/verify_live.py` | Parse a live tracker and print a health summary |
 | `scripts/tools/quick_inspect.py` | Quick parse output for the known local trackers |
 | `scripts/tools/dump_raw_table.py` | Dump raw HTML table rows |

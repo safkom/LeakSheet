@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""TrackerHub format-difference sweep — the "50+ trackers, each different" analysis.
+"""ArtistGrid format-difference sweep — the "50+ trackers, each different" analysis.
 
-Fetches the live TrackerHub registry (the deprecated artists.ndjson replacement),
-then for every up-to-date tracker:
+Fetches the live ArtistGrid registry (successor to the dead TrackerHub master
+sheet; the older artists.ndjson file is deprecated too), then for every
+up-to-date tracker:
 
   1. GETs the base /htmlview page and classifies every discovered tab name
      against the fetcher's keyword sets (main/art/content kinds) — unrecognized
@@ -40,8 +41,8 @@ sys.path.insert(0, str(ROOT))
 
 import httpx
 
-from src.api import _parse_trackerhub
-from src.config import TRACKERHUB_URL
+from src.config import ARTISTGRID_URL
+from src.parser import parse_artistgrid_csv
 from src.fetcher import (
     FetchError,
     USER_AGENT,
@@ -244,15 +245,15 @@ async def main_async(args) -> int:
     async with httpx.AsyncClient(
         follow_redirects=True, headers={"User-Agent": USER_AGENT}
     ) as client:
-        resp = await client.get(TRACKERHUB_URL, headers={"Accept": "text/html"}, timeout=30)
+        resp = await client.get(ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=30)
         resp.raise_for_status()
-        entries = _parse_trackerhub(resp.text)
+        entries = parse_artistgrid_csv(resp.text)
         targets = entries if args.include_stale else [e for e in entries if e.up_to_date]
         if args.only:
             targets = [e for e in targets if args.only.lower() in e.name.lower()]
         if args.limit:
             targets = targets[: args.limit]
-        print(f"TrackerHub: {len(entries)} entries, sweeping {len(targets)} "
+        print(f"ArtistGrid: {len(entries)} entries, sweeping {len(targets)} "
               f"({'all' if args.include_stale else 'up-to-date only'})")
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)

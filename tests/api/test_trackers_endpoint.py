@@ -1,4 +1,4 @@
-"""Tests for the /trackers TrackerHub discovery endpoint."""
+"""Tests for the /trackers ArtistGrid discovery endpoint."""
 
 import json
 
@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import src.api as api
 from src.api import app
-from src.parser import _clean_link, _parse_yes_no, parse_trackerhub
+from src.parser import _clean_link, _parse_yes_no, parse_artistgrid_csv, parse_trackerhub
 
 REDIRECT = (
     "https://www.google.com/url?q=https://docs.google.com/spreadsheets/d/"
@@ -89,16 +89,68 @@ class TestParseTrackerhub:
         assert parse_trackerhub("<html><body></body></html>") == []
 
 
+FIXTURE_CSV = """name,url,credit,links_work,updated,best
+50 Cent,1UBHQ067bIEDH3TapHIt3MCdwDNRe30Qv0VdBP9JLgFM,G-Man Junior,1,1,true
+Deftones,deftonestracker.net,troabroa,1,1,true
+Plain Artist,PLAIN,someone,1,0,false
+Flagless Artist,NOFLAGS,crew,,,false
+"""
+
+
+class TestParseArtistgridCsv:
+    def test_fixture(self):
+        entries = parse_artistgrid_csv(FIXTURE_CSV)
+        names = [e.name for e in entries]
+        assert names == ["50 Cent", "Deftones", "Flagless Artist", "Plain Artist"]
+
+        fifty = entries[0]
+        assert fifty.best is True
+        assert fifty.url == (
+            "https://docs.google.com/spreadsheets/d/"
+            "1UBHQ067bIEDH3TapHIt3MCdwDNRe30Qv0VdBP9JLgFM/edit"
+        )
+        assert fifty.credit == "G-Man Junior"
+        assert fifty.up_to_date is True
+        assert fifty.working_links is True
+
+        # bare domain (non-Google tracker) passes through instead of being
+        # treated as a Sheets file ID — dots are the discriminator.
+        deftones = entries[1]
+        assert deftones.best is True
+        assert deftones.url == "https://deftonestracker.net/"
+
+        # best entries sort first, then alphabetical
+        assert [e.best for e in entries] == [True, True, False, False]
+
+        plain = next(e for e in entries if e.name == "Plain Artist")
+        assert plain.best is False
+        assert plain.up_to_date is False
+        assert plain.working_links is True
+
+        flagless = next(e for e in entries if e.name == "Flagless Artist")
+        assert flagless.up_to_date is None
+        assert flagless.working_links is None
+
+    def test_links_work_tristate_unknown_maps_to_none(self):
+        csv_text = "name,url,credit,links_work,updated,best\nX,ID123,c,2,1,false\n"
+        entries = parse_artistgrid_csv(csv_text)
+        assert entries[0].working_links is None
+
+    def test_empty_csv(self):
+        assert parse_artistgrid_csv("name,url,credit,links_work,updated,best\n") == []
+        assert parse_artistgrid_csv("") == []
+
+
 class FakeResponse:
     def __init__(self, text: str, status_code: int = 200):
         self.text = text
         self.status_code = status_code
-        self.headers = {"content-type": "text/html"}
+        self.headers = {"content-type": "text/csv"}
 
 
 class FakeClient:
     def __init__(self):
-        self.response: FakeResponse | None = FakeResponse(FIXTURE_HTML)
+        self.response: FakeResponse | None = FakeResponse(FIXTURE_CSV)
         self.calls = 0
 
     async def get(self, url, headers=None):
@@ -144,12 +196,17 @@ class TestTrackersEndpoint:
         assert r.headers["X-Cache-Status"] == "stale"
         assert len(r.json()) == 4
 
-    def test_error_without_stale(self, trackers_env):
+    def test_seed_fallback_without_stale(self, trackers_env):
         client, fake = trackers_env
         fake.response = None
-        assert client.get("/trackers").status_code == 502
+        r = client.get("/trackers")
+        assert r.status_code == 200
+        assert r.headers["X-Cache-Status"] == "seed"
+        assert len(r.json()) == len(api.SEED_TRACKERS)
 
-    def test_unparseable_page_is_an_error(self, trackers_env):
+    def test_unparseable_page_falls_back_to_seed(self, trackers_env):
         client, fake = trackers_env
         fake.response = FakeResponse("<html><body>nothing here</body></html>")
-        assert client.get("/trackers").status_code == 502
+        r = client.get("/trackers")
+        assert r.status_code == 200
+        assert r.headers["X-Cache-Status"] == "seed"

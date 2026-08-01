@@ -1,12 +1,13 @@
-"""Opt-in mass validation over the live TrackerHub registry.
+"""Opt-in mass validation over the live ArtistGrid registry.
 
-Marked ``live`` AND ``slow`` — it fetches the TrackerHub master sheet, then
-every up-to-date tracker it lists (dozens of real sheets). For deliberate local
-sweeps (``pytest -m "live and slow"``), not CI.
+Marked ``live`` AND ``slow`` — it fetches the ArtistGrid tracker CSV, then
+every up-to-date tracker it lists (hundreds of real sheets). For deliberate
+local sweeps (``pytest -m "live and slow"``), not CI.
 
-The registry is the **live `/trackers` TrackerHub feed** (the old
-``Trackers/artists.ndjson`` file is deprecated). The fetch happens inside the
-test — never at collection time — so offline runs never touch the network.
+The registry is the **live `/trackers` ArtistGrid feed** (the old TrackerHub
+master sheet is dead; the older ``Trackers/artists.ndjson`` file is
+deprecated too). The fetch happens inside the test — never at collection
+time — so offline runs never touch the network.
 
 Validation goes through the single ``_health.live_violations`` definition
 (drift-tolerant: only genuine parse breaks fail; fetch failures are reported as
@@ -20,8 +21,8 @@ import asyncio
 import httpx
 import pytest
 
-from src.parser import parse_trackerhub
-from src.config import TRACKERHUB_URL
+from src.parser import parse_artistgrid_csv
+from src.config import ARTISTGRID_URL
 from src.fetcher import FetchError, async_fetch_and_parse
 from tests._health import live_violations
 
@@ -31,13 +32,13 @@ _CONCURRENCY = 4  # polite to Google
 
 
 async def _sweep() -> tuple[list[str], list[str], int]:
-    """Return (violation_reports, fetch_skips, ok_count) over TrackerHub."""
+    """Return (violation_reports, fetch_skips, ok_count) over ArtistGrid."""
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as hub_client:
-        resp = await hub_client.get(TRACKERHUB_URL, headers={"Accept": "text/html"})
+        resp = await hub_client.get(ARTISTGRID_URL, headers={"Accept": "text/csv"})
         resp.raise_for_status()
-    entries = parse_trackerhub(resp.text)
+    entries = parse_artistgrid_csv(resp.text)
     targets = [e for e in entries if e.up_to_date] or entries
-    assert targets, "TrackerHub parsed to zero entries — endpoint or parser broke"
+    assert targets, "ArtistGrid parsed to zero entries — endpoint or parser broke"
 
     sem = asyncio.Semaphore(_CONCURRENCY)
     violations: list[str] = []
@@ -69,9 +70,9 @@ async def _sweep() -> tuple[list[str], list[str], int]:
     return violations, skips, ok
 
 
-async def test_trackerhub_trackers_parse_healthy():
+async def test_artistgrid_trackers_parse_healthy():
     violations, skips, ok = await _sweep()
-    print(f"\nTrackerHub sweep: {ok} healthy, {len(violations)} violating, {len(skips)} unfetchable")
+    print(f"\nArtistGrid sweep: {ok} healthy, {len(violations)} violating, {len(skips)} unfetchable")
     for s in skips:
         print(f"  [skip] {s}")
     assert not violations, (

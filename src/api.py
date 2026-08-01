@@ -3,7 +3,7 @@
 Endpoints:
   POST /sheet       — send a tracker URL, get parsed Artist JSON back
                       (ETag / stale-while-revalidate)
-  GET  /trackers    — TrackerHub discovery list, best-first
+  GET  /trackers    — ArtistGrid discovery list, best-first
   GET  /stream      — proxy audio/video from supported file hosts (Range support)
   GET  /image-proxy — proxy images through backend (width buckets, disk cache)
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
@@ -41,7 +41,9 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
 from src.config import USER_AGENT, register_tracker_hosts
-from src.parser import parse_trackerhub
+from src.models import TrackerEntry
+from src.parser import parse_artistgrid_csv
+from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
@@ -1243,7 +1245,7 @@ async def proxy_metadata(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/trackers — artist tracker discovery from the TrackerHub sheet
+# GET /api/trackers — artist tracker discovery from the ArtistGrid registry
 # ---------------------------------------------------------------------------
 
 
@@ -1251,10 +1253,20 @@ _trackers_cache = _TTLCache(ttl=3600.0, max_entries=1)
 # Last successful payload, kept indefinitely as a fallback for upstream errors.
 _trackers_stale: str | None = None
 
+# Built-in fallback (see src/tracker_seed.py) — served when ArtistGrid can't
+# be fetched and no live payload has ever succeeded, so /trackers never hard-fails.
+_SEED_PAYLOAD = json.dumps([
+    TrackerEntry(name=name, url=url).model_dump() for name, url in SEED_TRACKERS
+])
+
 
 @app.get("/trackers")
 async def list_trackers():
-    """List artist trackers from the TrackerHub master sheet (cached 1h)."""
+    """List artist trackers from the ArtistGrid registry CSV (cached 1h).
+
+    Falls back to the last successful fetch, or if there's none yet, to the
+    built-in seed list (src/tracker_seed.py) — see X-Cache-Status.
+    """
     global _trackers_stale
 
     cached = _trackers_cache.get("trackers")
@@ -1268,16 +1280,16 @@ async def list_trackers():
             },
         )
 
-    from src.config import TRACKERHUB_URL
+    from src.config import ARTISTGRID_URL
     try:
         resp = await _get_proxy_client().get(
-            TRACKERHUB_URL, headers={"Accept": "text/html"}
+            ARTISTGRID_URL, headers={"Accept": "text/csv"}
         )
         if resp.status_code != 200:
-            raise NetworkError(f"TrackerHub returned {resp.status_code}")
-        entries = await asyncio.to_thread(parse_trackerhub, resp.text)
+            raise NetworkError(f"ArtistGrid returned {resp.status_code}")
+        entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
         if not entries:
-            raise ParseError("No tracker rows parsed from TrackerHub")
+            raise ParseError("No tracker rows parsed from ArtistGrid")
         # Every listed tracker becomes fetchable by /sheet — this is the warm
         # path for the host allowlist (see config.sheet_host_allowed).
         await asyncio.to_thread(
@@ -1295,7 +1307,7 @@ async def list_trackers():
             },
         )
     except Exception as e:
-        logger.exception("TrackerHub fetch failed: %s", e)
+        logger.exception("ArtistGrid fetch failed: %s", e)
         if _trackers_stale is not None:
             return Response(
                 content=_trackers_stale,
@@ -1305,7 +1317,14 @@ async def list_trackers():
                     "X-Cache-Status": "stale",
                 },
             )
-        raise HTTPException(status_code=502, detail="TrackerHub fetch failed")
+        return Response(
+            content=_SEED_PAYLOAD,
+            media_type="application/json",
+            headers={
+                "Cache-Control": _CC_TRACKERS_STALE,
+                "X-Cache-Status": "seed",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

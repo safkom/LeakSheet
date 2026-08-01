@@ -6,6 +6,7 @@ structured Artist/Era/Song/SongVersion objects.
 
 from __future__ import annotations
 
+import csv
 import logging
 import re
 import unicodedata
@@ -2554,6 +2555,51 @@ def parse_trackerhub(html: str) -> list[TrackerEntry]:
             best=best,
             up_to_date=up_to_date,
             working_links=working_links,
+        ))
+    entries.sort(key=lambda e: (not e.best, e.name.lower()))
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# ArtistGrid registry — TrackerHub's live successor, served as CSV
+# (https://artists.artistgrid.cx/artists.csv)
+# ---------------------------------------------------------------------------
+
+def _parse_csv_flag(value: str | None) -> bool | None:
+    """"1" -> True, "0" -> False, anything else (incl. ArtistGrid's tri-state
+    "2" for links_work, meaning "partially working") -> unknown."""
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
+
+
+def parse_artistgrid_csv(csv_text: str) -> list[TrackerEntry]:
+    """Parse the ArtistGrid tracker registry into tracker entries.
+
+    Columns: name, url, credit, links_work, updated, best. ``url`` is a bare
+    Google Sheets file ID for almost every row, or a bare domain for the
+    handful of non-Google trackers (e.g. "franktracker.net") — sheet IDs
+    never contain a dot, which is what tells the two apart.
+    """
+    entries: list[TrackerEntry] = []
+    for row in csv.DictReader(csv_text.splitlines()):
+        name = (row.get("name") or "").strip()
+        raw_url = (row.get("url") or "").strip()
+        if not name or not raw_url:
+            continue
+        url = (
+            f"https://{raw_url}/" if "." in raw_url
+            else f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
+        )
+        entries.append(TrackerEntry(
+            name=name,
+            url=url,
+            credit=(row.get("credit") or "").strip() or None,
+            best=(row.get("best") or "").strip().lower() == "true",
+            up_to_date=_parse_csv_flag(row.get("updated")),
+            working_links=_parse_csv_flag(row.get("links_work")),
         ))
     entries.sort(key=lambda e: (not e.best, e.name.lower()))
     return entries

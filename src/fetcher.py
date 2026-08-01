@@ -37,7 +37,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 from src.config import (
-    TRACKERHUB_URL,
+    ARTISTGRID_URL,
     USER_AGENT,
     register_tracker_hosts,
     sheet_host_allowed,
@@ -49,9 +49,9 @@ from src.parser import (
     apply_art_tab_images,
     apply_badge_tabs,
     parse_art_tab,
+    parse_artistgrid_csv,
     parse_misc_tab,
     parse_sheet,
-    parse_trackerhub,
     _MAX_UNMATCHED_ROWS,
     _era_match_key,
     _song_match_key,
@@ -133,7 +133,7 @@ def _get_sheets_client() -> httpx.AsyncClient:
 
 
 async def _refresh_tracker_hosts() -> None:
-    """Harvest fetchable hosts from the TrackerHub feed (best effort).
+    """Harvest fetchable hosts from the ArtistGrid feed (best effort).
 
     Lets a tracker added to the community feed work without a redeploy.
     Self-throttled by ``TRACKER_HOST_REFRESH_INTERVAL`` so a flood of bogus
@@ -143,17 +143,17 @@ async def _refresh_tracker_hosts() -> None:
         return
     try:
         client = _get_sheets_client()
-        resp = await client.get(TRACKERHUB_URL, timeout=DEFAULT_TIMEOUT)
+        resp = await client.get(ARTISTGRID_URL, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
-        entries = await asyncio.to_thread(parse_trackerhub, resp.text)
+        entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
         known = await asyncio.to_thread(
             register_tracker_hosts, [e.url for e in entries]
         )
-        logger.info("TrackerHub host refresh: %d hosts known", known)
+        logger.info("ArtistGrid host refresh: %d hosts known", known)
     except Exception as e:
         # Never let feed trouble turn a valid tracker URL into a hard error
         # any earlier than it already would be.
-        logger.warning("TrackerHub host refresh failed: %s", e)
+        logger.warning("ArtistGrid host refresh failed: %s", e)
         register_tracker_hosts([])  # stamp the attempt so we don't hot-loop
 
 
@@ -170,7 +170,7 @@ async def _assert_sheet_host_allowed(url: str) -> None:
         return
     raise InvalidURLError(
         f"host not allowed for tracker fetching: {host}. Trackers listed on "
-        f"TrackerHub are accepted automatically; add others via "
+        f"ArtistGrid are accepted automatically; add others via "
         f"LEAKSHEET_EXTRA_SHEET_HOSTS."
     )
 

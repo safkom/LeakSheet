@@ -17,14 +17,11 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
 # Default trackers directory
 TRACKERS_DIR = ROOT_DIR / "Trackers"
 
-# TrackerHub — community-maintained master sheet listing artist trackers.
-# Backs the GET /trackers discovery endpoint. The gid pins the single tab
-# that holds the tracker list, so the page contains exactly one table.
-TRACKERHUB_URL = (
-    "https://docs.google.com/spreadsheets/u/0/d/"
-    "1Z8aANbxXbnUGoZPRvJfWL3gz6jrzPPrwVt3d0c1iJ_4/htmlview/sheet"
-    "?headers=true&gid=1884837542"
-)
+# ArtistGrid — community-maintained registry of artist trackers, served as
+# CSV. Backs the GET /trackers discovery endpoint. Replaced the old
+# TrackerHub master sheet (docs.google.com), which went down; see
+# src/tracker_seed.py for the last-resort built-in fallback.
+ARTISTGRID_URL = "https://artists.artistgrid.cx/artists.csv"
 
 # Sheet-fetch host allowlist — SSRF guard for POST /sheet.
 # Rationale, threat model: docs/reviews/2026-07-27-security-review.md
@@ -33,9 +30,10 @@ _SHEET_HOST_SEED = frozenset({
     "drive.google.com",
     "yetracker.net",          # README's CLI example
     "deftonestracker.net",    # only non-Google host in the 2026-07-20 sweep
+    "franktracker.net",       # non-Google host in the built-in seed (src/tracker_seed.py)
 })
 
-# Hosts harvested from the TrackerHub feed, and when that last happened.
+# Hosts harvested from the ArtistGrid feed, and when that last happened.
 _tracker_hosts: set[str] = set()
 _tracker_hosts_at: float = 0.0
 
@@ -49,7 +47,7 @@ def _env_sheet_hosts() -> set[str]:
 
 
 def register_tracker_hosts(urls: Iterable[str]) -> int:
-    """Record the hosts of TrackerHub-listed trackers as fetchable.
+    """Record the hosts of ArtistGrid-listed trackers as fetchable.
 
     Returns the number of hosts now known. Called whenever the feed is
     parsed, so the normal /trackers path keeps the allowlist warm.
@@ -64,7 +62,7 @@ def register_tracker_hosts(urls: Iterable[str]) -> int:
 
 
 def tracker_hosts_are_stale() -> bool:
-    """True when a miss is worth one TrackerHub refresh."""
+    """True when a miss is worth one ArtistGrid refresh."""
     return time.time() - _tracker_hosts_at > TRACKER_HOST_REFRESH_INTERVAL
 
 

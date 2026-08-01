@@ -360,7 +360,7 @@ class TabSection(BaseModel):
 
 
 class TrackerEntry(BaseModel):
-    """One row of the TrackerHub master sheet — a discoverable artist tracker."""
+    """One row of the ArtistGrid tracker registry — a discoverable artist tracker."""
 
     name: str
     url: str
