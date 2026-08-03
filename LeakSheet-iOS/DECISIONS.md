@@ -201,3 +201,120 @@ lets a wrap-capable pill re-expand to its full single-line intrinsic width and c
 off the trailing edge. Both measurement and placement clamp to `maxWidth` so
 wrap-capable subviews (`Text`) report, and are placed at, the narrower multi-line
 size they were sized for.
+
+## Platform.swift::shim-surface — one shim file, not conditionals at call sites
+
+Porting to macOS and tvOS needed exactly four cross-platform helpers: clipboard
+access, a `CGImage` → platform-image bridge for `MPMediaItemArtwork`, URL-field
+keyboard traits, and a pointer-hover highlight. Putting them in one file keeps
+`#if os(...)` out of the ~20 call sites that use them. Everything else either
+became platform-neutral outright (see the entries below) or forks inside a file
+that was already platform-specific.
+
+## DesignTokens.swift::color-resolve — resolve(in:) instead of UIColor(self)
+
+`Color.rgbComponents` went through `UIColor(self)`, which has no macOS
+equivalent, and it is the single chokepoint for `brightened`,
+`relativeLuminance`, `contrastRatio`, `ensureReadable`, `preferredText` and
+`blended`. SwiftUI's own `Color.resolve(in:)` is cross-platform, `nonisolated`,
+and exact here because every colour in the file is a fixed literal — so
+resolving against default `EnvironmentValues` cannot vary. `DesignTokensColorTests`
+pins the resolved components so the derived contrast maths can't silently drift.
+
+## ImageCache.swift::cgimage-currency — CGImage, not UIImage, end to end
+
+The decode path was already `CGImage` (ImageIO's thumbnail API); `UIImage` was a
+wrapper added at the end and unwrapped again by every consumer. Making `CGImage`
+the currency type de-UIKits `ImageCache`, `EraColorExtractor`, `CachedImage`,
+`EraCardView` and `AudioEngine.makeArtwork` at once, with no conditional
+compilation anywhere. `Image(decorative:scale:)` renders identically to
+`Image(uiImage:)` here — `UIImage(cgImage:)` already defaulted to scale 1 and
+`.resizable()` discards intrinsic size.
+
+The memory-warning observer became a **retained** `DispatchSourceMemoryPressure`.
+`UIApplication.didReceiveMemoryWarningNotification` has no macOS analogue, and
+unlike the old fire-and-forget NotificationCenter observer a DispatchSource is
+cancelled as soon as its last reference drops — hence the stored property.
+
+## AudioEngine.swift::audio-session-fork — guard on os(macOS), never os(iOS)
+
+Only macOS lacks `AVAudioSession`. tvOS 27 has the complete API *including* the
+iOS-27 forms this app depends on (`activate(options:)`,
+`didBecomeInactiveNotification` + `deactivationContextKey`,
+`resumptionRecommendationNotification` + `resumptionContextKey`). Writing these
+guards as `#if os(iOS)` would silently strip interruption handling and session
+activation from Apple TV, where background audio is a headline feature.
+
+## Toolbar placements — .primaryAction / .confirmationAction, not .topBar*
+
+`.topBarLeading` and `.topBarTrailing` do not exist on macOS. Rather than shim a
+`platformTrailing` placement, the 16 call sites moved to `.primaryAction`,
+`.confirmationAction` and `.cancellationAction`, which exist on all three
+platforms and are semantically what those buttons already were. iOS renders
+identically; on a Mac sheet `.confirmationAction` correctly lands in the
+bottom-right button row instead of a toolbar the sheet doesn't have.
+
+## contentShape goes INSIDE a .plain Button's label
+
+`.buttonStyle(.plain)` hit-tests only its drawn content. A row-shaped Button
+whose label ends in a `Spacer()` is therefore dead in the empty space — on macOS,
+clicking a few pixels past a short tracker name did nothing at all. Applying
+`.contentShape(Rectangle())` *outside* the Button does not fix it: the gesture is
+attached to the label, not to the modified view. It has to go on the label's root,
+which is what the pre-existing working usages in `ArtistRowViews` and
+`MiniPlayerBar` already did.
+
+## SongDetailPayload — model data, not a type nested in a view
+
+`FavouritesManager` built a `SongDescriptionSheet.Payload`, so a view model
+depended on a view. The payload is pure model data and the tvOS detail screen
+needs it too, so it moved to `Shared/Models`. `SongDescriptionSheet.Payload`
+remains a typealias, leaving the iOS call sites untouched.
+
+## Shared/ is a root folder, not a membershipExceptions list
+
+The tvOS target was meant to take the existing `LeakSheet/` folder and exclude
+`Views/` via a folder-sync `membershipExceptions` entry. A bare directory name
+there is silently ignored — every iOS view compiled into tvOS and the build died
+on `import WebKit`, which does not exist in the tvOS SDK. Moving the shared code
+into its own root group makes the boundary explicit and needs no exceptions.
+
+## tvOS::no-swipe-no-context-menu — actions live on a detail screen
+
+`swipeActions`, `swipeActionsContainer()` and `contextMenu` are all unavailable
+on tvOS, and they are how iOS exposes play / queue / favourite / details. On tvOS
+each row carries a second, explicitly focusable info button that pushes
+`TVSongDetailView`, where those actions are ordinary buttons. Selecting the row
+itself still plays, which is the common case from a couch.
+
+## tvOS::qr-handoff — web links become QR codes
+
+WebKit is absent from the tvOS SDK entirely and tvOS has no browser to hand off
+to, so `EmbedPlayerView` and `SafariView` have no tvOS equivalents. Rather than
+hide the content or show dead rows, a link renders a QR code the user scans to
+continue on their phone. Routing happens at the existing `MiscLinkClassifier`
+boundary, so there is no second copy of the link-classification logic.
+
+## make-icons.swift::note-punch — destinationOut per component
+
+The note is punched out of the droplet inside a transparency layer, one
+component at a time. A single even-odd fill against the droplet re-fills the
+head/stem/flag overlaps and leaves notches; a single non-zero fill cancels where
+the flag crosses the stem, because the flag is authored in the opposite winding
+direction to the CG-generated ellipse and rounded rect. Punching each component
+separately makes the hole their union regardless of winding.
+
+## make-icons.swift::ios-entries-have-no-scale
+
+The iOS app-icon entries deliberately omit the `scale` key. Its absence is what
+marks them as the modern single-size icon; with `"scale": "1x"` present, actool
+treats them as legacy sized slots and warns that the 1024, 60@2x, 76@2x and
+83.5@2x icons are all missing.
+
+## make-icons.swift::tvos-layer-order — layers are front-to-back
+
+An `.imagestack`'s `layers` array is ordered FRONT to BACK, and actool requires
+the LAST entry — the backmost layer — to be a fully opaque bitmap. That is the
+reverse of the natural back-to-front drawing order, so the array is reversed on
+write. (`Array(...)` matters: JSONSerialization cannot serialize a
+`ReversedCollection`.)

@@ -16,9 +16,9 @@ LeakSheet is split into three pieces:
 |---|---|---|
 | **Backend / parser** | `src/` | Python 3.10+, FastAPI, httpx, lxml |
 | **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) · **unmaintained** |
-| **iOS app** | `LeakSheet-iOS/` | SwiftUI (iOS 27+), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
+| **Apple apps** | `LeakSheet-iOS/` | SwiftUI (iOS 27 / macOS 27 / tvOS 27), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
-Both apps talk to the same FastAPI backend. The iOS app is the maintained client; the web app is kept for reference but no longer developed.
+All clients talk to the same FastAPI backend. The Apple apps are the maintained clients — one Xcode project builds iPhone/iPad, Mac and Apple TV from a shared codebase. The web app is kept for reference but no longer developed.
 
 ### Web app (in short)
 
