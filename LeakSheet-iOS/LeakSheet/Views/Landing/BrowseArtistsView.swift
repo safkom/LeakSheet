@@ -99,6 +99,11 @@ struct BrowseArtistsView: View {
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
+                                // Inside the label, not outside the Button:
+                                // .buttonStyle(.plain) hit-tests only its drawn
+                                // content, so on macOS the empty space beside a
+                                // short name was dead. See ArtistRowViews:87.
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .listRowBackground(Color.clear)

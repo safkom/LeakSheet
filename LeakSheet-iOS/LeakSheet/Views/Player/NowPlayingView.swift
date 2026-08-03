@@ -229,7 +229,7 @@ struct NowPlayingView: View {
             )
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
                     } label: {
@@ -238,7 +238,7 @@ struct NowPlayingView: View {
                     }
                     .accessibilityLabel("Close now playing")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         if let track = player.currentTrack {
                             Button {
@@ -266,7 +266,7 @@ struct NowPlayingView: View {
                         }
                         if let link = player.currentTrack?.links?.first {
                             Button {
-                                UIPasteboard.general.string = link
+                                Pasteboard.copy(link)
                             } label: {
                                 Label("Copy Link", systemImage: "doc.on.doc")
                             }

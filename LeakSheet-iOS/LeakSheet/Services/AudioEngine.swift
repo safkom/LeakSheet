@@ -575,7 +575,14 @@ final class AudioEngine {
     /// category never changes after the first successful set, so do it once.
     private var audioCategoryConfigured = false
 
+    /// macOS has no AVAudioSession — CoreAudio handles routing and there is no
+    /// interruption/deactivation model to observe. tvOS has the *full* iOS 27
+    /// API, so this and `setupInterruptionHandling` fork on `os(macOS)`, not
+    /// `os(iOS)`. See DECISIONS.md::AudioEngine.swift::audio-session-fork.
     private func activateAudioSession() {
+        #if os(macOS)
+        // Nothing to activate; AVPlayer just plays.
+        #else
         let session = AVAudioSession.sharedInstance()
         if !audioCategoryConfigured {
             do {
@@ -592,6 +599,7 @@ final class AudioEngine {
                 Self.log.warning("Audio session activation failed (activated=\(activated)): \(error)")
             }
         }
+        #endif
     }
 
     private func startLoadingTimeout() {
@@ -669,6 +677,10 @@ final class AudioEngine {
     }
 
     private func setupInterruptionHandling() {
+        #if os(macOS)
+        // macOS has no session interruption or route-change model to observe;
+        // CoreAudio handles device changes below the AVPlayer.
+        #else
         // iOS 27 replaces AVAudioSession.interruptionNotification with a
         // deactivation notification (interruption began) and a resumption
         // recommendation notification (interruption ended + should resume).
@@ -717,6 +729,7 @@ final class AudioEngine {
                 self.isPlaying = false
             }
         }
+        #endif
     }
 
     func updateNowPlayingInfo() {
@@ -759,12 +772,17 @@ final class AudioEngine {
         }
     }
 
-    /// Builds an MPMediaItemArtwork from a UIImage.
+    /// Builds an MPMediaItemArtwork from a CGImage.
     /// Must be nonisolated so the image-provider closure carries no actor isolation —
     /// MediaPlayer calls it from MPNowPlayingInfoCenter/accessQueue (background), and Swift 6
     /// runtime-checks that any @MainActor closure is invoked on the MainActor (EXC_BREAKPOINT).
-    private nonisolated static func makeArtwork(from image: UIImage) -> MPMediaItemArtwork {
-        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    ///
+    /// `platformImage` is the only remaining UIKit/AppKit boundary in the app —
+    /// MPMediaItemArtwork's request handler is TARGET_OS_IPHONE-forked in the
+    /// MediaPlayer headers (NSImage on macOS, UIImage elsewhere).
+    private nonisolated static func makeArtwork(from image: CGImage) -> MPMediaItemArtwork {
+        let size = CGSize(width: image.width, height: image.height)
+        return MPMediaItemArtwork(boundsSize: size) { _ in platformImage(image) }
     }
 
     private func loadNowPlayingArtwork(targetUrl: String) async {

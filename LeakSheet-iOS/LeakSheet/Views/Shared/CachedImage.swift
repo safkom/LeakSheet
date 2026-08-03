@@ -9,12 +9,12 @@ struct CachedImage<Placeholder: View>: View {
     var maxPixelSize: Int = 1280
     @ViewBuilder var placeholder: () -> Placeholder
 
-    @State private var image: UIImage?
+    @State private var image: CGImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
+                Image(decorative: image, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {

@@ -125,12 +125,15 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
 // MARK: - Color Utilities
 
 extension Color {
-    /// Extract RGB components (0–1 range) by going through UIColor.
+    /// Extract sRGB components (0–1 range).
+    ///
+    /// Uses SwiftUI's own `resolve(in:)` rather than `UIColor(self)` — the
+    /// UIKit round-trip has no macOS equivalent, and every color in this file
+    /// is a fixed literal, so resolving against default environment values is
+    /// exact. See DECISIONS.md::DesignTokens.swift::color-resolve.
     var rgbComponents: (red: Double, green: Double, blue: Double) {
-        let ui = UIColor(self)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (Double(r), Double(g), Double(b))
+        let c = resolve(in: EnvironmentValues())
+        return (Double(c.red), Double(c.green), Double(c.blue))
     }
 
     /// Return a brightened version of this color (each channel clamped to 1.0).

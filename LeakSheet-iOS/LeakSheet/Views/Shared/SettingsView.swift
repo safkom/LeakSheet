@@ -10,6 +10,11 @@ struct SettingsView: View {
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @Environment(\.dismiss) private var dismiss
 
+    /// Set when hosted as a sidebar destination rather than presented as a
+    /// sheet — the host supplies the navigation chrome, so skip the wrapping
+    /// NavigationStack and the Done button.
+    var embedded = false
+
     @State private var cacheSizeBytes: Int64 = 0
     @State private var clearingCache = false
 
@@ -20,7 +25,15 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            settingsList
+        } else {
+            NavigationStack { settingsList }
+                .presentationBackground(.ultraThinMaterial)
+        }
+    }
+
+    private var settingsList: some View {
             List {
                 SwiftUI.Section {
                     VStack(alignment: .leading, spacing: 12) {
@@ -98,9 +111,8 @@ struct SettingsView: View {
 
                 SwiftUI.Section {
                     TextField(APIClient.defaultBaseURL, text: $customServerURL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .urlFieldTraits()
                         .font(.subheadline.monospaced())
                 } header: {
                     Text("Backend Server")
@@ -113,7 +125,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Settings")
@@ -122,12 +133,12 @@ struct SettingsView: View {
                 cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-        }
-        .presentationBackground(.ultraThinMaterial)
     }
 
     private func qualityOption(title: String, subtitle: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -152,6 +163,7 @@ struct SettingsView: View {
                         .font(.body)
                 }
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

@@ -375,7 +375,7 @@ struct SongDescriptionSheet: View {
             .navigationTitle("Description")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Menu {
                         if canStream {
                             Button {
@@ -422,7 +422,7 @@ struct SongDescriptionSheet: View {
                         }
                         if let link = payload.version.links?.first {
                             Button {
-                                UIPasteboard.general.string = link
+                                Pasteboard.copy(link)
                             } label: {
                                 Label("Copy Link", systemImage: "doc.on.doc")
                             }
@@ -432,7 +432,7 @@ struct SongDescriptionSheet: View {
                     }
                     .accessibilityLabel("More options")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -440,10 +440,7 @@ struct SongDescriptionSheet: View {
         .presentationBackground(.ultraThinMaterial)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .sheet(item: $safariItem) { item in
-            SafariView(url: item.url)
-                .ignoresSafeArea()
-        }
+        .webSheet(item: $safariItem)
     }
 
     // MARK: - Credits section

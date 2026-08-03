@@ -31,7 +31,7 @@ struct ContentView: View {
                 )
             }
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         showFavourites = true
                     } label: {

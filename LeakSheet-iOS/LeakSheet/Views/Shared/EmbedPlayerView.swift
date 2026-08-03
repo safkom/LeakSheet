@@ -24,10 +24,10 @@ struct EmbedPlayerView: View {
                 .navigationTitle(item.title)
                 .toolbarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .primaryAction) {
                         Link(destination: item.originalURL) {
                             Image(systemName: "safari")
                         }
@@ -38,19 +38,34 @@ struct EmbedPlayerView: View {
     }
 }
 
+private func makeEmbedWebView(url: URL) -> WKWebView {
+    let config = WKWebViewConfiguration()
+    #if os(iOS)
+    // macOS plays inline unconditionally; the property is iOS-only.
+    config.allowsInlineMediaPlayback = true
+    #endif
+    config.mediaTypesRequiringUserActionForPlayback = []
+    let webView = WKWebView(frame: .zero, configuration: config)
+    #if os(iOS)
+    webView.isOpaque = false
+    webView.backgroundColor = .black
+    #endif
+    webView.load(URLRequest(url: url))
+    return webView
+}
+
+#if os(macOS)
+private struct EmbedWebView: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> WKWebView { makeEmbedWebView(url: url) }
+    func updateNSView(_ webView: WKWebView, context: Context) {}
+}
+#else
 private struct EmbedWebView: UIViewRepresentable {
     let url: URL
 
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.load(URLRequest(url: url))
-        return webView
-    }
-
+    func makeUIView(context: Context) -> WKWebView { makeEmbedWebView(url: url) }
     func updateUIView(_ webView: WKWebView, context: Context) {}
 }
+#endif

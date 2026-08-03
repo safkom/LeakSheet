@@ -1,5 +1,5 @@
+import CoreGraphics
 import SwiftUI
-import UIKit
 
 /// Extracts the dominant RGB color from an era image — mirrors ColorThief's approach.
 /// Returns actual image RGB values so card gradients, text, and borders match the web app exactly.
@@ -19,9 +19,9 @@ actor EraColorExtractor {
 
     // MARK: - Public API
 
-    /// Extract from an already-loaded UIImage (no download). Used during prefetch.
+    /// Extract from an already-loaded image (no download). Used during prefetch.
     /// `cacheKey` should be the era's raw art URL, unique per image.
-    func extractColor(fromImage image: UIImage, cacheKey: String) async -> Color? {
+    func extractColor(fromImage image: CGImage, cacheKey: String) async -> Color? {
         if let cached = cache[cacheKey] {
             return color(from: cached)
         }
@@ -58,7 +58,7 @@ actor EraColorExtractor {
 
     /// Bridges `dominantRGB` onto a detached task so multiple eras can extract
     /// in parallel rather than queueing on this actor's executor.
-    nonisolated private static func dominantRGBOffActor(from image: UIImage) async -> RGB? {
+    nonisolated private static func dominantRGBOffActor(from image: CGImage) async -> RGB? {
         await Task.detached(priority: .userInitiated) {
             Self.dominantRGB(from: image)
         }.value
@@ -70,9 +70,7 @@ actor EraColorExtractor {
 
     /// Returns the dominant RGB color from the image using pixel quantization.
     /// Matches what ColorThief's getPalette()[0] returns for the same image.
-    nonisolated static func dominantRGB(from image: UIImage) -> RGB? {
-        guard let cgImage = image.cgImage else { return nil }
-
+    nonisolated static func dominantRGB(from cgImage: CGImage) -> RGB? {
         // Downsample to at most 100×100 for speed
         let sampleW = min(cgImage.width, 100)
         let sampleH = min(cgImage.height, 100)

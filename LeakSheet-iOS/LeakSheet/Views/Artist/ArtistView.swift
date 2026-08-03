@@ -262,9 +262,12 @@ private struct ArtistContentView: View {
         .swipeActionsContainer()
         .navigationTitle(artist.name)
         .navigationSubtitle("\(vm.artistStats.total) tracks")
+        // .large is iOS/watchOS only; a Mac window title has no large variant.
+        #if os(iOS)
         .toolbarTitleDisplayMode(.large)
+        #endif
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .primaryAction) {
                 GlassEffectContainer {
                     HStack(spacing: 8) {
                         Menu {
@@ -298,12 +301,19 @@ private struct ArtistContentView: View {
         }
         // navigationBarDrawer + displayMode .always — see
         // DECISIONS.md::ArtistView.swift::search-field-placement
+        // Both modifiers below are iOS-only: `navigationBarDrawer` and
+        // `.onScrollDown` don't exist off-iOS, and neither does the
+        // `.navigationBar` toolbar placement on macOS.
+        #if os(iOS)
         .searchable(
             text: $vm.searchQuery,
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search songs…"
         )
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+        #else
+        .searchable(text: $vm.searchQuery, prompt: "Search songs…")
+        #endif
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
                 .environment(vm)  // enables the cross-era "Also in" section
@@ -322,10 +332,7 @@ private struct ArtistContentView: View {
         .sheet(isPresented: $showLegend) {
             BadgeLegendSheet()
         }
-        .sheet(item: $safariItem) { item in
-            SafariView(url: item.url)
-                .ignoresSafeArea()
-        }
+        .webSheet(item: $safariItem)
         .sheet(item: $embedItem) { item in
             EmbedPlayerView(item: item)
         }

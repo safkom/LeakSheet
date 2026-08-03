@@ -36,7 +36,7 @@ struct TrackerTimelineSheet: View {
             .navigationTitle("Timeline")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }

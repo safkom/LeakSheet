@@ -1,13 +1,17 @@
+import CoreGraphics
+import Foundation
 import ImageIO
-import UIKit
 
 /// In-memory image cache backed by NSCache, with URLSession disk cache underneath.
 /// Actor-isolated for thread safety from any async context.
 ///
 /// Images are decoded through ImageIO's thumbnail path at a bounded pixel
-/// size — a full-resolution `UIImage(data:)` of a 2000×2000 cover costs
-/// ~16 MB of bitmap and decodes on first draw (main thread); a 320px bucket
-/// costs ~0.4 MB and decodes here, off-main.
+/// size — a full-resolution decode of a 2000×2000 cover costs ~16 MB of bitmap
+/// and decodes on first draw (main thread); a 320px bucket costs ~0.4 MB and
+/// decodes here, off-main.
+///
+/// The currency type is `CGImage`, not `UIImage` — see
+/// DECISIONS.md::ImageCache.swift::cgimage-currency.
 actor ImageCache {
     static let shared = ImageCache()
 
@@ -17,8 +21,11 @@ actor ImageCache {
     // Now Playing art was upscaled from 1280 on ~1290px displays.
     static let sizeBuckets = [128, 320, 640, 1280, 1600]
 
-    private let memCache = NSCache<NSString, UIImage>()
+    private let memCache = NSCache<NSString, CGImage>()
     private let session: URLSession
+    /// Must be retained — a DispatchSource is cancelled when its last reference
+    /// drops, unlike the NotificationCenter observer this replaced.
+    private let memoryPressure: DispatchSourceMemoryPressure
 
     private init() {
         memCache.countLimit = 300
@@ -32,15 +39,18 @@ actor ImageCache {
         config.timeoutIntervalForRequest = 15
         session = URLSession(configuration: config)
 
-        // Purge in-memory images on memory pressure.
-        // Observer intentionally not stored: ImageCache is a process-lifetime singleton.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didReceiveMemoryWarningNotification,
-            object: nil,
+        // Purge in-memory images on memory pressure. Dispatch's source works on
+        // every platform; UIApplication.didReceiveMemoryWarningNotification has
+        // no macOS equivalent.
+        let source = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical],
             queue: .main
-        ) { [weak self] _ in
+        )
+        memoryPressure = source
+        source.setEventHandler { [weak self] in
             Task { [weak self] in await self?.evictAll() }
         }
+        source.resume()
     }
 
     private func evictAll() {
@@ -68,7 +78,7 @@ actor ImageCache {
     }
 
     /// Returns a cached image synchronously (nil if not in memory cache).
-    func cachedImage(for url: URL, maxPixelSize: Int = 1600) -> UIImage? {
+    func cachedImage(for url: URL, maxPixelSize: Int = 1600) -> CGImage? {
         memCache.object(forKey: Self.cacheKey(url, maxPixelSize))
     }
 
@@ -108,20 +118,19 @@ actor ImageCache {
 
     /// Loads an image, using memory cache → disk/network, decoded at most
     /// `maxPixelSize` on its longest side.
-    func loadImage(from url: URL, maxPixelSize: Int = 1280) async -> UIImage? {
+    func loadImage(from url: URL, maxPixelSize: Int = 1280) async -> CGImage? {
         let key = Self.cacheKey(url, maxPixelSize)
         if let hit = memCache.object(forKey: key) { return hit }
         guard let (data, _) = try? await session.data(from: url),
               let image = Self.downsampled(data: data, maxPixelSize: maxPixelSize) else { return nil }
-        let cost = Int(image.size.width * image.size.height * 4 * image.scale * image.scale)
-        memCache.setObject(image, forKey: key, cost: cost)
+        memCache.setObject(image, forKey: key, cost: image.width * image.height * 4)
         return image
     }
 
     /// Decode via ImageIO's thumbnail API — bounded memory, and the bitmap is
     /// materialized here (ShouldCacheImmediately) instead of lazily on the
     /// main thread at first draw.
-    private nonisolated static func downsampled(data: Data, maxPixelSize: Int) -> UIImage? {
+    private nonisolated static func downsampled(data: Data, maxPixelSize: Int) -> CGImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
             return nil
@@ -132,9 +141,6 @@ actor ImageCache {
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
         ] as CFDictionary
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
-            return nil
-        }
-        return UIImage(cgImage: cgImage)
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions)
     }
 }

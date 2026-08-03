@@ -56,6 +56,7 @@ struct EraCardView: View {
                     .stroke(borderColor, lineWidth: 1)
             }
             .clipShape(cardShape)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(era.name)
@@ -207,12 +208,12 @@ private struct CachedEraImage: View {
     let cacheKey: String
     var onColorExtracted: (Color) -> Void
 
-    @State private var image: UIImage?
+    @State private var image: CGImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
+                Image(decorative: image, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
@@ -232,7 +233,7 @@ private struct CachedEraImage: View {
         }
     }
 
-    private func extractColor(from img: UIImage) {
+    private func extractColor(from img: CGImage) {
         Task {
             if let color = await EraColorExtractor.shared.extractColor(fromImage: img, cacheKey: cacheKey) {
                 await MainActor.run { onColorExtracted(color) }

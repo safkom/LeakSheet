@@ -68,13 +68,12 @@ struct BadgeLegendSheet: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Legend")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
