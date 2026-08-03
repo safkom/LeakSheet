@@ -67,6 +67,7 @@ struct VersionRowView: View {
         .padding(.trailing, 12)
         .background(isPlaying ? Color.lsAccent.opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .rowHoverHighlight()
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
         .onTapGesture {

@@ -16,7 +16,10 @@ struct LeakSheetApp: App {
         #if os(macOS)
         // Window frames and sidebar state restore automatically on macOS —
         // `restorationBehavior` is the opt-out, so there's nothing to add here.
-        WindowGroup {
+        // Named "main" so LeakSheetCommands can bring it forward — ⌥⌘Q toggles
+        // state only this window's inspector observes, and without this the
+        // toggle would be invisible while the Now Playing window is key.
+        WindowGroup(id: "main") {
             MacRootView()
                 .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)

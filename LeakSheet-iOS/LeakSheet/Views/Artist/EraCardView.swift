@@ -56,6 +56,7 @@ struct EraCardView: View {
                     .stroke(borderColor, lineWidth: 1)
             }
             .clipShape(cardShape)
+            .rowHoverHighlight()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

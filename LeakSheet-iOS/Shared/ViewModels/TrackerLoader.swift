@@ -15,15 +15,17 @@ final class TrackerLoader {
     private(set) var loadPhase: APIClient.LoadPhase?
     private(set) var error: String?
 
-    func clearError() {
-        withAnimation { error = nil }
-    }
-
     /// Loads and parses a tracker. Returns the parsed artist, or nil if the
     /// load failed (in which case `error` carries a user-facing message).
+    ///
+    /// `forceRefresh` skips the conditional request so the backend re-parses
+    /// rather than answering 304 — the "refresh this tracker" path. The result
+    /// is still cached, so a refresh never leaves the tracker without a local
+    /// copy for next time.
     func load(
         _ urlString: String,
         artistName: String? = nil,
+        forceRefresh: Bool = false,
         recents: RecentTrackersManager
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -39,12 +41,15 @@ final class TrackerLoader {
         // Conditional request: send the cached ETag so an unchanged tracker
         // comes back as a bodyless 304 and we reopen the local copy instead
         // of re-downloading and re-decoding the full multi-MB payload.
-        let cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
+        let cachedEtag = forceRefresh
+            ? nil
+            : await CacheService.shared.getCachedEtag(for: trimmed)
 
         do {
             let result = try await APIClient.shared.parseSheet(
                 url: trimmed,
                 artistName: artistName,
+                forceRefresh: forceRefresh,
                 cachedEtag: cachedEtag,
                 onProgress: { phase in
                     Task { @MainActor in self.loadPhase = phase }

@@ -10,7 +10,7 @@ struct TVSongDetailView: View {
     @Environment(FavouritesManager.self) private var favourites
 
     @State private var selected: SongVersion
-    @State private var qrURL: URL?
+    @State private var qrItem: QRItem?
 
     init(payload: SongDetailPayload) {
         self.payload = payload
@@ -47,7 +47,7 @@ struct TVSongDetailView: View {
         }
         .background(Color.lsBackground)
         .navigationTitle(payload.song?.baseName ?? payload.version.name)
-        .sheet(item: $qrURL) { QRCodeSheet(url: $0, title: selected.name) }
+        .sheet(item: $qrItem) { QRCodeSheet(item: $0) }
     }
 
     // MARK: - Pieces
@@ -131,7 +131,7 @@ struct TVSongDetailView: View {
             // of being dead controls.
             if let link = selected.links?.first, let url = URL(string: link) {
                 Button {
-                    qrURL = url
+                    qrItem = QRItem(url: url, title: selected.name)
                 } label: {
                     Label("Open on phone", systemImage: "qrcode")
                 }

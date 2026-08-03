@@ -76,6 +76,21 @@ struct MacRootView: View {
             loader.url = pasted
             Task { await open(pasted) }
         }
+        // The stack's root (detailRoot) changes identity with `section`.
+        // Switching sections while an Artist is still pushed on top of that
+        // root corrupts NavigationStack's internal state and traps on the
+        // next push (reproduced: browse → open → switch section → browse →
+        // open → EXC_BREAKPOINT in NavigationColumnState.boundPathChange).
+        // Clearing the path on every section change keeps root changes and
+        // path mutations from ever overlapping.
+        .onChange(of: section) { _, _ in
+            path = []
+        }
+        // ⌘R refreshes the currently pushed artist, if any.
+        .onChange(of: ui.refreshToken) { _, _ in
+            guard let artist = path.last else { return }
+            Task { await open(artist.sourceUrl ?? "", artistName: artist.name, forceRefresh: true) }
+        }
     }
 
     @ViewBuilder
@@ -97,8 +112,9 @@ struct MacRootView: View {
                 .environment(FavouritesManager.shared)
                 .environment(PlayerViewModel.shared)
         case .settings:
+            // SettingsView already sets its own navigationTitle("Settings")
+            // in the embedded path — no need to set it again here.
             SettingsView(embedded: true)
-                .navigationTitle("Settings")
         }
     }
 
@@ -134,8 +150,10 @@ struct MacRootView: View {
 
     /// Loads a tracker and pushes its screen, building the view model while the
     /// loading state is still up — one loading state per tracker, matching iOS.
-    private func open(_ url: String, artistName: String? = nil) async {
-        guard let artist = await loader.load(url, artistName: artistName, recents: recents) else { return }
+    private func open(_ url: String, artistName: String? = nil, forceRefresh: Bool = false) async {
+        guard let artist = await loader.load(
+            url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
+        ) else { return }
         let vm = await ArtistViewModel.make(artist: artist)
         prepared = (artist.slug, vm)
         withAnimation { path = [artist] }

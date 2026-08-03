@@ -12,17 +12,10 @@ import UIKit
 
 // MARK: - Clipboard
 
-/// Clipboard access. tvOS has no pasteboard at all, so it degrades to a no-op —
-/// callers gate their UI on `isAvailable` rather than showing a dead button.
+/// Clipboard access. tvOS has no pasteboard at all, so it degrades to a no-op;
+/// the tvOS URL screen omits its Paste button outright rather than showing a
+/// control that does nothing.
 enum Pasteboard {
-    static var isAvailable: Bool {
-        #if os(tvOS)
-        false
-        #else
-        true
-        #endif
-    }
-
     static var string: String? {
         #if canImport(AppKit)
         NSPasteboard.general.string(forType: .string)

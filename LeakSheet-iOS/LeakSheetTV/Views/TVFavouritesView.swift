@@ -5,7 +5,6 @@ import SwiftUI
 /// there — the same reason the song list has no inline actions.
 struct TVFavouritesView: View {
     @Environment(FavouritesManager.self) private var favourites
-    @Environment(PlayerViewModel.self) private var player
 
     @State private var path: [TVRoute] = []
 

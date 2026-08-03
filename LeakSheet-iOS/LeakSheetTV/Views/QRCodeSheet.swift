@@ -1,6 +1,18 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 
+/// Identifiable wrapper for `.sheet(item:)` presentation — matches the
+/// SafariItem pattern iOS uses for the same purpose. A blanket
+/// `extension URL: Identifiable` would apply to every URL in the module (any
+/// other Identifiable-URL use silently gets `id = absoluteString`, and it
+/// would conflict outright if a future SDK adds the conformance itself), so
+/// this stays local to the one presentation it serves.
+struct QRItem: Identifiable {
+    let url: URL
+    var title: String?
+    var id: String { url.absoluteString }
+}
+
 /// Hand-off for anything tvOS can't open itself.
 ///
 /// WebKit is absent from the tvOS SDK entirely and there is no browser to fall
@@ -52,6 +64,16 @@ struct QRCodeSheet: View {
         .background(Color.lsBackground)
         // The Menu button already dismisses; this keeps the binding in sync.
         .onExitCommand { dismiss() }
+    }
+
+    init(item: QRItem) {
+        self.url = item.url
+        self.title = item.title
+    }
+
+    init(url: URL, title: String? = nil) {
+        self.url = url
+        self.title = title
     }
 
     private static func qrImage(for url: URL) -> CGImage? {

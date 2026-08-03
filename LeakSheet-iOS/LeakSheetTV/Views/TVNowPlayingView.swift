@@ -6,7 +6,6 @@ import SwiftUI
 /// keep in sync and no UIKit bridge to maintain.
 struct TVNowPlayingView: View {
     @Environment(PlayerViewModel.self) private var player
-    @Environment(FavouritesManager.self) private var favourites
     @Environment(\.dismiss) private var dismiss
 
     @State private var showQueue = false

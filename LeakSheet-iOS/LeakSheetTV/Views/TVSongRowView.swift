@@ -166,11 +166,13 @@ struct TVVersionRowView: View {
 struct TVMiscRowView: View {
     let entry: MiscEntry
 
-    @State private var qrURL: URL?
+    @State private var qrItem: QRItem?
 
     var body: some View {
         Button {
-            qrURL = entry.links.first.flatMap(URL.init(string:))
+            qrItem = entry.links.first
+                .flatMap(URL.init(string:))
+                .map { QRItem(url: $0, title: entry.name) }
         } label: {
             HStack(spacing: 16) {
                 Image(systemName: "link")
@@ -199,10 +201,6 @@ struct TVMiscRowView: View {
         .buttonStyle(TVRowButtonStyle())
         .disabled(entry.links.isEmpty)
         .padding(.horizontal, 36)
-        .sheet(item: $qrURL) { QRCodeSheet(url: $0, title: entry.name) }
+        .sheet(item: $qrItem) { QRCodeSheet(item: $0) }
     }
-}
-
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
 }

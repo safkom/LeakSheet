@@ -13,6 +13,7 @@ struct LeakSheetCommands: Commands {
 
     @State private var player = PlayerViewModel.shared
     @State private var ui = MacUIState.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         // The app has no documents; File ▸ New would open a stray window.
@@ -41,13 +42,17 @@ struct LeakSheetCommands: Commands {
                 player.seekTo(min(player.currentTime + Self.skipInterval, player.duration))
             }
             .keyboardShortcut(.rightArrow, modifiers: [.shift, .command])
-            .disabled(player.currentTrack == nil)
+            // Gated on duration too: currentTrack is set as soon as playback is
+            // requested, before the asset reports its length. Without this,
+            // pressing Skip Forward in that window computes min(15, 0) == 0
+            // and seeks to the very start — Skip Forward rewinds.
+            .disabled(player.currentTrack == nil || player.duration <= 0)
 
             Button("Skip Back") {
                 player.seekTo(max(player.currentTime - Self.skipInterval, 0))
             }
             .keyboardShortcut(.leftArrow, modifiers: [.shift, .command])
-            .disabled(player.currentTrack == nil)
+            .disabled(player.currentTrack == nil || player.duration <= 0)
         }
 
         CommandMenu("Tracker") {
@@ -66,7 +71,11 @@ struct LeakSheetCommands: Commands {
 
         CommandGroup(after: .toolbar) {
             Button(ui.showQueue ? "Hide Queue" : "Show Queue") {
+                // The inspector this toggles lives only in the main window.
+                // Bring it forward too, or toggling while the Now Playing
+                // window is key changes state with no visible effect.
                 ui.showQueue.toggle()
+                openWindow(id: "main")
             }
             .keyboardShortcut("q", modifiers: [.option, .command])
         }

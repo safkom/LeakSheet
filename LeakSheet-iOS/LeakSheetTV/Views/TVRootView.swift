@@ -10,33 +10,23 @@ struct TVRootView: View {
 
     @State private var selection: Tab = .browse
 
+    // Each screen owns its own NavigationStack (and its path) rather than
+    // being wrapped in one here — they push programmatically after an async
+    // load, so each needs its own binding. The Menu button then pops within
+    // the tab instead of switching tabs.
     var body: some View {
         TabView(selection: $selection) {
-            tab("Browse", "music.note.list", .browse) { TVBrowseView() }
-            tab("Recents", "clock", .recents) { TVRecentsView() }
-            tab("Favourites", "heart.fill", .favourites) { TVFavouritesView() }
-            tab("Add URL", "link", .addURL) { TVURLEntryView() }
-            tab("Settings", "gearshape", .settings) { TVSettingsView() }
+            // Qualified as SwiftUI.Tab: the nested `Tab` enum above shadows it.
+            SwiftUI.Tab("Browse", systemImage: "music.note.list", value: Tab.browse) { TVBrowseView() }
+            SwiftUI.Tab("Recents", systemImage: "clock", value: Tab.recents) { TVRecentsView() }
+            SwiftUI.Tab("Favourites", systemImage: "heart.fill", value: Tab.favourites) { TVFavouritesView() }
+            SwiftUI.Tab("Add URL", systemImage: "link", value: Tab.addURL) { TVURLEntryView() }
+            SwiftUI.Tab("Settings", systemImage: "gearshape", value: Tab.settings) { TVSettingsView() }
         }
         .tabViewStyle(.sidebarAdaptable)
         .background(Color.lsBackground)
         .safeAreaBar(edge: .bottom) {
             TVMiniPlayerBar()
-        }
-    }
-
-    /// Screens own their own NavigationStack (and its path) rather than being
-    /// wrapped in one here — they push programmatically after an async load,
-    /// so each needs its own binding. The Menu button then pops within the tab
-    /// instead of switching tabs.
-    private func tab<Content: View>(
-        _ title: String,
-        _ symbol: String,
-        _ value: Tab,
-        @ViewBuilder content: @escaping () -> Content
-    ) -> some TabContent<Tab> {
-        SwiftUI.Tab(title, systemImage: symbol, value: value) {
-            content()
         }
     }
 }

@@ -7,6 +7,8 @@ import SwiftUI
 struct TVArtistView: View {
     let artist: Artist
 
+    @Environment(RecentTrackersManager.self) private var recents
+
     @State private var vm: ArtistViewModel?
     @State private var refreshing = false
     @State private var showStats = false
@@ -231,9 +233,22 @@ struct TVArtistView: View {
         guard let url = artist.sourceUrl else { return }
         refreshing = true
         defer { refreshing = false }
-        await CacheService.shared.removeTracker(for: url)
-        guard let result = try? await APIClient.shared.parseSheet(url: url, artistName: artist.name)
-        else { return }
-        vm = await ArtistViewModel.make(artist: result.artist)
+        // Mirrors ArtistView.refresh() on iOS: forceRefresh skips the ETag
+        // check so the backend actually re-parses, and the result is re-cached
+        // — the tvOS version previously deleted the cache entry and never
+        // wrote a new one, so every open after one refresh re-downloaded and
+        // re-decoded the full multi-MB payload instead of replaying a 304.
+        do {
+            let result = try await APIClient.shared.parseSheet(
+                url: url, artistName: artist.name, forceRefresh: true
+            )
+            if let etag = result.etag {
+                await CacheService.shared.cacheTracker(url: url, data: result.rawData, etag: etag)
+            }
+            recents.saveTracker(artist: result.artist)
+            vm = await ArtistViewModel.make(artist: result.artist)
+        } catch {
+            // Keep showing the current data; the Refresh button just re-enables.
+        }
     }
 }
