@@ -7,15 +7,9 @@ typealias DescriptionSheet = SongDescriptionSheet
 struct SongDescriptionSheet: View {
     let payload: Payload
 
-    struct Payload: Identifiable {
-        let id = UUID()
-        let song: Song?
-        let version: SongVersion
-        let artistName: String
-        let artistSlug: String?
-        let eraName: String
-        let eraArt: String?
-    }
+    /// Defined in Shared/Models so FavouritesManager and the tvOS detail screen
+    /// can build one without depending on this sheet.
+    typealias Payload = SongDetailPayload
 
     @Environment(\.dismiss) private var dismiss
     @Environment(PlayerViewModel.self) private var player

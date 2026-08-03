@@ -10,6 +10,11 @@ import SwiftUI
 final class AudioEngine {
     static let shared = AudioEngine()
 
+    /// UserDefaults key gating end-of-track auto-advance (default on).
+    /// Declared here, on the reader, so shared code doesn't depend on the
+    /// Settings screen — which is per-platform.
+    static let autoplayNextKey = "leaksheet_autoplay_next"
+
     private nonisolated static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Audio")
 
     // MARK: - State
@@ -476,8 +481,8 @@ final class AudioEngine {
                 self.currentTime = 0
                 // Settings → Playback → Autoplay next (default on).
                 let defaults = UserDefaults.standard
-                let autoplay = defaults.object(forKey: SettingsView.autoplayNextKey) == nil
-                    || defaults.bool(forKey: SettingsView.autoplayNextKey)
+                let autoplay = defaults.object(forKey: Self.autoplayNextKey) == nil
+                    || defaults.bool(forKey: Self.autoplayNextKey)
                 guard autoplay else { return }
                 self.playNext()
             }

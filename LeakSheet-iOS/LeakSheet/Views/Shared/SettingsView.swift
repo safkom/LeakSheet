@@ -2,11 +2,8 @@ import SwiftUI
 
 /// App settings — streaming quality mode and other preferences.
 struct SettingsView: View {
-    /// UserDefaults key gating end-of-track auto-advance (default on).
-    static let autoplayNextKey = "leaksheet_autoplay_next"
-
     @AppStorage("leaksheet_streaming_mode") private var useOriginalQuality: Bool = false
-    @AppStorage(Self.autoplayNextKey) private var autoplayNext: Bool = true
+    @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @Environment(\.dismiss) private var dismiss
 

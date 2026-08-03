@@ -541,7 +541,11 @@ func writeImageStack(named name: String, at base: String, width: Int, height: In
         layerRefs.append(["filename": "\(layer.rawValue).imagestacklayer"])
     }
 
-    writeJSON(["info": info, "layers": layerRefs], to: "\(stack)/Contents.json")
+    // `layers` is ordered FRONT to BACK. actool requires the last entry — the
+    // backmost layer — to be a fully opaque bitmap, so this must be reversed
+    // from the natural back-to-front drawing order.
+    // Array(...) matters: JSONSerialization cannot serialize a ReversedCollection.
+    writeJSON(["info": info, "layers": Array(layerRefs.reversed())], to: "\(stack)/Contents.json")
 }
 
 writeImageStack(named: "App Icon", at: brand, width: 400, height: 240)

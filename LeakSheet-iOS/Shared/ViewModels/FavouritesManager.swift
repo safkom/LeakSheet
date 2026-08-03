@@ -76,9 +76,9 @@ final class FavouritesManager {
             )
         }
 
-        var toDescriptionPayload: DescriptionSheet.Payload? {
+        var toDescriptionPayload: SongDetailPayload? {
             guard let version = toSongVersion else { return nil }
-            return DescriptionSheet.Payload(
+            return SongDetailPayload(
                 song: nil,
                 version: version,
                 artistName: artistName,
