@@ -69,6 +69,37 @@ struct StreamResolverTests {
         #expect(url?.absoluteString.contains("/stream?url=") == true)
     }
 
+    @Test func `original quality for imgur routes through the stream proxy`() {
+        // The /f/{id} link serves text/html, and the CDN URL is only
+        // discoverable via imgur's API — which only the backend calls. Handing
+        // AVPlayer the page URL failed with "Operation Stopped".
+        for link in ["https://imgur.gg/f/002XdG5", "https://temp.imgur.gg/f/002XdG5"] {
+            let url = StreamResolver.originalQualityURL(for: link)
+            #expect(url?.absoluteString.contains("/stream?url=") == true, "\(link)")
+        }
+    }
+
+    @Test func `no original quality URL points at a viewer page`() {
+        // Blanket guard: every supported host's "original" must be a file
+        // endpoint or the proxy, never a human-facing page.
+        let links = [
+            "https://pillows.su/f/abc123",
+            "https://music.froste.lol/song/0a1b2c",
+            "https://imgur.gg/f/002XdG5",
+            "https://krakenfiles.com/view/FJmpAhYHMp/file.html",
+            "https://pixeldrain.com/u/aBc123",
+            "https://drive.google.com/file/d/1AbC/view",
+        ]
+        for link in links {
+            guard let url = StreamResolver.originalQualityURL(for: link)?.absoluteString else {
+                Issue.record("no original-quality URL for \(link)")
+                continue
+            }
+            let isPage = url.contains("/f/") || url.contains("/u/") || url.contains("/view")
+            #expect(!isPage || url.contains("/stream?url="), "\(link) → \(url)")
+        }
+    }
+
     @Test func `stream URL is nil for unsupported links`() {
         #expect(StreamResolver.streamURL(for: "https://youtube.com/watch?v=1") == nil)
         #expect(StreamResolver.originalQualityURL(for: "https://mega.nz/file/x") == nil)
