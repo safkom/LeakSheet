@@ -96,4 +96,105 @@ struct CacheServiceTests {
         #expect(await service.getCachedEtag(for: "https://example.com/z") == "W/xyz")
         #expect(await service.getCachedEtag(for: "https://example.com/missing") == nil)
     }
+
+    // MARK: - Metadata sidecar
+    //
+    // Reading one ETag used to cost a full Data(contentsOf:) + JSONDecoder
+    // pass over a multi-MB base64'd payload, on every tracker load, before the
+    // conditional request was even sent — and the data-age chip paid it again
+    // after the screen was already up, which is what shunted the list down
+    // mid-scroll.
+
+    @Test func `caching writes a sidecar alongside the payload`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/meta"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "sidecar-etag")
+
+        let metaPath = await service.metaFileForTesting(url: url)
+        #expect(FileManager.default.fileExists(atPath: metaPath.path))
+        // Sidecar must stay tiny — that is the entire point.
+        let size = try #require(try metaPath.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        #expect(size < 512)
+
+        let meta = try #require(await service.getCachedMeta(for: url))
+        #expect(meta.etag == "sidecar-etag")
+    }
+
+    @Test func `the sidecar is read without touching the payload`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/detached"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "e1")
+        // Corrupt the payload. A sidecar read must not care.
+        try Data("not json at all".utf8).write(to: await service.cacheFileForTesting(url: url))
+
+        #expect(await service.getCachedEtag(for: url) == "e1")
+    }
+
+    @Test func `an entry written before the sidecar existed still resolves`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/legacy"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "old")
+        // Simulate a cache directory from a build that never wrote sidecars.
+        try FileManager.default.removeItem(at: await service.metaFileForTesting(url: url))
+
+        #expect(await service.getCachedEtag(for: url) == "old")
+        // …and it back-fills, so the next load is cheap.
+        #expect(FileManager.default.fileExists(atPath: await service.metaFileForTesting(url: url).path))
+    }
+
+    @Test func `a sidecar without its payload is not treated as a valid cache`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/orphan-meta"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "e")
+        try FileManager.default.removeItem(at: await service.cacheFileForTesting(url: url))
+
+        // Returning the ETag here would make the loader send a conditional
+        // request, take the 304, and find nothing to replay.
+        #expect(await service.getCachedMeta(for: url) == nil)
+    }
+
+    @Test func `removing an entry removes its sidecar`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/gone"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "e")
+        await service.removeTracker(for: url)
+
+        #expect(!FileManager.default.fileExists(atPath: await service.metaFileForTesting(url: url).path))
+        #expect(await service.getCachedMeta(for: url) == nil)
+    }
+
+    /// The legacy sweep deletes anything under "tracker_" whose stem isn't 64
+    /// hex chars. Sidecars are "tracker_<hex>_meta.json", so an unguarded
+    /// sweep wipes every one of them on launch.
+    @Test func `the legacy sweep spares sidecars`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let url = "https://example.com/swept"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "e")
+        await service.sweepLegacyEntries()
+
+        #expect(FileManager.default.fileExists(atPath: await service.metaFileForTesting(url: url).path))
+        #expect(await service.getCachedEtag(for: url) == "e")
+    }
+
+    @Test func `clearing the cache removes sidecars too`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        await service.cacheTracker(url: "https://example.com/c1", data: artistJSON, etag: "e")
+        await service.clearCache()
+        #expect(await service.cacheSizeBytes() == 0)
+        #expect(await service.getCachedMeta(for: "https://example.com/c1") == nil)
+    }
 }

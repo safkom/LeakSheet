@@ -48,9 +48,12 @@ final class TrackerLoader {
         // Conditional request: send the cached ETag so an unchanged tracker
         // comes back as a bodyless 304 and we reopen the local copy instead
         // of re-downloading and re-decoding the full multi-MB payload.
-        let cachedEtag = forceRefresh
-            ? nil
-            : await CacheService.shared.getCachedEtag(for: trimmed)
+        // Reads the sidecar, not the payload — see CacheService.getCachedMeta.
+        var cachedEtag: String?
+        if !forceRefresh {
+            loadPhase = .readingCache
+            cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
+        }
 
         do {
             let result = try await APIClient.shared.parseSheet(
@@ -58,8 +61,11 @@ final class TrackerLoader {
                 artistName: artistName,
                 forceRefresh: forceRefresh,
                 cachedEtag: cachedEtag,
-                onProgress: { phase in
-                    Task { @MainActor in self.loadPhase = phase }
+                onProgress: { @Sendable phase in
+                    // Hopped through one MainActor.assumeIsolated-free Task per
+                    // callback before; that gave no ordering guarantee between
+                    // a late .downloading and .preparing. `publish` serialises.
+                    Self.publish(phase, to: self)
                 }
             )
             if let etag = result.etag {
@@ -84,13 +90,61 @@ final class TrackerLoader {
         return nil
     }
 
+    /// Hold the loading state up while the caller finishes the job — building
+    /// the view model and warming the first era covers.
+    ///
+    /// `load` clears `loading` on return, so that work (the slowest part of a
+    /// big tracker) previously ran with no indicator at all, and the artist
+    /// screen answered with its own second "Preparing…" spinner. Keeping
+    /// `loading` true here also keeps the concurrent-load guard armed.
+    func preparing<T>(_ body: () async -> T) async -> T {
+        loading = true
+        loadPhase = .preparing
+        defer {
+            loading = false
+            loadPhase = nil
+        }
+        return await body()
+    }
+
+    /// Ordered hand-off of a progress phase onto the main actor.
+    ///
+    /// Each callback used to spawn its own unstructured `Task { @MainActor }`,
+    /// one per 256KB chunk, with no ordering between them — a late
+    /// `.downloading` could land after `.preparing` and rewind the label.
+    private nonisolated static func publish(_ phase: APIClient.LoadPhase, to loader: TrackerLoader) {
+        Task { @MainActor in loader.apply(phase) }
+    }
+
+    /// Monotonic: a phase never moves backwards within one load.
+    private func apply(_ phase: APIClient.LoadPhase) {
+        guard Self.rank(phase) >= Self.rank(loadPhase) else { return }
+        loadPhase = phase
+    }
+
+    static func rank(_ phase: APIClient.LoadPhase?) -> Int {
+        switch phase {
+        case nil: return -1
+        case .readingCache: return 0
+        case .connecting: return 1
+        case .downloading: return 2
+        case .preparing: return 3
+        }
+    }
+
     /// 304 path: reopen the local copy, or refetch unconditionally if the ETag
     /// matched but the cached payload is gone.
+    ///
+    /// This is the *common* path for a returning user, and it used to report
+    /// nothing at all: parseSheet throws before reaching `.preparing`, so the
+    /// UI sat on "Contacting server…" through a multi-MB decode and the whole
+    /// view-model build. Both are announced now.
     private func replayFromCache(
         _ trimmed: String,
         artistName: String?,
         recents: RecentTrackersManager
     ) async -> Artist? {
+        loadPhase = .preparing
         if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed) {
             recents.saveTracker(artist: cachedArtist)
             return cachedArtist

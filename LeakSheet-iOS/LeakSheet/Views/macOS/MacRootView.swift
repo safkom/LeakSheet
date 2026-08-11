@@ -163,7 +163,7 @@ struct MacRootView: View {
         guard let artist = await loader.load(
             url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
         ) else { return }
-        let vm = await ArtistViewModel.make(artist: artist)
+        let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
         prepared = (artist.slug, vm)
         withAnimation { path = [artist] }
     }

@@ -95,7 +95,13 @@ actor ImageCache {
     /// Cancellable: the caller's `.task` cancels this when the screen goes
     /// away, so a discarded tracker stops fetching.
     func prefetch(_ urls: [URL], maxPixelSize: Int, concurrency: Int = 4) async {
-        var pending = urls.filter { memCache.object(forKey: Self.cacheKey($0, maxPixelSize)) == nil }
+        // Reversed because the loop below pops from the END: without this the
+        // last era warmed first, i.e. the exact opposite of scroll order, so
+        // the covers the user was looking at were the last to arrive.
+        var pending = urls
+            .filter { memCache.object(forKey: Self.cacheKey($0, maxPixelSize)) == nil }
+            .reversed()
+            .map { $0 }
         guard !pending.isEmpty else { return }
         await withTaskGroup(of: Void.self) { group in
             var inFlight = 0
@@ -118,14 +124,41 @@ actor ImageCache {
 
     /// Loads an image, using memory cache → disk/network, decoded at most
     /// `maxPixelSize` on its longest side.
+    ///
+    /// Retries once on a throttle or a server error. The status used to be
+    /// ignored entirely: a 429 body ("Too Many Requests") went straight into
+    /// ImageIO, failed to decode, and returned nil — indistinguishable from
+    /// "this image does not exist". Callers render a placeholder and never ask
+    /// again, which is exactly what an era card full of blank covers was.
     func loadImage(from url: URL, maxPixelSize: Int = 1280) async -> CGImage? {
         let key = Self.cacheKey(url, maxPixelSize)
         if let hit = memCache.object(forKey: key) { return hit }
-        guard let (data, _) = try? await session.data(from: url),
-              let image = await Self.downsampledOffActor(data: data, maxPixelSize: maxPixelSize)
-        else { return nil }
-        memCache.setObject(image, forKey: key, cost: image.width * image.height * 4)
-        return image
+
+        for attempt in 0...1 {
+            guard let (data, response) = try? await session.data(from: url) else { return nil }
+            if let http = response as? HTTPURLResponse, Self.isTransient(http.statusCode) {
+                guard attempt == 0, !Task.isCancelled else { return nil }
+                try? await Task.sleep(for: .seconds(Self.retryDelay(after: http)))
+                continue
+            }
+            guard let image = await Self.downsampledOffActor(data: data, maxPixelSize: maxPixelSize)
+            else { return nil }
+            memCache.setObject(image, forKey: key, cost: image.width * image.height * 4)
+            return image
+        }
+        return nil
+    }
+
+    /// 429 and 5xx are "ask again"; a 404 or a corrupt body is not.
+    nonisolated static func isTransient(_ status: Int) -> Bool {
+        status == 429 || (500...599).contains(status)
+    }
+
+    /// Honour `Retry-After` when the server sends one, clamped so a hostile or
+    /// mistaken value can't park an era card for a minute.
+    nonisolated static func retryDelay(after response: HTTPURLResponse) -> Double {
+        let header = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 1
+        return min(max(header, 0.5), 3)
     }
 
     /// Bridges `downsampled` onto a detached task, mirroring

@@ -54,24 +54,18 @@ struct ArtistView: View {
                     vm = await ArtistViewModel.make(artist: artist)
                 }
                 if let url = artist.sourceUrl {
-                    lastUpdated = await CacheService.shared.getCachedTracker(for: url)?.timestamp
+                    // Sidecar read, not the multi-MB payload — this used to
+                    // land hundreds of ms after first render and insert the
+                    // data-age row ABOVE the scroll position, shunting the
+                    // whole list down mid-gesture.
+                    lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
                 }
             }
-            // Content is on screen by now; warm the covers the user is about
-            // to scroll to. Cancelled automatically when the screen goes away.
-            await Self.prefetchEraArt(for: current)
+            // The first screenful was warmed (art AND colour) before this
+            // screen was pushed — see ArtistViewModel.make. Warm the rest now
+            // that content is up. Cancelled when the screen goes away.
+            await vm?.warmEraArt()
         }
-    }
-
-    /// Pull every era cover into the image cache at the size the era cards
-    /// request, so scrolling doesn't trigger a fetch per row.
-    private static func prefetchEraArt(for artist: Artist) async {
-        let urls = artist.eras.compactMap { era -> URL? in
-            guard let art = era.artUrl else { return nil }
-            return APIClient.shared.imageProxyURL(for: art, width: 320)
-        }
-        guard !urls.isEmpty else { return }
-        await ImageCache.shared.prefetch(urls, maxPixelSize: 320)
     }
 
     /// Force-refetch the tracker (bypassing the ETag/cache), rebuild the view
@@ -170,14 +164,16 @@ private struct ArtistContentView: View {
                 )
 
                 // Data-age chip — how fresh the shown data is (pull to refresh).
-                if let lastUpdated {
-                    Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 1)
-                        .accessibilityLabel("Data updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                }
+                // Always occupies its line, even before the timestamp resolves:
+                // appearing later inserts content above the scroll position and
+                // shunts the list down under the user's finger.
+                Text(lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 1)
+                    .opacity(lastUpdated == nil ? 0 : 1)
+                    .accessibilityHidden(lastUpdated == nil)
 
                 // Filter toggles
                 FilterTogglesView(vm: vm)
@@ -310,6 +306,13 @@ private struct ArtistContentView: View {
             prompt: "Search songs…"
         )
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+        // Minimizing the bar with a large title, a searchable drawer AND a
+        // refresh control resized the scroll view's top safe area mid-gesture,
+        // and the offset correction that followed read as the list jumping up
+        // and down before resuming. The adjustment exists to keep controls
+        // pinned in a top safe-area inset; there are none here, so disabling
+        // it holds the content still while the bar still collapses.
+        .toolbarMinimizationSafeAreaAdjustment(.disabled, for: .navigationBar)
         #else
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
         #endif

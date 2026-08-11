@@ -317,6 +317,9 @@ struct MiscListView: View {
             // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
             let groups = vm.content.miscEraGroups
             ForEach(groups) { group in
+              // Single root — same LazyVStack identity-templating rule the
+              // eras branch follows (see ArtistRowViews.swift).
+              VStack(spacing: 0) {
                 let expanded = isExpanded(group.eraName, groupCount: groups.count)
                 EraCardView(
                     era: eraForGroup(group),
@@ -352,6 +355,7 @@ struct MiscListView: View {
                         .padding(.horizontal, 16)
                     }
                 }
+              }
             }
         }
     }
@@ -431,6 +435,11 @@ struct RecentsListView: View {
             }
         } else {
             ForEach(Array(visible.enumerated()), id: \.element.id) { idx, result in
+              // Single root: LazyVStack can only template row identity from
+              // the ForEach ids when the body is unary — the eras branch was
+              // restructured for exactly this (see ArtistRowViews.swift), and
+              // this branch never was.
+              VStack(spacing: 0) {
                 // Era group header — show when era changes
                 if idx == 0 || visible[idx - 1].era.name != result.era.name {
                     HStack(spacing: 8) {
@@ -492,10 +501,15 @@ struct RecentsListView: View {
                 }
                 .padding(.horizontal, 16)
                 .onAppear {
-                    if idx == visible.count - 1 {
+                    // Against the LIVE count, not the `visible` snapshot this
+                    // body closed over — a fast scroll fired several appends
+                    // off one stale count. Eight rows early so the next page
+                    // is in place before the user reaches the end.
+                    if idx >= vm.visibleRecents.count - 8 {
                         vm.loadMoreRecents()
                     }
                 }
+              }
             }
         }
     }

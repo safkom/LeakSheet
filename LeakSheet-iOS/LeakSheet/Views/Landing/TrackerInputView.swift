@@ -9,6 +9,11 @@ struct TrackerInputView: View {
 
     @FocusState private var focused: Bool
     @State private var selection: TextSelection?
+    /// Seconds spent in the current phase. `.connecting` is one long wait on
+    /// the server (fetching the sheet from Google, then parsing it), so the
+    /// label escalates rather than sitting on "Contacting server…" for the
+    /// whole load — which is what it did ~99% of the time.
+    @State private var phaseElapsed: TimeInterval = 0
 
     var body: some View {
         VStack(spacing: 6) {
@@ -16,6 +21,14 @@ struct TrackerInputView: View {
             if loading, let loadPhase {
                 progressRow(for: loadPhase)
                     .transition(.opacity)
+                    .task(id: loadPhase) {
+                        phaseElapsed = 0
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(500))
+                            if Task.isCancelled { break }
+                            phaseElapsed += 0.5
+                        }
+                    }
             }
         }
         .padding(.horizontal, 14)
@@ -97,10 +110,14 @@ struct TrackerInputView: View {
     private func progressRow(for phase: APIClient.LoadPhase) -> some View {
         HStack(spacing: 8) {
             switch phase {
+            case .readingCache:
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Checking local copy…")
             case .connecting:
                 ProgressView()
                     .controlSize(.mini)
-                Text("Contacting server…")
+                Text(Self.connectingLabel(elapsed: phaseElapsed))
             case .downloading(let received, let expected):
                 if let expected, expected > 0 {
                     ProgressView(value: Double(received), total: Double(expected))
@@ -124,6 +141,20 @@ struct TrackerInputView: View {
 
     static func formatBytes(_ bytes: Int64) -> String {
         bytes.formatted(.byteCount(style: .file))
+    }
+
+    /// What the server is actually doing while we wait for the first byte.
+    ///
+    /// `.connecting` spans the whole of time-to-first-byte, and on a cold parse
+    /// that is the backend fetching the sheet from Google and parsing it — the
+    /// download and decode that follow are comparatively instant. A single
+    /// "Contacting server…" for all of it read as a hang.
+    static func connectingLabel(elapsed: TimeInterval) -> String {
+        switch elapsed {
+        case ..<1.5: "Contacting server…"
+        case ..<5: "Fetching tracker…"
+        default: "Parsing a large tracker…"
+        }
     }
 
     private func pasteFromClipboard() {
