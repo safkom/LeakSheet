@@ -71,6 +71,37 @@ class TestExtractVersionTag:
     def test_version_range_unknown_upper(self):
         assert extract_version_tag("DRONES. [V1-V?](prod. Sounwave)") == ("V1-V?", "DRONES. (prod. Sounwave)")
 
+    # The families below were absent until 2026-08 and account for ~2,400 rows
+    # across the cached trackers. Leaving them out did two things: the tag
+    # stayed in the displayed title, AND _add_version_to_era groups on the
+    # tag-stripped name, so "90210 [Demo 8]" and "90210 [Demo 9]" became two
+    # separate songs instead of two versions of one.
+    @pytest.mark.parametrize("raw,tag,base", [
+        ("90210 [Demo 8]", "Demo 8", "90210"),
+        ("Dis Side [Demo]", "Demo", "Dis Side"),
+        ("Whose House [OG File]", "OG File", "Whose House"),
+        ("Track [Master File]", "Master File", "Track"),
+        ("Track [Instrumental]", "Instrumental", "Track"),
+        ("Track [Remix]", "Remix", "Track"),
+        ("Track [Final]", "Final", "Track"),
+        ("Track [Final Mix]", "Final Mix", "Track"),
+        ("Track [Final Mix 2]", "Final Mix 2", "Track"),
+        ("Track [Rough Mix]", "Rough Mix", "Track"),
+        ("Track [Mix A]", "Mix A", "Track"),
+        ("Track [Live]", "Live", "Track"),
+    ])
+    def test_late_added_tag_families(self, raw, tag, base):
+        assert extract_version_tag(raw) == (tag, base)
+
+    @pytest.mark.parametrize("raw", [
+        "Track [Mixtape]",   # "Mix [A-Z]" must not eat a longer word
+        "Track [Deluxe]",
+        "Track [Snippet]",
+        "Track [2019]",
+    ])
+    def test_unrecognised_brackets_stay_in_the_title(self, raw):
+        assert extract_version_tag(raw) == (None, raw)
+
     def test_album_tag(self):
         assert extract_version_tag("Man On The Moon [Album](feat. Kanye West)") == ("Album", "Man On The Moon (feat. Kanye West)")
 
@@ -333,6 +364,57 @@ class TestBracketStyleCredits:
         # exist on the live Travis tracker ("[prod. Travis Scott)").
         assert parse_song_credits("Song\n[prod. Nobody)").producers == "Nobody"
         assert parse_song_credits("Song\n(prod. Nobody]").producers == "Nobody"
+
+    def test_semicolon_separates_credits_in_one_group(self):
+        from src.models import parse_song_credits
+        # The Travis tracker packs several credits into one group. ';' was not
+        # a delimiter anywhere, so `ref` swallowed the whole body up to the
+        # closer and `feat` — not being bracket-prefixed — matched nothing.
+        # Real cell, Owl Pharaoh era.
+        c = parse_song_credits(
+            "Kanye West - No No No No\n"
+            "(ref. Travis Scott; feat. 2 Chainz & The-Dream)\n"
+            "[prod. Sak Pase & Travis Scott]"
+        )
+        assert c.title == "Kanye West - No No No No"
+        assert c.refs == "Travis Scott"
+        assert c.featuring == "2 Chainz & The-Dream"
+        assert c.producers == "Sak Pase & Travis Scott"
+        assert c.alt_titles == []
+
+    def test_comma_separates_credits_only_when_a_keyword_follows(self):
+        from src.models import parse_song_credits
+        # A comma inside a name list belongs to the value…
+        assert parse_song_credits("X\n(feat. Rhymefest, Kanye West)").featuring == (
+            "Rhymefest, Kanye West"
+        )
+        # …but one before another keyword separates two credits.
+        c = parse_song_credits("X\n(prod. A & B, ref. C)")
+        assert c.producers == "A & B" and c.refs == "C"
+
+    def test_keyword_must_open_the_group(self):
+        from src.models import parse_song_credits
+        # Otherwise "(Some Title, prod. X)" would lose its title half, and
+        # "(Remix)" would need special-casing.
+        c = parse_song_credits("Song\n(Some Alias, prod. X)")
+        assert c.producers is None
+        # The group survives as an alt title; the comma splitting there is
+        # _split_alt_aliases' pre-existing behaviour for alias lists.
+        assert c.alt_titles == ["Some Alias", "prod. X"]
+
+    def test_prod_spelling_variants(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X (Prod By Metro)").producers == "Metro"
+        assert parse_song_credits("X (produced by Metro)").producers == "Metro"
+        assert parse_song_credits("X (prod. Metro)").producers == "Metro"
+
+    def test_w_slash_is_a_collaboration(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("X (w/ Kanye)").collaboration == "Kanye"
+
+    def test_removing_an_inline_group_does_not_leave_a_double_space(self):
+        from src.models import parse_song_credits
+        assert parse_song_credits("Title (feat. A) Remix").title == "Title Remix"
 
     def test_multiline_credit_is_not_parsed(self):
         from src.models import parse_song_credits
@@ -1455,3 +1537,59 @@ class TestArtTabCoverSelection:
             "</table>"
         )
         assert parse_art_tab(html)["graduation"] == "https://img/g.png"
+
+
+class TestVersionSorting:
+    """Version ordering — there was no sort at all before 2026-08.
+
+    Versions arrived in spreadsheet row order, so [Demo 10] landed next to
+    [Demo 1] and a song's V-takes were interleaved with its demos.
+    """
+
+    def test_numeric_tags_sort_numerically_not_lexically(self):
+        from src.models import version_sort_key
+        tags = ["V10", "V2", "V1"]
+        ordered = [t for t, _ in sorted(
+            ((t, i) for i, t in enumerate(tags)),
+            key=lambda p: version_sort_key(*p),
+        )]
+        assert ordered == ["V1", "V2", "V10"]
+
+    def test_demos_sort_numerically_and_after_v_takes(self):
+        from src.models import version_sort_key
+        tags = ["Demo 10", "V2", "Demo", "V1", "Demo 2"]
+        ordered = [t for t, _ in sorted(
+            ((t, i) for i, t in enumerate(tags)),
+            key=lambda p: version_sort_key(*p),
+        )]
+        assert ordered == ["V1", "V2", "Demo", "Demo 2", "Demo 10"]
+
+    def test_untagged_and_unknown_tags_keep_sheet_order_at_the_end(self):
+        from src.models import version_sort_key
+        tags = ["OG File", None, "Alt", "V1"]
+        ordered = [t for t, _ in sorted(
+            ((t, i) for i, t in enumerate(tags)),
+            key=lambda p: version_sort_key(*p),
+        )]
+        # V1 leads; the rest keep their original relative order — inventing an
+        # order for unrecognised tags would be worse than leaving them alone.
+        assert ordered == ["V1", "OG File", None, "Alt"]
+
+    def test_sort_is_stable_for_equal_keys(self):
+        from src.models import version_sort_key
+        keys = [version_sort_key("Demo 3", i) for i in range(3)]
+        assert keys == sorted(keys)
+        assert [k[2] for k in keys] == [0, 1, 2]
+
+    def test_era_versions_are_sorted_after_parsing(self):
+        """End-to-end: the sort actually runs on a parsed era."""
+        from src.models import Era, Section, Song, SongVersion
+        from src.parser import _sort_era_versions
+
+        def v(tag):
+            return SongVersion(name=f"Track [{tag}]", version_tag=tag)
+
+        song = Song(base_name="Track", versions=[v("Demo 10"), v("V2"), v("Demo 2"), v("V1")])
+        era = Era(name="E", sections=[Section(name="", songs=[song])])
+        _sort_era_versions(era)
+        assert [x.version_tag for x in song.versions] == ["V1", "V2", "Demo 2", "Demo 10"]

@@ -43,12 +43,19 @@ BASELINES = {
         fuzzy=0, songs_with_10plus_versions=2,
     ),
     "Kendrick Lamar": dict(
-        eras=19, songs=738, versions=977,
+        # songs 738→736 (2026-08): VERSION_TAG_PATTERN learned the Demo /
+        # OG File / Instrumental / Remix / Final / Mix families, so rows that
+        # differ only by such a tag now group as versions of one song instead
+        # of separate songs. `versions` is unchanged on every fixture, which is
+        # the check that says nothing was dropped — only regrouped. Example:
+        # "50 Cent - We Up" is now one song carrying V1-V4 + OG File.
+        eras=19, songs=736, versions=977,
         total_rows=1045, song_rows=977, skipped=0, footer=22, other_rows=46,
         fuzzy=0, songs_with_10plus_versions=1,
     ),
     "Playboi Carti": dict(
-        eras=29, songs=1193, versions=1616,
+        # songs 1193→1179 (2026-08): same version-tag regrouping as Kendrick.
+        eras=29, songs=1179, versions=1616,
         total_rows=1872, song_rows=1616, skipped=0, footer=42, other_rows=214,
         # fuzzy 22→2 (2026-07-20): positional-prior fix — placement verified
         # byte-identical pre/post on all 29 eras; only the match tier changed.

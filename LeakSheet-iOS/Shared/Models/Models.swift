@@ -141,8 +141,17 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
         versions.contains { $0.isStreamable }
     }
 
+    /// Whether the row shows more than one version — the *displayed* set, not
+    /// the full one.
+    ///
+    /// This read `allVersions`, while the row's "N versions" label and
+    /// `bestVersion` read `versions`. Under a badge filter the two disagreed:
+    /// a Best Of row said "1 versions" and then expanded to show the ⭐ take
+    /// next to a Rumored one the filter was supposed to have hidden. Playback
+    /// and the description sheet still use `allVersions` explicitly, so
+    /// auto-advance is not truncated.
     var hasMultipleVersions: Bool {
-        allVersions.count > 1
+        versions.count > 1
     }
 
     /// Ranks used to pick the version whose badges best summarize a collapsed

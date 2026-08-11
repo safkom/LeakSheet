@@ -683,9 +683,13 @@ final class ArtistViewModel {
                 expanded: expanded, hasMultiple: hasMultiple, isLast: false, ordinal: ordinal
             ))
             if expanded {
-                // allVersions, not versions: under a badge filter the latter
-                // is only what matched, so the row expanded to one chip.
-                for (idx, version) in song.allVersions.enumerated() {
+                // `versions`, i.e. what matched the filter — the same array
+                // the row's count and chevron are derived from. Expanding
+                // `allVersions` here put versions the badge filter had
+                // excluded back on screen while the row still claimed the
+                // filtered count. Playback context is built from
+                // `allVersions` elsewhere, so auto-advance is unaffected.
+                for (idx, version) in song.versions.enumerated() {
                     rows.append(.version(
                         version, index: idx, song: song,
                         eraName: eraName, eraArt: eraArt, isLast: false, songOrdinal: ordinal

@@ -44,6 +44,7 @@ from src.models import (
     parse_timeline,
     parse_tracker_stats,
     slugify,
+    version_sort_key,
 )
 
 
@@ -525,7 +526,6 @@ SECTION_SEPARATORS = {
     "recordings",
     "full", "partial",  # Carti-style sub-section labels
     "og files",
-    "og files for released songs",
     "og files for released songs + alternate mixes",
     "alternate mixes",
 }
@@ -669,7 +669,7 @@ def _looks_like_era_name(text: str) -> bool:
         "types", "type", "owner", "general information", "release date",
         "updates", "mega folder", "performance tracks",
         "progress reports", "rules", "highlighted",
-        "current editor", "current editors", "editor comments",
+        "current editor", "editor comments",
         # Collaboration/feature labels → should be sections, not eras
         "features", "collaborations", "collaboration", "featured",
         "collaborations & features", "loosies", "guest verses",
@@ -1782,6 +1782,7 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Step 3c: consolidate group labels within each era's sections
     for era in eras:
         _consolidate_group_labels(era)
+        _sort_era_versions(era)
 
     # Step 4: build parse metadata
     metadata = ParseMetadata(
@@ -2040,6 +2041,29 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
 # these names are distinct mystery tracks (different notes/dates/samples) and
 # must never be grouped as versions of one song.
 _PLACEHOLDER_BASE_NAMES = frozenset({"???", "??", "?", "unknown", "untitled", "tba", "n/a"})
+
+
+def _sort_era_versions(era: Era) -> None:
+    """Order every song's versions by tag family, then number, then sheet order.
+
+    Versions arrived in spreadsheet row order, which is not the order anyone
+    reads them in: [Demo 10] landed next to [Demo 1], and a song's V-takes
+    were interleaved with its demos. The sort is stable, so untagged and
+    unrecognised versions keep their original relative position at the end.
+    """
+    for section in era.sections:
+        for song in section.songs:
+            if len(song.versions) < 2:
+                continue
+            # enumerate first: the sheet index has to come from the position,
+            # not from a lookup on the list being sorted.
+            song.versions = [
+                v
+                for _, v in sorted(
+                    enumerate(song.versions),
+                    key=lambda pair: version_sort_key(pair[1].version_tag, pair[0]),
+                )
+            ]
 
 
 def _add_version_to_era(

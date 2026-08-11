@@ -548,6 +548,47 @@ struct CrossEraIndexTests {
         #expect(resolved?.baseName == "This One Here")
     }
 
+    /// A badge filter must narrow what a row *shows* consistently: the count,
+    /// the chevron and the expanded rows all read the same array. They used to
+    /// disagree — the count came from `versions` (filtered) while expansion
+    /// used `allVersions`, so a Best Of row read "1 versions" and then
+    /// expanded to show a Rumored take the filter had excluded.
+    @Test func `a badge filter narrows the row count and its expanded versions together`() async {
+        func take(tag: String, badge: String?, available: String) -> SongVersion {
+            SongVersion(
+                name: "2Nite [\(tag)]", versionTag: tag, badge: badge, featuring: nil,
+                producers: nil, collaboration: nil, refs: nil, director: nil,
+                creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
+                ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
+                leakDate: nil, availableLength: available, quality: "High Quality",
+                streaming: nil, links: ["https://pillows.su/f/abc123"],
+                dateOfRecording: nil, type: nil, sources: nil, rating: nil
+            )
+        }
+        let rumored = take(tag: "V1", badge: nil, available: "Rumored")
+        let starred = take(tag: "V2", badge: "best", available: "Full")
+        let full = Song(baseName: "2Nite", songKey: nil, versions: [rumored, starred], badge: nil)
+        let artist = Artist(
+            name: "K", slug: "k", sourceUrl: nil,
+            eras: [era("Era A", songs: [full])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let filtered = ArtistViewModel.computeContent(
+            artist: artist,
+            state: FilterState(bestOf: true),
+            eraStats: [:]
+        )
+        let song = try! #require(filtered.eras.first?.songs.first)
+
+        // One version matched, so the row is a single-version row…
+        #expect(song.versions.count == 1)
+        #expect(song.versions.first?.versionTag == "V2")
+        #expect(song.hasMultipleVersions == false)
+        // …while the unfiltered set is still intact for playback and Details.
+        #expect(song.allVersions.count == 2)
+    }
+
     @Test func `a payload with no song and no match still returns nil rather than trapping`() async {
         let artist = Artist(
             name: "T", slug: "t", sourceUrl: nil,
