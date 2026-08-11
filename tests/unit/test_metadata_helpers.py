@@ -1,7 +1,8 @@
 """Unit tests for /metadata parsing helpers and the in-memory TTL cache."""
 
+from src.streaming import TTLCache
+
 from src.api import (
-    _TTLCache,
     _derive_media_kind,
     _media_kind_from_mime,
     _parse_froste_metadata,
@@ -156,7 +157,7 @@ class TestDeriveMediaKind:
 
 class TestTTLCache:
     def test_set_get(self):
-        cache = _TTLCache(ttl=60, max_entries=10)
+        cache = TTLCache(ttl=60, max_entries=10)
         cache.set("a", "1")
         assert cache.get("a") == "1"
         assert cache.get("missing") is None
@@ -164,7 +165,7 @@ class TestTTLCache:
     def test_expiry(self, monkeypatch):
         now = [1000.0]
         monkeypatch.setattr("src.api.time.monotonic", lambda: now[0])
-        cache = _TTLCache(ttl=10, max_entries=10)
+        cache = TTLCache(ttl=10, max_entries=10)
         cache.set("a", "1")
         now[0] += 5
         assert cache.get("a") == "1"
@@ -174,7 +175,7 @@ class TestTTLCache:
     def test_cap_evicts_oldest(self, monkeypatch):
         now = [1000.0]
         monkeypatch.setattr("src.api.time.monotonic", lambda: now[0])
-        cache = _TTLCache(ttl=1000, max_entries=3)
+        cache = TTLCache(ttl=1000, max_entries=3)
         for i, key in enumerate(["a", "b", "c"]):
             now[0] += 1
             cache.set(key, str(i))
@@ -187,7 +188,7 @@ class TestTTLCache:
     def test_overwrite_does_not_evict(self, monkeypatch):
         now = [1000.0]
         monkeypatch.setattr("src.api.time.monotonic", lambda: now[0])
-        cache = _TTLCache(ttl=1000, max_entries=2)
+        cache = TTLCache(ttl=1000, max_entries=2)
         cache.set("a", "1")
         now[0] += 1
         cache.set("b", "2")

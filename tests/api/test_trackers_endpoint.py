@@ -164,7 +164,7 @@ class FakeClient:
 def trackers_env(monkeypatch):
     fake = FakeClient()
     monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
-    monkeypatch.setattr(api, "_trackers_cache", api._TTLCache(ttl=3600.0, max_entries=1))
+    monkeypatch.setattr(api, "_trackers_cache", api.TTLCache(ttl=3600.0, max_entries=1))
     monkeypatch.setattr(api, "_trackers_stale", None)
     return TestClient(app), fake
 
@@ -189,7 +189,7 @@ class TestTrackersEndpoint:
         assert client.get("/trackers").status_code == 200
 
         # Expire the TTL cache and kill the upstream.
-        monkeypatch.setattr(api, "_trackers_cache", api._TTLCache(ttl=3600.0, max_entries=1))
+        monkeypatch.setattr(api, "_trackers_cache", api.TTLCache(ttl=3600.0, max_entries=1))
         fake.response = None
         r = client.get("/trackers")
         assert r.status_code == 200

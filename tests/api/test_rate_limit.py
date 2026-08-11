@@ -44,6 +44,62 @@ class TestRateLimit:
             api._rate_hits.clear()
 
 
+class TestImageProxyBucket:
+    """/image-proxy is throttled separately, and far more generously.
+
+    One artist screen fires 40-120 cover requests in a burst. Sharing the
+    /sheet bucket meant 25% of them came back 429 and the era cards stayed
+    blank (131 of 521 requests in a day's access log).
+    """
+
+    @staticmethod
+    def _scope(path: str):
+        return {
+            "type": "http",
+            "path": path,
+            "client": ("10.0.0.1", 1234),
+            "headers": [(b"host", b"example.com")],
+        }
+
+    def test_image_proxy_does_not_share_the_sheet_bucket(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_RATE_LIMIT_PER_MIN", "2")
+        monkeypatch.delenv("LEAKSHEET_TRUSTED_PROXY_HOPS", raising=False)
+        api._rate_hits.clear()
+        mw = api._RateLimitMiddleware(app=None)
+        try:
+            # Exhaust the shared bucket via /sheet.
+            assert mw._should_limit(self._scope("/sheet")) is False
+            assert mw._should_limit(self._scope("/sheet")) is False
+            assert mw._should_limit(self._scope("/sheet")) is True
+            # Image art is untouched by that.
+            assert mw._should_limit(self._scope("/image-proxy")) is False
+        finally:
+            api._rate_hits.clear()
+
+    def test_image_proxy_ceiling_is_the_multiplier(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_RATE_LIMIT_PER_MIN", "2")
+        monkeypatch.delenv("LEAKSHEET_TRUSTED_PROXY_HOPS", raising=False)
+        api._rate_hits.clear()
+        mw = api._RateLimitMiddleware(app=None)
+        allowed = 2 * api._IMAGE_RATE_LIMIT_MULTIPLIER
+        try:
+            for _ in range(allowed):
+                assert mw._should_limit(self._scope("/image-proxy")) is False
+            assert mw._should_limit(self._scope("/image-proxy")) is True
+        finally:
+            api._rate_hits.clear()
+
+    def test_unlisted_paths_are_never_limited(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_RATE_LIMIT_PER_MIN", "1")
+        api._rate_hits.clear()
+        mw = api._RateLimitMiddleware(app=None)
+        try:
+            for _ in range(5):
+                assert mw._should_limit(self._scope("/trackers")) is False
+        finally:
+            api._rate_hits.clear()
+
+
 class TestClientIPResolution:
     """Which address a request is bucketed under.
 

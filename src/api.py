@@ -17,21 +17,17 @@ this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import hashlib
 import hmac
 import json
 import logging
 import os
 import re
-import tempfile
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
-
-logger = logging.getLogger(__name__)
-
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -67,12 +63,15 @@ from src.streaming import (
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
     PublicOnlyAsyncTransport,
+    TTLCache,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
     stream_audio,
     _get_shared_client,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +366,14 @@ app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000, compresslevel=6
 
 # Expensive endpoints worth throttling: cold sheet fetches and the upstream
 # proxies. Cheap/cached endpoints (/trackers) are left alone.
-_RATE_LIMIT_PATHS = ("/sheet", "/stream", "/image-proxy", "/metadata")
+_RATE_LIMIT_PATHS = ("/sheet", "/stream", "/metadata")
+# /image-proxy is throttled in its OWN bucket at a much higher ceiling. Sharing
+# the bucket above cost 25% of all cover art: one artist screen fires 40-120
+# image requests in a burst, which drained the whole per-minute budget and
+# 429'd the rest (131 of 521 requests in a single day's access log). It is also
+# the least abusable of the four — disk-cached, 25MB download cap, 20MP decode
+# cap, SSRF allowlist.
+_IMAGE_RATE_LIMIT_MULTIPLIER = 10
 _RATE_LIMIT_WINDOW_S = 60.0
 _rate_hits: dict[str, list[float]] = {}
 _rate_last_prune = 0.0
@@ -434,13 +440,18 @@ class _RateLimitMiddleware:
         if limit <= 0:
             return False
         path = scope.get("path", "").rstrip("/")
-        if not any(path.endswith(p) for p in _RATE_LIMIT_PATHS):
+        # Separate bucket + ceiling for image-proxy; see the constants above.
+        if path.endswith("/image-proxy"):
+            key_suffix, limit = "|img", limit * _IMAGE_RATE_LIMIT_MULTIPLIER
+        elif any(path.endswith(p) for p in _RATE_LIMIT_PATHS):
+            key_suffix = ""
+        else:
             return False
-        ip = _client_ip(scope)
+        key = _client_ip(scope) + key_suffix
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_S
-        hits = _rate_hits.setdefault(ip, [])
-        del hits[: _bisect_right(hits, cutoff)]
+        hits = _rate_hits.setdefault(key, [])
+        del hits[: bisect.bisect_right(hits, cutoff)]
         self._maybe_prune(now, cutoff)
         if len(hits) >= limit:
             return True
@@ -455,12 +466,6 @@ class _RateLimitMiddleware:
         _rate_last_prune = now
         for k in [k for k, v in _rate_hits.items() if not v or v[-1] < cutoff]:
             _rate_hits.pop(k, None)
-
-
-def _bisect_right(sorted_ts: list[float], value: float) -> int:
-    """Index of the first timestamp > value (list is monotonically increasing)."""
-    import bisect
-    return bisect.bisect_right(sorted_ts, value)
 
 
 app.add_middleware(_RateLimitMiddleware)
@@ -983,35 +988,11 @@ async def _get_image_capped(
 
 _METADATA_USER_AGENT = USER_AGENT  # shared backend UA from src.config
 
-
-class _TTLCache:
-    """In-memory TTL cache with a size cap (oldest-inserted eviction)."""
-
-    def __init__(self, ttl: float, max_entries: int) -> None:
-        self.ttl = ttl
-        self.max_entries = max_entries
-        self._data: dict[str, tuple[float, object]] = {}
-
-    def get(self, key: str) -> object | None:
-        entry = self._data.get(key)
-        if entry is None:
-            return None
-        ts, value = entry
-        if time.monotonic() - ts > self.ttl:
-            self._data.pop(key, None)
-            return None
-        return value
-
-    def set(self, key: str, value: object) -> None:
-        if key not in self._data and len(self._data) >= self.max_entries:
-            oldest = min(self._data, key=lambda k: self._data[k][0])
-            self._data.pop(oldest, None)
-        self._data[key] = (time.monotonic(), value)
-
-
 # Provider metadata rarely changes for a given file — cache parsed results so
 # repeated description-sheet opens don't re-hit provider APIs.
-_metadata_cache = _TTLCache(ttl=3600.0, max_entries=500)
+# TTLCache lives in src.streaming (the lower-level module) so the CDN-resolve
+# cache there can use the same primitive.
+_metadata_cache = TTLCache(ttl=3600.0, max_entries=500)
 
 
 # Known fields in pillows.su metadata — longer multi-word keys first to avoid
@@ -1279,7 +1260,7 @@ async def proxy_metadata(
 # ---------------------------------------------------------------------------
 
 
-_trackers_cache = _TTLCache(ttl=3600.0, max_entries=1)
+_trackers_cache = TTLCache(ttl=3600.0, max_entries=1)
 # Last successful payload, kept indefinitely as a fallback for upstream errors.
 _trackers_stale: str | None = None
 
@@ -1386,6 +1367,9 @@ class _RangePlan:
 
 _RANGE_SPEC = re.compile(r"^bytes=(?:(\d+)-(\d*)|-(\d+))$")
 
+# Discarding more than this to synthesise a 206 is worth a log line.
+_DISCARD_WARN_BYTES = 8 * 1024 * 1024
+
 
 def _plan_synthesized_range(range_header: str | None, total_size: int | None) -> _RangePlan:
     """Map a client Range header onto a serving plan (RFC 7233 semantics).
@@ -1439,7 +1423,18 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
 
     Used to synthesise HTTP 206 responses when the upstream host ignores
     Range requests. Stops consuming the source once the range is served.
+
+    Everything before `range_start` is downloaded and thrown away — a seek into
+    the middle of a large file costs that many bytes of upstream traffic. Hosts
+    that honour Range never reach here; the ones that don't are logged below so
+    the cost stops being invisible.
     """
+    if range_start > _DISCARD_WARN_BYTES:
+        logger.warning(
+            "Synthesising a 206 by discarding %.1f MB of upstream body — "
+            "this host ignores Range",
+            range_start / 1_048_576,
+        )
     skipped = 0
     async for chunk in source:
         chunk_end = skipped + len(chunk)
@@ -1502,8 +1497,11 @@ async def proxy_stream(
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except ValueError as e:
+        # The message names internal hosts and SSRF-check internals (a DNS
+        # failure surfaced as "imgur.gg cdnUrl host does not resolve:
+        # i.imgur.gg" to the client). Log it; return something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Upstream error")
     except Exception as e:
         logger.exception("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
