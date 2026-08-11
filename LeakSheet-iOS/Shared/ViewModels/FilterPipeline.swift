@@ -146,6 +146,10 @@ extension ArtistViewModel {
         var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
+    /// Upper bound on search rows handed to the list. Highest-scoring first,
+    /// so the cut only ever drops weak matches.
+    nonisolated static let maxSearchResults = 500
+
     private nonisolated static func computeSearchResults(
         artist: Artist, state: FilterState, searchIndex: [[SongSearchFields]]
     ) -> [SearchResult] {
@@ -173,7 +177,11 @@ extension ArtistViewModel {
             }
         }
         results.sort { $0.score > $1.score }
-        return results
+        // One result per *version*, uncapped, meant a 1-2 character query on a
+        // large tracker built tens of thousands of rows — each copying a Song,
+        // SongVersion and Era — and handed them all to a ForEach. Nobody
+        // scrolls past a few hundred; the sort above keeps the best ones.
+        return Array(results.prefix(Self.maxSearchResults))
     }
 
     // MARK: - Recents

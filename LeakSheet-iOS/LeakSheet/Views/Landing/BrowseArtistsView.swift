@@ -111,7 +111,20 @@ struct BrowseArtistsView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    // Same placement as the artist screen (ArtistView.swift).
+                    // Passing no placement gets `.automatic`, which puts the
+                    // field in the bottom slot on iPhone — so opening a
+                    // tracker moved the search bar between top and bottom
+                    // depending on which screen you were on.
+                    #if os(iOS)
+                    .searchable(
+                        text: $searchText,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search trackers..."
+                    )
+                    #else
                     .searchable(text: $searchText, prompt: "Search trackers...")
+                    #endif
                     .overlay {
                         // Keep the List (and its search field) mounted; show the
                         // no-results state on top when a query matches nothing.

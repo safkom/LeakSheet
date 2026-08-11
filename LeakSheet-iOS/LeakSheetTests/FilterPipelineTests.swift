@@ -458,16 +458,54 @@ struct CrossEraIndexTests {
             totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
-        let fromWar = await MainActor.run {
-            vm.otherEras(forSongKey: "this one here", excluding: "War")
+        func payload(_ name: String, _ key: String?, era: String) -> DescriptionSheet.Payload {
+            let s = song(name, key: key)
+            return DescriptionSheet.Payload(
+                song: s, version: s.versions[0],
+                artistName: artist.name, artistSlug: artist.slug,
+                eraName: era, eraArt: nil
+            )
         }
-        #expect(fromWar.map(\.eraName) == ["Donda 2"])
-        #expect(fromWar.first?.versionCount == 3)
-        // Era-unique songs have no cross-era refs
+        // A song in two eras resolves to both, current era first.
+        let shared = await MainActor.run {
+            vm.crossEraRefs(for: payload("This One Here", "this one here", era: "War"))
+        }
+        #expect(shared.map(\.eraName) == ["War", "Donda 2"])
+        #expect(shared.last?.song.versions.count == 3)
+        // An era-unique song resolves to exactly its own era — songKeyEras
+        // drops single-era keys, so this exercises the base-name index.
         let unique = await MainActor.run {
-            vm.otherEras(forSongKey: "unique", excluding: "War")
+            vm.crossEraRefs(for: payload("Unique", "unique", era: "Donda 2"))
         }
-        #expect(unique.isEmpty)
+        #expect(unique.map(\.eraName) == ["Donda 2"])
+    }
+
+    @Test func `resolved song keeps the full version set for description sheets`() async {
+        let fullSong = song("This One Here", key: "this one here", versions: 2)
+        let filteredSong = Song(
+            baseName: fullSong.baseName,
+            songKey: fullSong.songKey,
+            versions: Array(fullSong.versions.prefix(1)),
+            badge: fullSong.badge
+        )
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [era("War", songs: [fullSong])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let payload = DescriptionSheet.Payload(
+            song: filteredSong,
+            version: filteredSong.versions[0],
+            artistName: artist.name,
+            artistSlug: artist.slug,
+            eraName: "War",
+            eraArt: nil
+        )
+        let resolved = await MainActor.run { vm.resolvedSong(for: payload) }
+        #expect(resolved?.versions.count == 2)
+        #expect(resolved?.versions.contains(where: { $0.id == filteredSong.versions[0].id }) == true)
     }
 }
 

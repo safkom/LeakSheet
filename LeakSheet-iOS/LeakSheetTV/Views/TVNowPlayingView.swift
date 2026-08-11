@@ -92,9 +92,9 @@ struct TVNowPlayingView: View {
             )
             .frame(maxWidth: 900)
             HStack {
-                Text(PlayerViewModel.formatTime(player.currentTime))
+                Text(Format.time(player.currentTime))
                 Spacer()
-                Text(PlayerViewModel.formatTime(player.duration))
+                Text(Format.time(player.duration))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)

@@ -47,6 +47,7 @@ from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
+    _atomic_write_bytes,
     async_fetch_and_parse,
     async_get_cached_age,
     async_get_cached_etag,
@@ -706,6 +707,11 @@ _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
+# Hard ceiling on what /image-proxy will pull into memory, checked while
+# streaming so an oversized body is abandoned instead of buffered. Above the
+# decode cap so a legitimately large source still reaches the resize path and
+# fails there with a clear error rather than being silently truncated here.
+_IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
 # Compressed-byte size says nothing about decoded size (a small, highly
 # compressible image can unpack to hundreds of MB) — cap decoded pixels too,
 # checked from the header before the full-frame load() below.
@@ -757,22 +763,6 @@ def _read_image_cache(key: str) -> tuple[bytes, str] | None:
         return bin_path.read_bytes(), meta["content_type"]
     except (OSError, ValueError, KeyError):
         return None
-
-
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write via a same-directory temp file + rename, so a concurrent
-    reader never observes a truncated/partial file mid-write."""
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(tmp_name, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _write_image_cache(key: str, data: bytes, content_type: str) -> None:
@@ -925,10 +915,16 @@ async def proxy_image(
                     # Fall through to the original URL + Pillow path.
                     logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
 
-        resp = await _get_proxy_client().get(url, headers=headers)
+        # Streamed with a byte cap rather than a plain .get(). A non-streaming
+        # get() buffers the WHOLE body before the content-type check below,
+        # and the size caps only apply inside _resize_image_bytes — i.e. after
+        # the bytes are already resident, and only when `width` is given. The
+        # allowlist admits any *.google.com host, including
+        # drive.usercontent.google.com, so an arbitrarily large user-uploaded
+        # file was enough to OOM the worker and drop every in-flight request.
+        resp, data = await _get_image_capped(url, headers)
         ct = resp.headers.get("content-type", "")
         if resp.status_code == 200 and ct.startswith("image/"):
-            data = resp.content
             if width is not None:
                 data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
                 await asyncio.to_thread(_write_image_cache, cache_key, data, ct)
@@ -950,6 +946,35 @@ async def proxy_image(
     except Exception as e:
         logger.exception("Image proxy error: %s", e)
         raise HTTPException(status_code=502, detail="Image proxy error")
+
+
+async def _get_image_capped(
+    url: str, headers: dict[str, str]
+) -> tuple[httpx.Response, bytes]:
+    """GET *url*, reading at most `_IMAGE_DOWNLOAD_CAP` bytes.
+
+    Returns the response and the body read so far. The body is only consumed
+    for a 200 image/*; anything else is abandoned unread, so an error page or
+    a huge non-image never lands in memory. Mirrors the stream-and-stop shape
+    of `streaming._get_text_capped`.
+    """
+    req = _get_proxy_client().build_request("GET", url, headers=headers)
+    resp = await _get_proxy_client().send(req, stream=True)
+    try:
+        ct = resp.headers.get("content-type", "")
+        if resp.status_code != 200 or not ct.startswith("image/"):
+            return resp, b""
+
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.aiter_bytes():
+            total += len(chunk)
+            if total > _IMAGE_DOWNLOAD_CAP:
+                raise HTTPException(status_code=502, detail="Upstream image too large")
+            chunks.append(chunk)
+        return resp, b"".join(chunks)
+    finally:
+        await resp.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -1103,13 +1128,18 @@ def _parse_froste_metadata(data: dict) -> dict:
 def _parse_imgur_metadata(data: dict) -> dict:
     """Extract useful fields from imgur.gg file API response."""
     result: dict = {"provider": "imgur"}
+    # The live API returns the mime under "type"; "mimeType" is accepted too
+    # because the old tests pinned that spelling and it may be a legacy form.
+    # Reading only "mimeType" meant every real response lost its mime and
+    # reported media_kind "unknown", so video files never got a video surface.
+    mime = data.get("type") or data.get("mimeType")
     if data.get("size"):
         result["file_size"] = data["size"]
-    if data.get("mimeType"):
-        result["mime_type"] = data["mimeType"]
+    if mime:
+        result["mime_type"] = mime
     if data.get("name"):
         result["filename"] = data["name"]
-    result["media_kind"] = _media_kind_from_mime(data.get("mimeType"))
+    result["media_kind"] = _media_kind_from_mime(mime)
     return result
 
 

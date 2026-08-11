@@ -30,6 +30,13 @@ final class TrackerLoader {
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // `loading` drove a spinner but gated nothing, and only the Parse
+        // button was ever disabled — so tapping several recents/browse rows
+        // started that many loads. They raced into multiple path.append calls,
+        // and whichever finished first cleared `loading` via the defer below
+        // while the others were still running. One guard here covers all six
+        // call sites (iOS landing, recents, browse, macOS, tvOS ×2).
+        guard !loading else { return nil }
         withAnimation { error = nil }
         loading = true
         loadPhase = nil

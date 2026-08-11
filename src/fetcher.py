@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -661,14 +662,38 @@ def _maybe_evict_sheet_cache() -> None:
         logger.warning("Sheet-cache eviction failed: %s", e)
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write via a same-directory temp file + rename, so a concurrent
+    reader never observes a truncated/partial file mid-write."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    _atomic_write_bytes(path, text.encode("utf-8"))
+
+
 def _set_cache(url: str, html: str, title: str) -> None:
     """Write HTML and metadata to cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
-    (CACHE_DIR / f"{key}.html").write_text(html, encoding="utf-8")
-    (CACHE_DIR / f"{key}.meta.json").write_text(
+    # Atomic: these files are read without a lock, and a background
+    # revalidation rewriting one while a request reads it produced a torn
+    # read. For the parsed cache that reached the client as truncated JSON
+    # under a 200 (get_cached_parsed_bytes does no validation).
+    _atomic_write_text(CACHE_DIR / f"{key}.html", html)
+    _atomic_write_text(
+        CACHE_DIR / f"{key}.meta.json",
         json.dumps({"url": url, "title": title, "timestamp": time.time()}),
-        encoding="utf-8",
     )
     _maybe_evict_sheet_cache()
 
@@ -698,9 +723,9 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
     key = _cache_key(url)
     try:
         data = artist.model_dump()
-        (CACHE_DIR / f"{key}.parsed.json").write_text(
+        _atomic_write_text(
+            CACHE_DIR / f"{key}.parsed.json",
             json.dumps(data, ensure_ascii=False),
-            encoding="utf-8",
         )
         # Update metadata with content hash for ETag support
         meta_file = CACHE_DIR / f"{key}.meta.json"
@@ -711,9 +736,13 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
         meta["content_hash"] = compute_content_hash(data)
-        meta_file.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
+        # Every reader keys off meta["timestamp"]. Under force_refresh the
+        # caller skips _set_cache (use_cache=False) while still writing the
+        # parse, so without this a pull-to-refresh either inherited the OLD
+        # timestamp — fresh data considered stale immediately — or, on a
+        # first-ever fetch, wrote a parsed cache that could never be read.
+        meta["timestamp"] = time.time()
+        _atomic_write_text(meta_file, json.dumps(meta, ensure_ascii=False))
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -1111,77 +1140,6 @@ async def async_fetch_sheet_html(
         _raise_fetch_error(e, url)
 
 
-async def _verify_art_images_async(
-    artist: "Artist",
-    art_map: dict[str, str],
-    client: httpx.AsyncClient,
-    threshold: int = 10,
-) -> dict[str, str]:
-    """Filter art_map to entries whose image is visually the same as the
-    existing era.art_url, verified via perceptual hash (pHash).
-
-    Entries with no existing era.art_url pass through unchanged (no baseline
-    to compare against). On any download/decode/import error the entry also
-    passes through (fail-open: never block upgrades on transient errors).
-
-    Args:
-        threshold: Maximum Hamming distance to consider images identical.
-            Values 0–6 indicate the same image at different resolutions;
-            16+ indicate different content. Default 10 provides a safe margin.
-    """
-    try:
-        import io
-        import imagehash
-        from PIL import Image
-    except ImportError:
-        return art_map  # optional deps not installed — skip verification
-
-    # Build {era_key: existing_url} for keys that appear in art_map
-    existing_by_key: dict[str, str] = {}
-    for era in artist.eras:
-        if not era.art_url:
-            continue
-        key = _era_match_key(era.name)
-        if key and key in art_map:
-            existing_by_key[key] = era.art_url
-        for alt in era.alt_names:
-            ak = _era_match_key(alt)
-            if ak and ak in art_map and ak not in existing_by_key:
-                existing_by_key[ak] = era.art_url
-
-    if not existing_by_key:
-        return art_map  # no existing art to compare against
-
-    def _phash(content: bytes) -> "imagehash.ImageHash":
-        return imagehash.phash(Image.open(io.BytesIO(content)).convert("RGB"))
-
-    async def _same_image(era_key: str, existing_url: str) -> tuple[str, bool]:
-        try:
-            r1, r2 = await asyncio.gather(
-                client.get(existing_url, timeout=15),
-                client.get(art_map[era_key], timeout=15),
-            )
-            if r1.status_code != 200 or r2.status_code != 200:
-                return era_key, True  # can't fetch — pass through
-            h1, h2 = await asyncio.gather(
-                asyncio.to_thread(_phash, r1.content),
-                asyncio.to_thread(_phash, r2.content),
-            )
-            return era_key, (h1 - h2) <= threshold
-        except Exception:
-            return era_key, True  # fail-open on any error
-
-    results = await asyncio.gather(*[
-        _same_image(k, v) for k, v in existing_by_key.items()
-    ])
-
-    filtered = dict(art_map)
-    for era_key, is_same in results:
-        if not is_same:
-            filtered.pop(era_key, None)
-    return filtered
-
-
 async def _fetch_gid_page(
     url_norm: str,
     gid_val: str,
@@ -1251,12 +1209,7 @@ async def _load_secondary_tabs(
                 with t.phase("art_parse"):
                     art_map = await asyncio.to_thread(parse_art_tab, art_html)
                 if art_map:
-                    with t.phase("art_verify"):
-                        art_map = await _verify_art_images_async(
-                            artist, art_map, client
-                        )
-                    if art_map:
-                        apply_art_tab_images(artist, art_map)
+                    apply_art_tab_images(artist, art_map)
         except Exception as e:
             # Art tab optional — keep existing art_url on failure. WARNING so
             # a systematically broken tab is visible at default log level.

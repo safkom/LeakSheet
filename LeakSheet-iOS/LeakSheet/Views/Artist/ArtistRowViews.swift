@@ -57,7 +57,12 @@ struct EraRowView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(name)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(displayColors?.dominant ?? .secondary)
+                            // readableHeader, not dominant: the raw median-cut
+                            // colour of a dark cover lands near-black on the
+                            // black background, so sub-era headers rendered
+                            // invisible. EraDisplayColors already guarantees
+                            // contrast — this was the one text site not using it.
+                            .foregroundStyle(displayColors?.readableHeader ?? .secondary)
                             .textCase(.uppercase)
                             .tracking(0.5)
                             .padding(.horizontal, 12)
@@ -91,11 +96,12 @@ struct EraRowView: View {
                     }
                 }
 
-            case .version(let version, let index, _, let eraName, let eraArt, let isLast, _):
+            case .version(let version, let index, let song, let eraName, let eraArt, let isLast, _):
                 panel(isLast: isLast) {
                     VersionRowView(
                         version: version,
                         versionIndex: index,
+                        song: song,
                         artistName: artistName,
                         artistSlug: artistSlug,
                         sourceUrl: sourceUrl,

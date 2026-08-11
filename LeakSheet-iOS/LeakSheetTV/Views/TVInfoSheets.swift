@@ -72,24 +72,6 @@ struct TVStatsView: View {
 struct TVBadgeLegendView: View {
     @Environment(\.dismiss) private var dismiss
 
-    private let entries: [(String, String)] = [
-        ("⭐️", "Best of — a standout track"),
-        ("💎", "Best of — a standout track"),
-        ("✨", "Special"),
-        ("🏆", "Grail — highly sought after"),
-        ("🏅", "Wanted"),
-        ("🗑️", "Worst of"),
-        ("🤖", "AI-generated"),
-        ("OG File", "The original, untouched file"),
-        ("Full", "The complete track"),
-        ("Tagged", "Complete but carries a producer tag"),
-        ("Partial", "Only part of the track circulates"),
-        ("Snippet", "A short clip only"),
-        ("Stem", "Stem bounce"),
-        ("Rumored", "Existence not confirmed"),
-        ("Conflicting", "Sources disagree"),
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             HStack {
@@ -100,18 +82,14 @@ struct TVBadgeLegendView: View {
             }
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 480), spacing: 24)], spacing: 20) {
-                    ForEach(entries, id: \.1) { symbol, meaning in
-                        HStack(spacing: 18) {
-                            Text(symbol)
-                                .font(.title3)
-                                .frame(width: 120, alignment: .leading)
-                            Text(meaning)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(20)
-                        .background(Color.lsCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    ForEach(BadgeLogic.badgeGlossary) { term in
+                        entryRow(term.emoji, term.name, term.detail)
+                    }
+                    ForEach(BadgeLogic.qualityGlossary) { term in
+                        entryRow(nil, term.name, term.detail)
+                    }
+                    ForEach(BadgeLogic.availabilityGlossary) { term in
+                        entryRow(nil, term.name, term.detail)
                     }
                 }
             }
@@ -120,5 +98,19 @@ struct TVBadgeLegendView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.lsBackground)
         .onExitCommand { dismiss() }
+    }
+
+    private func entryRow(_ emoji: String?, _ name: String, _ detail: String) -> some View {
+        HStack(spacing: 18) {
+            Text(emoji.map { "\($0) \(name)" } ?? name)
+                .font(.title3)
+                .frame(width: 260, alignment: .leading)
+            Text(detail)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(20)
+        .background(Color.lsCard)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

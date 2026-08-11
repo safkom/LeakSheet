@@ -117,6 +117,16 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     let songKey: String?
     let versions: [SongVersion]
     let badge: String?
+    /// Every version the tracker lists, including ones the active filter hid.
+    /// `versions` is only what matched the filter, so a Best Of row would
+    /// otherwise expand to a single chip and its detail sheet would play a
+    /// one-track queue. Nil when the song was never filtered (and on decode,
+    /// which is why it is excluded from CodingKeys).
+    var unfilteredVersions: [SongVersion]? = nil
+
+    /// The full version set — what expansion, the detail sheet, and the
+    /// auto-advance queue must use. Falls back to `versions` when unfiltered.
+    var allVersions: [SongVersion] { unfilteredVersions ?? versions }
 
     var id: String { baseName }
 
@@ -132,7 +142,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     var hasMultipleVersions: Bool {
-        versions.count > 1
+        allVersions.count > 1
     }
 
     /// Ranks used to pick the version whose badges best summarize a collapsed
@@ -185,7 +195,12 @@ extension Song {
         guard !kept.isEmpty else { return nil }
         // Kept-version badge — see DECISIONS.md::Models.swift::kept-badge
         let keptBadge = Badge.mostSignificant(in: kept)?.rawValue ?? badge
-        return Song(baseName: baseName, songKey: songKey, versions: kept, badge: keptBadge)
+        // Carry the full set forward so the row can still expand to every
+        // version and the detail sheet can still queue the whole song.
+        return Song(
+            baseName: baseName, songKey: songKey, versions: kept, badge: keptBadge,
+            unfilteredVersions: unfilteredVersions ?? versions
+        )
     }
 }
 

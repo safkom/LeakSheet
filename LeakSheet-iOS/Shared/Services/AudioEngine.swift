@@ -72,6 +72,9 @@ final class AudioEngine {
     private var loadingTimeoutTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
     private var seekInFlight = false
+    /// Bumped per seek so a superseded seek's completion can't clear
+    /// `seekInFlight` out from under the newer one.
+    private var seekGeneration = 0
     private var cachedArtworkUrl: String?
     private var cachedArtwork: MPMediaItemArtwork?
 
@@ -83,7 +86,25 @@ final class AudioEngine {
 
     // MARK: - Playback
 
-    func playTrack(_ version: SongVersion?, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
+    /// - Parameter preservingQueueContext: only the queue-aware entry points
+    ///   (`playInEra` / `playInList` / `playFromQueue`) pass true. They set
+    ///   their context and then route through here via `play(_:)`, so they
+    ///   must not have it cleared out from under them.
+    func playTrack(
+        _ version: SongVersion?,
+        artistName: String = "",
+        eraName: String = "",
+        artUrl: String = "",
+        artistSlug: String = "",
+        preservingQueueContext: Bool = false
+    ) {
+        // Ad-hoc playback inherited whatever era/list cursor was left over
+        // from a previous session, so auto-advance walked off into an
+        // unrelated song. Reached from every site where the optional `onPlay`
+        // closure is nil — including Now Playing's own Info sheet.
+        if !preservingQueueContext {
+            logic.clearContexts()
+        }
         currentTrack = version
         self.artistName = artistName
         self.artistSlug = artistSlug.isEmpty ? artistName.slugified : artistSlug
@@ -169,15 +190,34 @@ final class AudioEngine {
     }
 
     func seekTo(_ time: TimeInterval) {
+        // Without this guard the completion never runs, `seekInFlight` stays
+        // true for the process lifetime, and `currentTime` never updates
+        // again — for any track. Reachable because playTrack publishes
+        // currentTrack/duration before its own guards bail, which is exactly
+        // the state the mini-player renders a slider from.
+        guard let player else { return }
+
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         // Show the target position immediately, and suppress time-observer
         // writes until the seek lands — otherwise the observer briefly snaps
         // the slider back to the pre-seek position.
+        //
+        // Generation, not a bool: AVPlayer runs a superseded seek's completion
+        // with finished == false, so two quick scrubs had the first one's
+        // cancellation clear the flag while the second was still in flight —
+        // the thumb jumped backwards, then forwards. Only the newest seek may
+        // clear it.
+        seekGeneration &+= 1
+        let generation = seekGeneration
         seekInFlight = true
         currentTime = time
-        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.seekInFlight = false
+                guard let self, generation == self.seekGeneration else { return }
+                self.seekInFlight = false
+                // The lock screen otherwise extrapolates from the last
+                // published elapsed time until the next 3-second tick.
+                self.updateNowPlayingInfo()
             }
         }
     }
@@ -242,6 +282,11 @@ final class AudioEngine {
         loading = true
         originalQuality = true
         error = ""
+        // A different file for the same track: its duration must be
+        // re-derived, never inherited. `.status` fires once and routinely
+        // sees an indefinite duration on a progressive body, so seed from
+        // the tracker's length and let the duration observer correct it.
+        duration = Self.parseDuration(track.trackLength)
         // The new item is a different file for the same track — trackKey
         // alone can't tell captureStreamFormat this is stale.
         streamFormat = nil
@@ -263,6 +308,8 @@ final class AudioEngine {
         originalQuality = false
         streamUrl = url.absoluteString
         error = ""
+        // See playOriginalQuality: duration belongs to the item, not the track.
+        duration = Self.parseDuration(track.trackLength)
         // The new item is a different file for the same track — trackKey
         // alone can't tell captureStreamFormat this is stale.
         streamFormat = nil
@@ -337,7 +384,8 @@ final class AudioEngine {
             artistName: target.artistName,
             eraName: target.eraName,
             artUrl: target.artUrl,
-            artistSlug: target.artistSlug
+            artistSlug: target.artistSlug,
+            preservingQueueContext: true
         )
     }
 
@@ -383,6 +431,21 @@ final class AudioEngine {
                 }
             }
         }
+
+        // Duration observer. `.status` transitions exactly once, and for a
+        // progressive HTTP body (or FLAC/VBR) the duration is still
+        // indefinite at that instant — so without this the previous source's
+        // duration survived a quality switch and the slider's range and the
+        // total-time label described a file that was no longer playing.
+        // Only `dur` is captured: AVPlayerItem is not Sendable, and a
+        // replaced item's observations are invalidated in setupPlayer.
+        observations.append(item.observe(\.duration) { [weak self] item, _ in
+            let dur = item.duration
+            Task { @MainActor [weak self] in
+                guard let self, dur.isValid, !dur.isIndefinite, dur.seconds > 0 else { return }
+                self.duration = dur.seconds
+            }
+        })
 
         // Status observer — restore seek position once ready
         // NOTE: KVO fires on arbitrary threads. Capture values before hopping to MainActor
@@ -454,14 +517,26 @@ final class AudioEngine {
             let empty = item.isPlaybackBufferEmpty
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if empty { self.loading = true }
+                // The initial timeout is cancelled at .readyToPlay, so a
+                // mid-track stall previously showed a spinner with no timeout
+                // and no error path — only isPlaybackLikelyToKeepUp could
+                // ever clear it. Re-arm it here so a dead stream surfaces.
+                if empty {
+                    self.loading = true
+                    self.startLoadingTimeout()
+                }
             }
         })
         observations.append(item.observe(\.isPlaybackLikelyToKeepUp) { [weak self] item, _ in
             let keepUp = item.isPlaybackLikelyToKeepUp
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if keepUp { self.loading = false }
+                if keepUp {
+                    self.loading = false
+                    // Recovered before the re-armed stall timeout fired.
+                    self.loadingTimeoutTask?.cancel()
+                    self.loadingTimeoutTask = nil
+                }
             }
         })
 
@@ -483,7 +558,14 @@ final class AudioEngine {
                 let defaults = UserDefaults.standard
                 let autoplay = defaults.object(forKey: Self.autoplayNextKey) == nil
                     || defaults.bool(forKey: Self.autoplayNextKey)
-                guard autoplay else { return }
+                guard autoplay else {
+                    // actionAtItemEnd is .none, so the item stays parked at
+                    // its end time. Showing 0:00 without actually seeking
+                    // left the play button dead — AVPlayer will not restart
+                    // from the end without a seek.
+                    self.player?.seek(to: .zero)
+                    return
+                }
                 self.playNext()
             }
         }

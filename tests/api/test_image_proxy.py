@@ -1,6 +1,7 @@
 """Tests for /image-proxy resizing, caching, and header behavior."""
 
 import io
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -177,19 +178,45 @@ class FakeResponse:
         self.content = content
         self.status_code = status_code
         self.headers = {"content-type": content_type}
+        self.closed = False
+
+    async def aiter_bytes(self):
+        # Two chunks, so a test that caps mid-body sees a partial read the
+        # way a real streamed response would.
+        mid = len(self.content) // 2
+        yield self.content[:mid]
+        yield self.content[mid:]
+
+    async def aclose(self):
+        self.closed = True
 
 
 class FakeClient:
-    """Records requested URLs and serves a fixed image."""
+    """Records requested URLs and serves a fixed image.
+
+    Models the streaming API (build_request + send(stream=True)), because
+    /image-proxy streams with a byte cap rather than buffering the whole
+    body — a .get()-only double would no longer exercise the real path.
+    """
 
     def __init__(self, content: bytes, content_type: str = "image/png"):
         self._content = content
         self._content_type = content_type
         self.requested: list[str] = []
+        self.responses: list[FakeResponse] = []
 
     async def get(self, url, headers=None):
         self.requested.append(url)
         return FakeResponse(self._content, self._content_type)
+
+    def build_request(self, method, url, headers=None):
+        return SimpleNamespace(method=method, url=url, headers=headers)
+
+    async def send(self, request, stream=False):
+        self.requested.append(request.url)
+        resp = FakeResponse(self._content, self._content_type)
+        self.responses.append(resp)
+        return resp
 
 
 @pytest.fixture()
@@ -275,3 +302,23 @@ class TestImageProxyEndpoint:
         client, _ = proxy_env
         assert client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 10}).status_code == 422
         assert client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 9000}).status_code == 422
+
+    def test_oversized_body_is_abandoned(self, monkeypatch, tmp_path):
+        """A body larger than the download cap must not be buffered.
+
+        /image-proxy used a non-streaming .get(), so the whole body landed in
+        memory before the content-type check, and the existing size caps only
+        ran inside _resize_image_bytes — after the fact, and only when `w` was
+        given. The allowlist admits any *.google.com host, so an oversized
+        Drive file was enough to OOM the worker.
+        """
+        monkeypatch.setattr(api, "_IMAGE_DOWNLOAD_CAP", 1024)
+        fake = FakeClient(b"\x89PNG" + b"x" * 8192)
+        monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
+        monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
+
+        r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
+        assert r.status_code == 502
+        # The streamed response is closed even on the reject path, so the
+        # upstream connection is returned to the pool rather than leaked.
+        assert fake.responses and fake.responses[-1].closed

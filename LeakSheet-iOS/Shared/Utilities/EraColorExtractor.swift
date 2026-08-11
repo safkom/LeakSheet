@@ -9,6 +9,11 @@ actor EraColorExtractor {
     // Cache keyed by art URL not era name — see DECISIONS.md::EraColorExtractor.swift::cache-key
     private var cache: [String: [Double]]
     private static let cacheKey = "leaksheet_era_rgb_v3"
+    /// Cache keys oldest-first, so eviction drops the least recently added
+    /// rather than an arbitrary slice of `cache.keys`.
+    private var insertionOrder: [String] = []
+    /// Debounced UserDefaults write (see scheduleFlush).
+    private var flushTask: Task<Void, Never>?
 
     private init() {
         // One-time cleanup of the superseded v2 cache key (v3 re-keyed the
@@ -162,11 +167,34 @@ actor EraColorExtractor {
     }
 
     private func cache(_ rgb: RGB, forKey key: String) {
+        if cache[key] == nil { insertionOrder.append(key) }
         cache[key] = [rgb.r, rgb.g, rgb.b]
         if cache.count > 200 {
+            // Oldest-first, not `cache.keys.prefix` — dictionary key order is
+            // arbitrary, so the old eviction threw away whichever entries it
+            // happened to visit, including ones extracted seconds earlier.
             let excess = cache.count - 200
-            for k in cache.keys.prefix(excess) { cache.removeValue(forKey: k) }
+            for k in insertionOrder.prefix(excess) { cache.removeValue(forKey: k) }
+            insertionOrder.removeFirst(excess)
         }
+        scheduleFlush()
+    }
+
+    /// Memory is authoritative; UserDefaults is caught up shortly after the
+    /// last extraction. Writing on every extraction re-encoded the whole
+    /// dictionary (up to 200 entries) per era cover, repeatedly, while the
+    /// user was scrolling a cold tracker.
+    private func scheduleFlush() {
+        flushTask?.cancel()
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await self?.flushCache()
+        }
+    }
+
+    /// Actor-isolated so the debounced task reads `cache` on the actor.
+    private func flushCache() {
         UserDefaults.standard.set(cache, forKey: Self.cacheKey)
     }
 }

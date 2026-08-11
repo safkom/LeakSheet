@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2700"
-   version = "1.3">
+   version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -14,9 +15,8 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E30045922F8D29B40029C2D5"
-               BuildableName = "LeakSheet.app"
-               BlueprintName = "LeakSheet"
+               BlueprintIdentifier = "E3B00001AAAA0000AAAA0001"
+               BuildableName = "LeakSheetTV.app"
                ReferencedContainer = "container:LeakSheet.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -26,19 +26,8 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES">
-      <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "E3AA00032F8D29B40029C2D5"
-               BuildableName = "LeakSheetTests.xctest"
-               BlueprintName = "LeakSheetTests"
-               ReferencedContainer = "container:LeakSheet.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "YES">
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -49,14 +38,14 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES">
+      allowLocationSimulation = "YES"
+      queueDebuggingEnabled = "No">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E30045922F8D29B40029C2D5"
-            BuildableName = "LeakSheet.app"
-            BlueprintName = "LeakSheet"
+            BlueprintIdentifier = "E3B00001AAAA0000AAAA0001"
+            BuildableName = "LeakSheetTV.app"
             ReferencedContainer = "container:LeakSheet.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -71,9 +60,8 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "E30045922F8D29B40029C2D5"
-            BuildableName = "LeakSheet.app"
-            BlueprintName = "LeakSheet"
+            BlueprintIdentifier = "E3B00001AAAA0000AAAA0001"
+            BuildableName = "LeakSheetTV.app"
             ReferencedContainer = "container:LeakSheet.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

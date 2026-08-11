@@ -122,9 +122,27 @@ actor ImageCache {
         let key = Self.cacheKey(url, maxPixelSize)
         if let hit = memCache.object(forKey: key) { return hit }
         guard let (data, _) = try? await session.data(from: url),
-              let image = Self.downsampled(data: data, maxPixelSize: maxPixelSize) else { return nil }
+              let image = await Self.downsampledOffActor(data: data, maxPixelSize: maxPixelSize)
+        else { return nil }
         memCache.setObject(image, forKey: key, cost: image.width * image.height * 4)
         return image
+    }
+
+    /// Bridges `downsampled` onto a detached task, mirroring
+    /// `EraColorExtractor.dominantRGBOffActor`.
+    ///
+    /// `downsampled` is `nonisolated`, but that only removes the *requirement*
+    /// for isolation — called from an actor-isolated method it still runs on
+    /// this actor's serial executor. So every ImageIO decode blocked the
+    /// cache: `prefetch(concurrency: 4)` got four parallel downloads and zero
+    /// parallel decodes, and each visible row's `cachedImage(for:)` queued
+    /// behind them. That is the scroll freeze-then-catch-up.
+    private nonisolated static func downsampledOffActor(
+        data: Data, maxPixelSize: Int
+    ) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) {
+            Self.downsampled(data: data, maxPixelSize: maxPixelSize)
+        }.value
     }
 
     /// Decode via ImageIO's thumbnail API — bounded memory, and the bitmap is

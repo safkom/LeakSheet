@@ -160,6 +160,8 @@ final class ArtistViewModel {
     /// songKey → eras containing that song (only keys spanning >1 era) —
     /// built once in Precomputed.
     private let songKeyEras: [String: [CrossEraRef]]
+    /// baseName → every era containing it (see Precomputed.baseNameEras).
+    private let baseNameEras: [String: [CrossEraRef]]
 
     /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
     private let searchIndex: [[SongSearchFields]]
@@ -208,8 +210,19 @@ final class ArtistViewModel {
     /// One era containing another copy of a song (matched by `songKey`).
     nonisolated struct CrossEraRef: Equatable, Sendable, Identifiable {
         let eraName: String
-        let versionCount: Int
+        let eraArt: String?
+        let song: Song
         var id: String { eraName }
+    }
+
+    /// One playable version of a cross-era song, with the era it belongs to —
+    /// what the description sheet's version picker lists and switches between.
+    nonisolated struct CrossEraVersion: Identifiable, Sendable {
+        let version: SongVersion
+        let song: Song?
+        let eraName: String
+        let eraArt: String?
+        var id: String { "\(eraName)::\(version.id)" }
     }
 
     nonisolated struct Precomputed: Sendable {
@@ -219,6 +232,10 @@ final class ArtistViewModel {
         /// songKey → every era containing that song, in era order — backs
         /// the description sheet's "Also in" cross-era section.
         let songKeyEras: [String: [CrossEraRef]]
+        /// baseName → every era containing it. The songKey-less fallback for
+        /// both `resolvedSong` and `crossEraRefs`, so neither has to rescan
+        /// the tracker (Era.allSongs rebuilds its array on each access).
+        let baseNameEras: [String: [CrossEraRef]]
         /// Per-era, per-song lowercased search haystack, built once off-main so
         /// each keystroke's scoring is comparison-only (no re-lowercasing every
         /// song name / alt title / version name across the whole tracker).
@@ -229,6 +246,7 @@ final class ArtistViewModel {
             var statsByName: [String: Stats] = [:]
             var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
             var keyEras: [String: [CrossEraRef]] = [:]
+            var byBaseName: [String: [CrossEraRef]] = [:]
             for era in artist.eras {
                 let s = ArtistViewModel.computeEraStats(era)
                 statsByName[era.name] = s
@@ -238,11 +256,14 @@ final class ArtistViewModel {
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
                 for song in era.allSongs {
+                    byBaseName[song.baseName, default: []].append(
+                        CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
+                    )
                     guard let key = song.songKey, !key.isEmpty else { continue }
                     // One ref per era per key (a song appears once per era)
                     if keyEras[key]?.last?.eraName != era.name {
                         keyEras[key, default: []].append(
-                            CrossEraRef(eraName: era.name, versionCount: song.versions.count)
+                            CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
                         )
                     }
                 }
@@ -257,15 +278,31 @@ final class ArtistViewModel {
             )
             // Only keys that actually span content are worth keeping
             self.songKeyEras = keyEras.filter { $0.value.count > 1 }
+            self.baseNameEras = byBaseName
             self.searchIndex = artist.eras.map { $0.allSongs.map(SongSearchFields.init(song:)) }
         }
     }
 
-    /// Other eras containing the same song (by songKey), excluding the one
-    /// the user is already looking at. Empty when the song is era-unique.
-    func otherEras(forSongKey key: String?, excluding eraName: String) -> [CrossEraRef] {
-        guard let key, !key.isEmpty, let refs = songKeyEras[key] else { return [] }
-        return refs.filter { $0.eraName != eraName }
+    /// Resolve the full, unfiltered song for a description payload — the row
+    /// that opened the sheet may be a single-version snapshot from the
+    /// current filter.
+    func resolvedSong(for payload: SongDetailPayload) -> Song? {
+        guard let payloadSong = payload.song else { return nil }
+        let refs = crossEraRefs(for: payload)
+        return refs.first(where: { $0.eraName == payload.eraName })?.song
+            ?? refs.first?.song
+            ?? payloadSong
+    }
+
+    /// Every era containing this payload's song. Prefers `songKey`, which only
+    /// indexes songs spanning >1 era, and falls back to the base-name index —
+    /// which also covers era-unique songs and payloads carrying no songKey.
+    func crossEraRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
+        guard let payloadSong = payload.song else { return [] }
+        if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
+            return refs
+        }
+        return baseNameEras[payloadSong.baseName] ?? []
     }
 
     /// Preferred construction path: the stats/content pass runs off-main.
@@ -288,6 +325,7 @@ final class ArtistViewModel {
         self.artistStats = precomputed.artistStats
         self.content = precomputed.content
         self.songKeyEras = precomputed.songKeyEras
+        self.baseNameEras = precomputed.baseNameEras
         self.searchIndex = precomputed.searchIndex
 
         // Seed era colors from persisted cache — see DECISIONS.md::EraColorExtractor.swift::cache-key
@@ -568,7 +606,9 @@ final class ArtistViewModel {
                 expanded: expanded, hasMultiple: hasMultiple, isLast: false, ordinal: ordinal
             ))
             if expanded {
-                for (idx, version) in song.versions.enumerated() {
+                // allVersions, not versions: under a badge filter the latter
+                // is only what matched, so the row expanded to one chip.
+                for (idx, version) in song.allVersions.enumerated() {
                     rows.append(.version(
                         version, index: idx, song: song,
                         eraName: eraName, eraArt: eraArt, isLast: false, songOrdinal: ordinal

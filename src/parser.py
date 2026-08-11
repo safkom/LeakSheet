@@ -477,6 +477,21 @@ ERA_STATS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Spreadsheet formula errors. These appear in real trackers when a cell's
+# formula breaks, and they must never be mistaken for content — a `#REF!` in
+# the era-stats column used to hide every era header in the sheet, collapsing
+# the whole tracker into one era literally named "#REF!" (Future, 2026-08).
+_SPREADSHEET_ERROR_RE = re.compile(
+    r"^#(REF|N/A|VALUE|DIV/0|NAME|NULL|NUM|ERROR|GETTING_DATA)[!?]?$",
+    re.IGNORECASE,
+)
+
+
+def _is_spreadsheet_error(text: str) -> bool:
+    """Return True if *text* is nothing but a spreadsheet error value."""
+    return bool(_SPREADSHEET_ERROR_RE.match(text.strip()))
+
+
 # Row values that indicate a section divider (not a song or era name).
 # These strings appear as standalone cell values in the spreadsheet to
 # separate song groups (e.g. "surfaced" = officially released material).
@@ -527,11 +542,24 @@ def _is_era_header(row: list[_Cell]) -> bool:
     Real era headers have era stats in cell 0 AND an era name somewhere else
     in the row (or as the first line of cell 0 before the stats).
     Global stats rows have stats in ALL cells with no era name — reject those.
+
+    A stats cell holding a spreadsheet error still counts: see
+    docs/decisions.md::parser.py::broken-stats-formula.
     """
     if not row:
         return False
     text = row[0].text
     if not ERA_STATS_PATTERN.search(text):
+        if not _is_spreadsheet_error(text):
+            return False
+        # The stats cell is unreadable, so it can carry no evidence either
+        # way — require the era name (or the era art) from another cell.
+        for c in row[1:]:
+            if c.images:
+                return True
+            first_line = c.text.split("\n")[0].strip()
+            if first_line and not re.match(r"^\d+\s", first_line):
+                return True
         return False
     # Real era headers have at least one cell (or first line of cell 0) that
     # contains a non-stats era name.  Global stats rows have only stat-like
@@ -591,6 +619,12 @@ def _looks_like_era_name(text: str) -> bool:
 
     # Empty or whitespace-only → not an era
     if not first_line:
+        return False
+
+    # A broken formula is not a name. Without this, "#REF!" becomes a real
+    # era and the abbreviated-era-name rule below then absorbs every later
+    # era into it.
+    if _is_spreadsheet_error(first_line):
         return False
 
     # Check original text for handles/domains before stripping
@@ -2398,6 +2432,35 @@ def parse_misc_tab(
 # Art tab parsing — high-quality era artwork
 # ---------------------------------------------------------------------------
 
+# Art-tab header labels. The tab has its own layout (no Name/Links columns),
+# so it gets its own tiny header detection rather than COLUMN_ALIASES.
+_ART_ERA_HEADERS = frozenset({"era", "album", "project", "era/project"})
+_ART_TYPE_HEADERS = frozenset({"project type", "type", "art type", "image type", "category"})
+
+
+def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
+    """Locate the Era and Project Type columns and the first data row.
+
+    Returns ``(era_idx, type_idx, start_row)``. Either index may be None on
+    art tabs that have no header row — callers fall back to scanning the
+    whole row, which is what this function exists to avoid.
+    """
+    for idx, row in enumerate(rows[:5]):
+        if any(cell.images for cell in row):
+            break  # already into the data; no header row above it
+        era_idx = type_idx = None
+        for c_idx, cell in enumerate(row):
+            key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
+            if era_idx is None and key in _ART_ERA_HEADERS:
+                era_idx = c_idx
+            if type_idx is None and key in _ART_TYPE_HEADERS:
+                type_idx = c_idx
+        if era_idx is not None or type_idx is not None:
+            return era_idx, type_idx, idx + 1
+    start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
+    return None, None, start
+
+
 def parse_art_tab(html: str) -> dict[str, str]:
     """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
 
@@ -2405,10 +2468,15 @@ def parse_art_tab(html: str) -> dict[str, str]:
     Each row typically has an era name in one cell and one or more images.
 
     Multiple images may appear per era (front cover, back cover, promo photo,
-    background art, etc.).  We prefer images whose row contains descriptive
-    text that mentions "cover" — e.g. "Front Cover", "Album Cover", "Cover Art".
+    background art, etc.).  We prefer images whose **Project Type** column
+    says "cover" — e.g. "Front Cover", "Album Cover", "Cover Art".
     If no cover-labelled image is found for an era, we fall back to the first
     available image in the row.
+
+    The cover test reads the Project Type column, not the whole row: tracker
+    Notes prose mentions "cover" constantly (626 rows on the Ye art tab), so
+    a row-wide match fired almost everywhere and the era's *first* row won.
+    See docs/decisions.md::parser.py::art-cover-column.
 
     Returns a dict keyed by the normalised era match key (lowercase, stripped).
     """
@@ -2416,12 +2484,16 @@ def parse_art_tab(html: str) -> dict[str, str]:
     if not rows:
         return {}
 
-    # Skip header row if it has no images (it's a label row)
-    start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
+    era_idx, type_idx, start = _art_tab_columns(rows)
 
     # First pass: collect all images per era key, noting which have cover descriptions.
     # era_info: {era_key: {"cover": url, "first": url}}
     era_info: dict[str, dict[str, str | None]] = {}
+    # Art tabs leave the era cell blank on an era's continuation rows, so the
+    # last seen era carries forward. Without this a blank era cell fell back
+    # to the first non-empty cell — the artwork's own name — filing the image
+    # under an era that doesn't exist.
+    last_era_name = ""
 
     for row in rows[start:]:
         if not row:
@@ -2432,10 +2504,14 @@ def parse_art_tab(html: str) -> dict[str, str]:
         if not img_url:
             continue
 
-        # First non-empty text cell is the era name
-        era_name = next((cell.text.strip() for cell in row if cell.text.strip()), "")
+        if era_idx is not None:
+            era_name = _get_cell_text(row, era_idx).strip() or last_era_name
+        else:
+            # No Era header — fall back to the first non-empty text cell.
+            era_name = next((cell.text.strip() for cell in row if cell.text.strip()), "")
         if not era_name:
             continue
+        last_era_name = era_name
 
         key = _era_match_key(era_name)
         if not key:
@@ -2448,9 +2524,11 @@ def parse_art_tab(html: str) -> dict[str, str]:
         if era_info[key]["first"] is None:
             era_info[key]["first"] = img_url
 
-        # Check if any cell text in this row mentions "cover"
-        row_text = " ".join(c.text.strip() for c in row if c.text.strip())
-        if era_info[key]["cover"] is None and _COVER_RE.search(row_text):
+        if type_idx is not None:
+            cover_text = _get_cell_text(row, type_idx)
+        else:
+            cover_text = " ".join(c.text.strip() for c in row if c.text.strip())
+        if era_info[key]["cover"] is None and _COVER_RE.search(cover_text):
             era_info[key]["cover"] = img_url
 
     # Build final map: prefer cover-labelled image, fall back to first image

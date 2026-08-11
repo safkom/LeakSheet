@@ -128,11 +128,18 @@ extension Color {
     /// Extract sRGB components (0–1 range).
     ///
     /// Uses SwiftUI's own `resolve(in:)` rather than `UIColor(self)` — the
-    /// UIKit round-trip has no macOS equivalent, and every color in this file
-    /// is a fixed literal, so resolving against default environment values is
-    /// exact. See DECISIONS.md::DesignTokens.swift::color-resolve.
+    /// UIKit round-trip has no macOS equivalent.
+    /// See DECISIONS.md::DesignTokens.swift::color-resolve.
+    ///
+    /// Resolved in a **dark** environment. A bare `EnvironmentValues()`
+    /// defaults to light, and while the literals in this file are unaffected,
+    /// callers do pass dynamic colours (`.primary`) — which resolved to black
+    /// and made `ensureReadable` brighten white text down to mid-grey. The app
+    /// is force-dark (LeakSheetApp.swift), so dark is the honest environment.
     var rgbComponents: (red: Double, green: Double, blue: Double) {
-        let c = resolve(in: EnvironmentValues())
+        var env = EnvironmentValues()
+        env.colorScheme = .dark
+        let c = resolve(in: env)
         return (Double(c.red), Double(c.green), Double(c.blue))
     }
 

@@ -113,9 +113,4 @@ final class PlayerViewModel {
     func playInList(_ items: [PlaybackListItem], startAt index: Int) {
         engine.playInList(items, startAt: index)
     }
-
-    /// Format seconds as "m:ss".
-    static func formatTime(_ seconds: TimeInterval) -> String {
-        Format.time(seconds)
-    }
 }

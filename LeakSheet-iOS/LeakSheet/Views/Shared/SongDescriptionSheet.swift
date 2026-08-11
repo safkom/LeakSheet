@@ -11,6 +11,27 @@ struct SongDescriptionSheet: View {
     /// can build one without depending on this sheet.
     typealias Payload = SongDetailPayload
 
+    /// The version the sheet is currently showing — starts as `payload.version`
+    /// but changes when the user picks a chip in the version picker (same song,
+    /// same or a different era). Everything below reads `active`, never
+    /// `payload`, so the whole sheet follows the picker.
+    private struct ActiveVersion {
+        var version: SongVersion
+        var song: Song?
+        var eraName: String
+        var eraArt: String?
+    }
+
+    @State private var active: ActiveVersion
+
+    init(payload: Payload) {
+        self.payload = payload
+        _active = State(initialValue: ActiveVersion(
+            version: payload.version, song: payload.song,
+            eraName: payload.eraName, eraArt: payload.eraArt
+        ))
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
@@ -20,29 +41,59 @@ struct SongDescriptionSheet: View {
     /// bounce the user out to system Safari.
     @State private var safariItem: SafariItem?
     /// Present when the sheet is shown from the artist screen — powers the
-    /// cross-era "Also in" section. Nil from Now Playing / Favourites.
+    /// cross-era version picker. Nil from Now Playing / Favourites, where the
+    /// picker falls back to just this song's own versions.
     @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
 
+    /// One version, wherever it lives — its own era if the song is era-unique,
+    /// or every era sharing the same `songKey` when it isn't. Falls back to the
+    /// current era's own versions when there's no `ArtistViewModel` to ask
+    /// (Now Playing / Favourites) or the song has no cross-era duplicates.
+    private var pickerVersions: [ArtistViewModel.CrossEraVersion] {
+        if let vm = artistVM {
+            let refs = vm.crossEraRefs(for: payload)
+            if !refs.isEmpty {
+                return refs.flatMap { ref in
+                    ref.song.allVersions.map {
+                        .init(version: $0, song: ref.song, eraName: ref.eraName, eraArt: ref.eraArt)
+                    }
+                }
+            }
+            // Era-unique song: songKeyEras drops single-era keys, so recover
+            // the unfiltered song by base name rather than trusting the
+            // payload's copy, which a badge filter may have truncated.
+            if let resolved = vm.resolvedSong(for: payload) {
+                return resolved.allVersions.map {
+                    .init(version: $0, song: resolved, eraName: payload.eraName, eraArt: payload.eraArt)
+                }
+            }
+        }
+        let versions = payload.song?.allVersions ?? [payload.version]
+        return versions.map {
+            .init(version: $0, song: payload.song, eraName: payload.eraName, eraArt: payload.eraArt)
+        }
+    }
+
     private var badgeInfo: (emoji: String, label: String)? {
-        guard let b = payload.version.badge, let badge = Badge(rawValue: b) else { return nil }
+        guard let b = active.version.badge, let badge = Badge(rawValue: b) else { return nil }
         return (badge.emoji, badge.label)
     }
 
     private var displayName: String {
-        let n = payload.version.name
+        let n = active.version.name
         // Strip version tag suffix like " [V1]" for cleaner display
-        if let tag = payload.version.versionTag, n.hasSuffix(" [\(tag)]") {
+        if let tag = active.version.versionTag, n.hasSuffix(" [\(tag)]") {
             return String(n.dropLast(tag.count + 3))
         }
         return n
     }
 
     private var subtitle: String? {
-        payload.version.altTitles?.first
+        active.version.altTitles?.first
     }
 
     private var canStream: Bool {
-        payload.version.isStreamable
+        active.version.isStreamable
     }
 
     /// Play the sheet's version. When the full song is known, hand the player
@@ -50,15 +101,17 @@ struct SongDescriptionSheet: View {
     /// of stopping after this one track.
     private func play() {
         Haptics.light()
-        if let song = payload.song {
-            let streamable = song.versions.filter(\.isStreamable)
-            if let idx = streamable.firstIndex(where: { $0.id == payload.version.id }) {
+        if let song = active.song {
+            // allVersions: a filtered copy would queue only the versions that
+            // matched the badge filter, so playback stopped after one track.
+            let streamable = song.allVersions.filter(\.isStreamable)
+            if let idx = streamable.firstIndex(where: { $0.id == active.version.id }) {
                 let items = streamable.map {
                     PlaybackListItem(
                         version: $0,
                         artistName: payload.artistName,
-                        eraName: payload.eraName,
-                        artUrl: payload.eraArt ?? "",
+                        eraName: active.eraName,
+                        artUrl: active.eraArt ?? "",
                         artistSlug: payload.artistSlug
                     )
                 }
@@ -66,7 +119,7 @@ struct SongDescriptionSheet: View {
                 return
             }
         }
-        player.playTrack(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+        player.playTrack(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
     }
 
     var body: some View {
@@ -76,7 +129,7 @@ struct SongDescriptionSheet: View {
                     VStack(alignment: .leading, spacing: 14) {
                         // Prominent album art with gradient
                         VStack(spacing: 12) {
-                            if let artUrl = payload.eraArt, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 640) {
+                            if let artUrl = active.eraArt, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 640) {
                                 CachedImage(url: url, maxPixelSize: 640) {
                                     ArtworkPlaceholder(cornerRadius: 0)
                                         .font(.largeTitle)
@@ -84,14 +137,17 @@ struct SongDescriptionSheet: View {
                                 .frame(width: 160, height: 160)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .shadow(color: (accentColor ?? .clear).opacity(0.4), radius: 20, y: 8)
-                                .task {
+                                // Keyed on artUrl: picking a version from a
+                                // different era swaps the art, so the extracted
+                                // accent has to be re-run, not just the image.
+                                .task(id: artUrl) {
                                     accentColor = await EraColorExtractor.shared.extractColor(from: url, cacheKey: artUrl)
                                 }
                             }
 
                             // Era name pill badge
                             HStack(spacing: 6) {
-                                Text(payload.eraName.uppercased())
+                                Text(active.eraName.uppercased())
                                     .font(.caption2.weight(.bold))
                                     .tracking(0.8)
                                     .foregroundStyle((accentColor ?? .lsAccent).ensureReadable(against: .lsBackground))
@@ -118,7 +174,12 @@ struct SongDescriptionSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(displayName)
                                 .font(.title.weight(.bold))
-                                .foregroundStyle((accentColor ?? .primary).ensureReadable(against: .lsBackground))
+                                // .white, not .primary: a dynamic colour fed
+                                // into the contrast maths resolved to black,
+                                // so ensureReadable brightened the title to
+                                // mid-grey on every open until the artwork
+                                // task landed. A concrete colour is exact.
+                                .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground))
                             if let sub = subtitle {
                                 Text(sub)
                                     .font(.subheadline)
@@ -133,13 +194,13 @@ struct SongDescriptionSheet: View {
                         creditsSection
 
                         // Status badges (quality + availability + fan rating) — prominent
-                        if payload.version.quality != nil || payload.version.availableLength != nil || payload.version.rating != nil {
+                        if active.version.quality != nil || active.version.availableLength != nil || active.version.rating != nil {
                             FlowLayout(spacing: 6) {
                                 // Same dedupe rules as the song rows (SPEC §12),
                                 // rendered at this sheet's larger pill size.
                                 if let primary = BadgeLogic.primaryPill(
-                                    quality: payload.version.quality,
-                                    availability: payload.version.availableLength
+                                    quality: active.version.quality,
+                                    availability: active.version.availableLength
                                 ) {
                                     badgePill(
                                         text: primary.text,
@@ -149,15 +210,22 @@ struct SongDescriptionSheet: View {
                                     )
                                 }
                                 if let avail = BadgeLogic.availabilityPill(
-                                    quality: payload.version.quality,
-                                    availability: payload.version.availableLength
+                                    quality: active.version.quality,
+                                    availability: active.version.availableLength
                                 ) {
                                     badgePill(text: avail.text, variant: availabilityVariant(avail.text))
                                 }
-                                if let rating = payload.version.rating {
+                                if let rating = active.version.rating {
                                     ratingPill(rating)
                                 }
                             }
+                        }
+
+                        // Version picker — every version of this song, across
+                        // every era it appears in (fallback: just this era's
+                        // versions when the song has no cross-era duplicates).
+                        if pickerVersions.count > 1 {
+                            versionPicker
                         }
 
                         // Detail grid (2-column)
@@ -165,13 +233,13 @@ struct SongDescriptionSheet: View {
 
                         // Stream file info (codec, bitrate, …) — provider
                         // metadata API with live-player fallback.
-                        if payload.version.streamableLink != nil {
-                            FileInfoSection(version: payload.version)
+                        if active.version.streamableLink != nil {
+                            FileInfoSection(version: active.version)
                         }
 
                         // Story — the tracker's notes are the main learning
                         // content; they read directly after the facts.
-                        if let notes = payload.version.notes, !notes.isEmpty {
+                        if let notes = active.version.notes, !notes.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Notes")
                                     .font(.caption.weight(.semibold))
@@ -187,7 +255,7 @@ struct SongDescriptionSheet: View {
                         }
 
                         // Alt titles (remaining, after subtitle)
-                        if let alts = payload.version.altTitles, alts.count > 1 {
+                        if let alts = active.version.altTitles, alts.count > 1 {
                             cardSection(title: "Alt Titles") {
                                 ForEach(alts.dropFirst(), id: \.self) { alt in
                                     Text(alt)
@@ -198,7 +266,7 @@ struct SongDescriptionSheet: View {
                         }
 
                         // OG file(s) — dedicated section, pluralized by count
-                        let ogFiles = payload.version.allOgFilenames
+                        let ogFiles = active.version.allOgFilenames
                         if !ogFiles.isEmpty {
                             cardSection(title: ogFiles.count == 1 ? "OG File" : "OG Files") {
                                 ForEach(ogFiles, id: \.self) { file in
@@ -210,7 +278,7 @@ struct SongDescriptionSheet: View {
                         }
 
                         // Samples
-                        if let samples = payload.version.samples, !samples.isEmpty {
+                        if let samples = active.version.samples, !samples.isEmpty {
                             cardSection(title: "Samples") {
                                 ForEach(samples, id: \.self) { sample in
                                     Text(sample)
@@ -223,7 +291,7 @@ struct SongDescriptionSheet: View {
                         // Evidence — labeled provenance links from the
                         // tracker's Sources column ('First Mention
                         // (Screenshot)', 'Trailer (YouTube)').
-                        if let sources = payload.version.sources, !sources.isEmpty {
+                        if let sources = active.version.sources, !sources.isEmpty {
                             EvidenceSection(sources: sources) { url in
                                 safariItem = SafariItem(url: url)
                             }
@@ -231,7 +299,7 @@ struct SongDescriptionSheet: View {
 
                         // Links — filter to valid URLs first so the header
                         // never renders above an empty list.
-                        let validLinks = (payload.version.links ?? []).compactMap { link in
+                        let validLinks = (active.version.links ?? []).compactMap { link in
                             URL(string: link).map { (raw: link, url: $0) }
                         }
                         if !validLinks.isEmpty {
@@ -260,38 +328,6 @@ struct SongDescriptionSheet: View {
                             }
                         }
 
-                        // Cross-era linkage: other eras carrying the same
-                        // song (matched by the parser's normalized song_key).
-                        if let vm = artistVM {
-                            let alsoIn = vm.otherEras(
-                                forSongKey: payload.song?.songKey,
-                                excluding: payload.eraName
-                            )
-                            if !alsoIn.isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Also in")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    ForEach(alsoIn) { ref in
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "square.stack")
-                                                .font(.caption2)
-                                            Text(ref.eraName)
-                                                .font(.caption)
-                                            Spacer(minLength: 0)
-                                            Text("\(ref.versionCount) version\(ref.versionCount == 1 ? "" : "s")")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(Color.lsCard)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    }
-                                }
-                            }
-                        }
                     }
                     .padding(20)
                 }
@@ -317,29 +353,29 @@ struct SongDescriptionSheet: View {
                     // Favourite button — always available
                     Button {
                         Haptics.light()
-                        if let song = payload.song, let slug = payload.artistSlug {
+                        if let song = active.song, let slug = payload.artistSlug {
                             favourites.toggle(
                                 song: song,
                                 artistSlug: slug,
                                 artistName: payload.artistName,
                                 sourceUrl: nil,
-                                eraName: payload.eraName,
-                                eraArt: payload.eraArt
+                                eraName: active.eraName,
+                                eraArt: active.eraArt
                             )
                         } else {
                             let slug = payload.artistSlug ?? payload.artistName.slugified
                             favourites.toggleFromVersion(
-                                version: payload.version,
+                                version: active.version,
                                 artistSlug: slug,
                                 artistName: payload.artistName,
                                 sourceUrl: nil,
-                                eraName: payload.eraName,
-                                eraArt: payload.eraArt
+                                eraName: active.eraName,
+                                eraArt: active.eraArt
                             )
                         }
                     } label: {
                         let slug = payload.artistSlug ?? payload.artistName.slugified
-                        let isFav = favourites.isFavouritedByVersion(payload.version, artistSlug: slug, eraName: payload.eraName)
+                        let isFav = favourites.isFavouritedByVersion(active.version, artistSlug: slug, eraName: active.eraName)
                         Image(systemName: isFav ? "heart.fill" : "heart")
                             .font(.headline)
                             .foregroundStyle(isFav ? Color.lsFavourite : .primary)
@@ -378,21 +414,21 @@ struct SongDescriptionSheet: View {
                                 Label("Play", systemImage: "play.fill")
                             }
                             Button {
-                                player.addToQueue(payload.version, artistName: payload.artistName, eraName: payload.eraName, artUrl: payload.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+                                player.addToQueue(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
                                 Haptics.light()
                             } label: {
                                 Label("Add to Queue", systemImage: "text.append")
                             }
                         }
-                        if let song = payload.song, let slug = payload.artistSlug {
+                        if let song = active.song, let slug = payload.artistSlug {
                             Button {
                                 favourites.toggle(
                                     song: song,
                                     artistSlug: slug,
                                     artistName: payload.artistName,
                                     sourceUrl: nil,
-                                    eraName: payload.eraName,
-                                    eraArt: payload.eraArt
+                                    eraName: active.eraName,
+                                    eraArt: active.eraArt
                                 )
                                 Haptics.light()
                             } label: {
@@ -402,19 +438,19 @@ struct SongDescriptionSheet: View {
                             Button {
                                 let slug = payload.artistSlug ?? payload.artistName.slugified
                                 favourites.toggleFromVersion(
-                                    version: payload.version,
+                                    version: active.version,
                                     artistSlug: slug,
                                     artistName: payload.artistName,
                                     sourceUrl: nil,
-                                    eraName: payload.eraName,
-                                    eraArt: payload.eraArt
+                                    eraName: active.eraName,
+                                    eraArt: active.eraArt
                                 )
                                 Haptics.light()
                             } label: {
                                 Label("Favourite", systemImage: "heart")
                             }
                         }
-                        if let link = payload.version.links?.first {
+                        if let link = active.version.links?.first {
                             Button {
                                 Pasteboard.copy(link)
                             } label: {
@@ -437,16 +473,74 @@ struct SongDescriptionSheet: View {
         .webSheet(item: $safariItem)
     }
 
+    // MARK: - Version picker
+
+    /// Horizontal chip row of every version of this song — including versions
+    /// from other eras when the song has one (see `pickerVersions`). Tapping a
+    /// chip re-points the whole sheet at that version via `active`, the same
+    /// way tvOS's version picker drives its detail screen.
+    private var versionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Versions")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(pickerVersions) { entry in
+                        versionChip(entry)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private func versionChip(_ entry: ArtistViewModel.CrossEraVersion) -> some View {
+        let isSelected = entry.version.id == active.version.id && entry.eraName == active.eraName
+        return Button {
+            Haptics.light()
+            active = ActiveVersion(
+                version: entry.version, song: entry.song,
+                eraName: entry.eraName, eraArt: entry.eraArt
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.version.versionTag ?? entry.version.name)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+                // Era name: the reason this picker reaches across eras at
+                // all, so every chip says where its version lives.
+                Text(entry.eraName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                BadgeRowView(version: entry.version)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minWidth: 96, alignment: .leading)
+            .background(isSelected ? (accentColor ?? .lsAccent).opacity(0.22) : Color.lsCard)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(isSelected ? (accentColor ?? .lsAccent) : .clear, lineWidth: 1.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .rowHoverHighlight()
+    }
+
     // MARK: - Credits section
 
     @ViewBuilder
     private var creditsSection: some View {
         let credits: [(String, String)] = [
-            ("feat.", payload.version.featuring),
-            ("prod.", payload.version.producers),
-            ("with", payload.version.collaboration),
-            ("ref.", payload.version.refs),
-            ("artist", payload.version.creditedArtists),
+            ("feat.", active.version.featuring),
+            ("prod.", active.version.producers),
+            ("with", active.version.collaboration),
+            ("ref.", active.version.refs),
+            ("artist", active.version.creditedArtists),
         ].compactMap { label, val in
             guard let v = val, !v.isEmpty else { return nil }
             return (label, v)
@@ -484,12 +578,12 @@ struct SongDescriptionSheet: View {
         // write "Spring", "Late 2004 sessions", "Ooc" — the web reference
         // renders them, and hiding them silently loses tracker information.
         let items: [(String, String)] = [
-            ("Version", payload.version.versionTag),
-            ("Duration", payload.version.trackLength),
-            ("File Date", payload.version.fileDate),
-            ("Leak Date", payload.version.leakDate),
-            ("Type", payload.version.type),
-            ("Recording", payload.version.dateOfRecording),
+            ("Version", active.version.versionTag),
+            ("Duration", active.version.trackLength),
+            ("File Date", active.version.fileDate),
+            ("Leak Date", active.version.leakDate),
+            ("Type", active.version.type),
+            ("Recording", active.version.dateOfRecording),
         ].compactMap { label, val in
             guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
             return (label, v)

@@ -26,7 +26,7 @@ struct TVMiniPlayerBar: View {
                             .lineLimit(1)
                     }
                     Spacer()
-                    Text("\(PlayerViewModel.formatTime(player.currentTime)) / \(PlayerViewModel.formatTime(player.duration))")
+                    Text("\(Format.time(player.currentTime)) / \(Format.time(player.duration))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")

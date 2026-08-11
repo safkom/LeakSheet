@@ -21,7 +21,7 @@ from src.api import (
 )
 from src.streaming import (
     GdriveInterstitialError,
-    _is_gdrive_playable_content_type,
+    _is_audio_content_type,
     build_gdrive_confirm_url,
     parse_gdrive_confirm_form,
     resolve_metadata_url,
@@ -160,6 +160,45 @@ class TestGdriveMetadataResolution:
 
 
 # ---------------------------------------------------------------------------
+# imgur.gg — resolve_stream_url / resolve_metadata_url
+#
+# Had zero coverage until 2026-08, which is why the upstream host flip
+# (temp.imgur.gg started 404ing, imgur.gg started working) broke every
+# imgur link silently.
+# ---------------------------------------------------------------------------
+
+
+class TestImgurResolution:
+    @pytest.mark.parametrize("link", [
+        "https://imgur.gg/f/002XdG5",
+        "https://temp.imgur.gg/f/002XdG5",
+        "https://www.imgur.gg/f/002XdG5",
+    ])
+    def test_resolves_to_live_api_host(self, link):
+        # Every input form resolves to imgur.gg — NOT temp.imgur.gg, which
+        # 404s. resolve_imgur_cdn_url keeps temp. as a runtime fallback.
+        assert resolve_stream_url(link) == "https://imgur.gg/api/file/002XdG5"
+
+    def test_metadata_url_uses_the_same_host(self):
+        meta = resolve_metadata_url("https://imgur.gg/f/002XdG5")
+        assert meta == {
+            "url": "https://imgur.gg/api/file/002XdG5",
+            "provider": "imgur",
+        }
+
+    def test_resolved_host_is_allowlisted(self):
+        # The resolver and the proxy allowlist must not drift: a resolved
+        # URL the proxy then rejects is a silent 403 on every playback.
+        resolved = resolve_stream_url("https://imgur.gg/f/002XdG5")
+        assert _is_allowed_domain(resolved, _STREAM_ALLOWED_DOMAINS) is True
+
+    def test_mp4_container_is_playable(self):
+        # imgur.gg serves audio inside an mp4 container and labels it
+        # video/mp4; rejecting that is what produced the 502.
+        assert _is_audio_content_type("video/mp4") is True
+
+
+# ---------------------------------------------------------------------------
 # Stream-proxy domain allowlist
 # ---------------------------------------------------------------------------
 
@@ -170,6 +209,9 @@ class TestStreamAllowlist:
         # of hosts resolve_stream_url can emit — nothing more, nothing less.
         assert _STREAM_ALLOWED_DOMAINS == {
             "api.pillows.su",
+            # Both imgur hosts: resolve_stream_url emits imgur.gg and
+            # resolve_imgur_cdn_url falls back to temp.imgur.gg.
+            "imgur.gg",
             "temp.imgur.gg",
             "music.froste.lol",
             "krakenfiles.com",
@@ -272,7 +314,14 @@ class TestBuildGdriveConfirmUrl:
 # ---------------------------------------------------------------------------
 
 
-class TestGdrivePlayableContentType:
+class TestPlayableContentType:
+    """One gate for every host (2026-08).
+
+    gdrive used to have its own copy, `_is_gdrive_playable_content_type`,
+    which accepted `video/*` while the general path did not — that gap is
+    why imgur.gg (which serves audio in an mp4 container) 502'd.
+    """
+
     @pytest.mark.parametrize("ct", [
         "audio/mpeg",
         "audio/flac",
@@ -283,7 +332,7 @@ class TestGdrivePlayableContentType:
         "audio/mp4; charset=binary",
     ])
     def test_allowed_types(self, ct):
-        assert _is_gdrive_playable_content_type(ct) is True
+        assert _is_audio_content_type(ct) is True
 
     @pytest.mark.parametrize("ct", [
         "text/html",
@@ -292,7 +341,7 @@ class TestGdrivePlayableContentType:
         "text/plain",
     ])
     def test_rejected_types(self, ct):
-        assert _is_gdrive_playable_content_type(ct) is False
+        assert _is_audio_content_type(ct) is False
 
 
 # ---------------------------------------------------------------------------
