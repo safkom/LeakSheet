@@ -38,7 +38,7 @@ class FakeClient:
 @pytest.fixture(autouse=True)
 def _fresh_metadata_cache(monkeypatch):
     # The metadata cache is a module global — reset it so tests don't leak hits.
-    monkeypatch.setattr(api, "_metadata_cache", api._TTLCache(ttl=3600.0, max_entries=500))
+    monkeypatch.setattr(api, "_metadata_cache", api.TTLCache(ttl=3600.0, max_entries=500))
 
 
 def _install(monkeypatch, resp):

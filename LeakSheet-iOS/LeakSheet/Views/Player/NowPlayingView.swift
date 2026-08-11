@@ -4,6 +4,10 @@ import SwiftUI
 struct NowPlayingView: View {
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
+    /// The open tracker's view model, forwarded from the mini player. Lets the
+    /// description sheet below recover the full song (and its sibling
+    /// versions) from the bare SongVersion the player holds.
+    @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
     @Environment(\.dismiss) private var dismiss
 
     @State private var accentColor: Color?
@@ -98,8 +102,13 @@ struct NowPlayingView: View {
                         player.togglePlay()
                     } label: {
                         if player.loading {
+                            // .tint below applies to the whole button subtree,
+                            // so an untinted indicator drew in the era colour
+                            // on a glass button filled with that same colour —
+                            // invisible. Same treatment the Image branch uses.
                             ProgressView()
                                 .controlSize(.regular)
+                                .tint(Color.preferredText(on: accentColor ?? Color.lsAccent))
                                 .frame(width: 56, height: 56)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
@@ -295,6 +304,7 @@ struct NowPlayingView: View {
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)
                     .environment(PlayerViewModel.shared)
+                    .environment(artistVM)
             }
             .task(id: player.artUrl) {
                 guard !player.artUrl.isEmpty,

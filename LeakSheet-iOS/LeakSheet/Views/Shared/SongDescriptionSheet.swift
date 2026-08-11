@@ -202,18 +202,19 @@ struct SongDescriptionSheet: View {
                                     quality: active.version.quality,
                                     availability: active.version.availableLength
                                 ) {
-                                    badgePill(
+                                    BadgePill(
                                         text: primary.text,
                                         variant: primary.isQuality
                                             ? qualityVariant(primary.text)
-                                            : availabilityVariant(primary.text)
+                                            : availabilityVariant(primary.text),
+                                        prominent: true
                                     )
                                 }
                                 if let avail = BadgeLogic.availabilityPill(
                                     quality: active.version.quality,
                                     availability: active.version.availableLength
                                 ) {
-                                    badgePill(text: avail.text, variant: availabilityVariant(avail.text))
+                                    BadgePill(text: avail.text, variant: availabilityVariant(avail.text), prominent: true)
                                 }
                                 if let rating = active.version.rating {
                                     ratingPill(rating)
@@ -609,16 +610,6 @@ struct SongDescriptionSheet: View {
     }
 
     // MARK: - Helpers
-
-    private func badgePill(text: String, variant: BadgeVariant) -> some View {
-        Text(text)
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(variant.foreground)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(variant.background)
-            .clipShape(Capsule())
-    }
 
     /// Fan star rating (1-5) from the tracker's availability cell.
     private func ratingPill(_ rating: Int) -> some View {

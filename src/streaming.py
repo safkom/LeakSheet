@@ -38,6 +38,7 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -234,6 +235,47 @@ ALLOWED_STREAM_HOSTS = frozenset({
 _STREAM_TIMEOUT = 30.0
 _STREAM_USER_AGENT = USER_AGENT  # shared backend UA from src.config
 
+
+class TTLCache:
+    """In-memory TTL cache with a size cap (oldest-inserted eviction)."""
+
+    def __init__(self, ttl: float, max_entries: int) -> None:
+        self.ttl = ttl
+        self.max_entries = max_entries
+        self._data: dict[str, tuple[float, object]] = {}
+
+    def get(self, key: str) -> object | None:
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if time.monotonic() - ts > self.ttl:
+            self._data.pop(key, None)
+            return None
+        return value
+
+    def set(self, key: str, value: object) -> None:
+        if key not in self._data and len(self._data) >= self.max_entries:
+            oldest = min(self._data, key=lambda k: self._data[k][0])
+            self._data.pop(oldest, None)
+        self._data[key] = (time.monotonic(), value)
+
+
+# Resolved CDN URLs for imgur.gg and krakenfiles.com.
+#
+# Without this, EVERY client range request re-ran the resolve. AVPlayer opens a
+# track with a `bytes=0-1` probe and then chunk fetches, and each one paid an
+# extra HTTPS round-trip to imgur's API (measured at ~750ms) plus three DNS
+# lookups — the transport's, the SSRF pre-flight's blocking getaddrinfo, and
+# the transport's again for the CDN. On a 164MB lossless file that is the
+# difference between "slow to start" and "starts".
+#
+# ponytail: no single-flight, so two *simultaneous* cold requests for the same
+# file still resolve twice. Add a per-key asyncio lock if that shows up in the
+# logs; the TTL covers every request after the first.
+_CDN_URL_TTL = 1800.0
+_cdn_url_cache = TTLCache(ttl=_CDN_URL_TTL, max_entries=500)
+
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {
     "audio/",
@@ -427,6 +469,10 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
 
     Raises ValueError if the page cannot be fetched or no audio URL is found.
     """
+    cached = _cdn_url_cache.get(view_url)
+    if isinstance(cached, str):
+        return cached
+
     client = _get_shared_client()
     try:
         status, html = await _get_text_capped(
@@ -447,6 +493,7 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
     m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
     if not m:
         raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
+    _cdn_url_cache.set(view_url, m.group(0))
     return m.group(0)
 
 
@@ -480,6 +527,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
     Raises ValueError on network or API errors.
     """
+    cached = _cdn_url_cache.get(api_url)
+    if isinstance(cached, str):
+        return cached
+
     urls_to_try = [api_url]
     # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
     if "://imgur.gg/" in api_url or "://www.imgur.gg/" in api_url:
@@ -517,9 +568,16 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
             await asyncio.to_thread(
                 _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
             )
+            _cdn_url_cache.set(api_url, cdn_url)
             return cdn_url
-        except httpx.HTTPError as exc:
-            last_err = ValueError(f"imgur.gg API request failed: {exc}")
+        # ValueError too, not just HTTPError: the SSRF pre-flight above raises
+        # ValueError (including for a transient DNS failure), and catching only
+        # HTTPError let it escape the loop — making the temp.imgur.gg fallback
+        # this function exists to provide unreachable for that whole class.
+        except (httpx.HTTPError, ValueError) as exc:
+            last_err = exc if isinstance(exc, ValueError) else ValueError(
+                f"imgur.gg API request failed: {exc}"
+            )
             continue
 
     raise last_err  # type: ignore[misc]

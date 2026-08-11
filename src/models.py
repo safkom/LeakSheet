@@ -23,8 +23,6 @@ class Badge(str, Enum):
 EMOJI_TO_BADGE: dict[str, Badge] = {
     "⭐": Badge.BEST,
     "⭐️": Badge.BEST,
-    "\u2b50": Badge.BEST,       # ⭐ (star)
-    "\u2b50\ufe0f": Badge.BEST, # ⭐️ (star + variation selector)
     "💎": Badge.BEST,             # 💎 (gem stone)
     "✨": Badge.SPECIAL,
     "🗑️": Badge.WORST,
@@ -54,14 +52,59 @@ VERSION_TAG_PATTERN = re.compile(
     r"|Alt\.?"                           # Alt, Alt.
     r"|Radio Mix"
     r"|Unfinished"
+    # "Master File" before "MASTER" only for readability — the alternation
+    # backtracks either way, but the shorter branch reads like it wins.
+    r"|Master File"
     r"|MASTER"
     r"|CD VERSION"
     r"|Album"
     r"|Clean"
     r"|Song \d+"                         # Song 1, Song 2
+    # Added 2026-08: the families below account for ~2,400 rows across the
+    # cached trackers. Leaving them out did two things, not one — the tag
+    # stayed in the displayed title AND, because _add_version_to_era groups on
+    # the tag-stripped name, "90210 [Demo 8]" and "90210 [Demo 9]" became two
+    # separate songs instead of two versions of one.
+    r"|Demo(?:\s+\d+)?"                  # Demo, Demo 1 … Demo 45
+    r"|OG File"
+    r"|Instrumental"
+    r"|Rough Mix"
+    r"|Final Mix(?:\s+\d+)?"             # Final Mix, Final Mix 2
+    r"|Final"
+    r"|Remix"
+    r"|Mix [A-Z]\b"                      # Mix A, Mix B
+    r"|Live"
     r")\]",
     re.IGNORECASE,
 )
+
+# Version-tag ordering. Sheet order is row order, which puts [Demo 10] next to
+# [Demo 1] and scatters an era's numbered takes; there was no sort at all
+# before. Rank groups the families, the number orders within one, and the
+# original index keeps everything else stable.
+_VERSION_FAMILY_ORDER: list[tuple[str, "re.Pattern[str]"]] = [
+    ("v", re.compile(r"^v\s*(\d+)", re.IGNORECASE)),
+    ("demo", re.compile(r"^demo(?:\s+(\d+))?$", re.IGNORECASE)),
+    ("song", re.compile(r"^song\s+(\d+)$", re.IGNORECASE)),
+    ("mix", re.compile(r"^(?:final\s+mix|rough\s+mix|radio\s+mix|mix)\s*(\d+)?", re.IGNORECASE)),
+]
+_VERSION_FAMILY_RANK = {name: i for i, (name, _) in enumerate(_VERSION_FAMILY_ORDER)}
+# Untagged and unrecognised tags sort after every recognised family, in sheet
+# order — inventing an order for them would be worse than leaving them alone.
+_VERSION_FAMILY_FALLBACK = len(_VERSION_FAMILY_ORDER)
+
+
+def version_sort_key(version_tag: str | None, index: int) -> tuple[int, int, int]:
+    """Sort key for one version of a song: (family, number, sheet order)."""
+    if not version_tag:
+        return (_VERSION_FAMILY_FALLBACK, 0, index)
+    tag = version_tag.strip()
+    for name, pattern in _VERSION_FAMILY_ORDER:
+        m = pattern.match(tag)
+        if m:
+            number = int(m.group(1)) if m.lastindex and m.group(1) else 0
+            return (_VERSION_FAMILY_RANK[name], number, index)
+    return (_VERSION_FAMILY_FALLBACK, 0, index)
 
 
 class SourceRef(BaseModel):
@@ -603,17 +646,51 @@ def parse_tracker_stats(
 # off version tags like "[V1]". Why: docs/decisions.md.
 
 
-def _credit_pattern(keyword: str) -> "re.Pattern[str]":
-    """Build a credit regex matching `(kw value)` / `[kw value]` and mixes."""
-    return re.compile(rf"[\(\[](?:{keyword})\s+(.+?)[\)\]]", re.IGNORECASE)
+# One bracketed group. Deliberately does NOT span newlines: an unclosed
+# "(prod. " would otherwise swallow the alt-title lines below it, and exactly
+# one row on Travis needs that (see test_multiline_credit_is_not_parsed).
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]([^)\]\n]*)[\)\]]")
+
+# field name → the keyword that introduces it, separator included. Order is
+# the match order, so nothing here may be a prefix of a later entry.
+# "dir." sits on music-video and visual rows ("[dir. Dave Meyers]").
+_CREDIT_FIELDS: list[tuple[str, str]] = [
+    ("featuring", r"(?:feat|ft)\.?\s+|featuring\s+"),
+    ("producers", r"prod(?:uced|uction)?\.?(?:\s+by\b)?\s+"),
+    ("collaboration", r"with\s+|w/\s*"),
+    ("refs", r"ref(?:erence)?\.?\s+"),
+    ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
+]
+
+# Anchored at the start of a part: a keyword only counts where a credit can
+# begin (right after the opener, or after a ';'/',' separator). That is what
+# keeps this off version tags like "[V1]" and off "(Remix)".
+_CREDIT_PART_RE = re.compile(
+    "|".join(f"(?P<{field}>{pattern})" for field, pattern in _CREDIT_FIELDS),
+    re.IGNORECASE,
+)
+
+# Runs of horizontal whitespace left behind where a group was removed.
+_INNER_SPACE_RE = re.compile(r"[^\S\n]{2,}")
 
 
-_FEAT_PATTERN = _credit_pattern(r"feat\.?|featuring|ft\.?")
-_PROD_PATTERN = _credit_pattern(r"prod\.?")
-_WITH_PATTERN = _credit_pattern(r"with")
-_REF_PATTERN = _credit_pattern(r"ref\.?")
-# Director credits sit on music-video and visual rows ("[dir. Dave Meyers]").
-_DIR_PATTERN = _credit_pattern(r"dir\.?")
+def _split_credit_parts(body: str) -> list[str]:
+    """Split a credit-group body at each ';' or ',' that a keyword follows.
+
+    Trackers mix conventions: the Ye sheet writes one group per credit
+    ("(ref. X) (feat. Y)"), Travis packs several into one
+    ("(ref. X; feat. Y & Z)"). Splitting only when a keyword follows keeps a
+    comma inside a name list where it belongs — "(prod. A, B)" is one credit
+    with two producers, not two credits.
+    """
+    parts: list[str] = []
+    start = 0
+    for sep in re.finditer(r"[;,]\s*", body):
+        if _CREDIT_PART_RE.match(body, sep.end()):
+            parts.append(body[start:sep.start()])
+            start = sep.end()
+    parts.append(body[start:])
+    return [p.strip() for p in parts if p.strip()]
 
 
 # Strips the redundant "AKA:" label — see docs/decisions.md::models.py::ALIAS_LABEL_RE
@@ -683,21 +760,35 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     Credits in bracket form ("[prod. Allen Ritter]") parse identically —
     anything left over becomes an alt title.
     """
-    text = raw_name
+    collected: dict[str, list[str]] = {}
 
-    # Extract all credit patterns from full text
-    feat_matches = _FEAT_PATTERN.findall(text)
-    prod_matches = _PROD_PATTERN.findall(text)
-    with_matches = _WITH_PATTERN.findall(text)
-    ref_matches = _REF_PATTERN.findall(text)
-    dir_matches = _DIR_PATTERN.findall(text)
+    def take_group(match: "re.Match[str]") -> str:
+        """Harvest one bracketed group's credits; return "" if it was one."""
+        parts = _split_credit_parts(match.group(1))
+        opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
+        # The keyword must open the group, exactly as it always had to. Without
+        # that rule "(Some Title, prod. X)" would lose its title half, and
+        # "(Remix)" / "[V1]" would have to be special-cased out.
+        if opener is None:
+            return match.group(0)
+        for part in parts:
+            keyword = _CREDIT_PART_RE.match(part)
+            # Guaranteed non-None: _split_credit_parts only breaks where a
+            # keyword follows, and parts[0] was just checked.
+            if keyword is None:
+                continue
+            value = part[keyword.end():].strip()
+            if value and keyword.lastgroup:
+                collected.setdefault(keyword.lastgroup, []).append(value)
+        return ""
 
-    # Remove credit patterns to get clean text
-    cleaned = _FEAT_PATTERN.sub("", text)
-    cleaned = _PROD_PATTERN.sub("", cleaned)
-    cleaned = _WITH_PATTERN.sub("", cleaned)
-    cleaned = _REF_PATTERN.sub("", cleaned)
-    cleaned = _DIR_PATTERN.sub("", cleaned)
+    cleaned = _CREDIT_GROUP_RE.sub(take_group, raw_name)
+    # A removed group leaves a double space behind ("Title (feat. A) Remix").
+    cleaned = _INNER_SPACE_RE.sub(" ", cleaned)
+
+    def joined(field: str) -> str | None:
+        values = collected.get(field)
+        return ", ".join(values) if values else None
 
     # Split by newline: first line = title, rest = alt titles
     lines = [ln.strip() for ln in cleaned.split("\n")]
@@ -718,11 +809,11 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 
     return SongCredits(
         title=title,
-        featuring=", ".join(feat_matches) if feat_matches else None,
-        producers=", ".join(prod_matches) if prod_matches else None,
-        collaboration=", ".join(with_matches) if with_matches else None,
-        refs=", ".join(ref_matches) if ref_matches else None,
-        director=", ".join(dir_matches) if dir_matches else None,
+        featuring=joined("featuring"),
+        producers=joined("producers"),
+        collaboration=joined("collaboration"),
+        refs=joined("refs"),
+        director=joined("director"),
         alt_titles=alt_titles,
     )
 

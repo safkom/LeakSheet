@@ -76,3 +76,62 @@ struct FavouritesGroupingTests {
         #expect(grouped[0].eras[0].entries.map(\.songBaseName) == ["Newest", "Older"])
     }
 }
+
+/// The 2026-08 version-tag widening changed `Song.baseName` for rows whose
+/// title carried a Demo / OG File / Instrumental / … tag. Favourites are keyed
+/// on that name, so entries saved before the change stopped matching their row
+/// and the heart silently went cold.
+@Suite("Favourite version-tag migration")
+struct FavouriteTagMigrationTests {
+    private func stored(_ song: String, era: String = "Era", artist: String = "ye") -> FavouritesManager.FavouriteEntry {
+        entry(artist: artist, era: era, song: song, addedAt: Date(timeIntervalSince1970: 0))
+    }
+
+    @Test(arguments: [
+        ("90210 [Demo 8]", "90210"),
+        ("Track [Demo]", "Track"),
+        ("Track [OG File]", "Track"),
+        ("Track [Instrumental]", "Track"),
+        ("Track [Final Mix 2]", "Track"),
+        ("Track [Mix A]", "Track"),
+        ("Track [Live]", "Track"),
+    ])
+    func `an orphaned tag is stripped from the key`(oldName: String, newName: String) {
+        let migrated = FavouritesManager.migratingVersionTags([stored(oldName)])
+        #expect(migrated[0].songBaseName == newName)
+        #expect(migrated[0].key == FavouritesManager.key(artistSlug: "ye", eraName: "Era", baseName: newName))
+    }
+
+    @Test(arguments: ["Track [Mixtape]", "Track [Deluxe]", "Track [V1]", "Track [2019]", "Track"])
+    func `names the widening did not affect are left alone`(name: String) {
+        let migrated = FavouritesManager.migratingVersionTags([stored(name)])
+        #expect(migrated[0].songBaseName == name)
+        #expect(migrated[0].key == stored(name).key)
+    }
+
+    /// Two versions of one song favourited separately would collapse onto the
+    /// same key; keep the second as-is rather than create a duplicate.
+    @Test func `a collision leaves the later entry untouched`() {
+        let migrated = FavouritesManager.migratingVersionTags([
+            stored("90210 [Demo 8]"),
+            stored("90210 [Demo 9]"),
+        ])
+        #expect(migrated[0].songBaseName == "90210")
+        #expect(migrated[1].songBaseName == "90210 [Demo 9]")
+        #expect(Set(migrated.map(\.key)).count == 2, "keys must stay unique")
+    }
+
+    @Test func `a bare tag is not stripped down to an empty name`() {
+        let migrated = FavouritesManager.migratingVersionTags([stored("[Demo 8]")])
+        #expect(migrated[0].songBaseName == "[Demo 8]")
+    }
+
+    @Test func `entries in different eras migrate independently`() {
+        let migrated = FavouritesManager.migratingVersionTags([
+            stored("90210 [Demo 8]", era: "Era A"),
+            stored("90210 [Demo 8]", era: "Era B"),
+        ])
+        #expect(migrated.allSatisfy { $0.songBaseName == "90210" })
+        #expect(Set(migrated.map(\.key)).count == 2)
+    }
+}

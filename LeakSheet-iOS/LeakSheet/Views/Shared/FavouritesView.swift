@@ -3,7 +3,10 @@ import SwiftUI
 /// Favourites panel showing all saved songs grouped by artist/era.
 struct FavouritesView: View {
     @Environment(FavouritesManager.self) private var favourites
-    @Environment(PlayerViewModel.self) private var player
+    /// Forwarded into the description sheet so a favourite of the open tracker
+    /// resolves its full song (Versions picker, alt title, song-level credits)
+    /// instead of showing only the one version the entry stored.
+    @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDescription: DescriptionSheet.Payload?
@@ -122,6 +125,7 @@ struct FavouritesView: View {
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)
                     .environment(PlayerViewModel.shared)
+                    .environment(artistVM)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

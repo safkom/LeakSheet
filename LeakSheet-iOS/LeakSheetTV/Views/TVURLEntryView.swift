@@ -58,6 +58,7 @@ struct TVURLEntryView: View {
     /// tvOS shows the phase only.
     private var phaseLabel: String {
         switch loader.loadPhase {
+        case .readingCache: "Checking local copy…"
         case .connecting, nil: "Contacting server…"
         case .downloading: "Downloading…"
         case .preparing: "Preparing…"

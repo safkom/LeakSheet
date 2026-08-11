@@ -40,6 +40,14 @@ struct MacRootView: View {
     @State private var prepared: (slug: String, vm: ArtistViewModel)?
     @State private var ui = MacUIState.shared
 
+    /// The prepared view model, but only when it describes the artist that is
+    /// actually playing — mirrors ContentView. Lets the description sheet
+    /// raised from Now Playing / Favourites resolve the full song.
+    private var vmForCurrentPlayback: ArtistViewModel? {
+        guard let prepared, prepared.slug == PlayerViewModel.shared.artistSlug else { return nil }
+        return prepared.vm
+    }
+
     var body: some View {
         NavigationSplitView {
             List(SidebarSection.allCases, selection: $section) { item in
@@ -67,6 +75,7 @@ struct MacRootView: View {
         .safeAreaBar(edge: .bottom) {
             MiniPlayerBar()
                 .environment(PlayerViewModel.shared)
+                .environment(vmForCurrentPlayback)
         }
         // ⇧⌘V routes a pasted URL into the Browse pane and loads it.
         .onChange(of: ui.pastedURL) { _, pasted in
@@ -110,7 +119,7 @@ struct MacRootView: View {
         case .favourites:
             FavouritesView(embedded: true)
                 .environment(FavouritesManager.shared)
-                .environment(PlayerViewModel.shared)
+                .environment(vmForCurrentPlayback)
         case .settings:
             // SettingsView already sets its own navigationTitle("Settings")
             // in the embedded path — no need to set it again here.
@@ -154,7 +163,7 @@ struct MacRootView: View {
         guard let artist = await loader.load(
             url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
         ) else { return }
-        let vm = await ArtistViewModel.make(artist: artist)
+        let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
         prepared = (artist.slug, vm)
         withAnimation { path = [artist] }
     }

@@ -12,7 +12,12 @@ final class FavouritesManager {
     private static let storageKey = "leaksheet_favourites"
     private static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Favourites")
 
-    var entries: [FavouriteEntry] = []
+    var entries: [FavouriteEntry] = [] {
+        didSet { keyIndex = Set(entries.map(\.key)) }
+    }
+
+    /// `entries` keys, for O(1) `isFavourited` during scroll.
+    private var keyIndex: Set<String> = []
 
     nonisolated struct FavouriteEntry: Codable, Identifiable, Sendable {
         var id: String { key }
@@ -76,6 +81,19 @@ final class FavouritesManager {
             )
         }
 
+        /// Copy with a new key/base name — see `migratingVersionTags`.
+        func rekeyed(to newKey: String, baseName: String) -> FavouriteEntry {
+            FavouriteEntry(
+                key: newKey, artistSlug: artistSlug, artistName: artistName,
+                sourceUrl: sourceUrl, eraName: eraName, eraArt: eraArt,
+                songBaseName: baseName, songVersionCount: songVersionCount,
+                badge: badge, addedAt: addedAt, primaryVersion: primaryVersion,
+                primaryVersionName: primaryVersionName, primaryVersionTag: primaryVersionTag,
+                links: links, quality: quality, availableLength: availableLength,
+                notes: notes, trackLength: trackLength, leakDate: leakDate
+            )
+        }
+
         var toDescriptionPayload: SongDetailPayload? {
             guard let version = toSongVersion else { return nil }
             return SongDetailPayload(
@@ -102,8 +120,9 @@ final class FavouritesManager {
     // MARK: - Queries
 
     func isFavourited(artistSlug: String, eraName: String, baseName: String) -> Bool {
-        let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName)
-        return entries.contains { $0.key == k }
+        // Set, not `entries.contains { }`: this runs once per visible row on
+        // every scroll frame, against an array that grows with the library.
+        keyIndex.contains(Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName))
     }
 
     /// Check if a version is favourited by deriving its base name.
@@ -297,10 +316,43 @@ final class FavouritesManager {
 
         guard let data = try? Data(contentsOf: Self.storageFile) else { return }
         do {
-            entries = try JSONDecoder().decode([FavouriteEntry].self, from: data)
+            entries = Self.migratingVersionTags(try JSONDecoder().decode([FavouriteEntry].self, from: data))
         } catch {
             Self.log.error("Failed to decode favourites (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
             entries = []
+        }
+    }
+
+    /// Tags the backend started recognising in 2026-08. Entries saved before
+    /// that carry them inside `songBaseName` ("90210 [Demo 8]"), while rows now
+    /// report the stripped name — so the heart silently stopped matching. This
+    /// is a one-shot rewrite, deliberately narrow: it lists exactly the tag
+    /// families that changed, so a genuine bracketed title like "X [Mixtape]"
+    /// is left alone.
+    ///
+    /// ponytail: delete this once no install predates the change.
+    private static let orphanedTagRE = try? NSRegularExpression(
+        pattern: #"\s*\[(?:Demo(?:\s+\d+)?|OG File|Master File|Instrumental|Rough Mix|Final(?:\s+Mix)?(?:\s+\d+)?|Remix|Mix [A-Z]|Live)\]\s*$"#,
+        options: [.caseInsensitive]
+    )
+
+    static func migratingVersionTags(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
+        guard let regex = orphanedTagRE else { return stored }
+        var seen = Set(stored.map(\.key))
+        return stored.map { entry in
+            let name = entry.songBaseName
+            let range = NSRange(name.startIndex..., in: name)
+            guard let match = regex.firstMatch(in: name, range: range), match.range.location > 0,
+                  let swiftRange = Range(match.range, in: name)
+            else { return entry }
+            let stripped = String(name[name.startIndex..<swiftRange.lowerBound])
+            let newKey = key(artistSlug: entry.artistSlug, eraName: entry.eraName, baseName: stripped)
+            // Another version of the same song is already favourited under the
+            // stripped name — leave this one alone rather than create a
+            // duplicate key.
+            guard !seen.contains(newKey) else { return entry }
+            seen.insert(newKey)
+            return entry.rekeyed(to: newKey, baseName: stripped)
         }
     }
 

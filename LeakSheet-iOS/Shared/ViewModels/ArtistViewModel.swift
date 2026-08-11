@@ -287,30 +287,107 @@ final class ArtistViewModel {
     /// that opened the sheet may be a single-version snapshot from the
     /// current filter.
     func resolvedSong(for payload: SongDetailPayload) -> Song? {
-        guard let payloadSong = payload.song else { return nil }
         let refs = crossEraRefs(for: payload)
         return refs.first(where: { $0.eraName == payload.eraName })?.song
             ?? refs.first?.song
-            ?? payloadSong
+            ?? payload.song
     }
 
     /// Every era containing this payload's song. Prefers `songKey`, which only
     /// indexes songs spanning >1 era, and falls back to the base-name index —
     /// which also covers era-unique songs and payloads carrying no songKey.
+    ///
+    /// A nil `payload.song` is NOT a dead end: Now Playing and Favourites only
+    /// hold a bare `SongVersion`, and bailing here is why the description sheet
+    /// opened from the player's Info button lost its Versions picker, its alt
+    /// title, and its song-level credits. The version's own `derivedBaseName`
+    /// (tag stripped) is the same key the base-name index is built on.
     func crossEraRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
-        guard let payloadSong = payload.song else { return [] }
-        if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
-            return refs
+        if let payloadSong = payload.song {
+            if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
+                return refs
+            }
+            return baseNameEras[payloadSong.baseName] ?? []
         }
-        return baseNameEras[payloadSong.baseName] ?? []
+        return baseNameEras[payload.version.derivedBaseName] ?? []
     }
 
+    /// How many era covers are warmed before the artist screen is pushed.
+    /// Roughly two screenfuls of collapsed cards — enough that the first thing
+    /// the user sees is never a grid of placeholders, without making a 40-era
+    /// tracker wait on 40 downloads before it opens.
+    static let coldStartArtCount = 8
+
     /// Preferred construction path: the stats/content pass runs off-main.
-    static func make(artist: Artist) async -> ArtistViewModel {
+    ///
+    /// `warmArt` pulls the first few era covers (and their dominant colours)
+    /// into the cache before returning. The caller is still showing the landing
+    /// spinner at this point, so the work is free; without it the screen
+    /// rendered, *then* started fetching, and the first pass down a cold
+    /// tracker was a sequence of grey cards popping into colour.
+    static func make(artist: Artist, warmArt: Bool = true) async -> ArtistViewModel {
         let precomputed = await Task.detached(priority: .userInitiated) {
             Precomputed(artist: artist)
         }.value
-        return ArtistViewModel(artist: artist, precomputed: precomputed)
+        let vm = ArtistViewModel(artist: artist, precomputed: precomputed)
+        if warmArt {
+            await vm.warmEraArt(limit: coldStartArtCount)
+        }
+        return vm
+    }
+
+    /// Load era covers into the image cache and derive their display colours.
+    ///
+    /// `ImageCache.prefetch` alone is not enough: it warms bytes but never
+    /// extracts colour, so cards still arrived grey and re-tinted a frame
+    /// later. Extraction is cheap once the image is decoded and cached.
+    ///
+    /// `limit` nil warms every era (the background pass from ArtistView).
+    func warmEraArt(limit: Int? = nil) async {
+        let eras = limit.map { Array(artist.eras.prefix($0)) } ?? artist.eras
+        let targets: [(artUrl: String, url: URL)] = eras.compactMap { era in
+            guard let art = era.artUrl,
+                  eraDisplay[era.name] == nil,
+                  let url = APIClient.shared.imageProxyURL(for: art, width: 320)
+            else { return nil }
+            return (art, url)
+        }
+        guard !targets.isEmpty else { return }
+
+        await withTaskGroup(of: (String, Color)?.self) { group in
+            // Same ceiling as ImageCache.prefetch — enough to saturate the
+            // link without starving the cover the user is looking at.
+            let slots = 4
+            var next = 0
+            var inFlight = 0
+            func addTask() {
+                let target = targets[next]
+                next += 1
+                inFlight += 1
+                group.addTask {
+                    guard let image = await ImageCache.shared.loadImage(
+                        from: target.url, maxPixelSize: 320
+                    ) else { return nil }
+                    guard let color = await EraColorExtractor.shared.extractColor(
+                        fromImage: image, cacheKey: target.artUrl
+                    ) else { return nil }
+                    return (target.artUrl, color)
+                }
+            }
+            while next < targets.count && inFlight < slots { addTask() }
+            while inFlight > 0 {
+                let result = await group.next() ?? nil
+                inFlight -= 1
+                if let (artUrl, color) = result {
+                    for era in eras where era.artUrl == artUrl {
+                        setEraColor(eraName: era.name, dominant: color)
+                    }
+                }
+                if Task.isCancelled { break }
+                if next < targets.count { addTask() }
+            }
+            group.cancelAll()
+        }
     }
 
     /// Synchronous variant — used by tests and previews; computes the
@@ -606,9 +683,13 @@ final class ArtistViewModel {
                 expanded: expanded, hasMultiple: hasMultiple, isLast: false, ordinal: ordinal
             ))
             if expanded {
-                // allVersions, not versions: under a badge filter the latter
-                // is only what matched, so the row expanded to one chip.
-                for (idx, version) in song.allVersions.enumerated() {
+                // `versions`, i.e. what matched the filter — the same array
+                // the row's count and chevron are derived from. Expanding
+                // `allVersions` here put versions the badge filter had
+                // excluded back on screen while the row still claimed the
+                // filtered count. Playback context is built from
+                // `allVersions` elsewhere, so auto-advance is unaffected.
+                for (idx, version) in song.versions.enumerated() {
                     rows.append(.version(
                         version, index: idx, song: song,
                         eraName: eraName, eraArt: eraArt, isLast: false, songOrdinal: ordinal

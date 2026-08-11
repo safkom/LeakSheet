@@ -16,13 +16,14 @@ import SwiftUI
 struct FilterTogglesView: View {
     let vm: ArtistViewModel
 
+    /// Icon for a content-tab chip. Badge-annotation kinds (best_of, worst_of,
+    /// …) never reach here — `availableTabs` filters them out because they are
+    /// annotation sources, not pages — so they have no arms.
     static func tabIcon(for kind: String) -> String {
         switch kind {
         case "misc": return "film.stack"
         case "music_videos": return "video"
         case "released": return "music.note.list"
-        case "best_of": return "star.circle"
-        case "worst_of": return "hand.thumbsdown"
         case "stems": return "waveform.path"
         default: return "square.grid.2x2"
         }
@@ -103,7 +104,7 @@ struct SearchResultsListView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 4)
 
-            ForEach(results) { result in
+            ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
                 SongRowView(
                     song: result.song,
                     version: result.version,
@@ -126,22 +127,22 @@ struct SearchResultsListView: View {
                 )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
+                // Tap opens Details, never plays — see handleSongTap.
                 .onTapGesture {
-                    if result.version.isStreamable {
-                        Haptics.light()
-                        playWithinList(
-                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
-                            tappedId: result.id
-                        )
-                    } else {
-                        onShowDescription(DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artistName, artistSlug: artistSlug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        ))
-                    }
+                    onShowDescription(DescriptionSheet.Payload(
+                        song: result.song, version: result.version,
+                        artistName: artistName, artistSlug: artistSlug,
+                        eraName: result.era.name, eraArt: result.era.artUrl
+                    ))
                 }
-                .padding(.horizontal, 16)
+                // Same tinted panel the eras branch uses, so a search result
+                // reads as the same kind of object as the row it came from.
+                // The tail rounds where the era changes.
+                .songPanel(
+                    vm.eraDisplay[result.era.name],
+                    isLast: idx == results.count - 1
+                        || results[idx + 1].era.name != result.era.name
+                )
             }
         }
     }
@@ -227,24 +228,23 @@ struct ErasListView: View {
         }
     }
 
-    /// Multi-version songs expand/collapse; single-version songs play (or
-    /// show the description when not streamable).
+    /// Multi-version songs expand/collapse; single-version songs open Details.
+    ///
+    /// Tap used to start playback, which made an accidental brush of the list
+    /// hijack whatever was playing. Play is still one gesture away: swipe from
+    /// the leading edge, long-press → Play, the three-dot menu, or the Play
+    /// button inside Details.
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
         } else if let v = song.versions.first {
-            if v.isStreamable {
-                Haptics.light()
-                playWithEraContext(v, eraName: eraName)
-            } else {
-                onShowDescription(DescriptionSheet.Payload(
-                    song: song, version: v,
-                    artistName: artistName, artistSlug: artistSlug,
-                    eraName: eraName, eraArt: eraArt
-                ))
-            }
+            onShowDescription(DescriptionSheet.Payload(
+                song: song, version: v,
+                artistName: artistName, artistSlug: artistSlug,
+                eraName: eraName, eraArt: eraArt
+            ))
         }
     }
 
@@ -288,6 +288,17 @@ struct MiscListView: View {
         vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
+    /// Normalised key for `vm.eraDisplay`.
+    ///
+    /// The card renders "Other" for an empty era name and matches its art
+    /// case-insensitively, but colours were stored and read under the RAW
+    /// name — so an empty-named group loaded its cover and then rendered
+    /// uncoloured, and any casing difference against the main-tab era did the
+    /// same. Reads and writes now agree on one key.
+    private func colorKey(_ eraName: String) -> String {
+        eraName.isEmpty ? "Other" : eraName
+    }
+
     /// A minimal `Era` so a content-tab group renders through the same
     /// `EraCardView` as the main list. Only name and art matter here — the
     /// card reads nothing else, and the group's own entries are rendered
@@ -325,11 +336,14 @@ struct MiscListView: View {
             // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
             let groups = vm.content.miscEraGroups
             ForEach(groups) { group in
+              // Single root — same LazyVStack identity-templating rule the
+              // eras branch follows (see ArtistRowViews.swift).
+              VStack(spacing: 0) {
                 let expanded = isExpanded(group.eraName, groupCount: groups.count)
                 EraCardView(
                     era: eraForGroup(group),
                     expanded: expanded,
-                    displayColors: vm.eraDisplay[group.eraName],
+                    displayColors: vm.eraDisplay[colorKey(group.eraName)],
                     subtitle: "\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")",
                     onTap: {
                         withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
@@ -341,14 +355,14 @@ struct MiscListView: View {
                         }
                     },
                     onColorExtracted: { color in
-                        vm.setEraColor(eraName: group.eraName, dominant: color)
+                        vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
                     }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
                 if isExpanded(group.eraName, groupCount: groups.count) {
-                    ForEach(group.entries) { entry in
+                    ForEach(Array(group.entries.enumerated()), id: \.element.id) { idx, entry in
                         MiscEntryRowView(
                             entry: entry,
                             onShowDescription: onShowDescription,
@@ -356,31 +370,33 @@ struct MiscListView: View {
                         )
                         .contentShape(Rectangle())
                         .accessibilityAddTraits(.isButton)
-                        .onTapGesture {
-                            handleRowTap(entry, in: entries)
-                        }
-                        .padding(.horizontal, 16)
+                        .onTapGesture { handleRowTap(entry) }
+                        // Content tabs used to render bare rows against the app
+                        // background under a card whose border opens at the
+                        // bottom to flush into a panel that wasn't there.
+                        .songPanel(
+                            vm.eraDisplay[colorKey(group.eraName)],
+                            isLast: idx == group.entries.count - 1
+                        )
                     }
                 }
+              }
             }
         }
     }
 
-    /// A single link is unambiguous, so the row's own tap performs it
-    /// directly. Zero or multiple links have no one obvious action — the
-    /// description sheet is the safe default, and the row's menu (built from
-    /// `entry.mediaLinks`) lets the user pick a specific link explicitly.
-    private func handleRowTap(_ entry: MiscEntry, in entries: [MiscEntry]) {
-        let links = entry.mediaLinks
-        if links.count == 1 {
-            handleLinkSelection(links[0], for: entry, in: entries)
-        } else {
-            onShowDescription(DescriptionSheet.Payload(
-                song: nil, version: entry.asSongVersion,
-                artistName: artistName, artistSlug: artistSlug,
-                eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
-            ))
-        }
+    /// Tap always opens Details, whatever the link count.
+    ///
+    /// A single link used to be performed directly, so a stray tap started a
+    /// stream or bounced the user into Safari. The row's own affordances (the
+    /// trailing link control, the menu built from `entry.mediaLinks`) and the
+    /// sheet itself still reach every link explicitly.
+    private func handleRowTap(_ entry: MiscEntry) {
+        onShowDescription(DescriptionSheet.Payload(
+            song: nil, version: entry.asSongVersion,
+            artistName: artistName, artistSlug: artistSlug,
+            eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
+        ))
     }
 
     /// Stream-kind links play with continuation across every other
@@ -444,6 +460,11 @@ struct RecentsListView: View {
             }
         } else {
             ForEach(Array(visible.enumerated()), id: \.element.id) { idx, result in
+              // Single root: LazyVStack can only template row identity from
+              // the ForEach ids when the body is unary — the eras branch was
+              // restructured for exactly this (see ArtistRowViews.swift), and
+              // this branch never was.
+              VStack(spacing: 0) {
                 // Era group header — show when era changes
                 if idx == 0 || visible[idx - 1].era.name != result.era.name {
                     HStack(spacing: 8) {
@@ -495,28 +516,31 @@ struct RecentsListView: View {
                 )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
+                // Tap opens Details, never plays — see handleSongTap.
                 .onTapGesture {
-                    if result.version.isStreamable {
-                        Haptics.light()
-                        // Prebuilt playback list continues down the FULL
-                        // recents list, not just the rendered window.
-                        if let (items, idx) = vm.recentPlayback(for: result.id) {
-                            player.playInList(items, startAt: idx)
-                        }
-                    } else {
-                        onShowDescription(DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artistName, artistSlug: artistSlug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        ))
-                    }
+                    onShowDescription(DescriptionSheet.Payload(
+                        song: result.song, version: result.version,
+                        artistName: artistName, artistSlug: artistSlug,
+                        eraName: result.era.name, eraArt: result.era.artUrl
+                    ))
                 }
-                .padding(.horizontal, 16)
+                // Same tinted panel as the eras branch; the tail rounds where
+                // the era group ends.
+                .songPanel(
+                    vm.eraDisplay[result.era.name],
+                    isLast: idx == visible.count - 1
+                        || visible[idx + 1].era.name != result.era.name
+                )
                 .onAppear {
-                    if idx == visible.count - 1 {
+                    // Against the LIVE count, not the `visible` snapshot this
+                    // body closed over — a fast scroll fired several appends
+                    // off one stale count. Eight rows early so the next page
+                    // is in place before the user reaches the end.
+                    if idx >= vm.visibleRecents.count - 8 {
                         vm.loadMoreRecents()
                     }
                 }
+              }
             }
         }
     }

@@ -10,7 +10,6 @@ struct PendingBrowse: Equatable {
 
 /// Landing screen — URL input, recent trackers, discovery.
 struct LandingView: View {
-    @Environment(PlayerViewModel.self) private var player
     @Environment(RecentTrackersManager.self) private var recents
 
     @State private var loader = TrackerLoader()
@@ -91,7 +90,9 @@ struct LandingView: View {
 
     private func handleParse(_ urlString: String, artistName: String? = nil) async {
         if let artist = await loader.load(urlString, artistName: artistName, recents: recents) {
-            await onArtistLoaded(artist)
+            // Inside `preparing` so the progress row stays up through the
+            // view-model build and the first-screenful art warm.
+            await loader.preparing { await onArtistLoaded(artist) }
         }
     }
 }

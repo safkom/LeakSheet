@@ -68,8 +68,14 @@ actor APIClient {
     /// responses without it) — the UI shows a fraction when it's known and
     /// a byte counter otherwise.
     nonisolated enum LoadPhase: Equatable, Sendable {
+        /// Reading the local ETag/payload. Cheap now that the ETag lives in a
+        /// sidecar, but the 304 replay still decodes a multi-MB payload here.
+        case readingCache
         case connecting
         case downloading(receivedBytes: Int64, expectedBytes: Int64?)
+        /// Decoding the payload and building the artist view model. Used to be
+        /// silent, which is most of why "Contacting server…" appeared to cover
+        /// the whole load.
         case preparing
     }
 
