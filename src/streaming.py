@@ -217,7 +217,8 @@ _GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # entries accumulated in the hand-maintained copy).
 ALLOWED_STREAM_HOSTS = frozenset({
     "api.pillows.su",     # pillows.su / pillowcase.su both resolve here
-    "temp.imgur.gg",      # imgur.gg always resolves here (imgur.gg API 404s)
+    "imgur.gg",           # primary API host (2026-08: temp.imgur.gg now 404s)
+    "temp.imgur.gg",      # kept as the resolver's fallback host
     "music.froste.lol",
     "krakenfiles.com",    # view URL passes through; CDN host validated by
                           # _KRAKEN_CDN_AUDIO_PATTERN when resolved lazily
@@ -236,6 +237,10 @@ _STREAM_USER_AGENT = USER_AGENT  # shared backend UA from src.config
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {
     "audio/",
+    # Some hosts (imgur.gg) serve audio inside an mp4/webm container and
+    # label it video/*. The client plays the audio track either way; this
+    # gate exists to reject HTML error pages, not to police containers.
+    "video/",
     "application/octet-stream",
     "application/ogg",
     "binary/octet-stream",
@@ -325,7 +330,7 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
     if m:
         file_id = m.group(2)
         return {
-            "url": f"https://temp.imgur.gg/api/file/{file_id}",
+            "url": f"https://imgur.gg/api/file/{file_id}",
             "provider": "imgur",
         }
 
@@ -359,8 +364,10 @@ def resolve_stream_url(link: str) -> str | None:
     m = _IMGUR_PATTERN.match(link)
     if m:
         file_id = m.group(2)
-        # Always use temp.imgur.gg — imgur.gg API returns 404
-        resolved = f"https://temp.imgur.gg/api/file/{file_id}"
+        # imgur.gg is the live API host; temp.imgur.gg started 404ing in
+        # 2026-08. resolve_imgur_cdn_url still falls back to temp. if this
+        # host fails, so a future flip back needs no code change.
+        resolved = f"https://imgur.gg/api/file/{file_id}"
         logger.debug("Resolved imgur.gg link %s → metadata API %s", link, resolved)
         return resolved
 
@@ -461,11 +468,12 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
     """Fetch imgur.gg file metadata and return the CDN stream URL.
 
     Tries the given URL first; if it fails and the domain isn't already
-    temp.imgur.gg, retries with temp.imgur.gg (the only domain whose
-    API reliably works).
+    temp.imgur.gg, retries with temp.imgur.gg. Which of the two hosts works
+    has flipped before (temp. was the live one until 2026-08), so both are
+    tried rather than hard-coding today's winner.
 
     Args:
-        api_url: e.g. ``https://temp.imgur.gg/api/file/wGLEqSB``
+        api_url: e.g. ``https://imgur.gg/api/file/wGLEqSB``
 
     Returns:
         The ``cdnUrl`` from the JSON response.
@@ -576,21 +584,6 @@ def _is_gdrive_host_allowed(url: str) -> bool:
     except Exception:
         return False
     return host in _GDRIVE_ALLOWED_HOSTS or bool(_GDRIVE_USERCONTENT_RE.match(host))
-
-
-def _is_gdrive_playable_content_type(ct: str) -> bool:
-    """Return True if *ct* looks like real media Drive would serve.
-
-    Drive uses application/octet-stream for many audio files — the client
-    probes the container itself, so it's accepted here. HTML is never
-    accepted; it's always the interstitial or an error page.
-    """
-    base = ct.split(";")[0].strip().lower()
-    return (
-        base.startswith("audio/")
-        or base.startswith("video/")
-        or base in ("application/octet-stream", "binary/octet-stream")
-    )
 
 
 async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Response:
@@ -705,7 +698,7 @@ async def stream_audio(
                 logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
                 raise ValueError(f"Upstream returned {resp.status_code}")
             ct = resp.headers.get("content-type", "")
-            if resp.status_code != 416 and ct and not _is_gdrive_playable_content_type(ct):
+            if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
                 logger.warning("Upstream %s returned non-media content-type: %s", stream_url, ct)
                 raise ValueError(f"Upstream returned non-audio content: {ct}")
         except Exception:

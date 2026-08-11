@@ -2,6 +2,35 @@ import AVFoundation
 import AVKit
 import SwiftUI
 
+#if os(macOS)
+
+/// macOS video surface. AVKit's SwiftUI `VideoPlayer` renders the same shared
+/// AVPlayer and brings its own transport chrome and full-screen button, which
+/// is the Mac convention — so the platform has no separate presenter.
+/// See DECISIONS.md::VideoSurfaceView.swift::macos-videoplayer.
+struct VideoSurfaceView: View {
+    let player: AVPlayer?
+
+    var body: some View {
+        if let player {
+            VideoPlayer(player: player)
+        } else {
+            Color.black
+        }
+    }
+}
+
+/// No-op on macOS — `VideoPlayer` owns its own full-screen affordance. Kept so
+/// `NowPlayingView` needs no conditional at its call site.
+struct NativeFullScreenVideoPresenter: View {
+    let player: AVPlayer?
+    @Binding var isPresented: Bool
+
+    var body: some View { EmptyView() }
+}
+
+#else
+
 /// AVPlayerLayer host bound to the engine's shared AVPlayer. Shown in place
 /// of the Now Playing artwork when the current item carries a video track —
 /// playback state, scrubbing, and remote controls stay unified because the
@@ -92,3 +121,5 @@ final class DismissReportingPlayerViewController: AVPlayerViewController {
         }
     }
 }
+
+#endif

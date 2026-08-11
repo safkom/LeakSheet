@@ -31,10 +31,8 @@ struct TrackerInputView: View {
                 .font(.subheadline)
 
             TextField("Paste a tracker URL...", text: $url, selection: $selection)
-                .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .textContentType(.URL)
+                .urlFieldTraits()
                 .submitLabel(.go)
                 .focused($focused)
                 .disabled(loading)
@@ -129,7 +127,7 @@ struct TrackerInputView: View {
     }
 
     private func pasteFromClipboard() {
-        if let text = UIPasteboard.general.string {
+        if let text = Pasteboard.string {
             url = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }

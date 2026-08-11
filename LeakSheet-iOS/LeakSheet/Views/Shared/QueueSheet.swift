@@ -5,14 +5,34 @@ struct QueueSheet: View {
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.dismiss) private var dismiss
 
+    /// Set when hosted as the macOS inspector panel rather than presented as a
+    /// sheet — the host supplies the navigation chrome.
+    var embedded = false
+
+    private static let emptyHint: String = {
+        #if os(macOS)
+        "Right-click a song and choose Add to Queue."
+        #else
+        "Swipe left on a song to add it to the queue."
+        #endif
+    }()
+
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+                .presentationBackground(.ultraThinMaterial)
+        }
+    }
+
+    private var content: some View {
             Group {
                 if player.queue.isEmpty {
                     ContentUnavailableView(
                         "Queue Empty",
                         systemImage: "list.bullet",
-                        description: Text("Swipe left on a song to add it to the queue.")
+                        description: Text(Self.emptyHint)
                     )
                 } else {
                     List {
@@ -83,7 +103,7 @@ struct QueueSheet: View {
             .navigationTitle("Queue (\(player.queue.count))")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     if !player.queue.isEmpty {
                         Button("Clear") {
                             player.clearQueue()
@@ -91,12 +111,12 @@ struct QueueSheet: View {
                         .foregroundStyle(Color.lsError)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .primaryAction) {
+                    if !embedded {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-        }
-        .presentationBackground(.ultraThinMaterial)
     }
 
     private var queueArtPlaceholder: some View {

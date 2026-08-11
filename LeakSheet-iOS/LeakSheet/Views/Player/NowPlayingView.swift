@@ -70,11 +70,11 @@ struct NowPlayingView: View {
                     .tint(readableAccent ?? Color.lsAccent)
 
                     HStack {
-                        Text(PlayerViewModel.formatTime(player.displayTime))
+                        Text(Format.time(player.displayTime))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(player.duration > 0 ? PlayerViewModel.formatTime(player.duration) : (player.currentTrack?.trackLength ?? "--:--"))
+                        Text(player.duration > 0 ? Format.time(player.duration) : (player.currentTrack?.trackLength ?? "--:--"))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -125,8 +125,14 @@ struct NowPlayingView: View {
                     .accessibilityLabel("Next track")
                 }
 
-                // Secondary controls row
-                HStack(spacing: 28) {
+                // Secondary controls row.
+                // Spacing reduced from 28 and horizontal padding added: every
+                // child here is incompressible (a fixed-size label plus three
+                // 44pt frames, each in a glass capsule), and unlike the track
+                // info and progress rows this one had no padding at all — so
+                // on a non-Max iPhone the row overflowed and the widest,
+                // leftmost child (the quality button) ran off the left edge.
+                HStack(spacing: 16) {
                     // Quality toggle
                     if player.currentTrack != nil {
                         Button {
@@ -142,10 +148,14 @@ struct NowPlayingView: View {
                             )
                             .font(.caption.weight(.medium))
                             .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
-                            // Pinned single-line width — see DECISIONS.md::NowPlayingView.swift::original-label-width
+                            // lineLimit(1) still prevents the two-line wrap
+                            // that DECISIONS.md::NowPlayingView.swift::original-label-width
+                            // records, but without fixedSize — which turned
+                            // that wrap into an off-screen overflow. The label
+                            // may now truncate on the narrowest devices
+                            // instead of pushing the row past the bezel.
                             .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                         }
                         .buttonStyle(.glass)
@@ -229,7 +239,7 @@ struct NowPlayingView: View {
             )
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
                     } label: {
@@ -238,7 +248,7 @@ struct NowPlayingView: View {
                     }
                     .accessibilityLabel("Close now playing")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         if let track = player.currentTrack {
                             Button {
@@ -266,7 +276,7 @@ struct NowPlayingView: View {
                         }
                         if let link = player.currentTrack?.links?.first {
                             Button {
-                                UIPasteboard.general.string = link
+                                Pasteboard.copy(link)
                             } label: {
                                 Label("Copy Link", systemImage: "doc.on.doc")
                             }

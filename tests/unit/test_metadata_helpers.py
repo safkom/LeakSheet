@@ -115,6 +115,16 @@ class TestParseImgurMetadata:
         result = _parse_imgur_metadata({"mimeType": "video/mp4", "name": "clip.mp4"})
         assert result["media_kind"] == "video"
 
+    def test_live_api_type_key(self):
+        # The real imgur.gg response uses "type", not "mimeType" — reading
+        # only the latter made every live response report media_kind
+        # "unknown" (verified against the live API, 2026-08).
+        result = _parse_imgur_metadata(
+            {"size": 7899713, "type": "video/mp4", "name": "clip.mp4"}
+        )
+        assert result["mime_type"] == "video/mp4"
+        assert result["media_kind"] == "video"
+
 
 class TestDeriveMediaKind:
     def test_video_codecs(self):

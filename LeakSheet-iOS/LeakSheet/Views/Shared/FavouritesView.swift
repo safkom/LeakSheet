@@ -8,14 +8,34 @@ struct FavouritesView: View {
 
     @State private var showDescription: DescriptionSheet.Payload?
 
+    /// Set when hosted as a sidebar destination rather than presented as a
+    /// sheet — the host supplies the navigation chrome.
+    var embedded = false
+
+    private static let emptyHint: String = {
+        #if os(macOS)
+        "Right-click a song and choose Favourite to save it here."
+        #else
+        "Swipe left on a song and tap the heart to favourite it."
+        #endif
+    }()
+
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+                .presentationBackground(.ultraThinMaterial)
+        }
+    }
+
+    private var content: some View {
             Group {
                 if favourites.entries.isEmpty {
                     ContentUnavailableView(
                         "No Favourites",
                         systemImage: "heart",
-                        description: Text("Swipe left on a song and tap the heart to favourite it.")
+                        description: Text(Self.emptyHint)
                     )
                 } else {
                     List {
@@ -73,6 +93,7 @@ struct FavouritesView: View {
                                                     .font(.caption2.monospacedDigit())
                                                     .foregroundStyle(.secondary)
                                             }
+                                            .contentShape(Rectangle())
                                         }
                                         .buttonStyle(.plain)
                                         .swipeActions(edge: .trailing) {
@@ -103,7 +124,7 @@ struct FavouritesView: View {
                     .environment(PlayerViewModel.shared)
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     if !favourites.entries.isEmpty {
                         Button("Clear All") {
                             favourites.clearAll()
@@ -111,12 +132,12 @@ struct FavouritesView: View {
                         .foregroundStyle(Color.lsError)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .primaryAction) {
+                    if !embedded {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-        }
-        .presentationBackground(.ultraThinMaterial)
     }
 
     private var favArtPlaceholder: some View {

@@ -119,6 +119,7 @@ struct SongRowView: View {
         .padding(.horizontal, 12)
         .background(isPlaying ? Color.lsAccent.opacity(0.08) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .rowHoverHighlight()
         .swipeActions(edge: .trailing) {
             Button {
                 if version != nil {

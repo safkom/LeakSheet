@@ -1,15 +1,47 @@
-# LeakSheet iOS — Specification
+# LeakSheet Apple apps — Specification
 
-> Reference spec for the maintained native client.
-> Target: SwiftUI, iOS 27+, Swift 6, Liquid Glass design language.
-> Last verified against source: 2026-07-25.
+> Reference spec for the maintained native clients.
+> Targets: SwiftUI, iOS 27 / macOS 27 / tvOS 27, Swift 6, Liquid Glass design language.
+> Last verified against source: 2026-07-25 (iOS sections), 2026-08-03 (platform matrix).
+
+---
+
+## Platform matrix
+
+One Xcode project, two app targets. `Shared/` (models, services, view models,
+platform-neutral views) belongs to both; each platform owns its own view tree.
+
+| | iOS | macOS | tvOS |
+|---|---|---|---|
+| Target | `LeakSheet` | `LeakSheet` | `LeakSheetTV` |
+| Shell | `NavigationStack` | `NavigationSplitView` sidebar | sidebar `TabView` |
+| Player bar | `safeAreaBar` | `safeAreaBar` (window bottom) | `safeAreaBar` |
+| Song actions | swipe + context menu | context menu + right-click | detail screen |
+| Refresh | `.refreshable` | ⌘R | toolbar button |
+| Queue | sheet | `.inspector` (⌥⌘Q) | full-screen |
+| Now Playing | sheet | separate `Window` (⇧⌘0) | full-screen |
+| Web links | `SFSafariViewController` | `NSWorkspace` | QR code |
+| Embeds | `WKWebView` | `WKWebView` (AppKit) | QR code — no WebKit on tvOS |
+| Video | `AVPlayerLayer` + `AVPlayerViewController` | AVKit `VideoPlayer` | AVKit `VideoPlayer` |
+| Audio session | `AVAudioSession` | none (CoreAudio) | `AVAudioSession` |
+| Haptics | yes | no-op | no-op |
+| Clipboard | `UIPasteboard` | `NSPasteboard` | unavailable |
+| Sandbox | — | app sandbox + network client | — |
+
+Liquid Glass (`glassEffect`, `GlassEffectContainer`, `buttonStyle(.glass)`,
+`safeAreaBar`) is available on all three platforms and is used unchanged.
+
+Platform divergence is confined to `Shared/Utilities/Platform.swift`, the
+`#if os(macOS)` regions in `AudioEngine`/`LeakSheetApp`/`VideoSurfaceView`/
+`EmbedPlayerView`/`SafariView`, two mid-chain `#if`s in `ArtistView`, and the
+per-platform view folders. See [DECISIONS.md](DECISIONS.md).
 
 ---
 
 ## 0. Architecture
 
 - **Language:** Swift 6 (strict concurrency)
-- **UI:** SwiftUI, iOS 27+
+- **UI:** SwiftUI, iOS 27+ / macOS 27+ / tvOS 27+
 - **Build settings:** `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`
 - **Navigation:** `NavigationStack(path:)` with type-safe `.navigationDestination(for: Artist.self)`
 - **State:** `@Observable` macro (Observation framework), `@Environment` injection

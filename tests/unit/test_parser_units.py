@@ -1344,3 +1344,114 @@ class TestContentTabEraNamesFromMainTab:
         assert [(e.era_name, e.name) for e in entries] == [
             ("Rodeo", "Astroworld"), ("Rodeo", "Another Song")
         ]
+
+
+class TestBrokenStatsFormula:
+    """A `#REF!` in the era-stats column must not hide era headers.
+
+    Regression for the Future tracker (2026-08): its stats column was a
+    broken formula, so `_is_era_header` matched nothing, every era header
+    was missed, and all 1019 songs collapsed into a single era literally
+    named "#REF!".
+    """
+
+    @staticmethod
+    def _sheet(stats_a: str, stats_b: str) -> str:
+        return (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            f"<tr><td>{stats_a}</td><td>Dirty Sprite</td><td></td><td></td></tr>"
+            "<tr><td>Dirty Sprite</td><td>Hey Ho</td><td>n</td>"
+            "<td><a href='https://pillows.su/f/x'>l</a></td></tr>"
+            f"<tr><td>{stats_b}</td><td>Pluto</td><td></td><td></td></tr>"
+            "<tr><td>Pluto</td><td>Turn On The Lights</td><td>n</td>"
+            "<td><a href='https://pillows.su/f/y'>l</a></td></tr>"
+            "</table>"
+        )
+
+    def test_valid_stats_cell_splits_eras(self):
+        from src.parser import parse_sheet
+        artist = parse_sheet(self._sheet("2 Full", "1 Full"), "Future")
+        assert [e.name for e in artist.eras] == ["Dirty Sprite", "Pluto"]
+
+    def test_error_stats_cell_splits_eras_identically(self):
+        """Only the stats cell differs from the test above."""
+        from src.parser import parse_sheet
+        artist = parse_sheet(self._sheet("#REF!", "#REF!"), "Future")
+        assert [e.name for e in artist.eras] == ["Dirty Sprite", "Pluto"]
+
+    def test_error_value_is_never_an_era_name(self):
+        from src.parser import _looks_like_era_name
+        for err in ("#REF!", "#N/A", "#VALUE!", "#DIV/0!", "#NAME?"):
+            assert _looks_like_era_name(err) is False, err
+
+    def test_real_era_names_still_pass(self):
+        from src.parser import _looks_like_era_name
+        for name in ("Dirty Sprite", "DS2", "56 Nights"):
+            assert _looks_like_era_name(name) is True, name
+
+
+class TestArtTabCoverSelection:
+    """The cover test reads Project Type, not the whole row.
+
+    Regression (2026-08): `\\bcover\\b` was searched across the concatenated
+    row, and tracker Notes mention "cover" constantly, so the branch fired on
+    nearly every row and each era kept whichever image came first — 18 of 47
+    Ye eras ended up showing a different album's artwork.
+    """
+
+    HEADER = (
+        "<tr><td>Era</td><td>Name</td><td>Project Type</td><td>Notes</td></tr>"
+    )
+
+    def test_notes_mentioning_cover_do_not_win(self):
+        from src.parser import parse_art_tab
+        html = (
+            "<table>" + self.HEADER +
+            # First row: a single's art. Notes say "cover", Project Type does not.
+            "<tr><td>Donda</td><td>Only One</td><td>Single Art</td>"
+            "<td>Cover was shot in Paris</td>"
+            "<td><img src='https://img/wrong.png'></td></tr>"
+            # Second row: the actual album cover.
+            "<tr><td>Donda</td><td>Donda</td><td>Front Cover</td><td>n</td>"
+            "<td><img src='https://img/right.png'></td></tr>"
+            "</table>"
+        )
+        assert parse_art_tab(html)["donda"] == "https://img/right.png"
+
+    def test_blank_era_cell_carries_forward(self):
+        from src.parser import parse_art_tab
+        # Continuation rows leave Era blank; the image must stay with Donda
+        # rather than being filed under the artwork's own name.
+        html = (
+            "<table>" + self.HEADER +
+            "<tr><td>Donda</td><td>Promo</td><td>Promo Shot</td><td>n</td>"
+            "<td><img src='https://img/promo.png'></td></tr>"
+            "<tr><td></td><td>Alt Sleeve</td><td>Front Cover</td><td>n</td>"
+            "<td><img src='https://img/cover.png'></td></tr>"
+            "</table>"
+        )
+        art = parse_art_tab(html)
+        assert art == {"donda": "https://img/cover.png"}
+        assert "alt sleeve" not in art
+
+    def test_falls_back_to_first_image_without_a_cover_row(self):
+        from src.parser import parse_art_tab
+        html = (
+            "<table>" + self.HEADER +
+            "<tr><td>Yandhi</td><td>Promo</td><td>Promo Shot</td><td>n</td>"
+            "<td><img src='https://img/a.png'></td></tr>"
+            "</table>"
+        )
+        assert parse_art_tab(html)["yandhi"] == "https://img/a.png"
+
+    def test_headerless_art_tab_still_parses(self):
+        from src.parser import parse_art_tab
+        # No header row → row-wide fallback, preserving old behaviour.
+        html = (
+            "<table>"
+            "<tr><td>Graduation</td><td>Front Cover</td>"
+            "<td><img src='https://img/g.png'></td></tr>"
+            "</table>"
+        )
+        assert parse_art_tab(html)["graduation"] == "https://img/g.png"

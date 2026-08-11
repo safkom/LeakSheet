@@ -8,7 +8,7 @@ struct ArtistStatsBarView: View {
 
     var body: some View {
         if let onTap {
-            Button(action: onTap) { barContent }
+            Button(action: onTap) { barContent.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .accessibilityHint("Shows the full stats breakdown")
         } else {

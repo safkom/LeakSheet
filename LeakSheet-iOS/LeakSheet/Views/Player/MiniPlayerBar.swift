@@ -57,7 +57,7 @@ struct MiniPlayerBar: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                     if player.duration > 0 {
-                                        Text(PlayerViewModel.formatTime(player.displayTime))
+                                        Text(Format.time(player.displayTime))
                                             .font(.caption2.monospacedDigit())
                                             .foregroundStyle(.secondary)
                                     }

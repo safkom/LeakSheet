@@ -6,6 +6,11 @@ struct VersionRowView: View {
     /// Position within the song's version list — fallback label when the
     /// version has no explicit tag, so untagged versions stay tellable apart.
     var versionIndex: Int? = nil
+    /// The song this version belongs to — carries `songKey` for the
+    /// description sheet's cross-era version picker, and lets its context
+    /// menu offer Favourite (previously passed nil, which silently hid the
+    /// Favourite action from every expanded-version row's menu).
+    let song: Song
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -67,6 +72,7 @@ struct VersionRowView: View {
         .padding(.trailing, 12)
         .background(isPlaying ? Color.lsAccent.opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .rowHoverHighlight()
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
         .onTapGesture {
@@ -79,7 +85,7 @@ struct VersionRowView: View {
                 }
             } else {
                 onShowDescription(DescriptionSheet.Payload(
-                    song: nil, version: version,
+                    song: song, version: version,
                     artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
                 ))
             }
@@ -104,7 +110,7 @@ struct VersionRowView: View {
 
     private var versionMenu: some View {
         ThreeDotMenu(
-            version: version, song: nil,
+            version: version, song: song,
             artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
             eraName: eraName, eraArt: eraArt,
             onPlay: onPlay, onShowDescription: onShowDescription
@@ -114,7 +120,7 @@ struct VersionRowView: View {
     @ViewBuilder
     private var contextMenuItems: some View {
         SongContextMenu(
-            version: version, song: nil,
+            version: version, song: song,
             artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
             eraName: eraName, eraArt: eraArt,
             onPlay: onPlay, onShowDescription: onShowDescription

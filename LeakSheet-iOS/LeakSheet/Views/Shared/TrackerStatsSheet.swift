@@ -101,13 +101,12 @@ struct TrackerStatsSheet: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Stats")
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
