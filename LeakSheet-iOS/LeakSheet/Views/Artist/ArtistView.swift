@@ -114,7 +114,6 @@ private struct ArtistContentView: View {
         artist.eras.contains { !($0.timeline ?? []).isEmpty }
     }
     @Environment(PlayerViewModel.self) private var player
-    @Environment(FavouritesManager.self) private var favourites
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// era name (lowercased) → art URL, first occurrence wins — mirrors the

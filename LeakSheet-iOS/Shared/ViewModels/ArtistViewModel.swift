@@ -287,22 +287,29 @@ final class ArtistViewModel {
     /// that opened the sheet may be a single-version snapshot from the
     /// current filter.
     func resolvedSong(for payload: SongDetailPayload) -> Song? {
-        guard let payloadSong = payload.song else { return nil }
         let refs = crossEraRefs(for: payload)
         return refs.first(where: { $0.eraName == payload.eraName })?.song
             ?? refs.first?.song
-            ?? payloadSong
+            ?? payload.song
     }
 
     /// Every era containing this payload's song. Prefers `songKey`, which only
     /// indexes songs spanning >1 era, and falls back to the base-name index —
     /// which also covers era-unique songs and payloads carrying no songKey.
+    ///
+    /// A nil `payload.song` is NOT a dead end: Now Playing and Favourites only
+    /// hold a bare `SongVersion`, and bailing here is why the description sheet
+    /// opened from the player's Info button lost its Versions picker, its alt
+    /// title, and its song-level credits. The version's own `derivedBaseName`
+    /// (tag stripped) is the same key the base-name index is built on.
     func crossEraRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
-        guard let payloadSong = payload.song else { return [] }
-        if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
-            return refs
+        if let payloadSong = payload.song {
+            if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
+                return refs
+            }
+            return baseNameEras[payloadSong.baseName] ?? []
         }
-        return baseNameEras[payloadSong.baseName] ?? []
+        return baseNameEras[payload.version.derivedBaseName] ?? []
     }
 
     /// Preferred construction path: the stats/content pass runs off-main.

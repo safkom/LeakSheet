@@ -10,7 +10,6 @@ struct PendingBrowse: Equatable {
 
 /// Landing screen — URL input, recent trackers, discovery.
 struct LandingView: View {
-    @Environment(PlayerViewModel.self) private var player
     @Environment(RecentTrackersManager.self) private var recents
 
     @State private var loader = TrackerLoader()

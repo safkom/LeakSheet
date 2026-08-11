@@ -3,6 +3,9 @@ import SwiftUI
 /// Mini player bar shown at bottom of screen when a track is loaded.
 struct MiniPlayerBar: View {
     @Environment(PlayerViewModel.self) private var player
+    /// Forwarded to Now Playing so its description sheet can resolve the song
+    /// behind the playing version. Nil when nothing relevant is loaded.
+    @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
     @State private var showNowPlaying = false
 
     var body: some View {
@@ -85,23 +88,29 @@ struct MiniPlayerBar: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Previous track")
 
-                        if player.loading {
-                            ProgressView()
-                                .controlSize(.regular)
+                        // Spinner overlays the button rather than replacing it:
+                        // swapping the Button out removed the tap target for
+                        // the whole load, so pausing a slow stream was
+                        // impossible until it started.
+                        Button {
+                            player.togglePlay()
+                        } label: {
+                            Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 38))
+                                .foregroundStyle(Color.lsAccent)
+                                .opacity(player.loading ? 0 : 1)
                                 .frame(width: 44, height: 44)
-                        } else {
-                            Button {
-                                player.togglePlay()
-                            } label: {
-                                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 38))
-                                    .foregroundStyle(Color.lsAccent)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                                .overlay {
+                                    if player.loading {
+                                        ProgressView()
+                                            .controlSize(.regular)
+                                            .tint(Color.lsAccent)
+                                    }
+                                }
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
 
                         Button {
                             player.playNext()
@@ -126,6 +135,7 @@ struct MiniPlayerBar: View {
                 NowPlayingView()
                     .environment(PlayerViewModel.shared)
                     .environment(FavouritesManager.shared)
+                    .environment(artistVM)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }

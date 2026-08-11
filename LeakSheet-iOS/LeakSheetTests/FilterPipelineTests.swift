@@ -507,6 +507,73 @@ struct CrossEraIndexTests {
         #expect(resolved?.versions.count == 2)
         #expect(resolved?.versions.contains(where: { $0.id == filteredSong.versions[0].id }) == true)
     }
+
+    /// Now Playing and Favourites only hold a bare `SongVersion`, so their
+    /// payloads carry `song: nil`. Both lookups used to bail on that, which is
+    /// why the description sheet raised from the player's Info button showed no
+    /// Versions picker, no alt title and only the playing version's credits.
+    /// The version's own tag-stripped name is the base-name index's key.
+    @Test func `a payload without a song resolves through the version's base name`() async {
+        let fullSong = song("This One Here", key: "this one here", versions: 3)
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [era("War", songs: [fullSong])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+
+        // Exactly the shape NowPlayingView builds: no song, one version, and
+        // a name carrying the version tag the player displays.
+        let bare = SongVersion(
+            name: "This One Here [V2]", versionTag: "V2", badge: nil, featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, director: nil,
+            creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
+            ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
+            leakDate: nil, availableLength: "Full", quality: nil, streaming: nil,
+            links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        )
+        let payload = DescriptionSheet.Payload(
+            song: nil, version: bare,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+
+        let refs = await MainActor.run { vm.crossEraRefs(for: payload) }
+        #expect(refs.map(\.eraName) == ["War"])
+
+        let resolved = await MainActor.run { vm.resolvedSong(for: payload) }
+        // 3, not 1: the Versions section renders only when count > 1.
+        #expect(resolved?.allVersions.count == 3)
+        #expect(resolved?.baseName == "This One Here")
+    }
+
+    @Test func `a payload with no song and no match still returns nil rather than trapping`() async {
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [era("War", songs: [song("Something Else", key: "something else")])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let orphan = SongVersion(
+            name: "Not In This Tracker", versionTag: nil, badge: nil, featuring: nil,
+            producers: nil, collaboration: nil, refs: nil, director: nil,
+            creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
+            ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
+            leakDate: nil, availableLength: nil, quality: nil, streaming: nil,
+            links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        )
+        let payload = DescriptionSheet.Payload(
+            song: nil, version: orphan,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        let refs = await MainActor.run { vm.crossEraRefs(for: payload) }
+        #expect(refs.isEmpty)
+        let resolved = await MainActor.run { vm.resolvedSong(for: payload) }
+        #expect(resolved == nil)
+    }
 }
 
 // MARK: - Leak-date parsing (2026-07-20 review)

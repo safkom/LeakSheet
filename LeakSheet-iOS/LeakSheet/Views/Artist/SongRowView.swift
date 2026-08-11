@@ -200,8 +200,11 @@ struct SongRowView: View {
     private var leadingIcon: some View {
         if isPlaying {
             if player.loading {
+                // Untinted, this drew in the era colour on the era-tinted
+                // panel behind it — see the same fix in NowPlayingView.
                 ProgressView()
                     .controlSize(.mini)
+                    .tint(Color.lsAccent)
             } else {
                 Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
                     .font(.caption)

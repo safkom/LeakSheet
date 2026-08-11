@@ -20,6 +20,15 @@ actor EraColorExtractor {
         // cache from era name to art URL); harmless if already absent.
         UserDefaults.standard.removeObject(forKey: "leaksheet_era_rgb_v2")
         cache = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: [Double]] ?? [:]
+        // Seed the eviction order from what we just restored. Without this the
+        // list started empty against a full cache, so the first extraction of
+        // every launch pushed count to 201 and then evicted
+        // insertionOrder.prefix(1) — the key just added. The cache froze at
+        // whatever 200 entries were persisted and no new era colour was ever
+        // written again. Dictionary order is arbitrary, so restored entries
+        // evict in an arbitrary (but stable-for-this-launch) order; entries
+        // added during the session still evict oldest-first behind them.
+        insertionOrder = Array(cache.keys)
     }
 
     // MARK: - Public API
@@ -169,15 +178,32 @@ actor EraColorExtractor {
     private func cache(_ rgb: RGB, forKey key: String) {
         if cache[key] == nil { insertionOrder.append(key) }
         cache[key] = [rgb.r, rgb.g, rgb.b]
-        if cache.count > 200 {
-            // Oldest-first, not `cache.keys.prefix` — dictionary key order is
-            // arbitrary, so the old eviction threw away whichever entries it
-            // happened to visit, including ones extracted seconds earlier.
-            let excess = cache.count - 200
-            for k in insertionOrder.prefix(excess) { cache.removeValue(forKey: k) }
-            insertionOrder.removeFirst(excess)
-        }
+        Self.evict(cache: &cache, insertionOrder: &insertionOrder)
         scheduleFlush()
+    }
+
+    static let cacheLimit = 200
+
+    /// Trim to `cacheLimit`, dropping oldest-inserted first.
+    ///
+    /// Oldest-first, not `cache.keys.prefix` — dictionary key order is
+    /// arbitrary, so the original eviction threw away whichever entries it
+    /// happened to visit, including ones extracted seconds earlier.
+    ///
+    /// `min()` guards two things: `removeFirst(k)` traps when k exceeds the
+    /// count, and `insertionOrder` can legitimately be shorter than `cache`
+    /// (it is seeded from the restored keys, but a persisted dictionary larger
+    /// than the limit still has to drain over several calls).
+    ///
+    /// Split out as a pure function purely so the invariant is testable — the
+    /// extractor itself is a singleton actor whose init runs once per process.
+    nonisolated static func evict(
+        cache: inout [String: [Double]], insertionOrder: inout [String]
+    ) {
+        guard cache.count > cacheLimit else { return }
+        let excess = min(cache.count - cacheLimit, insertionOrder.count)
+        for k in insertionOrder.prefix(excess) { cache.removeValue(forKey: k) }
+        insertionOrder.removeFirst(excess)
     }
 
     /// Memory is authoritative; UserDefaults is caught up shortly after the

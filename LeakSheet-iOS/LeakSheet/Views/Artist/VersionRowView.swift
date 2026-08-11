@@ -20,7 +20,6 @@ struct VersionRowView: View {
     var onShowDescription: (DescriptionSheet.Payload) -> Void
 
     @Environment(PlayerViewModel.self) private var player
-    @Environment(FavouritesManager.self) private var favourites
 
     private var isPlaying: Bool {
         guard let current = player.currentTrack else { return false }
@@ -75,20 +74,12 @@ struct VersionRowView: View {
         .rowHoverHighlight()
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
+        // Tap opens Details, never plays — matches every other row kind.
         .onTapGesture {
-            if canStream {
-                Haptics.light()
-                if let onPlay {
-                    onPlay(version)
-                } else {
-                    player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "")
-                }
-            } else {
-                onShowDescription(DescriptionSheet.Payload(
-                    song: song, version: version,
-                    artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
-                ))
-            }
+            onShowDescription(DescriptionSheet.Payload(
+                song: song, version: version,
+                artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
+            ))
         }
         .swipeActions(edge: .trailing) {
             if canStream {
@@ -99,6 +90,24 @@ struct VersionRowView: View {
                     Image(systemName: "text.append")
                 }
                 .tint(.lsAccent)
+            }
+        }
+        // Leading swipe-to-play, matching SongRowView. Version rows never had
+        // one — tap was the only way to play a specific version, and tap no
+        // longer plays.
+        .swipeActions(edge: .leading) {
+            if canStream {
+                Button {
+                    Haptics.light()
+                    if let onPlay {
+                        onPlay(version)
+                    } else {
+                        player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .tint(.green)
             }
         }
         .contextMenu {

@@ -126,20 +126,13 @@ struct SearchResultsListView: View {
                 )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
+                // Tap opens Details, never plays — see handleSongTap.
                 .onTapGesture {
-                    if result.version.isStreamable {
-                        Haptics.light()
-                        playWithinList(
-                            results.map { (version: $0.version, era: $0.era, id: $0.id) },
-                            tappedId: result.id
-                        )
-                    } else {
-                        onShowDescription(DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artistName, artistSlug: artistSlug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        ))
-                    }
+                    onShowDescription(DescriptionSheet.Payload(
+                        song: result.song, version: result.version,
+                        artistName: artistName, artistSlug: artistSlug,
+                        eraName: result.era.name, eraArt: result.era.artUrl
+                    ))
                 }
                 .padding(.horizontal, 16)
             }
@@ -227,24 +220,23 @@ struct ErasListView: View {
         }
     }
 
-    /// Multi-version songs expand/collapse; single-version songs play (or
-    /// show the description when not streamable).
+    /// Multi-version songs expand/collapse; single-version songs open Details.
+    ///
+    /// Tap used to start playback, which made an accidental brush of the list
+    /// hijack whatever was playing. Play is still one gesture away: swipe from
+    /// the leading edge, long-press → Play, the three-dot menu, or the Play
+    /// button inside Details.
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
         } else if let v = song.versions.first {
-            if v.isStreamable {
-                Haptics.light()
-                playWithEraContext(v, eraName: eraName)
-            } else {
-                onShowDescription(DescriptionSheet.Payload(
-                    song: song, version: v,
-                    artistName: artistName, artistSlug: artistSlug,
-                    eraName: eraName, eraArt: eraArt
-                ))
-            }
+            onShowDescription(DescriptionSheet.Payload(
+                song: song, version: v,
+                artistName: artistName, artistSlug: artistSlug,
+                eraName: eraName, eraArt: eraArt
+            ))
         }
     }
 
@@ -356,9 +348,7 @@ struct MiscListView: View {
                         )
                         .contentShape(Rectangle())
                         .accessibilityAddTraits(.isButton)
-                        .onTapGesture {
-                            handleRowTap(entry, in: entries)
-                        }
+                        .onTapGesture { handleRowTap(entry) }
                         .padding(.horizontal, 16)
                     }
                 }
@@ -366,21 +356,18 @@ struct MiscListView: View {
         }
     }
 
-    /// A single link is unambiguous, so the row's own tap performs it
-    /// directly. Zero or multiple links have no one obvious action — the
-    /// description sheet is the safe default, and the row's menu (built from
-    /// `entry.mediaLinks`) lets the user pick a specific link explicitly.
-    private func handleRowTap(_ entry: MiscEntry, in entries: [MiscEntry]) {
-        let links = entry.mediaLinks
-        if links.count == 1 {
-            handleLinkSelection(links[0], for: entry, in: entries)
-        } else {
-            onShowDescription(DescriptionSheet.Payload(
-                song: nil, version: entry.asSongVersion,
-                artistName: artistName, artistSlug: artistSlug,
-                eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
-            ))
-        }
+    /// Tap always opens Details, whatever the link count.
+    ///
+    /// A single link used to be performed directly, so a stray tap started a
+    /// stream or bounced the user into Safari. The row's own affordances (the
+    /// trailing link control, the menu built from `entry.mediaLinks`) and the
+    /// sheet itself still reach every link explicitly.
+    private func handleRowTap(_ entry: MiscEntry) {
+        onShowDescription(DescriptionSheet.Payload(
+            song: nil, version: entry.asSongVersion,
+            artistName: artistName, artistSlug: artistSlug,
+            eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
+        ))
     }
 
     /// Stream-kind links play with continuation across every other
@@ -495,21 +482,13 @@ struct RecentsListView: View {
                 )
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isButton)
+                // Tap opens Details, never plays — see handleSongTap.
                 .onTapGesture {
-                    if result.version.isStreamable {
-                        Haptics.light()
-                        // Prebuilt playback list continues down the FULL
-                        // recents list, not just the rendered window.
-                        if let (items, idx) = vm.recentPlayback(for: result.id) {
-                            player.playInList(items, startAt: idx)
-                        }
-                    } else {
-                        onShowDescription(DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artistName, artistSlug: artistSlug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        ))
-                    }
+                    onShowDescription(DescriptionSheet.Payload(
+                        song: result.song, version: result.version,
+                        artistName: artistName, artistSlug: artistSlug,
+                        eraName: result.era.name, eraArt: result.era.artUrl
+                    ))
                 }
                 .padding(.horizontal, 16)
                 .onAppear {
