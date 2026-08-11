@@ -276,6 +276,15 @@ extension ArtistViewModel {
             let flagged = entries.filter { $0.name.contains(Badge.worst.emoji) }
             if !flagged.isEmpty { entries = flagged }
         }
+        if state.grails {
+            // The chip was doing nothing at all on a content tab: every other
+            // badge filter was honoured here and this one was simply missing.
+            // Grail + wanted, matching the eras branch's combined chip.
+            let sought = entries.filter { e in
+                e.name.contains(Badge.grail.emoji) || e.name.contains(Badge.wanted.emoji)
+            }
+            if !sought.isEmpty { entries = sought }
+        }
         if !state.query.isEmpty {
             let q = state.query
             entries = entries.filter { e in

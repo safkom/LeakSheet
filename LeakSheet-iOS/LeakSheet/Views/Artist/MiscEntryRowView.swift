@@ -66,7 +66,14 @@ struct MiscEntryRowView: View {
 
             trailingAffordance
         }
-        .padding(.vertical, 6)
+        // Matches SongRowView's metrics so a content-tab row reads as the same
+        // kind of object as a song row. These used to be 6pt vertical, no
+        // horizontal padding, no clip and no hover — visibly a different row
+        // family sitting under the same era card.
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .rowHoverHighlight()
         .accessibilityElement(children: .combine)
     }
 
@@ -130,17 +137,10 @@ struct MiscEntryRowView: View {
 
     // MARK: - Pieces
 
+    /// The shared pill, not a fifth bespoke copy — BadgePill's own doc comment
+    /// already claims to have folded every one of these in.
     private func typePill(_ type: String) -> some View {
-        Text(type.uppercased())
-            .font(.caption2.weight(.bold))
-            .tracking(0.5)
-            .foregroundStyle(Color.lsAccent)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.lsAccent.opacity(0.12))
-            .clipShape(Capsule())
-            .fixedSize()
-            .accessibilityLabel("Type: \(type)")
+        BadgePill(text: type.uppercased(), variant: .accent, accessibilityPrefix: "Type")
     }
 
     private func metaText(_ text: String, icon: String) -> some View {

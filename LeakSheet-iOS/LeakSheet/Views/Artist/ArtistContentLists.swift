@@ -16,13 +16,14 @@ import SwiftUI
 struct FilterTogglesView: View {
     let vm: ArtistViewModel
 
+    /// Icon for a content-tab chip. Badge-annotation kinds (best_of, worst_of,
+    /// …) never reach here — `availableTabs` filters them out because they are
+    /// annotation sources, not pages — so they have no arms.
     static func tabIcon(for kind: String) -> String {
         switch kind {
         case "misc": return "film.stack"
         case "music_videos": return "video"
         case "released": return "music.note.list"
-        case "best_of": return "star.circle"
-        case "worst_of": return "hand.thumbsdown"
         case "stems": return "waveform.path"
         default: return "square.grid.2x2"
         }
@@ -103,7 +104,7 @@ struct SearchResultsListView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 4)
 
-            ForEach(results) { result in
+            ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
                 SongRowView(
                     song: result.song,
                     version: result.version,
@@ -134,7 +135,14 @@ struct SearchResultsListView: View {
                         eraName: result.era.name, eraArt: result.era.artUrl
                     ))
                 }
-                .padding(.horizontal, 16)
+                // Same tinted panel the eras branch uses, so a search result
+                // reads as the same kind of object as the row it came from.
+                // The tail rounds where the era changes.
+                .songPanel(
+                    vm.eraDisplay[result.era.name],
+                    isLast: idx == results.count - 1
+                        || results[idx + 1].era.name != result.era.name
+                )
             }
         }
     }
@@ -280,6 +288,17 @@ struct MiscListView: View {
         vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
+    /// Normalised key for `vm.eraDisplay`.
+    ///
+    /// The card renders "Other" for an empty era name and matches its art
+    /// case-insensitively, but colours were stored and read under the RAW
+    /// name — so an empty-named group loaded its cover and then rendered
+    /// uncoloured, and any casing difference against the main-tab era did the
+    /// same. Reads and writes now agree on one key.
+    private func colorKey(_ eraName: String) -> String {
+        eraName.isEmpty ? "Other" : eraName
+    }
+
     /// A minimal `Era` so a content-tab group renders through the same
     /// `EraCardView` as the main list. Only name and art matter here — the
     /// card reads nothing else, and the group's own entries are rendered
@@ -324,7 +343,7 @@ struct MiscListView: View {
                 EraCardView(
                     era: eraForGroup(group),
                     expanded: expanded,
-                    displayColors: vm.eraDisplay[group.eraName],
+                    displayColors: vm.eraDisplay[colorKey(group.eraName)],
                     subtitle: "\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")",
                     onTap: {
                         withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
@@ -336,14 +355,14 @@ struct MiscListView: View {
                         }
                     },
                     onColorExtracted: { color in
-                        vm.setEraColor(eraName: group.eraName, dominant: color)
+                        vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
                     }
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
                 if isExpanded(group.eraName, groupCount: groups.count) {
-                    ForEach(group.entries) { entry in
+                    ForEach(Array(group.entries.enumerated()), id: \.element.id) { idx, entry in
                         MiscEntryRowView(
                             entry: entry,
                             onShowDescription: onShowDescription,
@@ -352,7 +371,13 @@ struct MiscListView: View {
                         .contentShape(Rectangle())
                         .accessibilityAddTraits(.isButton)
                         .onTapGesture { handleRowTap(entry) }
-                        .padding(.horizontal, 16)
+                        // Content tabs used to render bare rows against the app
+                        // background under a card whose border opens at the
+                        // bottom to flush into a panel that wasn't there.
+                        .songPanel(
+                            vm.eraDisplay[colorKey(group.eraName)],
+                            isLast: idx == group.entries.count - 1
+                        )
                     }
                 }
               }
@@ -499,7 +524,13 @@ struct RecentsListView: View {
                         eraName: result.era.name, eraArt: result.era.artUrl
                     ))
                 }
-                .padding(.horizontal, 16)
+                // Same tinted panel as the eras branch; the tail rounds where
+                // the era group ends.
+                .songPanel(
+                    vm.eraDisplay[result.era.name],
+                    isLast: idx == visible.count - 1
+                        || visible[idx + 1].era.name != result.era.name
+                )
                 .onAppear {
                     // Against the LIVE count, not the `visible` snapshot this
                     // body closed over — a fast scroll fired several appends

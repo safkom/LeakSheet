@@ -8,13 +8,17 @@ struct BadgePill: View {
     let variant: BadgeVariant
     /// VoiceOver prefix, e.g. "Quality" → "Quality: CD Quality".
     var accessibilityPrefix: String? = nil
+    /// Larger type and padding for the description sheet, which reads at
+    /// arm's length rather than inside a dense list. This was the fifth
+    /// near-identical copy the comment above claims to have folded in.
+    var prominent: Bool = false
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(variant.foreground)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .font(prominent ? .footnote.weight(.semibold) : .caption2.weight(.semibold))
+            .foregroundStyle(variant.color)
+            .padding(.horizontal, prominent ? 10 : 7)
+            .padding(.vertical, prominent ? 5 : 3)
             .background(variant.background)
             .clipShape(Capsule())
             .fixedSize()

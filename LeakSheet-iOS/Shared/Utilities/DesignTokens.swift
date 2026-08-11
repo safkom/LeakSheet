@@ -61,6 +61,9 @@ enum BadgeVariant: String {
     case og, lossless, hq, cd, lq, rec, beatonly, na
     case ogfile, full, tagged, stem, partial, snippet, confirmed, unavailable
     case rumored, conflicting
+    /// Not a quality/availability value — the content-tab entry type
+    /// ("MUSIC VIDEO", "STEM"), which had its own bespoke pill before.
+    case accent
 
     var color: Color {
         switch self {
@@ -82,11 +85,8 @@ enum BadgeVariant: String {
         case .unavailable: .badgeUnavailable
         case .rumored: .badgeRumored
         case .conflicting: .badgeConflicting
+        case .accent: .lsAccent
         }
-    }
-
-    var foreground: Color {
-        color
     }
 
     var background: Color {

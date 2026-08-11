@@ -119,20 +119,9 @@ struct EraRowView: View {
         }
     }
 
-    /// The tinted songs-panel treatment the per-era container used to apply:
-    /// row-width tint, bottom corners rounded on the era's final row, 16pt
-    /// screen inset.
+    /// Shared with the search / recents / content-tab lists — see SongPanel.
     private func panel<Content: View>(isLast: Bool, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(maxWidth: .infinity)
-            .background(displayColors?.dominant.opacity(0.08) ?? Color.clear)
-            .clipShape(
-                UnevenRoundedRectangle(
-                    bottomLeadingRadius: isLast ? 16 : 0,
-                    bottomTrailingRadius: isLast ? 16 : 0
-                )
-            )
-            .padding(.horizontal, 16)
+        content().songPanel(displayColors, isLast: isLast)
     }
 }
 
