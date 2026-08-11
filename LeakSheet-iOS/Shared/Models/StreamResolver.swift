@@ -110,7 +110,11 @@ enum StreamResolver {
             return URL(string: "https://music.froste.lol/song/\(hash)/download")
 
         case .imgur:
-            return URL(string: originalLink)
+            // Same trap as kraken below: the /f/{id} link is an HTML page, and
+            // the real CDN URL is only discoverable through imgur's API, which
+            // the backend proxy already calls. Returning the page URL handed
+            // AVPlayer HTML and failed with "Operation Stopped".
+            return streamURL(for: originalLink)
 
         case .kraken:
             // The view URL is an HTML page — AVPlayer can't play it directly.
