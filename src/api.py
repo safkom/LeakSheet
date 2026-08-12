@@ -572,7 +572,6 @@ class SheetRequest(BaseModel):
 async def parse_sheet(
     req: SheetRequest,
     request: Request,
-    response: Response,
     bg: BackgroundTasks,
 ):
     """Fetch and parse a tracker spreadsheet.
@@ -678,18 +677,30 @@ async def parse_sheet(
 
     # Serialize + hash cost ~600ms on a Ye-sized artist — run off the event
     # loop so concurrent requests aren't stalled during a cold miss.
-    def _serialize_and_hash() -> tuple[dict, str]:
+    #
+    # Encode to bytes HERE, in the same thread, and return a Response. Handing
+    # FastAPI a plain dict undid the whole point of this: with no
+    # response_model and no response_class it ran jsonable_encoder (a full
+    # recursive walk of the 6.5MB structure) and then json.dumps AGAIN, both on
+    # the event loop. Three serializations, two of them exactly where this
+    # comment says they must not be — and the largest loop stall on the box.
+    def _serialize_and_hash() -> tuple[bytes, str]:
         d = artist.model_dump()
-        return d, compute_content_hash(d)
+        return json.dumps(d, ensure_ascii=False).encode(), compute_content_hash(d)
 
     with timer.phase("serialize"):
-        data, etag = await asyncio.to_thread(_serialize_and_hash)
-    response.headers["ETag"] = f'"{etag}"'
-    response.headers["X-Cache-Status"] = "miss"
-    response.headers["Cache-Control"] = _CC_SHEET
-    response.headers["Server-Timing"] = timer.server_timing_header()
+        body, etag = await asyncio.to_thread(_serialize_and_hash)
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
-    return data
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "ETag": f'"{etag}"',
+            "X-Cache-Status": "miss",
+            "Cache-Control": _CC_SHEET,
+            "Server-Timing": timer.server_timing_header(),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

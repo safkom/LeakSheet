@@ -80,6 +80,30 @@ _last_sheet_evict = 0.0
 # tempfile.mkstemp(prefix=f"{name}.tmp") → "abc.html.tmpQ7z1zK".
 _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 
+# Concurrent sub-page fetches, across ALL callers.
+#
+# Discovery started every discovered GID at once and _aggregate_hub_workbook
+# fetched *and parsed* every unclassified tab at once, each holding its full
+# response body — the largest export here is 11.85MB, and README.md:147 says
+# the box cannot fit two concurrent Ye-sized parses. One semaphore inside
+# _fetch_gid_page bounds all three fan-out sites at their single choke point.
+_GID_FETCH_CONCURRENCY = int(
+    os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
+)
+_gid_fetch_sem: asyncio.Semaphore | None = None
+# Hub-workbook tabs are fetched AND parsed, so they need a tighter bound.
+_HUB_LOAD_CONCURRENCY = int(
+    os.environ.get("LEAKSHEET_HUB_LOAD_CONCURRENCY", "3") or 3
+)
+
+
+def _gid_fetch_slot() -> asyncio.Semaphore:
+    """Lazily created so the semaphore binds to the running loop."""
+    global _gid_fetch_sem
+    if _gid_fetch_sem is None:
+        _gid_fetch_sem = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
+    return _gid_fetch_sem
+
 
 class PhaseTimer:
     """Collects per-phase wall-clock durations across one request.
@@ -1246,18 +1270,19 @@ async def _fetch_gid_page(
 ) -> tuple[str, str] | None:
     """Fetch a single GID sheet page. Returns (gid, html) or None."""
     try:
-        with t.phase("gid_fetch"):
-            sheet_url = _build_sheet_html_url(url_norm, gid_val, page_paths)
-            if use_cache and cache_ttl > 0:
-                cached = await _async_get_cached(sheet_url, cache_ttl)
-                if cached is not None:
-                    return (gid_val, cached[0])
-            resp = await client.get(sheet_url, timeout=timeout)
-            if resp.status_code != 200 or "<table" not in resp.text.lower():
-                return None
-            if use_cache and cache_ttl > 0:
-                await _async_set_cache(sheet_url, resp.text, title)
-            return (gid_val, resp.text)
+        async with _gid_fetch_slot():
+            with t.phase("gid_fetch"):
+                sheet_url = _build_sheet_html_url(url_norm, gid_val, page_paths)
+                if use_cache and cache_ttl > 0:
+                    cached = await _async_get_cached(sheet_url, cache_ttl)
+                    if cached is not None:
+                        return (gid_val, cached[0])
+                resp = await client.get(sheet_url, timeout=timeout)
+                if resp.status_code != 200 or "<table" not in resp.text.lower():
+                    return None
+                if use_cache and cache_ttl > 0:
+                    await _async_set_cache(sheet_url, resp.text, title)
+                return (gid_val, resp.text)
     except (httpx.HTTPError, ValueError, KeyError):
         return None
 
@@ -1470,21 +1495,29 @@ async def _aggregate_hub_workbook(
     if not candidates:
         return 0
 
+    # A SECOND, smaller bound around fetch+parse together. The gid-fetch
+    # semaphore is released once the body is in hand, so without this every
+    # candidate proceeded to hold its full HTML and build a model tree
+    # concurrently. Distinct semaphore, always acquired outside the inner one,
+    # so the nesting can't deadlock.
+    sem = asyncio.Semaphore(_HUB_LOAD_CONCURRENCY)
+
     async def _load(gid_val: str, display: str) -> tuple[str, Artist] | None:
-        try:
-            result = await _fetch_gid_page(
-                url_norm, gid_val, title, client=client, timeout=timeout,
-                cache_ttl=cache_ttl, use_cache=use_cache, t=t,
-                page_paths=page_paths,
-            )
-            if result is None:
-                return None
-            with t.phase("hub_parse"):
-                parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
-            return display, parsed
-        except Exception as e:
-            logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
-            return None
+        async with sem:
+          try:
+              result = await _fetch_gid_page(
+                  url_norm, gid_val, title, client=client, timeout=timeout,
+                  cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                  page_paths=page_paths,
+              )
+              if result is None:
+                  return None
+              with t.phase("hub_parse"):
+                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
+              return display, parsed
+          except Exception as e:
+              logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
+              return None
 
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 

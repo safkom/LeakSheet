@@ -10,6 +10,7 @@ import csv
 import logging
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
@@ -1104,7 +1105,7 @@ def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     Handles cases like "Digital Nas Collab" matching
     "Collaboration with Digital Nas".
     """
-    key_words = {w for w in key.split() if len(w) > 2}
+    key_words = _significant_words(key)
     if not key_words:
         return None
 
@@ -1112,7 +1113,7 @@ def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     best_score = 0.0
 
     for era_key, era in era_by_key.items():
-        era_words = {w for w in era_key.split() if len(w) > 2}
+        era_words = _significant_words(era_key)
         if not era_words:
             continue
         overlap = len(key_words & era_words)
@@ -1130,13 +1131,29 @@ def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     key_clean = key.replace(" ", "")
     if len(key_clean) >= 3:
         for era_key, era in era_by_key.items():
-            era_words = era_key.split()
-            if len(era_words) >= 3:
-                acro = "".join(w[0] for w in era_words if w)
-                if acro and key_clean == acro:
-                    return era
+            if _acronym(era_key) == key_clean:
+                return era
 
     return None
+
+
+# Both helpers are called once per era key PER UNMATCHED ROW — a 100-era
+# tracker registers ~300 keys, and Ye is 9350 rows, so the uncached form built
+# millions of sets. The key strings repeat across rows, which is exactly what
+# an lru_cache wants.
+@lru_cache(maxsize=8192)
+def _significant_words(era_key: str) -> frozenset[str]:
+    """Words long enough to carry meaning in overlap scoring."""
+    return frozenset(w for w in era_key.split() if len(w) > 2)
+
+
+@lru_cache(maxsize=8192)
+def _acronym(era_key: str) -> str:
+    """First letters of a >=3-word key ("shoot for the stars" → "sfts")."""
+    words = era_key.split()
+    if len(words) < 3:
+        return ""
+    return "".join(w[0] for w in words if w)
 
 
 # ---------------------------------------------------------------------------
