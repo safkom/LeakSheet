@@ -188,6 +188,21 @@ _TAB_ITEMS_PATTERN = re.compile(
     r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
 )
 
+# The same items.push() switcher, but keyed on pageUrl instead of gid. Some
+# hosts (deftonestracker.net, franktracker.net, tylertracker.net) omit the
+# `gid:` key entirely and carry the sub-page as a PATH:
+#   items.push({name: "Unreleased", pageUrl: "\/htmlview\/sheet\/554276433.html"});
+#   items.push({name: "Unreleased", pageUrl: "\/preview\/sheet\/937104017.html"});
+# Those hosts answer the ?gid= query form with the 52KB shell page — no
+# <table> — so every one of them failed with NoTablesError until we followed
+# the URL the page itself advertises.
+_TAB_PAGEURL_PATTERN = re.compile(
+    r'\{name:\s*"([^"]+)"[^}]*?pageUrl:\s*"([^"]+)"',
+)
+
+# Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
+_PAGEURL_GID_PATTERN = re.compile(r"/(\d+)\.html?$")
+
 # Art tab name keywords (after stripping emojis and normalising whitespace)
 _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", "album arts"})
 
@@ -336,13 +351,24 @@ def _extract_sheet_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _build_sheet_html_url(base_url: str, gid: str) -> str:
-    """Build the /htmlview/sheet URL that returns server-rendered HTML.
+def _build_sheet_html_url(
+    base_url: str, gid: str, page_paths: dict[str, str] | None = None
+) -> str:
+    """Build the URL that returns this tab's server-rendered HTML.
+
+    When the base page carried a switcher naming this gid's path, use it —
+    that is the URL the host actually serves. Otherwise fall back to the
+    query form:
 
     For Google Sheets: /spreadsheets/d/{id}/htmlview/sheet?headers=true&gid={gid}
     For custom domains: /htmlview/sheet?headers=true&gid={gid}
     """
     parsed = urlparse(base_url)
+
+    if page_paths and (path := page_paths.get(gid)):
+        if path.startswith(("http://", "https://")):
+            return path
+        return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     if _is_google_sheets_url(base_url):
         sheet_id = _extract_sheet_id(base_url)
@@ -491,7 +517,33 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
         name = _decode_js_string(name).strip()
         if name and gid:
             result.setdefault(gid, name)
+    # Hosts whose switcher entries carry no `gid:` key still name every tab —
+    # without this they fell through to keyword-guessing against nothing, so
+    # art/content/unreleased detection never fired for them.
+    for gid, (name, _path) in _discover_page_urls(html).items():
+        if name:
+            result.setdefault(gid, name)
     return result
+
+
+def _discover_page_urls(html: str) -> dict[str, tuple[str, str]]:
+    """Extract {gid: (tab_name, page_path)} from the page-switcher JS.
+
+    The switcher is authoritative: it is what the page's own tab bar uses, so
+    it gives both the exact tab name and a URL known to serve that tab.
+    """
+    result: dict[str, tuple[str, str]] = {}
+    for name, raw_path in _TAB_PAGEURL_PATTERN.findall(html):
+        path = _decode_js_string(raw_path).strip()
+        m = _PAGEURL_GID_PATTERN.search(path)
+        if m:
+            result.setdefault(m.group(1), (_decode_js_string(name).strip(), path))
+    return result
+
+
+def _page_path_map(html: str) -> dict[str, str]:
+    """{gid: page_path} — the subset of `_discover_page_urls` the fetcher needs."""
+    return {gid: path for gid, (_name, path) in _discover_page_urls(html).items()}
 
 
 def _clean_tab_name(name: str) -> str:
@@ -1152,7 +1204,8 @@ async def async_fetch_sheet_html(
             return base_html, title
 
         # Step 2: Discover GIDs
-        gids = _discover_gids(base_html)
+        page_paths = _page_path_map(base_html)
+        gids = _discover_gids(base_html) or list(page_paths)
         if not gids:
             gids = ["0"]
 
@@ -1160,7 +1213,7 @@ async def async_fetch_sheet_html(
         last_error = None
         for try_gid in gids:
             try:
-                sheet_url = _build_sheet_html_url(url, try_gid)
+                sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
                 r = await client.get(sheet_url, timeout=timeout)
                 if r.status_code == 200 and "<table" in r.text.lower():
                     if use_cache:
@@ -1189,11 +1242,12 @@ async def _fetch_gid_page(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> tuple[str, str] | None:
     """Fetch a single GID sheet page. Returns (gid, html) or None."""
     try:
         with t.phase("gid_fetch"):
-            sheet_url = _build_sheet_html_url(url_norm, gid_val)
+            sheet_url = _build_sheet_html_url(url_norm, gid_val, page_paths)
             if use_cache and cache_ttl > 0:
                 cached = await _async_get_cached(sheet_url, cache_ttl)
                 if cached is not None:
@@ -1220,6 +1274,7 @@ async def _load_secondary_tabs(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
@@ -1236,7 +1291,7 @@ async def _load_secondary_tabs(
         return await _fetch_gid_page(
             url_norm, gid_val, title,
             client=client, timeout=timeout, cache_ttl=cache_ttl,
-            use_cache=use_cache, t=t,
+            use_cache=use_cache, t=t, page_paths=page_paths,
         )
 
     async def _load_art() -> None:
@@ -1398,6 +1453,7 @@ async def _aggregate_hub_workbook(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> int:
     """Merge sibling catalogue tabs into a hub workbook's era tree.
 
@@ -1419,6 +1475,7 @@ async def _aggregate_hub_workbook(
             result = await _fetch_gid_page(
                 url_norm, gid_val, title, client=client, timeout=timeout,
                 cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                page_paths=page_paths,
             )
             if result is None:
                 return None
@@ -1513,11 +1570,13 @@ async def async_fetch_and_parse(
                 )
             # Base-page tab listing needed — see docs/decisions.md::fetcher.py::gid-subpage-discovery
             named_tabs: dict[str, str] = {}
+            base_page_paths: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
                     base_resp = await client.get(url_norm, timeout=timeout)
                     base_resp.raise_for_status()
                 named_tabs = _discover_named_tabs(base_resp.text)
+                base_page_paths = _page_path_map(base_resp.text)
             except httpx.HTTPError:
                 pass  # Can't tell — fall back to trusting parse_sheet below
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
@@ -1546,6 +1605,7 @@ async def async_fetch_and_parse(
                             url_norm, title,
                             client=client, timeout=timeout,
                             cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                            page_paths=base_page_paths,
                         )
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
@@ -1578,7 +1638,10 @@ async def async_fetch_and_parse(
                     await _async_set_cached_parsed(url_norm, artist)
                 return artist
 
-        gids = _discover_gids(base_html)
+        # The page-switcher is authoritative for both tab names and sub-page
+        # URLs — see _discover_page_urls.
+        page_paths = _page_path_map(base_html)
+        gids = _discover_gids(base_html) or list(page_paths)
         if not gids:
             gids = ["0"]
 
@@ -1592,7 +1655,7 @@ async def async_fetch_and_parse(
             return await _fetch_gid_page(
                 url_norm, gid_val, title,
                 client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t,
+                use_cache=use_cache, t=t, page_paths=page_paths,
             )
 
         # Priority-ordered concurrent fetch with cancellation — see
@@ -1665,7 +1728,7 @@ async def async_fetch_and_parse(
                     ),
                     url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,
-                    use_cache=use_cache, t=t,
+                    use_cache=use_cache, t=t, page_paths=page_paths,
                 )
 
             # Secondary tabs (Art + content tabs) — fetched concurrently,
@@ -1673,7 +1736,7 @@ async def async_fetch_and_parse(
             await _load_secondary_tabs(
                 best_artist, art_gid, content_tabs, url_norm, title,
                 client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t,
+                use_cache=use_cache, t=t, page_paths=page_paths,
             )
 
             with t.phase("cache_write"):
