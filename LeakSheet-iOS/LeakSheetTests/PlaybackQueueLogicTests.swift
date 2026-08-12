@@ -173,3 +173,70 @@ struct PlaybackQueueLogicTests {
         #expect(logic.next() == .stop)  // nothing after bonusB — must NOT jump to lp
     }
 }
+
+/// Era rollover must survive browsing a different artist while one plays.
+@Suite("Cross-artist era list")
+struct CrossArtistEraListTests {
+    private func version(_ name: String) -> SongVersion {
+        SongVersion(
+            name: name, versionTag: nil, badge: nil, featuring: nil, producers: nil,
+            collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
+            altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil, availableLength: "Full",
+            quality: nil, streaming: nil, links: ["https://pillows.su/f/abc123"],
+            dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        )
+    }
+
+    private func era(_ name: String, artist: String, _ songs: [String]) -> EraSongContext {
+        EraSongContext(
+            eraName: name, artistName: artist, artUrl: "",
+            versions: songs.map(version), artistSlug: artist.lowercased()
+        )
+    }
+
+    @Test func `browsing another artist does not replace the playing artist's eras`() {
+        var logic = PlaybackQueueLogic()
+        let aEras = [era("A1", artist: "Alpha", ["a1"]), era("A2", artist: "Alpha", ["a2"])]
+        logic.setArtistEras(aEras)
+        _ = logic.playInEra(aEras[0].versions[0], context: aEras[0])
+
+        // The user opens artist Beta while Alpha is still playing. ArtistView
+        // calls setArtistEras on every appearance.
+        logic.setArtistEras([era("B1", artist: "Beta", ["b1"])])
+
+        // Alpha's era ends → must roll into A2, not stop.
+        guard case .play(let target) = logic.next() else {
+            Issue.record("expected rollover into the next era, got a stop")
+            return
+        }
+        #expect(target.eraName == "A2")
+    }
+
+    @Test func `the era list is replaced normally when nothing is playing`() {
+        var logic = PlaybackQueueLogic()
+        logic.setArtistEras([era("A1", artist: "Alpha", ["a1"])])
+        let bEras = [era("B1", artist: "Beta", ["b1"]), era("B2", artist: "Beta", ["b2"])]
+        logic.setArtistEras(bEras)
+        _ = logic.playInEra(bEras[0].versions[0], context: bEras[0])
+        guard case .play(let target) = logic.next() else {
+            Issue.record("expected rollover")
+            return
+        }
+        #expect(target.eraName == "B2")
+    }
+
+    @Test func `re-registering the same artist's eras still refreshes them`() {
+        var logic = PlaybackQueueLogic()
+        let first = [era("A1", artist: "Alpha", ["a1"])]
+        logic.setArtistEras(first)
+        _ = logic.playInEra(first[0].versions[0], context: first[0])
+        // A pull-to-refresh hands back a longer list for the SAME artist.
+        logic.setArtistEras([era("A1", artist: "Alpha", ["a1"]), era("A2", artist: "Alpha", ["a2"])])
+        guard case .play(let target) = logic.next() else {
+            Issue.record("expected the refreshed list to be used")
+            return
+        }
+        #expect(target.eraName == "A2")
+    }
+}

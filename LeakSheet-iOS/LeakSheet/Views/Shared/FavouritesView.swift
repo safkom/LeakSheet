@@ -10,6 +10,7 @@ struct FavouritesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDescription: DescriptionSheet.Payload?
+    @State private var showClearConfirm = false
 
     /// Set when hosted as a sidebar destination rather than presented as a
     /// sheet — the host supplies the navigation chrome.
@@ -80,9 +81,16 @@ struct FavouritesView: View {
                                                         .font(.caption2)
                                                         .foregroundStyle(.secondary)
                                                         .lineLimit(1)
+                                                    // primaryVersion first: new
+                                                    // writes leave the flat
+                                                    // fields nil (they are the
+                                                    // pre-snapshot legacy path),
+                                                    // so reading them alone made
+                                                    // every recent favourite
+                                                    // render a blank badge row.
                                                     DedupedBadgePills(
-                                                        quality: entry.quality,
-                                                        availability: entry.availableLength
+                                                        quality: entry.primaryVersion?.quality ?? entry.quality,
+                                                        availability: entry.primaryVersion?.availableLength ?? entry.availableLength
                                                     )
                                                 }
                                                 Spacer()
@@ -127,11 +135,25 @@ struct FavouritesView: View {
                     .environment(PlayerViewModel.shared)
                     .environment(artistVM)
             }
+            .confirmationDialog(
+                "Remove all \(favourites.entries.count) favourites?",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Remove All", role: .destructive) { favourites.clearAll() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This can't be undone.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if !favourites.entries.isEmpty {
-                        Button("Clear All") {
-                            favourites.clearAll()
+                        // Confirmed, and marked .destructive: this sits in the
+                        // slot every other sheet uses for Cancel/Done, and
+                        // favourites are the only user-authored data the app
+                        // holds — everything else re-downloads.
+                        Button("Clear All", role: .destructive) {
+                            showClearConfirm = true
                         }
                         .foregroundStyle(Color.lsError)
                     }

@@ -111,6 +111,17 @@ struct QueueSheet: View {
                         .foregroundStyle(Color.lsError)
                     }
                 }
+                #if os(iOS)
+                // .onMove needs edit mode on iOS, and there was no way to
+                // enter it — so the whole reorder path (moveInQueue and its
+                // test) was unreachable on the platform that has it. macOS
+                // Lists reorder by drag natively and need no button.
+                ToolbarItem(placement: .primaryAction) {
+                    if player.queue.count > 1 {
+                        EditButton()
+                    }
+                }
+                #endif
                 ToolbarItem(placement: .primaryAction) {
                     if !embedded {
                         Button("Done") { dismiss() }

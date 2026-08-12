@@ -30,6 +30,12 @@ struct CachedImage<Placeholder: View>: View {
                 image = cached
                 return
             }
+            // Cache miss means a network round trip. Clear first so the
+            // PREVIOUS url's bitmap isn't left on screen under the new one's
+            // label for the length of the fetch. (Only on a miss — clearing
+            // unconditionally would flash the placeholder on every memory
+            // hit, which the fast path above exists to avoid.)
+            image = nil
             if let loaded = await ImageCache.shared.loadImage(from: url, maxPixelSize: maxPixelSize) {
                 image = loaded
             } else {

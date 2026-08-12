@@ -79,8 +79,15 @@ struct MiscEntryRowView: View {
 
     // MARK: - Thumbnail
 
+    /// Through the proxy like every other CachedImage call site: the raw
+    /// third-party URL meant no backend downscale (a 1280px YouTube thumbnail
+    /// decoded for a 44pt cell), no 429/Retry-After handling, and exposure to
+    /// hotlink blocking.
     private func thumbnail(url: URL) -> some View {
-        CachedImage(url: url, maxPixelSize: 128) {
+        CachedImage(
+            url: APIClient.shared.imageProxyURL(for: url.absoluteString, width: 128) ?? url,
+            maxPixelSize: 128
+        ) {
             ArtworkPlaceholder(cornerRadius: 6)
         }
         .frame(width: 44, height: 44)

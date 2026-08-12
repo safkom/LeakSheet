@@ -503,6 +503,11 @@ final class ArtistViewModel {
                 guard self.currentFilterState == state else { return }
                 self.content = result
                 self.isFiltering = false
+                // Ordinals are positions within the FILTERED era, so a filter
+                // change renumbers them. Keeping the set meant expanding the
+                // 4th song, toggling a chip, and finding a different song
+                // expanded instead.
+                self.expandedSongs.removeAll()
                 self.resetRecentsWindow()
                 self.rebuildEraRows()
             }

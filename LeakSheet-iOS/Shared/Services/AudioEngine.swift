@@ -77,6 +77,10 @@ final class AudioEngine {
     private var seekGeneration = 0
     private var cachedArtworkUrl: String?
     private var cachedArtwork: MPMediaItemArtwork?
+    /// The artUrl we last STARTED a fetch for, successful or not — the retry
+    /// guard. `cachedArtworkUrl` only advances on success, so it cannot serve
+    /// as one.
+    private var artworkAttemptedUrl: String?
 
     private init() {
         setupRemoteCommands()
@@ -118,18 +122,28 @@ final class AudioEngine {
         videoAspectRatio = nil
         duration = Self.parseDuration(version?.trackLength)
 
+        // Both bailouts must silence the OLD item. Publishing "new track,
+        // paused" while the player kept running left the previous file
+        // audible, the time observer writing from its clock, and the lock
+        // screen showing the wrong song.
         guard let version, let link = version.streamableLink else {
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
             streamUrl = ""
             isPlaying = false
             loading = false
+            updateNowPlayingInfo()
             return
         }
 
         guard let url = StreamResolver.streamURL(for: link) else {
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
             streamUrl = ""
             isPlaying = false
             loading = false
             error = "Stream host not supported"
+            updateNowPlayingInfo()
             return
         }
 
@@ -250,6 +264,13 @@ final class AudioEngine {
         artUrl = ""
         artistSlug = ""
         cachedArtworkUrl = nil
+        cachedArtwork = nil
+        artworkAttemptedUrl = nil
+        // The AVPlayer outlives replaceCurrentItem(with: nil), and Now Playing
+        // branches on hasVideo — on macOS, where the window persists, a
+        // finished video left a black AVPlayerLayer under "Not Playing".
+        hasVideo = false
+        videoAspectRatio = nil
         logic.clearContexts()
         clearNowPlayingInfo()
     }
@@ -261,11 +282,14 @@ final class AudioEngine {
         queue = logic.queue
     }
 
-    /// Called when the app moves to background — pauses playback (background audio continues via AVSession).
+    /// Called when the app moves to background. Playback deliberately continues
+    /// (the session is configured for it); this is where debounced writes are
+    /// forced out before the process can be suspended or killed.
     func handleBackgrounding() {
-        // Audio session is already configured for background playback (.playback category).
-        // This is a hook for any flush/cleanup needed (e.g. flushing cache).
-        // Intentionally does not pause playback.
+        Task {
+            await FavouritesManager.shared.flush()
+            await EraColorExtractor.shared.flush()
+        }
     }
 
     // MARK: - Original Quality
@@ -461,7 +485,12 @@ final class AudioEngine {
                     self.loading = false
                     self.loadingTimeoutTask?.cancel()
                     self.loadingTimeoutTask = nil
-                    if dur.isValid && !dur.isIndefinite {
+                    // `> 0` matches the .duration observer below. A quality
+                    // switch seeds duration from the tracker's length because
+                    // .status routinely fires before a progressive body knows
+                    // its own; an item reporting a valid, definite ZERO here
+                    // destroyed that seed and collapsed the scrubber to 0...1.
+                    if dur.isValid, !dur.isIndefinite, dur.seconds > 0 {
                         self.duration = dur.seconds
                     }
                     // Read format info from the (MainActor-held) current item
@@ -850,9 +879,13 @@ final class AudioEngine {
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
-        // Load artwork once per track (skip if already loaded for this artUrl)
-        if !artUrl.isEmpty && cachedArtworkUrl != artUrl {
+        // Load artwork once per track. `artworkAttemptedUrl` is set BEFORE the
+        // fetch, not after it succeeds: updateNowPlayingInfo runs from the
+        // periodic observer every ~3s, so a cover that 404s used to spawn a
+        // fresh task and request every 3 seconds for the whole track.
+        if !artUrl.isEmpty, artworkAttemptedUrl != artUrl {
             let targetUrl = artUrl
+            artworkAttemptedUrl = targetUrl
             Task {
                 await loadNowPlayingArtwork(targetUrl: targetUrl)
             }

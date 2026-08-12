@@ -308,7 +308,10 @@ final class FavouritesManager {
         // One-shot migration from UserDefaults
         if let legacyData = UserDefaults.standard.data(forKey: Self.storageKey),
            let migrated = try? JSONDecoder().decode([FavouriteEntry].self, from: legacyData) {
-            entries = migrated
+            // Migrate here too: this branch returned early, so the cohort
+            // most likely to hold pre-version-tag keys was the one cohort
+            // that never got the rewrite.
+            entries = Self.migratingVersionTags(migrated)
             save()
             UserDefaults.standard.removeObject(forKey: Self.storageKey)
             return
@@ -316,7 +319,11 @@ final class FavouritesManager {
 
         guard let data = try? Data(contentsOf: Self.storageFile) else { return }
         do {
-            entries = Self.migratingVersionTags(try JSONDecoder().decode([FavouriteEntry].self, from: data))
+            let stored = try JSONDecoder().decode([FavouriteEntry].self, from: data)
+            let migrated = Self.migratingVersionTags(stored)
+            entries = migrated
+            // Persist the rewrite, or it re-runs on every launch forever.
+            if migrated.map(\.key) != stored.map(\.key) { save() }
         } catch {
             Self.log.error("Failed to decode favourites (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
             entries = []
@@ -372,6 +379,19 @@ final class FavouritesManager {
             if Task.isCancelled { return }
             await Self.persist(snapshot, to: file, logger: logger)
         }
+    }
+
+    /// Persist immediately, skipping the debounce.
+    ///
+    /// Called when the app backgrounds. Without it, hearting a song and then
+    /// force-quitting (or being jetsammed) inside 150ms silently dropped the
+    /// write — and two toggles inside one window cancelled the first task, so
+    /// both were lost, not just the last.
+    func flush() async {
+        guard saveTask != nil else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        await Self.persist(entries, to: Self.storageFile, logger: Self.log)
     }
 
     // @concurrent required — see DECISIONS.md::FavouritesManager.swift::concurrent-persist
