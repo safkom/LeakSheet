@@ -77,6 +77,8 @@ _SHEET_CACHE_MAX_BYTES = int(
 )
 _SHEET_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
 _last_sheet_evict = 0.0
+# tempfile.mkstemp(prefix=f"{name}.tmp") → "abc.html.tmpQ7z1zK".
+_TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 
 
 class PhaseTimer:
@@ -626,6 +628,12 @@ def _evict_sheet_cache() -> None:
     for path in CACHE_DIR.iterdir():
         if not path.is_file() or path.name.startswith("img_"):
             continue
+        # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
+        # "abc", so temp files grouped with the real entry and got unlinked
+        # mid-write — os.replace then raised FileNotFoundError out of
+        # _set_cache and 500'd a request that had already parsed successfully.
+        if _TMP_SUFFIX_RE.search(path.name):
+            continue
         try:
             stat = path.stat()
         except OSError:
@@ -691,11 +699,41 @@ def _set_cache(url: str, html: str, title: str) -> None:
     # read. For the parsed cache that reached the client as truncated JSON
     # under a 200 (get_cached_parsed_bytes does no validation).
     _atomic_write_text(CACHE_DIR / f"{key}.html", html)
-    _atomic_write_text(
-        CACHE_DIR / f"{key}.meta.json",
-        json.dumps({"url": url, "title": title, "timestamp": time.time()}),
-    )
+    # Merge, don't overwrite. `.html` and `.parsed.json` share one meta file
+    # but have independent lifecycles: this writes minutes before the parse
+    # exists, and can be followed by a failure that never produces one.
+    # Rebuilding the dict here bumped the parsed cache's freshness to "now"
+    # and dropped its content_hash, so a failed refresh served yesterday's
+    # parse as a fresh hit for a full TTL.
+    _write_meta(key, {"url": url, "title": title, "timestamp": time.time()})
     _maybe_evict_sheet_cache()
+
+
+def _read_meta(key: str) -> dict:
+    """Read a cache entry's metadata, or {} when absent/corrupt."""
+    try:
+        return json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata and write it atomically."""
+    meta = _read_meta(key)
+    meta.update(updates)
+    _atomic_write_text(
+        CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
+    )
+
+
+def _parsed_timestamp(meta: dict) -> float:
+    """Freshness of the PARSED cache.
+
+    Distinct from `timestamp`, which tracks the HTML. Falls back to it for
+    entries written before the two were separated.
+    """
+    ts = meta.get("parsed_timestamp")
+    return float(ts) if ts else float(meta.get("timestamp", 0) or 0)
 
 
 def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist | None:
@@ -706,7 +744,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
     if parsed_file.exists() and meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            if time.time() - meta.get("timestamp", 0) < cache_ttl:
+            if time.time() - _parsed_timestamp(meta) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.model_validate(data)
         except Exception as e:
@@ -727,22 +765,16 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             CACHE_DIR / f"{key}.parsed.json",
             json.dumps(data, ensure_ascii=False),
         )
-        # Update metadata with content hash for ETag support
-        meta_file = CACHE_DIR / f"{key}.meta.json"
-        meta = {}
-        if meta_file.exists():
-            try:
-                meta = json.loads(meta_file.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
-        meta["content_hash"] = compute_content_hash(data)
-        # Every reader keys off meta["timestamp"]. Under force_refresh the
-        # caller skips _set_cache (use_cache=False) while still writing the
-        # parse, so without this a pull-to-refresh either inherited the OLD
-        # timestamp — fresh data considered stale immediately — or, on a
-        # first-ever fetch, wrote a parsed cache that could never be read.
-        meta["timestamp"] = time.time()
-        _atomic_write_text(meta_file, json.dumps(meta, ensure_ascii=False))
+        # parsed_timestamp, not timestamp: the parse's freshness is its own
+        # signal. Under force_refresh the caller skips _set_cache entirely
+        # while still writing the parse, so without a write here a
+        # pull-to-refresh either inherited the OLD timestamp — fresh data
+        # considered stale immediately — or, on a first-ever fetch, wrote a
+        # parsed cache that could never be read.
+        _write_meta(key, {
+            "content_hash": compute_content_hash(data),
+            "parsed_timestamp": time.time(),
+        })
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -787,7 +819,7 @@ def stale_parsed_cache_urls(limit: int) -> list[str]:
         except (OSError, json.JSONDecodeError):
             continue
         url = meta.get("url")
-        ts = meta.get("timestamp", 0)
+        ts = _parsed_timestamp(meta)
         if not url or ts <= 0:
             continue
         age = now - ts
@@ -809,7 +841,9 @@ def clear_cache() -> tuple[int, int]:
     cleared = 0
     skipped = 0
     for f in CACHE_DIR.iterdir():
-        if f.is_file():
+        # Same reason as the eviction scan: unlinking another thread's
+        # in-flight atomic write makes its os.replace raise.
+        if f.is_file() and not _TMP_SUFFIX_RE.search(f.name):
             try:
                 f.unlink()
                 cleared += 1
@@ -845,7 +879,7 @@ def get_cached_age(url: str) -> float | None:
     if meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            ts = meta.get("timestamp", 0)
+            ts = _parsed_timestamp(meta)
             if ts > 0:
                 return time.time() - ts
         except (json.JSONDecodeError, OSError):
@@ -872,7 +906,7 @@ def get_cached_parsed_bytes(
         return None
     try:
         meta = json.loads(meta_file.read_text())
-        ts = meta.get("timestamp", 0)
+        ts = _parsed_timestamp(meta)
         if ts <= 0:
             return None
         age = time.time() - ts
@@ -1097,7 +1131,12 @@ async def async_fetch_sheet_html(
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
             if use_cache:
-                await _async_set_cache(url, r.text, title)
+                # Key by the URL actually fetched, like every other call site
+                # (_fetch_gid_page uses sheet_url). Keying by the base `url`
+                # filed one tab's HTML under the workbook's entry, so a later
+                # gid-less read — the fallback path in async_fetch_and_parse —
+                # got that tab back as if it were the whole sheet.
+                await _async_set_cache(sheet_url, r.text, title)
             return r.text, title
 
         # Step 1: Fetch the base page

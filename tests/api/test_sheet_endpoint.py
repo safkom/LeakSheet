@@ -43,7 +43,12 @@ def _populate_cache(url: str, artist, *, age_seconds: float = 0.0) -> str:
     if age_seconds:
         meta_path = api.CACHE_DIR / f"{_cache_key(un)}.meta.json"
         meta = json.loads(meta_path.read_text())
-        meta["timestamp"] = time.time() - age_seconds
+        # Both signals: the HTML and the parse age independently, and an entry
+        # that is genuinely old is old in both. Ageing only `timestamp` left
+        # the parse looking fresh, so the endpoint answered "hit" not "stale".
+        aged = time.time() - age_seconds
+        meta["timestamp"] = aged
+        meta["parsed_timestamp"] = aged
         meta_path.write_text(json.dumps(meta))
     from src.fetcher import get_cached_etag
     return get_cached_etag(url)

@@ -452,10 +452,13 @@ class _RateLimitMiddleware:
         cutoff = now - _RATE_LIMIT_WINDOW_S
         hits = _rate_hits.setdefault(key, [])
         del hits[: bisect.bisect_right(hits, cutoff)]
-        self._maybe_prune(now, cutoff)
         if len(hits) >= limit:
             return True
         hits.append(now)
+        # After the append: the prune drops keys whose list is empty, and
+        # running it first popped the entry `setdefault` had just created —
+        # leaving `hits` an orphan, so that request went uncounted.
+        self._maybe_prune(now, cutoff)
         return False
 
     @staticmethod
@@ -641,16 +644,34 @@ async def parse_sheet(
         )
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL: {e}")
-    except AccessDeniedError as e:
-        raise HTTPException(status_code=403, detail=f"Access denied: {e}")
+    except AccessDeniedError:
+        # The provider's own wording ("401 Unauthorized", "410 Gone") means
+        # nothing to a user staring at a tracker that used to work.
+        logger.info("sheet access denied for %s", req.url[:120])
+        raise HTTPException(
+            status_code=403,
+            detail="This tracker is private or has been taken down.",
+        )
     except NetworkError as e:
-        raise HTTPException(status_code=502, detail=f"Network error: {e}")
+        # NEVER interpolate: NetworkError wraps the SSRF guard's message,
+        # which names the resolved address ("blocked non-public address
+        # 10.0.0.5 for host …"). Same rule /stream and /image-proxy follow.
+        logger.warning("sheet network error for %s: %s", req.url[:120], e)
+        raise HTTPException(
+            status_code=502, detail="Could not reach the tracker source."
+        )
     except NoTablesError as e:
-        raise HTTPException(status_code=404, detail=f"No table data found: {e}")
+        # Carries the full GID list it tried — internal detail, not the user's.
+        logger.warning("sheet has no table data at %s: %s", req.url[:120], e)
+        raise HTTPException(
+            status_code=404, detail="No table data found at that URL."
+        )
     except ParseError as e:
-        raise HTTPException(status_code=422, detail=f"Parse error: {e}")
+        logger.warning("sheet parse error for %s: %s", req.url[:120], e)
+        raise HTTPException(status_code=422, detail="Could not parse this tracker.")
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse: {e}")
+        logger.warning("sheet value error for %s: %s", req.url[:120], e)
+        raise HTTPException(status_code=422, detail="Could not parse this tracker.")
     except Exception as e:
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
@@ -1413,8 +1434,14 @@ def _plan_synthesized_range(range_header: str | None, total_size: int | None) ->
     end = int(last)
     if end < start:
         return _RangePlan("full")  # malformed → ignore the header
-    if total_size is not None:
-        end = min(end, total_size - 1)
+    if total_size is None:
+        # We can't clamp, so we can't promise a Content-Length. Serving the
+        # full body signals "Range unsupported"; a synthesised 206 here
+        # advertised the client's requested length (`bytes=0-999999999` →
+        # Content-Length: 1000000000) and then delivered a much shorter body.
+        # Same reasoning as the suffix and open-ended branches above.
+        return _RangePlan("full")
+    end = min(end, total_size - 1)
     return _RangePlan("partial", start, end)
 
 
