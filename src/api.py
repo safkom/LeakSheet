@@ -48,6 +48,7 @@ from src.fetcher import (
     async_get_cached_age,
     async_get_cached_etag,
     async_get_cached_parsed_bytes,
+    get_cached_parsed_bytes,
     clear_cache,
     compute_content_hash,
     DEFAULT_CACHE_TTL,
@@ -524,8 +525,22 @@ async def _refresh_stale_once(limit: int = _PREWARM_BATCH) -> int:
     """
     urls = await asyncio.to_thread(stale_parsed_cache_urls, limit)
     for url in urls:
-        await _background_revalidate(url, None)
+        # artist_name=None re-infers from the page title, silently overwriting
+        # whatever override a client had populated the entry with.
+        await _background_revalidate(url, await asyncio.to_thread(_cached_artist_name, url))
     return len(urls)
+
+
+def _cached_artist_name(url: str) -> str | None:
+    """The artist name already on the cached parse, so a prewarm preserves a
+    client-supplied override instead of re-inferring from the page title."""
+    cached = get_cached_parsed_bytes(url, max_age=STALE_CACHE_TTL)
+    if cached is None:
+        return None
+    try:
+        return json.loads(cached[0]).get("name") or None
+    except (ValueError, AttributeError):
+        return None
 
 
 async def _prewarm_loop() -> None:
@@ -790,32 +805,47 @@ def _image_cache_paths(key: str):
     return CACHE_DIR / f"img_{key}.bin", CACHE_DIR / f"img_{key}.meta.json"
 
 
-def _read_image_cache(key: str) -> tuple[bytes, str] | None:
-    """Blocking read of a cached resized image — call via asyncio.to_thread."""
+def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
+    """Blocking read of a cached resized image — call via asyncio.to_thread.
+
+    Returns (bytes, content_type, etag). The ETag mixes the entry's write time
+    into the key: the key alone is a hash of the REQUEST, so after the 7-day
+    TTL expired and the URL was refetched with different content, a client
+    holding the old bytes got a 304 telling it its stale copy was current.
+    """
     bin_path, meta_path = _image_cache_paths(key)
     try:
         meta = json.loads(meta_path.read_text())
         if time.time() - meta["timestamp"] > _IMAGE_CACHE_TTL:
             return None
-        return bin_path.read_bytes(), meta["content_type"]
+        etag = f"{key}-{int(meta['timestamp'])}"
+        return bin_path.read_bytes(), meta["content_type"], etag
     except (OSError, ValueError, KeyError):
         return None
 
 
-def _write_image_cache(key: str, data: bytes, content_type: str) -> None:
-    """Blocking write + size-cap eviction — call via asyncio.to_thread."""
+def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
+    """Blocking write + size-cap eviction — call via asyncio.to_thread.
+
+    Returns the entry's ETag (key + write time), so the response that just
+    populated the cache advertises the SAME tag a later cache hit will —
+    otherwise the first request's tag never matched and never 304'd.
+    """
     try:
         CACHE_DIR.mkdir(exist_ok=True)
         bin_path, meta_path = _image_cache_paths(key)
+        written_at = time.time()
         meta_bytes = json.dumps({
             "content_type": content_type,
-            "timestamp": time.time(),
+            "timestamp": written_at,
         }).encode()
         _atomic_write_bytes(bin_path, data)
         _atomic_write_bytes(meta_path, meta_bytes)
         _evict_image_cache()
+        return f"{key}-{int(written_at)}"
     except OSError as e:
         logger.warning("Image cache write failed: %s", e)
+        return None
 
 
 def _evict_image_cache() -> None:
@@ -915,8 +945,9 @@ async def proxy_image(
         cache_key = _image_cache_key(url, width)
         cached = await asyncio.to_thread(_read_image_cache, cache_key)
         if cached is not None:
-            base_headers["ETag"] = f'"{cache_key}"'
-            if _parse_if_none_match(request.headers.get("if-none-match", "")) == cache_key:
+            entry_etag = cached[2]
+            base_headers["ETag"] = f'"{entry_etag}"'
+            if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
 
     # Conditional headers — send browser-like headers for Google domains
@@ -930,7 +961,7 @@ async def proxy_image(
     try:
         if width is not None:
             if cached is not None:
-                data, ct = cached
+                data, ct, _etag = cached
                 return Response(
                     content=data, media_type=ct,
                     headers={**base_headers, "X-Cache-Status": "hit"},
@@ -964,8 +995,11 @@ async def proxy_image(
         if resp.status_code == 200 and ct.startswith("image/"):
             if width is not None:
                 data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
-                await asyncio.to_thread(_write_image_cache, cache_key, data, ct)
-                base_headers["ETag"] = f'"{cache_key}"'
+                written_etag = await asyncio.to_thread(
+                    _write_image_cache, cache_key, data, ct
+                )
+                if written_etag:
+                    base_headers["ETag"] = f'"{written_etag}"'
                 status = "miss"
             else:
                 status = "origin"
@@ -1301,6 +1335,22 @@ _trackers_stale: str | None = None
 _SEED_PAYLOAD = json.dumps([
     TrackerEntry(name=name, url=url).model_dump() for name, url in SEED_TRACKERS
 ])
+
+
+@app.get("/health")
+async def health() -> Response:
+    """Liveness probe for the container HEALTHCHECK.
+
+    Deliberately does no I/O — it answers "the event loop is running and can
+    serve a request", which is exactly what the watchdog needs to know. The
+    probe used to hit /docs, which rendered the whole Swagger page and tied
+    liveness to docs staying enabled.
+    """
+    return Response(
+        content='{"status":"ok"}',
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/trackers")

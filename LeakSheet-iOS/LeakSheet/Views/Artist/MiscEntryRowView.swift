@@ -16,12 +16,30 @@ struct MiscEntryRowView: View {
     var onShowDescription: (DescriptionSheet.Payload) -> Void
     var onSelectLink: (MiscLink) -> Void
 
-    private var links: [MiscLink] { entry.mediaLinks }
+    /// Computed ONCE per row, not per access. `entry.mediaLinks` is a computed
+    /// property that runs MiscLinkClassifier.classify (a URLComponents parse
+    /// plus a StreamResolver.target parse) and label(for:) per link — and this
+    /// view read it five times per body evaluation, on a tab that can carry
+    /// ~1900 entries.
+    private let links: [MiscLink]
+    private let previewURL: URL?
+
+    init(
+        entry: MiscEntry,
+        onShowDescription: @escaping (DescriptionSheet.Payload) -> Void,
+        onSelectLink: @escaping (MiscLink) -> Void
+    ) {
+        self.entry = entry
+        self.onShowDescription = onShowDescription
+        self.onSelectLink = onSelectLink
+        self.links = entry.mediaLinks
+        self.previewURL = entry.previewImageURL.flatMap(URL.init(string:))
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            if let previewURL = entry.previewImageURL, let url = URL(string: previewURL) {
-                thumbnail(url: url)
+            if let previewURL {
+                thumbnail(url: previewURL)
             }
 
             VStack(alignment: .leading, spacing: 3) {

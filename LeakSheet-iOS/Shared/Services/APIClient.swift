@@ -10,8 +10,28 @@ actor APIClient {
     /// UserDefaults key for a custom backend URL set in Settings.
     static let baseURLDefaultsKey = "leaksheet_api_base_url"
 
-    /// Active API base URL — a custom server from Settings, or the production default.
+    /// Active API base URL — a custom server from Settings, or the production
+    /// default.
+    ///
+    /// Resolved once. This is read from `body` for every visible row that
+    /// shows art (imageProxyURL), and it was doing a UserDefaults lookup,
+    /// trim, lowercase, prefix check and URL validation on each one. Settings
+    /// calls `invalidateBaseURL()` when the custom server changes.
     static var baseURL: String {
+        if let cached = _cachedBaseURL { return cached }
+        let resolved = resolveBaseURL()
+        _cachedBaseURL = resolved
+        return resolved
+    }
+
+    private nonisolated(unsafe) static var _cachedBaseURL: String?
+
+    /// Drop the memoised value — call after writing a new custom server.
+    static func invalidateBaseURL() {
+        _cachedBaseURL = nil
+    }
+
+    private static func resolveBaseURL() -> String {
         let custom = UserDefaults.standard.string(forKey: baseURLDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !custom.isEmpty, custom.lowercased().hasPrefix("http"), URL(string: custom) != nil else {

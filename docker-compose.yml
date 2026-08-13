@@ -14,7 +14,10 @@ services:
     ports:
       - "8081:80"
     depends_on:
-      - api
+      # Wait for the HEALTHCHECK, not just for the container to exist —
+      # otherwise nginx starts proxying before the API is listening.
+      api:
+        condition: service_healthy
 
 volumes:
   cache:

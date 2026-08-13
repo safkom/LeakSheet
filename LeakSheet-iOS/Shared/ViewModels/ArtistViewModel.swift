@@ -165,6 +165,8 @@ final class ArtistViewModel {
 
     /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
     private let searchIndex: [[SongSearchFields]]
+    /// Ordered era playback contexts (see Precomputed.eraPlaybackContexts).
+    let eraPlaybackContexts: [EraSongContext]
 
     // MARK: - Recents windowing
 
@@ -241,6 +243,14 @@ final class ArtistViewModel {
         /// song name / alt title / version name across the whole tracker).
         /// Shape mirrors `artist.eras[i].allSongs[j]`.
         let searchIndex: [[SongSearchFields]]
+        /// Ordered playback contexts, one per era — what drives auto-advance
+        /// into the next era. Built here rather than in ArtistView's `.task`,
+        /// where it walked the whole tracker on the MainActor on every screen
+        /// appearance (including every back-navigation): `Era.allSongs`
+        /// allocates a fresh flattened array per access and `isStreamable`
+        /// does a URL parse plus a full StreamResolver.target parse per
+        /// version — tens of thousands of parses on a 40-era tracker.
+        let eraPlaybackContexts: [EraSongContext]
 
         init(artist: Artist) {
             var statsByName: [String: Stats] = [:]
@@ -280,6 +290,15 @@ final class ArtistViewModel {
             self.songKeyEras = keyEras.filter { $0.value.count > 1 }
             self.baseNameEras = byBaseName
             self.searchIndex = artist.eras.map { $0.allSongs.map(SongSearchFields.init(song:)) }
+            self.eraPlaybackContexts = artist.eras.map { era in
+                EraSongContext(
+                    eraName: era.name,
+                    artistName: artist.name,
+                    artUrl: era.artUrl ?? "",
+                    versions: era.allSongs.flatMap(\.versions).filter(\.isStreamable),
+                    artistSlug: artist.slug
+                )
+            }
         }
     }
 
@@ -404,6 +423,7 @@ final class ArtistViewModel {
         self.songKeyEras = precomputed.songKeyEras
         self.baseNameEras = precomputed.baseNameEras
         self.searchIndex = precomputed.searchIndex
+        self.eraPlaybackContexts = precomputed.eraPlaybackContexts
 
         // Seed era colors from persisted cache — see DECISIONS.md::EraColorExtractor.swift::cache-key
         let cached = EraColorExtractor.cachedColors()

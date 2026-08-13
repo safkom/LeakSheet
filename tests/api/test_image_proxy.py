@@ -140,7 +140,7 @@ class TestImageCacheWrite:
     def test_write_then_read_roundtrips(self, tmp_path, monkeypatch):
         monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
         _write_image_cache("k1", b"hello world", "image/jpeg")
-        data, ct = _read_image_cache("k1")
+        data, ct, _etag = _read_image_cache("k1")
         assert data == b"hello world"
         assert ct == "image/jpeg"
 
@@ -155,7 +155,7 @@ class TestImageCacheWrite:
 
         _write_image_cache("k1", b"y" * 10, "image/jpeg")
         assert bin_path.stat().st_size == 10
-        data, _ = _read_image_cache("k1")
+        data, _, _ = _read_image_cache("k1")
         assert data == b"y" * 10
 
         # No leftover temp files after a clean write.
@@ -273,6 +273,31 @@ class TestImageProxyEndpoint:
         )
         assert r2.status_code == 304
         assert len(fake.requested) == 1
+
+    def test_if_none_match_refetches_after_the_entry_is_rewritten(self, proxy_env):
+        """The ETag identifies the BYTES, not the request.
+
+        It used to be a bare hash of (url, width). After the 7-day TTL expired
+        and the URL was refetched with different content, the key was
+        identical — so a client holding the OLD bytes sent If-None-Match, got
+        a 304, and kept showing a stale image forever.
+        """
+        client, fake = proxy_env
+        r = client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
+        old_etag = r.headers["ETag"]
+
+        # Rewrite the same key with new content, as a post-TTL refetch does.
+        import time as _time
+        key = _image_cache_key(NON_GOOGLE_URL, 320)
+        _time.sleep(1.1)  # the tag carries whole-second write time
+        _write_image_cache(key, b"different bytes entirely", "image/jpeg")
+
+        r2 = client.get(
+            "/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320},
+            headers={"If-None-Match": old_etag},
+        )
+        assert r2.status_code == 200, "a rewritten entry must not answer 304"
+        assert r2.headers["ETag"] != old_etag
 
     def test_if_none_match_refetches_after_cache_cleared(self, proxy_env):
         """A stale ETag must not 304 once its backing cache entry is gone —
