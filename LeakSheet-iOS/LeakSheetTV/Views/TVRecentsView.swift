@@ -8,6 +8,7 @@ struct TVRecentsView: View {
     @State private var loader = TrackerLoader()
     @State private var loadingURL = ""
     @State private var path: [TVRoute] = []
+    @State private var showClearConfirm = false
 
     private let columns = [GridItem(.adaptive(minimum: 340), spacing: 48)]
 
@@ -42,9 +43,17 @@ struct TVRecentsView: View {
             .toolbar {
                 if !recents.trackers.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Clear", role: .destructive) { recents.clearAll() }
+                        Button("Clear", role: .destructive) { showClearConfirm = true }
                     }
                 }
+            }
+            .confirmationDialog(
+                "Clear all \(recents.trackers.count) recent trackers?",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Clear", role: .destructive) { recents.clearAll() }
+                Button("Cancel", role: .cancel) {}
             }
             .navigationDestination(for: TVRoute.self) { $0.destination }
         }

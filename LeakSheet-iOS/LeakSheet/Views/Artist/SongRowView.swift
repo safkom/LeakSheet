@@ -85,7 +85,11 @@ struct SongRowView: View {
                 // judged at a glance without expanding.
                 if hasMultiple && !showVersionBadge {
                     HStack(spacing: 6) {
-                        if let best = song.bestVersion {
+                        // bestPlayableVersion, matching what the row's play
+                        // action uses — badges must describe the version a tap
+                        // actually plays, or this is the "Lossless · OG File"
+                        // row that played the Low Quality snippet again.
+                        if let best = song.bestPlayableVersion {
                             BadgeRowView(version: best)
                         }
                         Text("\(song.versions.count) versions")

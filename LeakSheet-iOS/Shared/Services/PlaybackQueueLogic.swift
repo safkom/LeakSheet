@@ -29,9 +29,18 @@ nonisolated struct PlaybackQueueLogic {
     private(set) var queue: [QueueItem] = []
     private(set) var eraSongs: EraSongContext?
     private(set) var playbackList: [PlaybackListItem]?
-    private(set) var artistEras: [EraSongContext] = []
+    /// Ordered era lists, one per artist. Keyed rather than kept in a single
+    /// slot because `ArtistView` registers on every appearance: browsing B
+    /// while A plays must not cost A its rollover, and must still leave B's
+    /// list in place for when the user plays something from B.
+    private var erasByArtist: [String: [EraSongContext]] = [:]
 
-    private var eraIndex: Int?   // position of eraSongs within artistEras
+    /// The era list for whichever artist is currently playing.
+    var artistEras: [EraSongContext] {
+        eraSongs.map { erasByArtist[$0.artistName] ?? [] } ?? []
+    }
+
+    private var eraIndex: Int?   // position of eraSongs within its artist's list
     private var songIndex: Int?  // position within eraSongs.versions
     private var listIndex: Int?  // position within playbackList
     private var queueIdCounter = 0
@@ -45,7 +54,7 @@ nonisolated struct PlaybackQueueLogic {
         listIndex = nil
         eraSongs = context
         songIndex = nil
-        eraIndex = artistEras.firstIndex { ctx in
+        eraIndex = (erasByArtist[context.artistName] ?? []).firstIndex { ctx in
             ctx.eraName == context.eraName
                 && ctx.artistName == context.artistName
                 && ctx.artUrl == context.artUrl
@@ -80,21 +89,36 @@ nonisolated struct PlaybackQueueLogic {
         return Self.target(for: items[index])
     }
 
+    /// Register an artist's ordered era list. Filed under that artist, so
+    /// registering one never disturbs another's rollover — and an artist
+    /// browsed mid-playback still has its list ready when the user plays it.
     mutating func setArtistEras(_ eras: [EraSongContext]) {
-        // Don't replace the list out from under a track that is still playing
-        // from a DIFFERENT artist. ArtistView calls this on every appearance,
-        // so browsing artist B while A played swapped A's era list for B's;
-        // when A's era ended, advanceToNextEra could match nothing and
-        // playback stopped instead of rolling into A's next era.
-        if let playing = eraSongs,
-           let incoming = eras.first,
-           incoming.artistName != playing.artistName {
-            return
+        guard let artist = eras.first?.artistName else { return }
+        erasByArtist[artist] = eras
+        registrationOrder.removeAll { $0 == artist }
+        registrationOrder.append(artist)
+        // Every entry holds every streamable version of every era, so a long
+        // browsing session would otherwise accumulate whole trackers (Ye alone
+        // is ~9k versions). Keep the few that can still matter: the playing
+        // artist, plus the most recent registrations.
+        while registrationOrder.count > Self.maxRetainedArtists {
+            let evicted = registrationOrder.removeFirst()
+            if evicted != eraSongs?.artistName {
+                erasByArtist[evicted] = nil
+            } else {
+                registrationOrder.append(evicted)  // never evict what's playing
+                break
+            }
         }
-        artistEras = eras
-        // Positions into the old array are meaningless now.
-        eraIndex = nil
+        // Positions into the old array are meaningless — but only for the
+        // artist whose list just changed.
+        if eraSongs?.artistName == artist {
+            eraIndex = nil
+        }
     }
+
+    private static let maxRetainedArtists = 4
+    private var registrationOrder: [String] = []
 
     /// Drop the era/list contexts (playback stopped). The user queue and
     /// artist era list survive — they describe intent, not position.
@@ -220,10 +244,11 @@ nonisolated struct PlaybackQueueLogic {
     /// matching on name+artist alone would misroute auto-advance when two
     /// eras share a name.
     private mutating func advanceToNextEra(after current: EraSongContext) -> EraSongContext? {
+        let eras = erasByArtist[current.artistName] ?? []
         let startIdx: Int
-        if let idx = eraIndex, artistEras.indices.contains(idx) {
+        if let idx = eraIndex, eras.indices.contains(idx) {
             startIdx = idx + 1
-        } else if let idx = artistEras.firstIndex(where: {
+        } else if let idx = eras.firstIndex(where: {
             $0.eraName == current.eraName
                 && $0.artistName == current.artistName
                 && $0.artUrl == current.artUrl
@@ -233,9 +258,9 @@ nonisolated struct PlaybackQueueLogic {
         } else {
             return nil
         }
-        for idx in startIdx..<artistEras.count where !artistEras[idx].versions.isEmpty {
+        for idx in startIdx..<eras.count where !eras[idx].versions.isEmpty {
             eraIndex = idx
-            return artistEras[idx]
+            return eras[idx]
         }
         return nil
     }

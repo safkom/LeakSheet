@@ -117,7 +117,11 @@ struct QueueSheet: View {
                 // test) was unreachable on the platform that has it. macOS
                 // Lists reorder by drag natively and need no button.
                 ToolbarItem(placement: .primaryAction) {
-                    if player.queue.count > 1 {
+                    // Shown whenever the queue is non-empty, not only when it
+                    // has 2+ items: gated on `> 1`, removing rows down to one
+                    // while editing took the button away with edit mode still
+                    // active, and nothing else exits it.
+                    if !player.queue.isEmpty {
                         EditButton()
                     }
                 }

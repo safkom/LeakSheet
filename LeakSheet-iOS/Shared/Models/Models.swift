@@ -169,7 +169,23 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     /// collapsed multi-version row shows so the song can be judged at a
     /// glance without expanding.
     var bestVersion: SongVersion? {
-        versions.max { a, b in
+        Self.best(of: versions)
+    }
+
+    /// The version a collapsed row should represent: the best one the user can
+    /// actually play, falling back to the best overall when nothing is
+    /// playable. `bestVersion` ranks on quality and availability only, so on
+    /// 457 of the corpus's multi-version songs it selected a version with no
+    /// link while a playable sibling sat underneath — the row then showed no
+    /// play affordance at all. Picking the best STREAMABLE one keeps the row's
+    /// badges describing the thing tapping it plays, which is the property the
+    /// original `versions.first` bug broke in the other direction.
+    var bestPlayableVersion: SongVersion? {
+        Self.best(of: versions.filter(\.isStreamable)) ?? bestVersion
+    }
+
+    private static func best(of candidates: [SongVersion]) -> SongVersion? {
+        candidates.max { a, b in
             let qa = Self.qualityRank[a.quality ?? ""] ?? 1
             let qb = Self.qualityRank[b.quality ?? ""] ?? 1
             if qa != qb { return qa < qb }
@@ -504,6 +520,11 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
     let ogFiles: Int?
     let stemBounces: Int?
     let full: Int?
+    /// The "Total Full" wording, which already counts the OG files within it.
+    /// Trackers use one or the other, so a Carti-style sheet reports `full: 0`
+    /// with everything in here — and reading `full` alone dropped the Full row
+    /// from the stats sheet entirely (862 of 1,635 versions unaccounted for).
+    let totalFull: Int?
     let tagged: Int?
     let partial: Int?
     let snippets: Int?
@@ -525,6 +546,7 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
         case notAvailableQuality = "not_available_quality"
         case ogFiles = "og_files"
         case stemBounces = "stem_bounces"
+        case totalFull = "total_full"
         case bestOf = "best_of"
         case worstOf = "worst_of"
     }

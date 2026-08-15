@@ -10,6 +10,9 @@ struct LeakSheetApp: App {
 
     init() {
         configureAudioSession()
+        // Settings writes the custom-server key through @AppStorage, which
+        // notifies nothing — so the memoised base URL has to watch the store.
+        MainActor.assumeIsolated { APIClient.startObservingBaseURL() }
     }
 
     var body: some Scene {

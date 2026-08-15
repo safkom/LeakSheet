@@ -40,8 +40,11 @@ struct MacRootView: View {
     @State private var prepared: (slug: String, vm: ArtistViewModel)?
     @State private var ui = MacUIState.shared
 
-    /// Freshly-refetched artist + view model from Cmd-R, keyed to the pushed
-    /// screen. Cleared implicitly by navigating elsewhere.
+    /// The most recently loaded artist + view model, keyed to the pushed
+    /// screen. Set by every `open()`, not only ⌘R — `Artist: Hashable` is
+    /// slug-only, so `path.last` can be a stale value while this holds the
+    /// fresh parse. Dropped when the stack empties so a window left on the
+    /// browse pane isn't retaining a whole tracker (Ye is ~9k versions).
     @State private var refreshedArtist: (artist: Artist, vm: ArtistViewModel)?
     /// Bumped per Cmd-R so the destination subtree gets a new identity.
     @State private var refreshToken = 0
@@ -107,6 +110,14 @@ struct MacRootView: View {
         // path mutations from ever overlapping.
         .onChange(of: section) { _, _ in
             path = []
+        }
+        // Nothing is pushed, so neither cache can be reached — and each holds
+        // a full Artist plus its view model.
+        .onChange(of: path) { _, newPath in
+            if newPath.isEmpty {
+                refreshedArtist = nil
+                prepared = nil
+            }
         }
         // ⌘R refreshes the currently pushed artist, if any.
         .onChange(of: ui.refreshToken) { _, _ in

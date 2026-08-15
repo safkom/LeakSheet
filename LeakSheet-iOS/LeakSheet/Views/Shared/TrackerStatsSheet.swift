@@ -28,7 +28,14 @@ struct TrackerStatsSheet: View {
     private var availabilityRows: [Row] {
         [
             Row(label: "OG Files", value: stats.ogFiles ?? 0, color: .badgeOGFile),
-            Row(label: "Full", value: stats.full ?? 0, color: .badgeFull),
+            // Trackers use one wording or the other and leave the other at 0,
+            // so take whichever is populated. NOT `totalFull ?? full`: the
+            // server sends `total_full: 0` rather than omitting it, which
+            // decodes as Optional(0), and `??` would never fall through —
+            // showing "0" (i.e. hiding the row) for every plain-"Full" sheet.
+            // Reading `full` alone was the original bug: Carti reports 862 in
+            // totalFull and 0 in full, so the row vanished entirely.
+            Row(label: "Full", value: max(stats.totalFull ?? 0, stats.full ?? 0), color: .badgeFull),
             Row(label: "Tagged", value: stats.tagged ?? 0, color: .badgeTagged),
             Row(label: "Partial", value: stats.partial ?? 0, color: .badgePartial),
             Row(label: "Snippets", value: stats.snippets ?? 0, color: .badgeSnippet),

@@ -38,6 +38,14 @@ struct RecentTrackersListView: View {
                     }
                 }
             }
+            .confirmationDialog(
+                "Clear all \(recents.trackers.count) recent trackers?",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Clear", role: .destructive) { recents.clearAll() }
+                Button("Cancel", role: .cancel) {}
+            }
         }
     }
 }

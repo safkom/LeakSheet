@@ -7,6 +7,7 @@ struct TVFavouritesView: View {
     @Environment(FavouritesManager.self) private var favourites
 
     @State private var path: [TVRoute] = []
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -46,9 +47,22 @@ struct TVFavouritesView: View {
             .toolbar {
                 if !favourites.entries.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        Button("Clear All", role: .destructive) { favourites.clearAll() }
+                        // Confirmed, like iOS: favourites are the only
+                        // user-authored data the app holds — everything else
+                        // re-downloads — and this was one click from gone.
+                        Button("Clear All", role: .destructive) { showClearConfirm = true }
                     }
                 }
+            }
+            .confirmationDialog(
+                "Remove all \(favourites.entries.count) favourites?",
+                isPresented: $showClearConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Remove All", role: .destructive) { favourites.clearAll() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This can't be undone.")
             }
             .navigationDestination(for: TVRoute.self) { $0.destination }
         }

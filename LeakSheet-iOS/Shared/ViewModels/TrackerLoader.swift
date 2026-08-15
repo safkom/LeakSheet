@@ -119,6 +119,13 @@ final class TrackerLoader {
     /// Monotonic: a phase never moves backwards within one load.
     private func apply(_ phase: APIClient.LoadPhase) {
         guard Self.rank(phase) >= Self.rank(loadPhase) else { return }
+        // Rank alone doesn't order two `.downloading` updates — they tie — so
+        // a chunk callback landing late could still rewind the byte counter.
+        if case .downloading(let newBytes, _) = phase,
+           case .downloading(let shownBytes, _) = loadPhase,
+           newBytes < shownBytes {
+            return
+        }
         loadPhase = phase
     }
 

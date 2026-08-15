@@ -37,7 +37,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
 from src.config import USER_AGENT, register_tracker_hosts
-from src.models import TrackerEntry
+from src.models import TrackerEntry, slugify
 from src.parser import parse_artistgrid_csv
 from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
@@ -236,6 +236,11 @@ _CC_TRACKERS_STALE = "public, max-age=600"  # /trackers stale fallback — retry
 # ---------------------------------------------------------------------------
 
 _IMAGE_ALLOWED_DOMAINS = {
+    # Misc-tab thumbnails. MiscLinkClassifier.thumbnailURL derives these two
+    # for YouTube embeds, and the client routes every thumbnail through this
+    # proxy — without them every misc row 403'd and showed a placeholder.
+    "img.youtube.com",
+    "i.ytimg.com",
     # Exact hostnames allowed for image proxy
     "lh3.googleusercontent.com",
     "lh4.googleusercontent.com",
@@ -648,7 +653,13 @@ async def parse_sheet(
     try:
         artist = await async_fetch_and_parse(
             req.url,
-            artist_name=req.artist_name,
+            # NEVER the caller's name: the parse this produces is written to a
+            # cache keyed by URL alone and shared with every other client, so a
+            # request-body field reaching it let anyone rename any tracker —
+            # and its slug, which is iOS favourites key material — for
+            # everyone, permanently. The override is re-applied to THIS
+            # response below, after the shared entry has been written.
+            artist_name=None,
             cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
             use_cache=use_cache,
             # A force-refresh skips cache reads but must still repopulate it,
@@ -699,6 +710,15 @@ async def parse_sheet(
     # recursive walk of the 6.5MB structure) and then json.dumps AGAIN, both on
     # the event loop. Three serializations, two of them exactly where this
     # comment says they must not be — and the largest loop stall on the box.
+    # Display-only override, applied after the shared cache has been written
+    # with the page-inferred name. A later cache hit therefore serves the
+    # inferred name to everyone, and only the caller that asked for a rename
+    # sees it.
+    if req.artist_name:
+        artist = artist.model_copy(
+            update={"name": req.artist_name, "slug": slugify(req.artist_name)}
+        )
+
     def _serialize_and_hash() -> tuple[bytes, str]:
         d = artist.model_dump()
         return json.dumps(d, ensure_ascii=False).encode(), compute_content_hash(d)
@@ -759,6 +779,23 @@ _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
+# Concurrent Pillow decodes. asyncio.to_thread's default pool is
+# min(32, cpu+4) threads and each slot can hold a 15MB input plus a 20MP
+# decode (~80MB as RGBA), so an artist screen firing 40-120 image requests at
+# once could ask the 512MB box for multiples of its own memory. The per-item
+# caps bound one decode; this bounds how many run together.
+_IMAGE_RESIZE_CONCURRENCY = int(
+    os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY", "3") or 3
+)
+_resize_sem: asyncio.Semaphore | None = None
+
+
+def _resize_slot() -> asyncio.Semaphore:
+    """Lazily created so the semaphore binds to the running loop."""
+    global _resize_sem
+    if _resize_sem is None:
+        _resize_sem = asyncio.Semaphore(_IMAGE_RESIZE_CONCURRENCY)
+    return _resize_sem
 # Hard ceiling on what /image-proxy will pull into memory, checked while
 # streaming so an oversized body is abandoned instead of buffered. Above the
 # decode cap so a legitimately large source still reaches the resize path and
@@ -841,11 +878,32 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
         }).encode()
         _atomic_write_bytes(bin_path, data)
         _atomic_write_bytes(meta_path, meta_bytes)
-        _evict_image_cache()
+        _maybe_evict_image_cache()
         return f"{key}-{int(written_at)}"
     except OSError as e:
         logger.warning("Image cache write failed: %s", e)
         return None
+
+
+_IMAGE_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
+_last_image_evict = 0.0
+
+
+def _maybe_evict_image_cache() -> None:
+    """Throttle the eviction scan.
+
+    `_evict_image_cache` globs every `img_*.bin` and stats each one. Running
+    that on EVERY cached image meant a full-directory scan per thumbnail — at
+    200MB of ~50KB entries that is thousands of stats per write, on the one
+    path an artist screen hits 40-120 times in a burst. Mirrors the identical
+    throttle the sheet cache already uses (`_maybe_evict_sheet_cache`).
+    """
+    global _last_image_evict
+    now = time.time()
+    if now - _last_image_evict < _IMAGE_EVICT_MIN_INTERVAL:
+        return
+    _last_image_evict = now
+    _evict_image_cache()
 
 
 def _evict_image_cache() -> None:
@@ -994,13 +1052,25 @@ async def proxy_image(
         ct = resp.headers.get("content-type", "")
         if resp.status_code == 200 and ct.startswith("image/"):
             if width is not None:
-                data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
-                written_etag = await asyncio.to_thread(
-                    _write_image_cache, cache_key, data, ct
-                )
-                if written_etag:
-                    base_headers["ETag"] = f'"{written_etag}"'
-                status = "miss"
+                original_len = len(data)
+                async with _resize_slot():
+                    data, ct = await asyncio.to_thread(
+                        _resize_image_bytes, data, width, ct
+                    )
+                # _resize_image_bytes returns the input untouched when it
+                # refuses to decode (over _IMAGE_RESIZE_INPUT_CAP, over
+                # _IMAGE_MAX_DECODE_PIXELS, or undecodable). Caching that under
+                # the WIDTH-keyed entry filed a 20MB original as a thumbnail —
+                # one entry being 10% of the 200MB budget, evicting real ones.
+                if len(data) < original_len:
+                    written_etag = await asyncio.to_thread(
+                        _write_image_cache, cache_key, data, ct
+                    )
+                    if written_etag:
+                        base_headers["ETag"] = f'"{written_etag}"'
+                    status = "miss"
+                else:
+                    status = "origin"
             else:
                 status = "origin"
             return Response(
@@ -1008,8 +1078,13 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": status},
             )
 
+        # Never relay the upstream STATUS here: a non-image 200 (an error page,
+        # an interstitial) turned into a 200 whose body was JSON, so <img> and
+        # CachedImage saw success and rendered nothing — and heuristic caches
+        # stored that as the image. 502 says "upstream gave us something we
+        # can't serve", which is what happened.
         raise HTTPException(
-            status_code=resp.status_code,
+            status_code=502 if resp.status_code == 200 else resp.status_code,
             detail="Upstream image fetch failed",
         )
     except HTTPException:
@@ -1329,6 +1404,9 @@ async def proxy_metadata(
 _trackers_cache = TTLCache(ttl=3600.0, max_entries=1)
 # Last successful payload, kept indefinitely as a fallback for upstream errors.
 _trackers_stale: str | None = None
+# Suppress upstream retries for this long after a failure — see list_trackers.
+_TRACKERS_FAIL_BACKOFF_S = 60.0
+_trackers_fail_until = 0.0
 
 # Built-in fallback (see src/tracker_seed.py) — served when ArtistGrid can't
 # be fetched and no live payload has ever succeeded, so /trackers never hard-fails.
@@ -1360,7 +1438,14 @@ async def list_trackers():
     Falls back to the last successful fetch, or if there's none yet, to the
     built-in seed list (src/tracker_seed.py) — see X-Cache-Status.
     """
-    global _trackers_stale
+    global _trackers_stale, _trackers_fail_until
+
+    # Back off after a failure. Only SUCCESS populated the cache, so during an
+    # ArtistGrid outage every single request re-hit upstream — the endpoint is
+    # also outside the rate limiter, so a burst of clients turned one outage
+    # into sustained amplification against a third party.
+    if time.monotonic() < _trackers_fail_until:
+        return _trackers_fallback_response()
 
     cached = _trackers_cache.get("trackers")
     if cached is not None:
@@ -1401,23 +1486,29 @@ async def list_trackers():
         )
     except Exception as e:
         logger.exception("ArtistGrid fetch failed: %s", e)
-        if _trackers_stale is not None:
-            return Response(
-                content=_trackers_stale,
-                media_type="application/json",
-                headers={
-                    "Cache-Control": _CC_TRACKERS_STALE,
-                    "X-Cache-Status": "stale",
-                },
-            )
+        _trackers_fail_until = time.monotonic() + _TRACKERS_FAIL_BACKOFF_S
+        return _trackers_fallback_response()
+
+
+def _trackers_fallback_response() -> Response:
+    """Last good fetch if we have one, else the built-in seed list."""
+    if _trackers_stale is not None:
         return Response(
-            content=_SEED_PAYLOAD,
+            content=_trackers_stale,
             media_type="application/json",
             headers={
                 "Cache-Control": _CC_TRACKERS_STALE,
-                "X-Cache-Status": "seed",
+                "X-Cache-Status": "stale",
             },
         )
+    return Response(
+        content=_SEED_PAYLOAD,
+        media_type="application/json",
+        headers={
+            "Cache-Control": _CC_TRACKERS_STALE,
+            "X-Cache-Status": "seed",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1447,7 +1538,12 @@ class _RangePlan:
         return f"_RangePlan({self.kind!r}, {self.start}, {self.end})"
 
 
-_RANGE_SPEC = re.compile(r"^bytes=(?:(\d+)-(\d*)|-(\d+))$")
+# Digit runs are BOUNDED. Python >= 3.11 (the production image) caps
+# string->int at 4300 digits and raises ValueError past it, and the int() calls
+# on these captures sit outside the /stream try block — so an unbounded `\d+`
+# turned a crafted Range header into an uncaught 500. 19 digits covers any
+# real offset (max int64 is 19).
+_RANGE_SPEC = re.compile(r"^bytes=(?:(\d{1,19})-(\d{0,19})|-(\d{1,19}))$")
 
 # Discarding more than this to synthesise a 206 is worth a log line.
 _DISCARD_WARN_BYTES = 8 * 1024 * 1024
@@ -1572,7 +1668,7 @@ async def proxy_stream(
     _range_start = 0
     _is_suffix_range = False
     if range_header:
-        _rs_m = re.match(r"bytes=(\d+)-", range_header)
+        _rs_m = re.match(r"bytes=(\d{1,19})-", range_header)
         if _rs_m:
             _range_start = int(_rs_m.group(1))
         else:

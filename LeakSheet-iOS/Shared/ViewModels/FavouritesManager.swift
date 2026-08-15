@@ -387,10 +387,18 @@ final class FavouritesManager {
     /// force-quitting (or being jetsammed) inside 150ms silently dropped the
     /// write — and two toggles inside one window cancelled the first task, so
     /// both were lost, not just the last.
+    ///
+    /// Awaits the in-flight task rather than only cancelling it. `cancel()`
+    /// does nothing once the debounce has elapsed and `Self.persist` is
+    /// already running — it checks no cancellation and its file write is
+    /// synchronous — so cancel-then-write raced two writers with different
+    /// snapshots, and the OLDER one landing second would clobber the newest
+    /// favourite. Exactly the loss this method exists to prevent.
     func flush() async {
-        guard saveTask != nil else { return }
-        saveTask?.cancel()
+        let inFlight = saveTask
         saveTask = nil
+        inFlight?.cancel()
+        await inFlight?.value
         await Self.persist(entries, to: Self.storageFile, logger: Self.log)
     }
 

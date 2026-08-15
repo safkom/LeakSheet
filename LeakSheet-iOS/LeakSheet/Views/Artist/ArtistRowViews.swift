@@ -80,14 +80,15 @@ struct EraRowView: View {
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
-                        // bestVersion, not versions.first: the collapsed row
-                        // renders bestVersion's badges, but every action —
-                        // swipe-to-play, the context menu, canStream — used
-                        // versions.first. A row reading "Lossless · OG File"
-                        // played the Low Quality snippet, and a song whose
-                        // first version was non-streamable showed no play
-                        // affordance at all despite playable versions below.
-                        version: song.bestVersion ?? song.versions.first,
+                        // bestPlayableVersion, not versions.first and not
+                        // bestVersion: the row renders this version's badges
+                        // AND acts on it, so the two must agree. versions.first
+                        // made a row reading "Lossless · OG File" play the Low
+                        // Quality snippet; plain bestVersion ignores whether a
+                        // version has a link, which on 457 corpus songs picked
+                        // an unplayable one and removed the play affordance
+                        // while playable siblings sat underneath.
+                        version: song.bestPlayableVersion ?? song.versions.first,
                         artistName: artistName,
                         artistSlug: artistSlug,
                         sourceUrl: sourceUrl,

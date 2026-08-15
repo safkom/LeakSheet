@@ -54,6 +54,7 @@ from src.parser import (
     parse_misc_tab,
     parse_sheet,
     _MAX_UNMATCHED_ROWS,
+    _disambiguate_era_names,
     _era_match_key,
     _song_match_key,
 )
@@ -212,9 +213,15 @@ _TAB_ITEMS_PATTERN = re.compile(
     r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
 )
 
-# The same items.push() switcher, but keyed on pageUrl instead of gid. Some
-# hosts (deftonestracker.net, franktracker.net, tylertracker.net) omit the
-# `gid:` key entirely and carry the sub-page as a PATH:
+# The same items.push() switcher, but keyed on pageUrl instead of gid.
+#
+# CORRECTION (verified by live-fetching all three hosts): deftonestracker.net,
+# franktracker.net and tylertracker.net all DO emit `gid:` on every entry, so
+# _discover_named_tabs already found their tabs and the name-merge below is a
+# no-op for them. The load-bearing half of this feature is _build_sheet_html_url
+# preferring the advertised PATH — those hosts answer the ?gid= query form with
+# a table-less shell page. The merge is kept as a cheap fallback for a host that
+# genuinely omits gid; it has not been observed.
 #   items.push({name: "Unreleased", pageUrl: "\/htmlview\/sheet\/554276433.html"});
 #   items.push({name: "Unreleased", pageUrl: "\/preview\/sheet\/937104017.html"});
 # Those hosts answer the ?gid= query form with the 52KB shell page — no
@@ -1193,15 +1200,18 @@ async def async_fetch_sheet_html(
     url = _normalize_url(url)
     await _assert_sheet_host_allowed(url)
 
-    if use_cache and cache_ttl > 0:
-        cached = await _async_get_cached(url, cache_ttl)
-        if cached is not None:
-            return cached
-
     client = _get_sheets_client()
     try:
         if gid:
             sheet_url = _build_sheet_html_url(url, gid)
+            # Read the SAME key the write below uses. Reading the base `url`
+            # here meant a gid request never hit its own entry (permanent cold
+            # fetch) and, worse, could match a base-keyed entry written by the
+            # fallback loop — handing back a different tab as the workbook.
+            if use_cache and cache_ttl > 0:
+                cached = await _async_get_cached(sheet_url, cache_ttl)
+                if cached is not None:
+                    return cached
             r = await client.get(sheet_url, timeout=timeout)
             r.raise_for_status()
             title_match = TITLE_PATTERN.search(r.text)
@@ -1215,7 +1225,12 @@ async def async_fetch_sheet_html(
                 await _async_set_cache(sheet_url, r.text, title)
             return r.text, title
 
-        # Step 1: Fetch the base page
+        # Step 1: Fetch the base page (cached under the base URL, which is
+        # what this branch both reads and writes).
+        if use_cache and cache_ttl > 0:
+            cached = await _async_get_cached(url, cache_ttl)
+            if cached is not None:
+                return cached
         r = await client.get(url, timeout=timeout)
         r.raise_for_status()
         base_html = r.text
@@ -1771,6 +1786,14 @@ async def async_fetch_and_parse(
                 client=client, timeout=timeout, cache_ttl=cache_ttl,
                 use_cache=use_cache, t=t, page_paths=page_paths,
             )
+
+            # Re-run AFTER every merge. parse_sheet guarantees unique era names
+            # for one tab, but _merge_aggregated_eras and _load_secondary_tabs
+            # append sibling tabs' eras to this list afterwards — so the served
+            # artist could still carry a duplicate, which is the one thing
+            # clients cannot survive (SwiftUI drops the second row silently).
+            # Idempotent: names already unique are returned untouched.
+            best_artist.eras = _disambiguate_era_names(best_artist.eras)
 
             with t.phase("cache_write"):
                 if write_cache and best_html:

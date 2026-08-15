@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from typing import NamedTuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class Badge(str, Enum):
@@ -219,6 +219,12 @@ class EraStats(BaseModel):
     stem_bounces: int = Field(0, description="Number of stem bounces")
     unavailable: int = Field(0, description="Number of unavailable songs")
 
+    # computed_field, not a plain @property + model_dump() override. Pydantic
+    # v2 serialises a NESTED model through pydantic-core, which walks the
+    # schema and never calls a Python-level override — so Artist.model_dump()
+    # (what /sheet returns) dropped `total` entirely and no client ever saw
+    # the corrected number.
+    @computed_field
     @property
     def total(self) -> int:
         """Total song count from stats.
@@ -241,13 +247,11 @@ class EraStats(BaseModel):
             + self.snippets + self.stem_bounces + self.unavailable
         )
 
-    def dict(self, **kwargs):
-        d = super().model_dump(**kwargs)
-        d["total"] = self.total
-        return d
-
-    def model_dump(self, **kwargs):
-        return self.dict(**kwargs)
+    # `total` must be a computed_field, not a model_dump() override. Pydantic
+    # v2 serialises a NESTED model through pydantic-core, which walks the
+    # schema and never calls the Python-level override — so Artist.model_dump()
+    # (what /sheet returns) dropped `total` entirely and no client ever saw the
+    # corrected number.
 
 
 class TrackerStats(BaseModel):

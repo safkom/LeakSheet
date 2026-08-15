@@ -203,6 +203,17 @@ final class AudioEngine {
         }
     }
 
+    /// Start playback, never stop it.
+    ///
+    /// `MPRemoteCommandCenter.playCommand` is a discrete intent, not a toggle:
+    /// CarPlay, a car head unit resuming after a call, Siri "play", and the
+    /// lock screen after a state desync all send it unconditionally. Wired to
+    /// `togglePlay()` it paused the music the user just asked to hear.
+    func resumePlayback() {
+        guard isPlaying == false else { return }
+        togglePlay()
+    }
+
     func seekTo(_ time: TimeInterval) {
         // Without this guard the completion never runs, `seekInFlight` stays
         // true for the process lifetime, and `currentTime` never updates
@@ -533,6 +544,11 @@ final class AudioEngine {
                     case .waitingToPlayAtSpecifiedRate:
                         self.isPlaying = false
                         self.loading = true
+                        // Arm the timeout, same as the buffer-empty observer
+                        // below. The initial one is cancelled at .readyToPlay,
+                        // so a stream that stalls without ever emptying its
+                        // buffer showed a spinner nothing could clear.
+                        self.startLoadingTimeout()
                     @unknown default:
                         break
                     }
@@ -764,7 +780,8 @@ final class AudioEngine {
         let commandCenter = MPRemoteCommandCenter.shared()
 
         commandCenter.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.togglePlay() }
+            // resumePlayback, not togglePlay — a discrete Play must never pause.
+            Task { @MainActor in self?.resumePlayback() }
             return .success
         }
         commandCenter.pauseCommand.addTarget { [weak self] _ in

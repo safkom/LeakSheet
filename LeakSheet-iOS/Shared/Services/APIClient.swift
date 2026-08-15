@@ -13,11 +13,21 @@ actor APIClient {
     /// Active API base URL — a custom server from Settings, or the production
     /// default.
     ///
-    /// Resolved once. This is read from `body` for every visible row that
-    /// shows art (imageProxyURL), and it was doing a UserDefaults lookup,
-    /// trim, lowercase, prefix check and URL validation on each one. Settings
-    /// calls `invalidateBaseURL()` when the custom server changes.
+    /// Resolved once per change. This is read from `body` for every visible
+    /// row that shows art (imageProxyURL), and it was doing a UserDefaults
+    /// lookup, trim, lowercase, prefix check and URL validation on each one.
+    ///
+    /// The cache invalidates itself. Both Settings screens bind the key with
+    /// `@AppStorage`, which writes UserDefaults directly and calls nothing —
+    /// so an explicit `invalidateBaseURL()` was never reached and a new server
+    /// only took effect after a relaunch. Observing the store's own change
+    /// notification is the version that cannot be forgotten at a call site.
+    /// Read from `body` on the MainActor and from inside this actor, so the
+    /// memo is lock-protected rather than `nonisolated(unsafe)` — the
+    /// annotation silenced the Swift 6 diagnostic without removing the race.
     static var baseURL: String {
+        _cacheLock.lock()
+        defer { _cacheLock.unlock() }
         if let cached = _cachedBaseURL { return cached }
         let resolved = resolveBaseURL()
         _cachedBaseURL = resolved
@@ -25,10 +35,33 @@ actor APIClient {
     }
 
     private nonisolated(unsafe) static var _cachedBaseURL: String?
+    private static let _cacheLock = NSLock()
 
-    /// Drop the memoised value — call after writing a new custom server.
+    /// Drop the memoised value. Armed by `startObservingBaseURL()`; also safe
+    /// to call directly.
     static func invalidateBaseURL() {
+        _cacheLock.lock()
         _cachedBaseURL = nil
+        _cacheLock.unlock()
+    }
+
+    private nonisolated(unsafe) static var _observer: NSObjectProtocol?
+
+    /// Invalidate whenever the defaults store changes. Called once at launch.
+    ///
+    /// Both Settings screens bind the key with `@AppStorage`, which writes
+    /// UserDefaults directly and calls nothing — so an explicit
+    /// `invalidateBaseURL()` at the write site was never reached, and a new
+    /// custom server only took effect after a relaunch. Observing the store
+    /// is the version that cannot be forgotten at a call site.
+    @MainActor
+    static func startObservingBaseURL() {
+        guard _observer == nil else { return }
+        _observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: nil
+        ) { _ in invalidateBaseURL() }
     }
 
     private static func resolveBaseURL() -> String {
