@@ -80,7 +80,14 @@ struct EraRowView: View {
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
-                        version: song.versions.first,
+                        // bestVersion, not versions.first: the collapsed row
+                        // renders bestVersion's badges, but every action —
+                        // swipe-to-play, the context menu, canStream — used
+                        // versions.first. A row reading "Lossless · OG File"
+                        // played the Low Quality snippet, and a song whose
+                        // first version was non-streamable showed no play
+                        // affordance at all despite playable versions below.
+                        version: song.bestVersion ?? song.versions.first,
                         artistName: artistName,
                         artistSlug: artistSlug,
                         sourceUrl: sourceUrl,

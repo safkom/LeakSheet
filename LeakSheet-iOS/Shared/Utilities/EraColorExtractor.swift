@@ -223,4 +223,14 @@ actor EraColorExtractor {
     private func flushCache() {
         UserDefaults.standard.set(cache, forKey: Self.cacheKey)
     }
+
+    /// Write now instead of waiting out the 2s debounce — called when the app
+    /// backgrounds, so a session's worth of extracted colours isn't lost to a
+    /// force-quit and re-extracted on next launch.
+    func flush() {
+        guard flushTask != nil else { return }
+        flushTask?.cancel()
+        flushTask = nil
+        flushCache()
+    }
 }

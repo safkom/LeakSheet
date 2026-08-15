@@ -184,7 +184,29 @@ class TestEraStatsParsing:
         from src.models import parse_era_stats
         raw = "1 Total Full\n0 OG File\n0 Partial / Cut\n0 Snippet\n3 Unavailable"
         stats = parse_era_stats(raw)
-        assert stats.full == 1 and stats.unavailable == 3 and stats.total == 4
+        # "Total Full" lands in its own field, not aliased onto `full` — the
+        # two wordings don't mean the same thing (see below).
+        assert stats.total_full == 1 and stats.full == 0
+        assert stats.unavailable == 3 and stats.total == 4
+
+    def test_total_full_already_counts_the_og_files(self):
+        """The Carti wording is an aggregate; the plain wording is a peer.
+
+        Adding og_files on top of "Total Full" inflated every affected era —
+        Die Lit reported 338 against 207 real versions. Verified across all 29
+        "Total Full" eras in the fixtures: summed |stats.total - actual| falls
+        from 568 to 28 when og_files is excluded.
+        """
+        from src.models import parse_era_stats
+        carti = parse_era_stats(
+            "141 Total Full\n131 OG File\n6 Partial / Cut\n22 Snippet\n38 Unavailable"
+        )
+        assert carti.total == 141 + 6 + 22 + 38  # og_files NOT added
+
+        # Plain "Full" is a separate category and still sums with OG File.
+        plain = parse_era_stats("3 OG File(s)\n10 Full\n2 Tagged\n1 Snippet(s)")
+        assert plain.full == 10 and plain.total_full == 0
+        assert plain.total == 3 + 10 + 2 + 1
 
 
 class TestTrackerStatsParsing:

@@ -135,3 +135,45 @@ struct FavouriteTagMigrationTests {
         #expect(Set(migrated.map(\.key)).count == 2)
     }
 }
+
+/// The badge row on a favourites entry.
+@Suite("Favourite badge source")
+struct FavouriteBadgeSourceTests {
+    /// New writes leave the flat quality/availableLength fields nil — they are
+    /// the pre-snapshot legacy path — so reading them alone rendered a blank
+    /// badge row for every favourite added since the primaryVersion migration.
+    @Test func `pills come from the version snapshot when the flat fields are nil`() {
+        let v = SongVersion(
+            name: "Track", versionTag: nil, badge: nil, featuring: nil, producers: nil,
+            collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
+            altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil, availableLength: "Full",
+            quality: "Lossless", streaming: nil, links: nil, dateOfRecording: nil,
+            type: nil, sources: nil, rating: nil
+        )
+        let entry = FavouritesManager.FavouriteEntry(
+            key: "k", artistSlug: "a", artistName: "A", sourceUrl: nil,
+            eraName: "E", eraArt: nil, songBaseName: "Track", songVersionCount: 1,
+            badge: nil, addedAt: Date(), primaryVersion: v,
+            primaryVersionName: nil, primaryVersionTag: nil, links: nil,
+            quality: nil, availableLength: nil, notes: nil, trackLength: nil, leakDate: nil
+        )
+        // What FavouritesView renders from.
+        #expect((entry.primaryVersion?.quality ?? entry.quality) == "Lossless")
+        #expect((entry.primaryVersion?.availableLength ?? entry.availableLength) == "Full")
+        // And the pill logic actually produces something for those values.
+        #expect(BadgeLogic.primaryPill(quality: "Lossless", availability: "Full") != nil)
+    }
+
+    @Test func `entries predating the snapshot still read their flat fields`() {
+        let entry = FavouritesManager.FavouriteEntry(
+            key: "k", artistSlug: "a", artistName: "A", sourceUrl: nil,
+            eraName: "E", eraArt: nil, songBaseName: "Track", songVersionCount: 1,
+            badge: nil, addedAt: Date(), primaryVersion: nil,
+            primaryVersionName: "Track", primaryVersionTag: nil, links: nil,
+            quality: "CD Quality", availableLength: "Snippet", notes: nil,
+            trackLength: nil, leakDate: nil
+        )
+        #expect((entry.primaryVersion?.quality ?? entry.quality) == "CD Quality")
+    }
+}

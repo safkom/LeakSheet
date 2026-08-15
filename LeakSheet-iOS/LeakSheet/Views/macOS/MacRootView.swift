@@ -40,6 +40,12 @@ struct MacRootView: View {
     @State private var prepared: (slug: String, vm: ArtistViewModel)?
     @State private var ui = MacUIState.shared
 
+    /// Freshly-refetched artist + view model from Cmd-R, keyed to the pushed
+    /// screen. Cleared implicitly by navigating elsewhere.
+    @State private var refreshedArtist: (artist: Artist, vm: ArtistViewModel)?
+    /// Bumped per Cmd-R so the destination subtree gets a new identity.
+    @State private var refreshToken = 0
+
     /// The prepared view model, but only when it describes the artist that is
     /// actually playing — mirrors ContentView. Lets the description sheet
     /// raised from Now Playing / Favourites resolve the full song.
@@ -59,10 +65,17 @@ struct MacRootView: View {
             NavigationStack(path: $path) {
                 detailRoot
                     .navigationDestination(for: Artist.self) { artist in
+                        let refreshed = refreshedArtist?.artist.slug == artist.slug
+                            ? refreshedArtist
+                            : nil
                         ArtistView(
-                            artist: artist,
-                            preparedVM: prepared?.slug == artist.slug ? prepared?.vm : nil
+                            artist: refreshed?.artist ?? artist,
+                            preparedVM: refreshed?.vm
+                                ?? (prepared?.slug == artist.slug ? prepared?.vm : nil)
                         )
+                        // Identity changes when Cmd-R lands fresh data, which
+                        // is what forces the subtree to rebuild.
+                        .id(refreshToken)
                     }
             }
         }
@@ -98,7 +111,10 @@ struct MacRootView: View {
         // ⌘R refreshes the currently pushed artist, if any.
         .onChange(of: ui.refreshToken) { _, _ in
             guard let artist = path.last else { return }
-            Task { await open(artist.sourceUrl ?? "", artistName: artist.name, forceRefresh: true) }
+            Task {
+                await open(artist.sourceUrl ?? "", artistName: artist.name, forceRefresh: true)
+                refreshToken &+= 1
+            }
         }
     }
 
@@ -165,6 +181,12 @@ struct MacRootView: View {
         ) else { return }
         let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
         prepared = (artist.slug, vm)
+        // Artist: Hashable is slug-only, so re-pushing the same artist is a
+        // no-op — the destination is never rebuilt and ArtistView's
+        // `.task(id: artist.slug)` doesn't re-fire. Cmd-R therefore refetched,
+        // rewrote the cache, and left the screen identical. Bumping this token
+        // gives the pushed screen an identity change to react to.
+        refreshedArtist = (artist, vm)
         withAnimation { path = [artist] }
     }
 }

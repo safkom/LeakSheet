@@ -339,18 +339,9 @@ private struct ArtistContentView: View {
             EmbedPlayerView(item: item)
         }
         .task {
-            // Register ordered era list with the engine so playback auto-continues
-            // to the next era when the current one runs out.
-            let eraContexts = artist.eras.map { era in
-                EraSongContext(
-                    eraName: era.name,
-                    artistName: artist.name,
-                    artUrl: era.artUrl ?? "",
-                    versions: era.allSongs.flatMap(\.versions).filter(\.isStreamable),
-                    artistSlug: artist.slug
-                )
-            }
-            player.setArtistEras(eraContexts)
+            // Prebuilt off-main in Precomputed — this used to walk every
+            // version of every era on the MainActor, on every appearance.
+            player.setArtistEras(vm.eraPlaybackContexts)
             // Seeded colors (from the persisted extraction cache) give the
             // background tint immediately; otherwise the first per-card
             // extraction callback sets it.

@@ -67,7 +67,15 @@ struct FileInfoSection: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .task(id: version.id) { await load() }
+        .task(id: version.id) {
+            // Reset first. `.task(id:)` restarts the task but the view keeps
+            // its identity, so @State survived a version switch — V1's codec,
+            // bitrate and sample rate stayed on screen labelled as V2's,
+            // because the tail guard below only writes .unavailable when the
+            // state is still .loading.
+            state = .loading
+            await load()
+        }
         .onChange(of: player.streamFormat) { _, newFormat in
             // The user may start playing this version while the sheet is up —
             // upgrade an empty section with the freshly captured format.

@@ -8,6 +8,8 @@ struct RecentTrackersListView: View {
     var showsHeader = true
     var onSelect: (RecentTrackersManager.RecentTracker) -> Void
 
+    @State private var showClearConfirm = false
+
     var body: some View {
         if !recents.trackers.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
@@ -17,8 +19,8 @@ struct RecentTrackersListView: View {
                             .font(.headline)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Clear") {
-                            recents.clearAll()
+                        Button("Clear", role: .destructive) {
+                            showClearConfirm = true
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)

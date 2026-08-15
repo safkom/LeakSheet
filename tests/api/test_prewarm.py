@@ -30,7 +30,11 @@ def _seed_entry(url: str, *, age_s: float, parsed: bool = True) -> None:
         fetcher._set_cached_parsed(un, parse_sheet(read_synthetic("main_tab"), "SynthWave"))
     meta_path = fetcher.CACHE_DIR / f"{_cache_key(un)}.meta.json"
     meta = json.loads(meta_path.read_text())
-    meta["timestamp"] = time.time() - age_s
+    # Both: the HTML and the parse carry independent freshness signals, and an
+    # entry that is genuinely old is old in both.
+    aged = time.time() - age_s
+    meta["timestamp"] = aged
+    meta["parsed_timestamp"] = aged
     meta_path.write_text(json.dumps(meta))
 
 

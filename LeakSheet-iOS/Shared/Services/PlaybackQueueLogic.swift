@@ -81,6 +81,16 @@ nonisolated struct PlaybackQueueLogic {
     }
 
     mutating func setArtistEras(_ eras: [EraSongContext]) {
+        // Don't replace the list out from under a track that is still playing
+        // from a DIFFERENT artist. ArtistView calls this on every appearance,
+        // so browsing artist B while A played swapped A's era list for B's;
+        // when A's era ended, advanceToNextEra could match nothing and
+        // playback stopped instead of rolling into A's next era.
+        if let playing = eraSongs,
+           let incoming = eras.first,
+           incoming.artistName != playing.artistName {
+            return
+        }
         artistEras = eras
         // Positions into the old array are meaningless now.
         eraIndex = nil

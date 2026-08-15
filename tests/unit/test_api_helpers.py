@@ -22,7 +22,12 @@ from src.api import _parse_if_none_match, _plan_synthesized_range, _RangePlan
         ("bytes=0-499", 1000, _RangePlan("partial", 0, 499)),
         ("bytes=500-999", 1000, _RangePlan("partial", 500, 999)),
         ("bytes=0-999999999", 1000, _RangePlan("partial", 0, 999)),   # clamp to total
-        ("bytes=0-499", None, _RangePlan("partial", 0, 499)),         # unknown total OK
+        # Unknown total: we cannot clamp `end`, so we cannot honestly promise
+        # a Content-Length. Serving the full body signals "Range unsupported";
+        # synthesising a 206 advertised the REQUESTED length and then
+        # delivered a shorter body. Matches the suffix/open-ended branches.
+        ("bytes=0-499", None, _RangePlan("full")),
+        ("bytes=0-999999999", None, _RangePlan("full")),
         # Open-ended ranges
         ("bytes=0-", 1000, _RangePlan("partial", 0, 999)),
         ("bytes=200-", 1000, _RangePlan("partial", 200, 999)),

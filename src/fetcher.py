@@ -77,6 +77,32 @@ _SHEET_CACHE_MAX_BYTES = int(
 )
 _SHEET_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
 _last_sheet_evict = 0.0
+# tempfile.mkstemp(prefix=f"{name}.tmp") → "abc.html.tmpQ7z1zK".
+_TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
+
+# Concurrent sub-page fetches, across ALL callers.
+#
+# Discovery started every discovered GID at once and _aggregate_hub_workbook
+# fetched *and parsed* every unclassified tab at once, each holding its full
+# response body — the largest export here is 11.85MB, and README.md:147 says
+# the box cannot fit two concurrent Ye-sized parses. One semaphore inside
+# _fetch_gid_page bounds all three fan-out sites at their single choke point.
+_GID_FETCH_CONCURRENCY = int(
+    os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
+)
+_gid_fetch_sem: asyncio.Semaphore | None = None
+# Hub-workbook tabs are fetched AND parsed, so they need a tighter bound.
+_HUB_LOAD_CONCURRENCY = int(
+    os.environ.get("LEAKSHEET_HUB_LOAD_CONCURRENCY", "3") or 3
+)
+
+
+def _gid_fetch_slot() -> asyncio.Semaphore:
+    """Lazily created so the semaphore binds to the running loop."""
+    global _gid_fetch_sem
+    if _gid_fetch_sem is None:
+        _gid_fetch_sem = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
+    return _gid_fetch_sem
 
 
 class PhaseTimer:
@@ -185,6 +211,21 @@ GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 _TAB_ITEMS_PATTERN = re.compile(
     r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
 )
+
+# The same items.push() switcher, but keyed on pageUrl instead of gid. Some
+# hosts (deftonestracker.net, franktracker.net, tylertracker.net) omit the
+# `gid:` key entirely and carry the sub-page as a PATH:
+#   items.push({name: "Unreleased", pageUrl: "\/htmlview\/sheet\/554276433.html"});
+#   items.push({name: "Unreleased", pageUrl: "\/preview\/sheet\/937104017.html"});
+# Those hosts answer the ?gid= query form with the 52KB shell page — no
+# <table> — so every one of them failed with NoTablesError until we followed
+# the URL the page itself advertises.
+_TAB_PAGEURL_PATTERN = re.compile(
+    r'\{name:\s*"([^"]+)"[^}]*?pageUrl:\s*"([^"]+)"',
+)
+
+# Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
+_PAGEURL_GID_PATTERN = re.compile(r"/(\d+)\.html?$")
 
 # Art tab name keywords (after stripping emojis and normalising whitespace)
 _ART_TAB_NAMES = frozenset({"art", "album art", "cover art", "artwork", "arts", "album arts"})
@@ -334,13 +375,24 @@ def _extract_sheet_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _build_sheet_html_url(base_url: str, gid: str) -> str:
-    """Build the /htmlview/sheet URL that returns server-rendered HTML.
+def _build_sheet_html_url(
+    base_url: str, gid: str, page_paths: dict[str, str] | None = None
+) -> str:
+    """Build the URL that returns this tab's server-rendered HTML.
+
+    When the base page carried a switcher naming this gid's path, use it —
+    that is the URL the host actually serves. Otherwise fall back to the
+    query form:
 
     For Google Sheets: /spreadsheets/d/{id}/htmlview/sheet?headers=true&gid={gid}
     For custom domains: /htmlview/sheet?headers=true&gid={gid}
     """
     parsed = urlparse(base_url)
+
+    if page_paths and (path := page_paths.get(gid)):
+        if path.startswith(("http://", "https://")):
+            return path
+        return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     if _is_google_sheets_url(base_url):
         sheet_id = _extract_sheet_id(base_url)
@@ -489,7 +541,33 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
         name = _decode_js_string(name).strip()
         if name and gid:
             result.setdefault(gid, name)
+    # Hosts whose switcher entries carry no `gid:` key still name every tab —
+    # without this they fell through to keyword-guessing against nothing, so
+    # art/content/unreleased detection never fired for them.
+    for gid, (name, _path) in _discover_page_urls(html).items():
+        if name:
+            result.setdefault(gid, name)
     return result
+
+
+def _discover_page_urls(html: str) -> dict[str, tuple[str, str]]:
+    """Extract {gid: (tab_name, page_path)} from the page-switcher JS.
+
+    The switcher is authoritative: it is what the page's own tab bar uses, so
+    it gives both the exact tab name and a URL known to serve that tab.
+    """
+    result: dict[str, tuple[str, str]] = {}
+    for name, raw_path in _TAB_PAGEURL_PATTERN.findall(html):
+        path = _decode_js_string(raw_path).strip()
+        m = _PAGEURL_GID_PATTERN.search(path)
+        if m:
+            result.setdefault(m.group(1), (_decode_js_string(name).strip(), path))
+    return result
+
+
+def _page_path_map(html: str) -> dict[str, str]:
+    """{gid: page_path} — the subset of `_discover_page_urls` the fetcher needs."""
+    return {gid: path for gid, (_name, path) in _discover_page_urls(html).items()}
 
 
 def _clean_tab_name(name: str) -> str:
@@ -626,6 +704,12 @@ def _evict_sheet_cache() -> None:
     for path in CACHE_DIR.iterdir():
         if not path.is_file() or path.name.startswith("img_"):
             continue
+        # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
+        # "abc", so temp files grouped with the real entry and got unlinked
+        # mid-write — os.replace then raised FileNotFoundError out of
+        # _set_cache and 500'd a request that had already parsed successfully.
+        if _TMP_SUFFIX_RE.search(path.name):
+            continue
         try:
             stat = path.stat()
         except OSError:
@@ -691,11 +775,41 @@ def _set_cache(url: str, html: str, title: str) -> None:
     # read. For the parsed cache that reached the client as truncated JSON
     # under a 200 (get_cached_parsed_bytes does no validation).
     _atomic_write_text(CACHE_DIR / f"{key}.html", html)
-    _atomic_write_text(
-        CACHE_DIR / f"{key}.meta.json",
-        json.dumps({"url": url, "title": title, "timestamp": time.time()}),
-    )
+    # Merge, don't overwrite. `.html` and `.parsed.json` share one meta file
+    # but have independent lifecycles: this writes minutes before the parse
+    # exists, and can be followed by a failure that never produces one.
+    # Rebuilding the dict here bumped the parsed cache's freshness to "now"
+    # and dropped its content_hash, so a failed refresh served yesterday's
+    # parse as a fresh hit for a full TTL.
+    _write_meta(key, {"url": url, "title": title, "timestamp": time.time()})
     _maybe_evict_sheet_cache()
+
+
+def _read_meta(key: str) -> dict:
+    """Read a cache entry's metadata, or {} when absent/corrupt."""
+    try:
+        return json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata and write it atomically."""
+    meta = _read_meta(key)
+    meta.update(updates)
+    _atomic_write_text(
+        CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
+    )
+
+
+def _parsed_timestamp(meta: dict) -> float:
+    """Freshness of the PARSED cache.
+
+    Distinct from `timestamp`, which tracks the HTML. Falls back to it for
+    entries written before the two were separated.
+    """
+    ts = meta.get("parsed_timestamp")
+    return float(ts) if ts else float(meta.get("timestamp", 0) or 0)
 
 
 def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist | None:
@@ -706,7 +820,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
     if parsed_file.exists() and meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            if time.time() - meta.get("timestamp", 0) < cache_ttl:
+            if time.time() - _parsed_timestamp(meta) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.model_validate(data)
         except Exception as e:
@@ -727,22 +841,16 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             CACHE_DIR / f"{key}.parsed.json",
             json.dumps(data, ensure_ascii=False),
         )
-        # Update metadata with content hash for ETag support
-        meta_file = CACHE_DIR / f"{key}.meta.json"
-        meta = {}
-        if meta_file.exists():
-            try:
-                meta = json.loads(meta_file.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
-        meta["content_hash"] = compute_content_hash(data)
-        # Every reader keys off meta["timestamp"]. Under force_refresh the
-        # caller skips _set_cache (use_cache=False) while still writing the
-        # parse, so without this a pull-to-refresh either inherited the OLD
-        # timestamp — fresh data considered stale immediately — or, on a
-        # first-ever fetch, wrote a parsed cache that could never be read.
-        meta["timestamp"] = time.time()
-        _atomic_write_text(meta_file, json.dumps(meta, ensure_ascii=False))
+        # parsed_timestamp, not timestamp: the parse's freshness is its own
+        # signal. Under force_refresh the caller skips _set_cache entirely
+        # while still writing the parse, so without a write here a
+        # pull-to-refresh either inherited the OLD timestamp — fresh data
+        # considered stale immediately — or, on a first-ever fetch, wrote a
+        # parsed cache that could never be read.
+        _write_meta(key, {
+            "content_hash": compute_content_hash(data),
+            "parsed_timestamp": time.time(),
+        })
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -787,7 +895,7 @@ def stale_parsed_cache_urls(limit: int) -> list[str]:
         except (OSError, json.JSONDecodeError):
             continue
         url = meta.get("url")
-        ts = meta.get("timestamp", 0)
+        ts = _parsed_timestamp(meta)
         if not url or ts <= 0:
             continue
         age = now - ts
@@ -809,7 +917,9 @@ def clear_cache() -> tuple[int, int]:
     cleared = 0
     skipped = 0
     for f in CACHE_DIR.iterdir():
-        if f.is_file():
+        # Same reason as the eviction scan: unlinking another thread's
+        # in-flight atomic write makes its os.replace raise.
+        if f.is_file() and not _TMP_SUFFIX_RE.search(f.name):
             try:
                 f.unlink()
                 cleared += 1
@@ -845,7 +955,7 @@ def get_cached_age(url: str) -> float | None:
     if meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            ts = meta.get("timestamp", 0)
+            ts = _parsed_timestamp(meta)
             if ts > 0:
                 return time.time() - ts
         except (json.JSONDecodeError, OSError):
@@ -872,7 +982,7 @@ def get_cached_parsed_bytes(
         return None
     try:
         meta = json.loads(meta_file.read_text())
-        ts = meta.get("timestamp", 0)
+        ts = _parsed_timestamp(meta)
         if ts <= 0:
             return None
         age = time.time() - ts
@@ -1097,7 +1207,12 @@ async def async_fetch_sheet_html(
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
             if use_cache:
-                await _async_set_cache(url, r.text, title)
+                # Key by the URL actually fetched, like every other call site
+                # (_fetch_gid_page uses sheet_url). Keying by the base `url`
+                # filed one tab's HTML under the workbook's entry, so a later
+                # gid-less read — the fallback path in async_fetch_and_parse —
+                # got that tab back as if it were the whole sheet.
+                await _async_set_cache(sheet_url, r.text, title)
             return r.text, title
 
         # Step 1: Fetch the base page
@@ -1113,7 +1228,8 @@ async def async_fetch_sheet_html(
             return base_html, title
 
         # Step 2: Discover GIDs
-        gids = _discover_gids(base_html)
+        page_paths = _page_path_map(base_html)
+        gids = _discover_gids(base_html) or list(page_paths)
         if not gids:
             gids = ["0"]
 
@@ -1121,7 +1237,7 @@ async def async_fetch_sheet_html(
         last_error = None
         for try_gid in gids:
             try:
-                sheet_url = _build_sheet_html_url(url, try_gid)
+                sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
                 r = await client.get(sheet_url, timeout=timeout)
                 if r.status_code == 200 and "<table" in r.text.lower():
                     if use_cache:
@@ -1150,21 +1266,23 @@ async def _fetch_gid_page(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> tuple[str, str] | None:
     """Fetch a single GID sheet page. Returns (gid, html) or None."""
     try:
-        with t.phase("gid_fetch"):
-            sheet_url = _build_sheet_html_url(url_norm, gid_val)
-            if use_cache and cache_ttl > 0:
-                cached = await _async_get_cached(sheet_url, cache_ttl)
-                if cached is not None:
-                    return (gid_val, cached[0])
-            resp = await client.get(sheet_url, timeout=timeout)
-            if resp.status_code != 200 or "<table" not in resp.text.lower():
-                return None
-            if use_cache and cache_ttl > 0:
-                await _async_set_cache(sheet_url, resp.text, title)
-            return (gid_val, resp.text)
+        async with _gid_fetch_slot():
+            with t.phase("gid_fetch"):
+                sheet_url = _build_sheet_html_url(url_norm, gid_val, page_paths)
+                if use_cache and cache_ttl > 0:
+                    cached = await _async_get_cached(sheet_url, cache_ttl)
+                    if cached is not None:
+                        return (gid_val, cached[0])
+                resp = await client.get(sheet_url, timeout=timeout)
+                if resp.status_code != 200 or "<table" not in resp.text.lower():
+                    return None
+                if use_cache and cache_ttl > 0:
+                    await _async_set_cache(sheet_url, resp.text, title)
+                return (gid_val, resp.text)
     except (httpx.HTTPError, ValueError, KeyError):
         return None
 
@@ -1181,6 +1299,7 @@ async def _load_secondary_tabs(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
@@ -1197,7 +1316,7 @@ async def _load_secondary_tabs(
         return await _fetch_gid_page(
             url_norm, gid_val, title,
             client=client, timeout=timeout, cache_ttl=cache_ttl,
-            use_cache=use_cache, t=t,
+            use_cache=use_cache, t=t, page_paths=page_paths,
         )
 
     async def _load_art() -> None:
@@ -1359,6 +1478,7 @@ async def _aggregate_hub_workbook(
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
 ) -> int:
     """Merge sibling catalogue tabs into a hub workbook's era tree.
 
@@ -1375,20 +1495,29 @@ async def _aggregate_hub_workbook(
     if not candidates:
         return 0
 
+    # A SECOND, smaller bound around fetch+parse together. The gid-fetch
+    # semaphore is released once the body is in hand, so without this every
+    # candidate proceeded to hold its full HTML and build a model tree
+    # concurrently. Distinct semaphore, always acquired outside the inner one,
+    # so the nesting can't deadlock.
+    sem = asyncio.Semaphore(_HUB_LOAD_CONCURRENCY)
+
     async def _load(gid_val: str, display: str) -> tuple[str, Artist] | None:
-        try:
-            result = await _fetch_gid_page(
-                url_norm, gid_val, title, client=client, timeout=timeout,
-                cache_ttl=cache_ttl, use_cache=use_cache, t=t,
-            )
-            if result is None:
-                return None
-            with t.phase("hub_parse"):
-                parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
-            return display, parsed
-        except Exception as e:
-            logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
-            return None
+        async with sem:
+          try:
+              result = await _fetch_gid_page(
+                  url_norm, gid_val, title, client=client, timeout=timeout,
+                  cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                  page_paths=page_paths,
+              )
+              if result is None:
+                  return None
+              with t.phase("hub_parse"):
+                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
+              return display, parsed
+          except Exception as e:
+              logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
+              return None
 
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 
@@ -1474,11 +1603,13 @@ async def async_fetch_and_parse(
                 )
             # Base-page tab listing needed — see docs/decisions.md::fetcher.py::gid-subpage-discovery
             named_tabs: dict[str, str] = {}
+            base_page_paths: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
                     base_resp = await client.get(url_norm, timeout=timeout)
                     base_resp.raise_for_status()
                 named_tabs = _discover_named_tabs(base_resp.text)
+                base_page_paths = _page_path_map(base_resp.text)
             except httpx.HTTPError:
                 pass  # Can't tell — fall back to trusting parse_sheet below
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
@@ -1507,6 +1638,7 @@ async def async_fetch_and_parse(
                             url_norm, title,
                             client=client, timeout=timeout,
                             cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                            page_paths=base_page_paths,
                         )
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
@@ -1539,7 +1671,10 @@ async def async_fetch_and_parse(
                     await _async_set_cached_parsed(url_norm, artist)
                 return artist
 
-        gids = _discover_gids(base_html)
+        # The page-switcher is authoritative for both tab names and sub-page
+        # URLs — see _discover_page_urls.
+        page_paths = _page_path_map(base_html)
+        gids = _discover_gids(base_html) or list(page_paths)
         if not gids:
             gids = ["0"]
 
@@ -1553,7 +1688,7 @@ async def async_fetch_and_parse(
             return await _fetch_gid_page(
                 url_norm, gid_val, title,
                 client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t,
+                use_cache=use_cache, t=t, page_paths=page_paths,
             )
 
         # Priority-ordered concurrent fetch with cancellation — see
@@ -1626,7 +1761,7 @@ async def async_fetch_and_parse(
                     ),
                     url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,
-                    use_cache=use_cache, t=t,
+                    use_cache=use_cache, t=t, page_paths=page_paths,
                 )
 
             # Secondary tabs (Art + content tabs) — fetched concurrently,
@@ -1634,7 +1769,7 @@ async def async_fetch_and_parse(
             await _load_secondary_tabs(
                 best_artist, art_gid, content_tabs, url_norm, title,
                 client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t,
+                use_cache=use_cache, t=t, page_paths=page_paths,
             )
 
             with t.phase("cache_write"):

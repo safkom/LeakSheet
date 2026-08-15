@@ -207,7 +207,12 @@ class EraStats(BaseModel):
         70 Unavailable
     """
     og_files: int = Field(0, description="Number of OG files")
-    full: int = Field(0, description="Number of full versions")
+    full: int = Field(0, description="Number of full versions ('Full' wording)")
+    total_full: int = Field(
+        0,
+        description="Number of full versions ('Total Full' wording, which "
+                    "counts the OG files within it)",
+    )
     tagged: int = Field(0, description="Number of tagged versions")
     partial: int = Field(0, description="Number of partial versions")
     snippets: int = Field(0, description="Number of snippets")
@@ -216,7 +221,21 @@ class EraStats(BaseModel):
 
     @property
     def total(self) -> int:
-        """Total song count from stats (all categories summed)."""
+        """Total song count from stats.
+
+        Trackers use one of two wordings for the full count, and they do not
+        mean the same thing. Plain "Full" is a peer of OG File; "Total Full"
+        (the Carti-style header) already *contains* the OG files, so adding
+        both inflated the era total by the OG count — 338 against 207 real
+        versions on Die Lit. Verified against all eight Carti eras that report
+        a non-zero OG File alongside Total Full: excluding og_files makes
+        every one match its parsed version count exactly.
+        """
+        if self.total_full:
+            return (
+                self.total_full + self.tagged + self.partial
+                + self.snippets + self.stem_bounces + self.unavailable
+            )
         return (
             self.og_files + self.full + self.tagged + self.partial
             + self.snippets + self.stem_bounces + self.unavailable
@@ -571,7 +590,9 @@ def parse_era_stats(raw: str) -> EraStats:
 
     return EraStats(
         og_files=pairs.get("og file", pairs.get("og files", 0)),
-        full=_match_stat(pairs, ["total full", "full"]),
+        # Kept apart, not aliased — see EraStats.total.
+        full=pairs.get("full", 0),
+        total_full=pairs.get("total full", 0),
         tagged=pairs.get("tagged", 0),
         partial=_match_stat(pairs, ["partial", "partial / cut"]),
         snippets=pairs.get("snippet", pairs.get("snippets", 0)),
@@ -897,6 +918,25 @@ def _clean_og_name(name: str) -> str:
     return name.strip().rstrip("&").strip()
 
 
+def _is_og_listing(match: "re.Match[str]", rest: str) -> bool:
+    """True when an OG lead-in actually introduces a filename.
+
+    The lead-in accepts a bare space as its separator, because
+    "OG Filename KW - Where Are We Ref (1.15.13)" is a real observed form. But
+    that also matched prose — "OG Filenames are unknown for this track" —
+    which was then stored as a filename AND deleted from the notes.
+
+    An explicit ':' or '-' separator is always a listing. After a bare space,
+    a filename starts like a filename: never with a lowercase word, which is
+    what every prose continuation ("are…", "is…", "were…", "not…") does.
+    """
+    if not rest:
+        return False
+    if match.group(0).rstrip().endswith((":", "-")):
+        return True
+    return not rest[0].islower()
+
+
 def _walk_og_lines(notes: str):
     """Yield (line_index, is_og, names) per line.
 
@@ -915,6 +955,10 @@ def _walk_og_lines(notes: str):
             continue
 
         rest = stripped[m.end():].strip()
+        if not _is_og_listing(m, rest):
+            yield i, False, []
+            i += 1
+            continue
         # A quoted filename bounds the capture; otherwise take the line rest.
         quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
         names = [quoted.group(1)] if quoted else ([rest] if rest else [])

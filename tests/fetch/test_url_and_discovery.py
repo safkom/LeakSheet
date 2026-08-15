@@ -216,3 +216,78 @@ class TestContentTabClassification:
 
     def test_main_and_art_tabs_not_content(self):
         assert self._tabs(g1="Unreleased", g2="Art") == []
+
+
+class TestPageSwitcherDiscovery:
+    """Hosts whose switcher carries a PATH instead of a `gid:` key.
+
+    deftonestracker.net, franktracker.net and tylertracker.net answer the
+    ?gid= query form with a ~52KB shell page containing no <table>, so all
+    three failed with NoTablesError — Tyler alone is 49 eras / 1234 versions.
+    The switcher names the URL the host actually serves.
+    """
+
+    HTMLVIEW = (
+        '<script>function init(){var items=[];'
+        'items.push({name: "Unreleased", pageUrl: "\\/htmlview\\/sheet\\/554276433.html"});'
+        'items.push({name: "Released", pageUrl: "\\/htmlview\\/sheet\\/2075464323.html"});'
+        'items.push({name: "\\ud83d\\uddbc\\ufe0f Art", pageUrl: "\\/htmlview\\/sheet\\/879105978.html"});'
+        "}</script>"
+    )
+    PREVIEW = (
+        '<script>var items=[];'
+        'items.push({name: "\\ud83c\\udfb5 Unreleased", pageUrl: "\\/preview\\/sheet\\/937104017.html"});'
+        "</script>"
+    )
+
+    def test_page_urls_extracted_with_names(self):
+        from src.fetcher import _discover_page_urls
+        out = _discover_page_urls(self.HTMLVIEW)
+        assert out["554276433"] == ("Unreleased", "/htmlview/sheet/554276433.html")
+        assert out["2075464323"][0] == "Released"
+        # JS escapes decoded, so keyword matching sees a real tab name.
+        assert out["879105978"][0].endswith("Art")
+
+    def test_preview_path_shape(self):
+        from src.fetcher import _discover_page_urls
+        out = _discover_page_urls(self.PREVIEW)
+        assert out["937104017"][1] == "/preview/sheet/937104017.html"
+
+    def test_url_builder_prefers_the_advertised_path(self):
+        from src.fetcher import _page_path_map
+        paths = _page_path_map(self.HTMLVIEW)
+        out = _build_sheet_html_url("https://deftonestracker.net/", "554276433", paths)
+        assert out == "https://deftonestracker.net/htmlview/sheet/554276433.html"
+
+    def test_url_builder_falls_back_to_the_query_form(self):
+        from src.fetcher import _page_path_map
+        paths = _page_path_map(self.HTMLVIEW)
+        # A gid the switcher doesn't mention keeps the old behaviour.
+        out = _build_sheet_html_url("https://deftonestracker.net/", "999", paths)
+        assert out == "https://deftonestracker.net/htmlview/sheet?headers=true&gid=999"
+        assert _build_sheet_html_url("https://yetracker.net/", "5", {}) == (
+            "https://yetracker.net/htmlview/sheet?headers=true&gid=5"
+        )
+
+    def test_absolute_page_urls_are_used_as_is(self):
+        out = _build_sheet_html_url(
+            "https://x.net/", "1", {"1": "https://cdn.x.net/sheet/1.html"}
+        )
+        assert out == "https://cdn.x.net/sheet/1.html"
+
+    def test_switcher_names_feed_tab_classification(self):
+        """Without this these hosts had NO named tabs at all, so art/content
+        detection never fired for them."""
+        from src.fetcher import _discover_named_tabs, _get_art_tab_gid
+        tabs = _discover_named_tabs(self.HTMLVIEW)
+        assert tabs["554276433"] == "Unreleased"
+        assert _get_art_tab_gid(tabs) == "879105978"
+
+    def test_gid_keyed_entries_still_win(self):
+        """A page with both shapes must not have the path form override the
+        canonical gid-keyed names."""
+        from src.fetcher import _discover_named_tabs
+        both = (
+            'items.push({name: "Real Name", pageUrl: "\\/htmlview\\/sheet\\/42.html", gid: "42"});'
+        )
+        assert _discover_named_tabs(both)["42"] == "Real Name"
