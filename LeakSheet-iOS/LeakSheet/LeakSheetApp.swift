@@ -28,7 +28,6 @@ struct LeakSheetApp: App {
         // supplies its own Window-menu item for free.
         Window("LeakSheet", id: "main") {
             MacRootView()
-                .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
                 .environment(RecentTrackersManager.shared)
@@ -44,7 +43,6 @@ struct LeakSheetApp: App {
 
         Window("Now Playing", id: "now-playing") {
             NowPlayingView()
-                .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
         }
@@ -56,13 +54,11 @@ struct LeakSheetApp: App {
         // which is neither where a Mac user looks nor reachable by keyboard.
         Settings {
             SettingsView(embedded: true)
-                .preferredColorScheme(.dark)
                 .frame(width: 460, height: 520)
         }
         #else
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.dark)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

@@ -161,7 +161,7 @@ struct FilterChip: View {
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .foregroundStyle(isActive ? .white : .secondary)
+                .foregroundStyle(isActive ? AnyShapeStyle(Color.preferredText(on: tintColor)) : AnyShapeStyle(.secondary))
                 // Tint via opacity — see DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity
                 .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }

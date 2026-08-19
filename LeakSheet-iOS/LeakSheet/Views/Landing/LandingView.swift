@@ -28,7 +28,7 @@ struct LandingView: View {
                 VStack(spacing: 8) {
                     Text("LeakSheet")
                         .font(.largeTitle.bold())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Text("Music tracker parser")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

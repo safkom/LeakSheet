@@ -37,9 +37,13 @@ struct CreditTagsView: View {
         HStack(alignment: .top, spacing: 4) {
             Text(type.label)
                 .font(.caption2.weight(.semibold))
+                // Full opacity, and the wash below is 15%: the same composite
+                // BadgePill uses. At 0.8 over a 10% wash `director` could not
+                // clear AA at any brightness — the composite was the defect,
+                // not the hue.
                 .foregroundStyle(onProminentBackground
                     ? AnyShapeStyle(.background.opacity(0.85))
-                    : AnyShapeStyle(type.color.opacity(0.8)))
+                    : AnyShapeStyle(type.color))
                 .fixedSize()
             Text(text)
                 .font(.caption2)
@@ -48,7 +52,7 @@ struct CreditTagsView: View {
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
-        .background(onProminentBackground ? Color.white.opacity(0.18) : type.color.opacity(0.10))
+        .background(onProminentBackground ? Color.white.opacity(0.18) : type.color.opacity(0.15))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(type.accessibilityLabel) \(text)")

@@ -109,6 +109,7 @@ private struct ArtistContentView: View {
     }
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     /// era name (lowercased) → art URL, first occurrence wins — mirrors the
     /// case-insensitive `.first { }` lookup misc entries used to do directly
@@ -253,6 +254,10 @@ private struct ArtistContentView: View {
                     .padding(.bottom, 12)
                     .transition(.opacity)
             }
+        }
+        // Era card gradients and header contrast are derived per appearance.
+        .onChange(of: colorScheme, initial: true) { _, scheme in
+            vm.setColorScheme(scheme)
         }
         .swipeActionsContainer()
         .navigationTitle(artist.name)

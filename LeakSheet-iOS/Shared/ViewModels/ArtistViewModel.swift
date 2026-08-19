@@ -161,6 +161,12 @@ final class ArtistViewModel {
     /// changes so `body` only iterates.
     private(set) var eraRows: [EraRow] = []
 
+    /// The appearance the cached `eraDisplay` values were derived for. Era card
+    /// gradients and header contrast are computed per scheme, so switching
+    /// light/dark has to re-derive them — the raw dominant colours behind them
+    /// are appearance-independent and never need re-extracting.
+    private(set) var colorScheme: ColorScheme = .dark
+
     /// songKey → eras containing that song (only keys spanning >1 era) —
     /// built once in Precomputed.
     private let songKeyEras: [String: [CrossEraRef]]
@@ -433,7 +439,7 @@ final class ArtistViewModel {
         let cached = EraColorExtractor.cachedColors()
         for era in artist.eras {
             guard let artUrl = era.artUrl, let color = cached[artUrl] else { continue }
-            eraDisplay[era.name] = EraDisplayColors.derive(from: color)
+            eraDisplay[era.name] = EraDisplayColors.derive(from: color, in: colorScheme)
         }
 
         rebuildEraRows()
@@ -441,13 +447,22 @@ final class ArtistViewModel {
 
     // MARK: - Era colors
 
+    /// Re-derive every cached era colour for a new appearance. No-op when the
+    /// scheme is unchanged, so it is safe to call from `onChange`. The raw
+    /// dominant colours are appearance-independent, so nothing is re-extracted.
+    func setColorScheme(_ scheme: ColorScheme) {
+        guard scheme != colorScheme else { return }
+        colorScheme = scheme
+        eraDisplay = eraDisplay.mapValues { EraDisplayColors.derive(from: $0.dominant, in: scheme) }
+    }
+
     /// Idempotent — extraction is deterministic and cached, so the first
     /// derivation per era wins and later callbacks are no-ops. Buffers into
     /// `pendingEraColors` and coalesces same-turn callbacks into a single
     /// `eraDisplay` write on the next runloop tick.
     func setEraColor(eraName: String, dominant: Color) {
         guard eraDisplay[eraName] == nil, pendingEraColors[eraName] == nil else { return }
-        pendingEraColors[eraName] = EraDisplayColors.derive(from: dominant)
+        pendingEraColors[eraName] = EraDisplayColors.derive(from: dominant, in: colorScheme)
         scheduleEraColorFlush()
     }
 

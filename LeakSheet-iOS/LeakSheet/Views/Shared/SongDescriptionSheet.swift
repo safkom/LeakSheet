@@ -367,7 +367,7 @@ struct SongDescriptionSheet: View {
                         } label: {
                             Label("Play", systemImage: "play.fill")
                                 .font(.headline)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? .lsAccent))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(accentColor ?? Color.lsAccent)

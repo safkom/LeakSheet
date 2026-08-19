@@ -23,6 +23,7 @@ struct MacArtistView: View {
     @State private var embedItem: EmbedItem?
 
     @Environment(PlayerViewModel.self) private var player
+    @Environment(\.colorScheme) private var colorScheme
 
     /// era name (lowercased) → art URL, first occurrence wins. Precomputed once
     /// so `MiscListView` takes a small dictionary instead of the whole era tree.
@@ -90,6 +91,10 @@ struct MacArtistView: View {
         .onChange(of: listSelection) { _, id in
             guard let id, let row = visibleRows.first(where: { $0.id == id }) else { return }
             ui.selectedSong = row.payload(artistName: artist.name, artistSlug: artist.slug)
+        }
+        // Era card gradients and header contrast are derived per appearance.
+        .onChange(of: colorScheme, initial: true) { _, scheme in
+            vm.setColorScheme(scheme)
         }
         .task(id: artist.slug) {
             listSelection = nil
