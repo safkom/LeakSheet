@@ -18,7 +18,7 @@ struct FavouritesView: View {
 
     private static let emptyHint: String = {
         #if os(macOS)
-        "Right-click a song and choose Favourite to save it here."
+        "Hover a song and use its ⋯ menu, or right-click it."
         #else
         "Swipe left on a song and tap the heart to favourite it."
         #endif
@@ -128,7 +128,9 @@ struct FavouritesView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Favourites (\(favourites.entries.count))")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .sheet(item: $showDescription) { payload in
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)

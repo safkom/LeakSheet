@@ -11,6 +11,8 @@ struct LeakSheetCommands: Commands {
     /// Seconds moved by Skip Forward / Skip Back.
     private static let skipInterval: TimeInterval = 15
 
+    private var showingQueue: Bool { ui.showInspector && ui.inspectorTab == .queue }
+
     @State private var player = PlayerViewModel.shared
     @State private var ui = MacUIState.shared
     @Environment(\.openWindow) private var openWindow
@@ -18,6 +20,13 @@ struct LeakSheetCommands: Commands {
     var body: some Commands {
         // The app has no documents; File ▸ New would open a stray window.
         CommandGroup(replacing: .newItem) {}
+
+        // ...but closing the only window then left no menu path back to it.
+        CommandGroup(after: .windowList) {
+            Button("LeakSheet") { openWindow(id: "main") }
+                .keyboardShortcut("1", modifiers: [.command, .shift])
+            Button("Now Playing") { openWindow(id: "now-playing") }
+        }
 
         CommandMenu("Playback") {
             Button(player.isPlaying ? "Pause" : "Play") {
@@ -28,12 +37,16 @@ struct LeakSheetCommands: Commands {
 
             Divider()
 
+            // ⌥⌘←/→, not ⌘←/→: a menu key equivalent is matched before the
+            // first responder sees the event, so binding the bare-⌘ arrows —
+            // the system's move-to-start/end-of-line shortcuts — made them play
+            // tracks instead of moving the caret in the tracker URL field.
             Button("Next Track") { player.playNext() }
-                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .keyboardShortcut(.rightArrow, modifiers: [.option, .command])
                 .disabled(player.currentTrack == nil)
 
             Button("Previous Track") { player.playPrevious() }
-                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .keyboardShortcut(.leftArrow, modifiers: [.option, .command])
                 .disabled(player.currentTrack == nil)
 
             Divider()
@@ -41,7 +54,7 @@ struct LeakSheetCommands: Commands {
             Button("Skip Forward") {
                 player.seekTo(min(player.currentTime + Self.skipInterval, player.duration))
             }
-            .keyboardShortcut(.rightArrow, modifiers: [.shift, .command])
+            .keyboardShortcut(.rightArrow, modifiers: [.shift, .option, .command])
             // Gated on duration too: currentTrack is set as soon as playback is
             // requested, before the asset reports its length. Without this,
             // pressing Skip Forward in that window computes min(15, 0) == 0
@@ -51,13 +64,15 @@ struct LeakSheetCommands: Commands {
             Button("Skip Back") {
                 player.seekTo(max(player.currentTime - Self.skipInterval, 0))
             }
-            .keyboardShortcut(.leftArrow, modifiers: [.shift, .command])
+            .keyboardShortcut(.leftArrow, modifiers: [.shift, .option, .command])
             .disabled(player.currentTrack == nil || player.duration <= 0)
         }
 
         CommandMenu("Tracker") {
             Button("Refresh Tracker") { ui.refreshToken += 1 }
                 .keyboardShortcut("r", modifiers: .command)
+                // Silently did nothing on every pane but a tracker.
+                .disabled(ui.selectedSlug == nil)
 
             Button("Paste Tracker URL") {
                 guard let pasted = Pasteboard.string?
@@ -70,11 +85,23 @@ struct LeakSheetCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
-            Button(ui.showQueue ? "Hide Queue" : "Show Queue") {
-                // The inspector this toggles lives only in the main window.
-                // Bring it forward too, or toggling while the Now Playing
-                // window is key changes state with no visible effect.
-                ui.showQueue.toggle()
+            // The inspector these drive lives only in the main window. Bring it
+            // forward too, or toggling while the Now Playing window is key
+            // changes state with no visible effect.
+            Button("Song Details") {
+                ui.inspectorTab = .details
+                ui.showInspector = true
+                openWindow(id: "main")
+            }
+            .keyboardShortcut("i", modifiers: .command)
+
+            Button(showingQueue ? "Hide Queue" : "Show Queue") {
+                if showingQueue {
+                    ui.showInspector = false
+                } else {
+                    ui.inspectorTab = .queue
+                    ui.showInspector = true
+                }
                 openWindow(id: "main")
             }
             .keyboardShortcut("q", modifiers: [.option, .command])

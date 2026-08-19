@@ -7,6 +7,12 @@ struct BrowseArtistsView: View {
     /// backend's sheet-title inference, which trips on joke tracker titles.
     var onPick: (String, String?) -> Void
 
+    /// Set when hosted as a sidebar destination rather than presented as a
+    /// sheet — the host supplies the navigation chrome. A nested
+    /// `NavigationStack` inside a split view's detail column fights it for the
+    /// window title, the toolbar, and the search field.
+    var embedded = false
+
     @State private var artists: [DiscoveryArtist] = []
     @State private var searchText = ""
     @State private var loading = false
@@ -20,7 +26,20 @@ struct BrowseArtistsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+        } else {
+            NavigationStack {
+                content
+                    .navigationTitle("Explore Trackers")
+                    #if os(iOS)
+                    .toolbarTitleDisplayMode(.inline)
+                    #endif
+            }
+        }
+    }
+
+    private var content: some View {
             Group {
                 if loading && artists.isEmpty {
                     VStack(spacing: 12) {
@@ -135,11 +154,8 @@ struct BrowseArtistsView: View {
                 }
             }
             .background(Color.lsBackground)
-            .navigationTitle("Explore Trackers")
-            .toolbarTitleDisplayMode(.inline)
-        }
-        .task { await loadArtists() }
-        .onAppear { loadingUrl = "" }
+            .task { await loadArtists() }
+            .onAppear { loadingUrl = "" }
     }
 
     private func loadArtists() async {

@@ -22,7 +22,11 @@ struct EmbedPlayerView: View {
             EmbedWebView(url: item.embedURL)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(item.title)
-                .toolbarTitleDisplayMode(.inline)
+                #if os(iOS)
+                #if os(iOS)
+            .toolbarTitleDisplayMode(.inline)
+            #endif
+                #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }

@@ -2,91 +2,41 @@
 import SwiftUI
 
 /// Mac shell: a source-list sidebar over a detail column, with the player bar
-/// pinned to the window bottom and the queue as a trailing inspector.
+/// pinned to the window bottom and a Details/Queue inspector on the trailing edge.
 ///
-/// The artist screen itself (`ArtistView`) is shared with iOS verbatim — only
-/// the surrounding navigation differs, because a phone's push-stack and a Mac
-/// window's split view are genuinely different shapes.
+/// The detail column is driven by the sidebar *selection*, not by a
+/// `NavigationStack`. The push-stack shape it replaced had to clear its path on
+/// every section change to dodge a crash (the stack's root changed identity
+/// while a value was pushed), which meant visiting Favourites threw away the
+/// loaded tracker. Selection has no such coupling: trackers stay parsed in
+/// `MacUIState`, so switching back is instant.
 struct MacRootView: View {
-    enum SidebarSection: String, CaseIterable, Identifiable {
-        case browse, recents, favourites, settings
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .browse: "Browse"
-            case .recents: "Recents"
-            case .favourites: "Favourites"
-            case .settings: "Settings"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .browse: "music.note.list"
-            case .recents: "clock"
-            case .favourites: "heart.fill"
-            case .settings: "gearshape"
-            }
-        }
-    }
-
     @Environment(RecentTrackersManager.self) private var recents
 
-    @State private var section: SidebarSection? = .browse
-    @State private var path: [Artist] = []
-    @State private var loader = TrackerLoader()
-    @State private var prepared: (slug: String, vm: ArtistViewModel)?
     @State private var ui = MacUIState.shared
+    @State private var loader = TrackerLoader()
 
-    /// The most recently loaded artist + view model, keyed to the pushed
-    /// screen. Set by every `open()`, not only ⌘R — `Artist: Hashable` is
-    /// slug-only, so `path.last` can be a stale value while this holds the
-    /// fresh parse. Dropped when the stack empties so a window left on the
-    /// browse pane isn't retaining a whole tracker (Ye is ~9k versions).
-    @State private var refreshedArtist: (artist: Artist, vm: ArtistViewModel)?
-    /// Bumped per Cmd-R so the destination subtree gets a new identity.
-    @State private var refreshToken = 0
-
-    /// The prepared view model, but only when it describes the artist that is
-    /// actually playing — mirrors ContentView. Lets the description sheet
-    /// raised from Now Playing / Favourites resolve the full song.
+    /// The view model for whatever is playing, so the Details panel raised from
+    /// Now Playing / Favourites can resolve the full song behind a bare version.
     private var vmForCurrentPlayback: ArtistViewModel? {
-        guard let prepared, prepared.slug == PlayerViewModel.shared.artistSlug else { return nil }
-        return prepared.vm
+        ui.trackers[PlayerViewModel.shared.artistSlug]?.vm
     }
 
     var body: some View {
         NavigationSplitView {
-            List(SidebarSection.allCases, selection: $section) { item in
-                Label(item.title, systemImage: item.symbol)
-                    .tag(item)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+            MacSidebar(selection: $ui.selection)
         } detail: {
-            NavigationStack(path: $path) {
-                detailRoot
-                    .navigationDestination(for: Artist.self) { artist in
-                        let refreshed = refreshedArtist?.artist.slug == artist.slug
-                            ? refreshedArtist
-                            : nil
-                        ArtistView(
-                            artist: refreshed?.artist ?? artist,
-                            preparedVM: refreshed?.vm
-                                ?? (prepared?.slug == artist.slug ? prepared?.vm : nil)
-                        )
-                        // Identity changes when Cmd-R lands fresh data, which
-                        // is what forces the subtree to rebuild.
-                        .id(refreshToken)
-                    }
-            }
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.lsBackground)
         }
         .frame(minWidth: 900, minHeight: 620)
-        .inspector(isPresented: $ui.showQueue) {
-            QueueSheet(embedded: true)
+        .inspector(isPresented: $ui.showInspector) {
+            MacInspector()
                 .environment(PlayerViewModel.shared)
-                .inspectorColumnWidth(min: 260, ideal: 320, max: 420)
+                .environment(FavouritesManager.shared)
+                .environment(vmForCurrentPlayback)
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 460)
         }
         .safeAreaBar(edge: .bottom) {
             MiniPlayerBar()
@@ -97,61 +47,65 @@ struct MacRootView: View {
         .onChange(of: ui.pastedURL) { _, pasted in
             guard let pasted else { return }
             ui.pastedURL = nil
-            section = .browse
+            ui.selection = .browse
             loader.url = pasted
             Task { await open(pasted) }
         }
-        // The stack's root (detailRoot) changes identity with `section`.
-        // Switching sections while an Artist is still pushed on top of that
-        // root corrupts NavigationStack's internal state and traps on the
-        // next push (reproduced: browse → open → switch section → browse →
-        // open → EXC_BREAKPOINT in NavigationColumnState.boundPathChange).
-        // Clearing the path on every section change keeps root changes and
-        // path mutations from ever overlapping.
-        .onChange(of: section) { _, _ in
-            path = []
+        // Selecting a tracker that isn't parsed yet (a sidebar row from a
+        // previous launch) loads it on demand.
+        .onChange(of: ui.selection) { _, selection in
+            guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
+                  let entry = recents.trackers.first(where: { $0.slug == slug })
+            else { return }
+            Task { await open(entry.sourceUrl, artistName: entry.name, select: false) }
         }
-        // Nothing is pushed, so neither cache can be reached — and each holds
-        // a full Artist plus its view model.
-        .onChange(of: path) { _, newPath in
-            if newPath.isEmpty {
-                refreshedArtist = nil
-                prepared = nil
-            }
-        }
-        // ⌘R refreshes the currently pushed artist, if any.
+        // ⌘R re-fetches the selected tracker, bypassing the cache.
         .onChange(of: ui.refreshToken) { _, _ in
-            guard let artist = path.last else { return }
-            Task {
-                await open(artist.sourceUrl ?? "", artistName: artist.name, forceRefresh: true)
-                refreshToken &+= 1
-            }
+            guard let slug = ui.selectedSlug,
+                  let url = ui.tracker(slug)?.artist.sourceUrl
+                    ?? recents.trackers.first(where: { $0.slug == slug })?.sourceUrl
+            else { return }
+            Task { await open(url, forceRefresh: true, select: false) }
         }
     }
 
+    // MARK: - Detail column
+
     @ViewBuilder
-    private var detailRoot: some View {
-        switch section {
+    private var detail: some View {
+        switch ui.selection {
         case .browse, nil:
             browsePane
-        case .recents:
-            ScrollView {
-                RecentTrackersListView { entry in
-                    Task { await open(entry.sourceUrl) }
-                }
-                .padding(.vertical, 16)
-            }
-            .background(Color.lsBackground)
-            .navigationTitle("Recents")
         case .favourites:
             FavouritesView(embedded: true)
                 .environment(FavouritesManager.shared)
                 .environment(vmForCurrentPlayback)
-        case .settings:
-            // SettingsView already sets its own navigationTitle("Settings")
-            // in the embedded path — no need to set it again here.
-            SettingsView(embedded: true)
+        case .tracker(let slug):
+            if let loaded = ui.tracker(slug) {
+                MacArtistView(artist: loaded.artist, vm: loaded.vm)
+                    .id(slug)
+            } else {
+                loadingPane
+            }
         }
+    }
+
+    private var loadingPane: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            if let error = loader.error {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(Color.lsError)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            } else {
+                Text("Loading tracker…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var browsePane: some View {
@@ -164,6 +118,7 @@ struct MacRootView: View {
                 await open(loader.url)
             }
             .padding(16)
+            .frame(maxWidth: Metrics.contentMaxWidth)
 
             if let error = loader.error {
                 Text(error)
@@ -176,29 +131,37 @@ struct MacRootView: View {
 
             Divider().overlay(Color.lsBorder)
 
-            BrowseArtistsView { pickedUrl, pickedName in
-                Task { await open(pickedUrl, artistName: pickedName) }
-            }
+            // embedded: the split view already supplies the title and toolbar —
+            // a nested NavigationStack here fought the detail column for both.
+            BrowseArtistsView(
+                onPick: { pickedUrl, pickedName in
+                    Task { await open(pickedUrl, artistName: pickedName) }
+                },
+                embedded: true
+            )
         }
-        .background(Color.lsBackground)
         .navigationTitle("Browse")
     }
 
-    /// Loads a tracker and pushes its screen, building the view model while the
-    /// loading state is still up — one loading state per tracker, matching iOS.
-    private func open(_ url: String, artistName: String? = nil, forceRefresh: Bool = false) async {
+    // MARK: - Loading
+
+    /// Fetch, parse, build the view model, and file the result under its slug.
+    /// One loading state per tracker, matching iOS — the view model is built
+    /// inside `preparing` so there is no second "Preparing…" spinner.
+    private func open(
+        _ url: String,
+        artistName: String? = nil,
+        forceRefresh: Bool = false,
+        select: Bool = true
+    ) async {
         guard let artist = await loader.load(
             url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
         ) else { return }
         let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
-        prepared = (artist.slug, vm)
-        // Artist: Hashable is slug-only, so re-pushing the same artist is a
-        // no-op — the destination is never rebuilt and ArtistView's
-        // `.task(id: artist.slug)` doesn't re-fire. Cmd-R therefore refetched,
-        // rewrote the cache, and left the screen identical. Bumping this token
-        // gives the pushed screen an identity change to react to.
-        refreshedArtist = (artist, vm)
-        withAnimation { path = [artist] }
+        ui.store(LoadedTracker(artist: artist, vm: vm))
+        if select || ui.selectedSlug != artist.slug {
+            ui.selection = .tracker(slug: artist.slug)
+        }
     }
 }
 #endif

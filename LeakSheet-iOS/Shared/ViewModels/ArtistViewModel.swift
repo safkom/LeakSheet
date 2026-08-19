@@ -33,10 +33,14 @@ nonisolated struct FilteredEra: Identifiable, Equatable, Sendable {
 
     var id: String { era.name }
 
+    /// Filtered songs in display order, whether or not the era is sectioned.
+    var allSongs: [Song] {
+        sections.isEmpty ? songs : sections.flatMap(\.songs)
+    }
+
     /// Streamable versions in filtered order — playback context for the era.
     var streamableVersions: [SongVersion] {
-        let source = sections.isEmpty ? songs : sections.flatMap(\.songs)
-        return source.flatMap(\.versions).filter(\.isStreamable)
+        allSongs.flatMap(\.versions).filter(\.isStreamable)
     }
 }
 
@@ -561,6 +565,17 @@ final class ArtistViewModel {
     func toggleEra(_ name: String) {
         if isBadgeFilterActive { return }
         expandedEra = expandedEra == name ? nil : name
+        rebuildEraRows()
+    }
+
+    /// Set (or clear) the single expanded era outright.
+    ///
+    /// `toggleEra` flips, which makes "drill into *this* era" a two-case dance
+    /// at every call site — the macOS grid needs to open a named era whatever
+    /// was open before.
+    func openEra(_ name: String?) {
+        guard !isBadgeFilterActive, expandedEra != name else { return }
+        expandedEra = name
         rebuildEraRows()
     }
 

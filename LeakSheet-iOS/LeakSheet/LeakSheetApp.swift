@@ -44,9 +44,17 @@ struct LeakSheetApp: App {
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
         }
-        .defaultSize(width: 440, height: 660)
+        .defaultSize(width: 460, height: 700)
         .windowResizability(.contentMinSize)
         .keyboardShortcut("0", modifiers: [.command, .shift])
+
+        // ⌘, — the Mac's one place for preferences. It used to be a sidebar row,
+        // which is neither where a Mac user looks nor reachable by keyboard.
+        Settings {
+            SettingsView(embedded: true)
+                .preferredColorScheme(.dark)
+                .frame(width: 460, height: 520)
+        }
         #else
         WindowGroup {
             ContentView()
