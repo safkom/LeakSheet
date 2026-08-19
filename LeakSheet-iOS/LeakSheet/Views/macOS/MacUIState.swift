@@ -42,9 +42,6 @@ final class MacUIState {
     /// through a list updates the panel without opening anything.
     var selectedSong: SongDetailPayload?
 
-    /// Era drilled into, per tracker slug. Nil means the era grid is showing.
-    var openEra: [String: String] = [:]
-
     /// Bumped by ⌘R; the detail column re-fetches the selected tracker.
     var refreshToken = 0
 

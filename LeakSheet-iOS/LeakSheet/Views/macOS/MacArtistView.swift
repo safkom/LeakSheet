@@ -41,8 +41,14 @@ struct MacArtistView: View {
     /// The era drilled into, or nil for the grid. Search, the badge filters and
     /// the content tabs all produce a flat cross-era list, so they force the
     /// list view regardless.
+    ///
+    /// Reads the view model's own `expandedEra` rather than keeping a second
+    /// copy. It used to shadow it in `MacUIState`, and the two desynced:
+    /// turning the LAST badge filter off makes `toggleBestOf` clear
+    /// `expandedEra`, so the shadow still named an era while the view model had
+    /// no era expanded — the page rendered "No Songs" for an era full of them.
     private var openEra: String? {
-        isFlatMode ? nil : ui.openEra[artist.slug]
+        isFlatMode ? nil : vm.expandedEra
     }
 
     /// True when the filter state produces one cross-era song list rather than a
@@ -263,7 +269,6 @@ struct MacArtistView: View {
         ToolbarItemGroup {
             if openEra != nil {
                 Button {
-                    ui.openEra[artist.slug] = nil
                     vm.openEra(nil)
                     ui.selectedSong = nil
                 } label: {
@@ -324,7 +329,6 @@ struct MacArtistView: View {
                 VStack(spacing: 0) {
                     pageHeader
                     MacEraGrid(vm: vm) { eraName in
-                        ui.openEra[artist.slug] = eraName
                         vm.openEra(eraName)
                         ui.selectedSong = nil
                     }

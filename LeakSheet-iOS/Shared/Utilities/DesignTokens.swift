@@ -63,6 +63,23 @@ extension Color {
     // Accent
     static let lsPrimary = tone(hue: 220 / 360, saturation: 0.655, brightness: 0.96, lightBrightness: 0.74)
 
+    /// Selected-row fill for the macOS list.
+    ///
+    /// The system default is a saturated accent slab, which fights an OLED-dark
+    /// app whose every panel is tinted by its era art. A neutral lifted row
+    /// reads as "this one" without repainting it.
+    ///
+    /// Two static values rather than one `adaptive` colour: the list's selection
+    /// fill comes from its `tint`, and a tint built from a dynamic platform
+    /// colour is ignored — the list falls back to the system accent. The caller
+    /// picks by scheme.
+    static let lsSelectionDark = Color(hex: 0x3A3A3C)
+    static let lsSelectionLight = Color(hex: 0xD6D6DB)
+
+    static func lsSelection(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? lsSelectionDark : lsSelectionLight
+    }
+
     // Semantic
     static let lsAccent = lsPrimary
     static let lsError = adaptive(light: Color(hex: 0xC0342D), dark: Color(hex: 0xF85149))

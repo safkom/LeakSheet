@@ -59,6 +59,7 @@ struct MacSongList<Header: View>: View {
     /// scratch. On a badge-filtered Ye that is ~6000 rows rebuilt per keypress.
     /// Selection is this list's business; the host only needs the result.
     @State private var selection: MacListRow.ID?
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         List(selection: $selection) {
@@ -68,47 +69,17 @@ struct MacSongList<Header: View>: View {
                 .selectionDisabled()
 
             ForEach(rows) { row in
-            switch row {
-            case .header(let text, _):
-                Text(text)
-                    .font(.caption.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 10)
-                    .selectionDisabled()
-
-            case .song(let song, let version, let eraName, let eraArt, let ordinal):
-                MacSongRow(
-                    song: song, version: version,
-                    artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-                    eraName: eraName, eraArt: eraArt,
-                    onPlay: { onPlay($0, eraName) },
-                    onShowDescription: onShowDescription
-                )
-                // Double-click plays; a multi-version song expands instead,
-                // because "play" for a song with eight versions is a guess.
-                .onTapGesture(count: 2) {
-                    if song.hasMultipleVersions, let onToggleExpansion {
-                        onToggleExpansion(eraName, ordinal)
-                    } else if let v = version, v.isStreamable {
-                        onPlay(v, eraName)
-                    }
-                }
-
-            case .version(let version, let song, let eraName, let eraArt, let index, _):
-                MacSongRow(
-                    song: song, version: version,
-                    artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-                    eraName: eraName, eraArt: eraArt,
-                    showVersionBadge: true, indented: true,
-                    onPlay: { onPlay($0, eraName) },
-                    onShowDescription: onShowDescription
-                )
-                .id(index)
-                .onTapGesture(count: 2) {
-                    if version.isStreamable { onPlay(version, eraName) }
-                }
-            }
+                rowView(row)
+                    // Own the selection fill rather than letting the table paint
+                    // a saturated accent slab over an app whose panels are all
+                    // era-tinted.
+                    .listRowBackground(
+                        row.id == selection
+                            ? RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.lsSelection(colorScheme))
+                                .padding(.horizontal, 6)
+                            : nil
+                    )
             }
         }
         .listStyle(.inset)
@@ -126,6 +97,57 @@ struct MacSongList<Header: View>: View {
             }
             PlayerViewModel.shared.togglePlay()
             return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: MacListRow) -> some View {
+        switch row {
+        case .header(let text, _):
+            Text(text)
+                .font(.caption.weight(.bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .padding(.top, 10)
+                .selectionDisabled()
+
+        case .song(let song, let version, let eraName, let eraArt, let ordinal):
+            MacSongRow(
+                song: song, version: version,
+                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                eraName: eraName, eraArt: eraArt,
+                onPlay: { onPlay($0, eraName) },
+                onShowDescription: onShowDescription
+            )
+            // A multi-version song opens on ONE click — the versions are the
+            // point of the row, and hiding them behind a double-click made
+            // every such song a two-step. Selection is set here too because
+            // the tap gesture takes the click from the List.
+            .onTapGesture(count: 1) {
+                guard song.hasMultipleVersions, let onToggleExpansion else { return }
+                selection = row.id
+                onToggleExpansion(eraName, ordinal)
+            }
+            // Double-click plays. On a multi-version row the first click
+            // already expanded, so this only fires for single-version songs —
+            // where "play" is unambiguous.
+            .onTapGesture(count: 2) {
+                if let v = version, v.isStreamable { onPlay(v, eraName) }
+            }
+
+        case .version(let version, let song, let eraName, let eraArt, let index, _):
+            MacSongRow(
+                song: song, version: version,
+                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                eraName: eraName, eraArt: eraArt,
+                showVersionBadge: true, indented: true,
+                onPlay: { onPlay($0, eraName) },
+                onShowDescription: onShowDescription
+            )
+            .id(index)
+            .onTapGesture(count: 2) {
+                if version.isStreamable { onPlay(version, eraName) }
+            }
         }
     }
 

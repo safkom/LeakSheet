@@ -14,21 +14,22 @@ struct BadgePill: View {
     /// near-identical copy the comment above claims to have folded in.
     var prominent: Bool = false
 
-    /// A selected macOS list row paints an accent-filled background and raises
-    /// `backgroundProminence`. The pill's own tint is chosen for the app's dark
-    /// background and reads as mud on top of that fill, so it steps aside.
-    /// Inert everywhere else — nothing else raises prominence.
-    @Environment(\.backgroundProminence) private var prominence
-
-    private var onProminentBackground: Bool { prominence == .increased }
-
     var body: some View {
         Text(text)
             .font(prominent ? .footnote.weight(.semibold) : .caption2.weight(.semibold))
-            .foregroundStyle(onProminentBackground ? AnyShapeStyle(.background) : AnyShapeStyle(variant.color))
+            .foregroundStyle(variant.color)
             .padding(.horizontal, prominent ? 10 : 7)
             .padding(.vertical, prominent ? 5 : 3)
-            .background(onProminentBackground ? AnyShapeStyle(.background.opacity(0.22)) : AnyShapeStyle(variant.background))
+            // Opaque base under the tint, so the pill composites against the
+            // app background rather than whatever row is behind it. The tint is
+            // only 15%; over a selected row's fill it drifted off the contrast
+            // the palette is tested at, which is why the pill used to invert
+            // itself on selection and look washed out.
+            .background {
+                Capsule()
+                    .fill(Color.lsBackground)
+                    .overlay { Capsule().fill(variant.background) }
+            }
             .clipShape(Capsule())
             .fixedSize()
             .accessibilityLabel(accessibilityPrefix.map { "\($0): \(text)" } ?? text)

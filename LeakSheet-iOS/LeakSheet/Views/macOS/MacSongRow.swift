@@ -28,13 +28,6 @@ struct MacSongRow: View {
     @Environment(FavouritesManager.self) private var favourites
 
     @State private var hovering = false
-    /// `.increased` while this row is the List's selection — see `BadgePill`.
-    @Environment(\.backgroundProminence) private var prominence
-
-    private var onProminentBackground: Bool { prominence == .increased }
-
-    /// The now-playing accent, unless the selection fill is already using it.
-    private var playingTint: Color { onProminentBackground ? .primary : .lsAccent }
 
     private var isPlaying: Bool {
         guard let v = version, let current = player.currentTrack else { return false }
@@ -82,15 +75,20 @@ struct MacSongRow: View {
                     if let aka = akaTitle, !indented {
                         Text(aka)
                             .font(.caption2)
-                            .foregroundStyle(onProminentBackground ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .accessibilityLabel("Also known as \(aka)")
                     }
                 }
 
-                HStack(spacing: 6) {
+                // One flowing line, badges then credits. They used to be an
+                // HStack of a badge FlowLayout beside a credit VStack, so the
+                // credits stacked down the side of a row with hundreds of
+                // points of empty space to their right.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if (!hasMultiple || showVersionBadge), let v = version {
                         BadgeRowView(version: v)
+                        CreditTagsView(version: v, inline: true)
                     } else if let best = song.bestPlayableVersion {
                         // Collapsed multi-version row: badge the version a play
                         // action would actually reach, not versions.first.
@@ -98,9 +96,6 @@ struct MacSongRow: View {
                         Text("\(song.versions.count) versions")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                    }
-                    if (!hasMultiple || showVersionBadge), let v = version {
-                        CreditTagsView(version: v)
                     }
                 }
             }
@@ -137,11 +132,11 @@ struct MacSongRow: View {
             if player.loading {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(playingTint)
+                    .tint(Color.lsAccent)
             } else {
                 Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
                     .font(.caption)
-                    .foregroundStyle(playingTint)
+                    .foregroundStyle(Color.lsAccent)
             }
         } else if showVersionBadge {
             if let b = version?.badge, let badge = Badge(rawValue: b) {
@@ -194,7 +189,7 @@ struct MacSongRow: View {
             if isFavourited {
                 Image(systemName: "heart.fill")
                     .font(.caption2)
-                    .foregroundStyle(onProminentBackground ? Color.primary : Color.lsFavourite)
+                    .foregroundStyle(Color.lsFavourite)
                     .accessibilityLabel("Favourited")
             }
         }
