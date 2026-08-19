@@ -16,10 +16,21 @@ struct MacRootView: View {
     @State private var ui = MacUIState.shared
     @State private var loader = TrackerLoader()
 
-    /// The view model for whatever is playing, so the Details panel raised from
-    /// Now Playing / Favourites can resolve the full song behind a bare version.
+    /// The view model for whatever is playing — lets the mini player resolve the
+    /// full song behind the bare version the player holds.
     private var vmForCurrentPlayback: ArtistViewModel? {
         ui.trackers[PlayerViewModel.shared.artistSlug]?.vm
+    }
+
+    /// The view model the Details panel should resolve against: the tracker
+    /// being BROWSED, falling back to the one playing (a favourite of a tracker
+    /// that isn't open). Handing it the playing tracker unconditionally made the
+    /// cross-era version picker answer for the wrong artist whenever you browsed
+    /// one tracker while another played — and answer nothing at all when
+    /// nothing was playing, which is the common case.
+    private var vmForInspector: ArtistViewModel? {
+        if let slug = ui.selectedSlug, let vm = ui.tracker(slug)?.vm { return vm }
+        return vmForCurrentPlayback
     }
 
     var body: some View {
@@ -44,7 +55,7 @@ struct MacRootView: View {
             MacInspector()
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
-                .environment(vmForCurrentPlayback)
+                .environment(vmForInspector)
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 460)
         }
         .safeAreaBar(edge: .bottom) {
@@ -63,6 +74,11 @@ struct MacRootView: View {
         // Selecting a tracker that isn't parsed yet (a sidebar row from a
         // previous launch) loads it on demand.
         .onChange(of: ui.selection) { _, selection in
+            // The Details panel is scoped to what you are looking at. Left
+            // alone it kept showing the previous tracker's song while
+            // `vmForInspector` had already moved on, so the version picker
+            // resolved one tracker's song against another's era tree.
+            ui.selectedSong = nil
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })
             else { return }
@@ -86,9 +102,19 @@ struct MacRootView: View {
         case .browse, nil:
             browsePane
         case .favourites:
-            FavouritesView(embedded: true)
-                .environment(FavouritesManager.shared)
-                .environment(vmForCurrentPlayback)
+            // onShowDescription routes into the inspector — without it a
+            // favourite opened a modal sheet while every song row opened the
+            // panel, which is two answers to the same question.
+            FavouritesView(
+                embedded: true,
+                onShowDescription: { payload in
+                    ui.selectedSong = payload
+                    ui.inspectorTab = .details
+                    ui.showInspector = true
+                }
+            )
+            .environment(FavouritesManager.shared)
+            .environment(vmForCurrentPlayback)
         case .tracker(let slug):
             if let loaded = ui.tracker(slug) {
                 MacArtistView(artist: loaded.artist, vm: loaded.vm)

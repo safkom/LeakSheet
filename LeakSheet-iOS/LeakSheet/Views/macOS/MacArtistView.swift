@@ -14,7 +14,6 @@ struct MacArtistView: View {
     @Bindable var vm: ArtistViewModel
 
     @State private var ui = MacUIState.shared
-    @State private var listSelection: MacSongList.Row.ID?
     @State private var lastUpdated: Date?
     @State private var showStats = false
     @State private var showTimeline = false
@@ -69,11 +68,10 @@ struct MacArtistView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(Color.lsBorder)
-            content
-        }
+        // Computed ONCE per body evaluation and handed down. As a computed
+        // property it was re-derived at every use site — six of them.
+        let rows = visibleRows
+        content(rows)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.lsBackground)
         .navigationTitle(openEra ?? artist.name)
@@ -87,17 +85,14 @@ struct MacArtistView: View {
         .sheet(isPresented: $showLegend) { BadgeLegendSheet() }
         .webSheet(item: $safariItem)
         .sheet(item: $embedItem) { EmbedPlayerView(item: $0) }
-        // The selection *is* the Details panel's input — no click opens a modal.
-        .onChange(of: listSelection) { _, id in
-            guard let id, let row = visibleRows.first(where: { $0.id == id }) else { return }
-            ui.selectedSong = row.payload(artistName: artist.name, artistSlug: artist.slug)
-        }
         // Era card gradients and header contrast are derived per appearance.
         .onChange(of: colorScheme, initial: true) { _, scheme in
             vm.setColorScheme(scheme)
         }
-        .task(id: artist.slug) {
-            listSelection = nil
+        // Keyed on the view model's identity, not the slug: ⌘R replaces the
+        // parsed tracker in place, so a slug-keyed task never re-fired and the
+        // "Updated …" stamp and playback contexts stayed on the old parse.
+        .task(id: ObjectIdentifier(vm)) {
             if let url = artist.sourceUrl {
                 lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
             }
@@ -114,22 +109,21 @@ struct MacArtistView: View {
         return "\(vm.artistStats.total) tracks"
     }
 
-    // MARK: - Header
+    // MARK: - Page header
 
-    private var header: some View {
-        VStack(spacing: 10) {
-            if let notices = artist.notices, !notices.isEmpty {
-                VStack(spacing: 4) {
-                    ForEach(notices) { notice in
-                        NoticeBannerView(notice: notice) { safariItem = SafariItem(url: $0) }
-                    }
-                }
+    /// Scrolls with the content rather than sitting above it.
+    ///
+    /// Pinned, it cost ~290pt of a 700pt window — and on an era page it showed
+    /// the WHOLE tracker's totals (9,343) under a title reading "77 songs",
+    /// which answers a question nobody asked on that page.
+    @ViewBuilder
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let openEra {
+                eraHeader(openEra)
+            } else {
+                trackerHeader
             }
-
-            ArtistStatsBarView(
-                stats: vm.artistStats,
-                onTap: artist.trackerStats != nil ? { showStats = true } : nil
-            )
 
             // FlowLayout, not a horizontal scroller: a Mac has no scroll
             // affordance on an indicator-less strip, so chips past the fold
@@ -154,17 +148,114 @@ struct MacArtistView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let lastUpdated {
-                Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .frame(maxWidth: Metrics.contentMaxWidth)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+
+    /// Tracker-level chrome, shown on the era grid.
+    @ViewBuilder
+    private var trackerHeader: some View {
+        if let notices = artist.notices, !notices.isEmpty {
+            VStack(spacing: 4) {
+                ForEach(notices) { notice in
+                    NoticeBannerView(notice: notice) { safariItem = SafariItem(url: $0) }
+                }
+            }
+        }
+        statRow(vm.artistStats)
+        if let lastUpdated {
+            Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Era-level chrome: cover, name, and the era's own numbers — plus the Play
+    /// action the page was missing entirely (starting an era meant finding a
+    /// song in it and double-clicking that).
+    @ViewBuilder
+    private func eraHeader(_ name: String) -> some View {
+        let filtered = vm.filteredEra(named: name)
+        HStack(alignment: .center, spacing: 14) {
+            Group {
+                if let artUrl = filtered?.era.artUrl,
+                   let url = APIClient.shared.imageProxyURL(for: artUrl, width: 240) {
+                    CachedImage(url: url, maxPixelSize: 240) { ArtworkPlaceholder(cornerRadius: 0) }
+                } else {
+                    ArtworkPlaceholder(cornerRadius: 0)
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(2)
+                if let alts = filtered?.era.altNames, !alts.isEmpty {
+                    Text(alts.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let stats = filtered?.stats {
+                    Text("\(stats.total) tracks · \(stats.available) available · \(stats.snippets) snippets")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if let filtered, !filtered.streamableVersions.isEmpty {
+                Button {
+                    guard let first = filtered.streamableVersions.first else { return }
+                    player.playInEra(
+                        first, eraName: name, artistName: artist.name,
+                        artUrl: filtered.era.artUrl ?? "",
+                        versions: filtered.streamableVersions, artistSlug: artist.slug
+                    )
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Play this era")
+            }
+        }
+
+        if let desc = filtered?.era.description, !desc.isEmpty {
+            Text(desc)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Compact stat row. The four tiles were `maxWidth: .infinity`, stretching
+    /// a glanceable summary across the whole window.
+    private func statRow(_ stats: ArtistViewModel.Stats) -> some View {
+        HStack(spacing: 8) {
+            statTile(stats.total, "Total", .secondary)
+            statTile(stats.available, "Available", .green)
+            statTile(stats.snippets, "Snippets", .orange)
+            statTile(stats.fullHQ, "Full HQ", .lsAccent)
+        }
+    }
+
+    private func statTile(_ value: Int, _ label: String, _ color: Color) -> some View {
+        VStack(spacing: 1) {
+            Text("\(value)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 76)
+        .padding(.vertical, 6)
+        .background(Color.lsCard, in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ToolbarContentBuilder
@@ -174,7 +265,7 @@ struct MacArtistView: View {
                 Button {
                     ui.openEra[artist.slug] = nil
                     vm.openEra(nil)
-                    listSelection = nil
+                    ui.selectedSong = nil
                 } label: {
                     Label("All Eras", systemImage: "chevron.backward")
                 }
@@ -206,12 +297,14 @@ struct MacArtistView: View {
     // MARK: - Content
 
     @ViewBuilder
-    private var content: some View {
-        if vm.isFiltering && visibleRows.isEmpty && !isMiscMode {
+    private func content(_ rows: [MacListRow]) -> some View {
+        if vm.isFiltering && rows.isEmpty && !isMiscMode {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if isMiscMode {
             ScrollView {
+                VStack(spacing: 0) {
+                pageHeader
                 MiscListView(
                     vm: vm,
                     artistName: artist.name,
@@ -221,36 +314,48 @@ struct MacArtistView: View {
                     onOpenLink: openLink
                 )
                 .id(vm.selectedTabKey ?? "misc")
-                .padding(.vertical, 12)
+                .padding(.bottom, 12)
+                }
                 .frame(maxWidth: Metrics.contentMaxWidth)
                 .frame(maxWidth: .infinity)
             }
         } else if openEra == nil && !isFlatMode {
             ScrollView {
-                MacEraGrid(vm: vm) { eraName in
-                    ui.openEra[artist.slug] = eraName
-                    vm.openEra(eraName)
-                    listSelection = nil
+                VStack(spacing: 0) {
+                    pageHeader
+                    MacEraGrid(vm: vm) { eraName in
+                        ui.openEra[artist.slug] = eraName
+                        vm.openEra(eraName)
+                        ui.selectedSong = nil
+                    }
                 }
-                .padding(.top, 16)
                 .frame(maxWidth: Metrics.contentMaxWidth)
                 .frame(maxWidth: .infinity)
             }
-        } else if visibleRows.isEmpty {
-            emptyState
+        } else if rows.isEmpty {
+            VStack(spacing: 0) {
+                pageHeader
+                    .frame(maxWidth: Metrics.contentMaxWidth)
+                emptyState
+            }
         } else {
             MacSongList(
-                rows: visibleRows,
+                rows: rows,
                 artistName: artist.name,
                 artistSlug: artist.slug,
                 sourceUrl: artist.sourceUrl,
                 onToggleExpansion: openEra == nil ? nil : { eraName, ordinal in
                     vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
                 },
-                onPlay: play,
+                onPlay: { version, eraName in play(version, eraName: eraName, in: rows) },
                 onShowDescription: showDetails,
-                selection: $listSelection
+                onSelect: { row in
+                    ui.selectedSong = row?.payload(artistName: artist.name, artistSlug: artist.slug)
+                },
+                header: { pageHeader }
             )
+            // Fresh selection per mode/era — the list is a different list.
+            .id(openEra ?? "flat")
             .frame(maxWidth: Metrics.contentMaxWidth)
             .frame(maxWidth: .infinity)
         }
@@ -283,7 +388,7 @@ struct MacArtistView: View {
     /// One flat row list for whatever mode is active. Each branch reuses the
     /// arrays the view model already computed off-main; nothing is filtered or
     /// sorted here.
-    private var visibleRows: [MacSongList.Row] {
+    private var visibleRows: [MacListRow] {
         if vm.isSearching {
             return vm.content.searchResults.map {
                 .song($0.song, version: $0.version, eraName: $0.era.name, eraArt: $0.era.artUrl, ordinal: $0.songOrdinal)
@@ -303,8 +408,8 @@ struct MacArtistView: View {
 
     /// Every era's songs in one list, with an era header between groups —
     /// the shape the badge filters and content tabs need.
-    private var flatEraRows: [MacSongList.Row] {
-        var out: [MacSongList.Row] = []
+    private var flatEraRows: [MacListRow] {
+        var out: [MacListRow] = []
         for era in vm.content.eras {
             let songs = era.allSongs
             guard !songs.isEmpty else { continue }
@@ -322,8 +427,8 @@ struct MacArtistView: View {
     /// One era's rows, taken straight from the view model's prepared
     /// `eraRows` — `rebuildEraRows` emits song/version rows only for the single
     /// expanded era, so filtering by name yields exactly this era's content.
-    private func rows(forEra name: String) -> [MacSongList.Row] {
-        vm.eraRows.compactMap { row -> MacSongList.Row? in
+    private func rows(forEra name: String) -> [MacListRow] {
+        vm.eraRows.compactMap { row -> MacListRow? in
             guard row.eraName == name else { return nil }
             switch row {
             case .card, .divider, .eraGap:
@@ -371,7 +476,7 @@ struct MacArtistView: View {
 
     /// Play with the visible list as the auto-advance context, so playback
     /// continues down whatever the user is actually looking at.
-    private func play(_ version: SongVersion, eraName: String) {
+    private func play(_ version: SongVersion, eraName: String, in rows: [MacListRow]) {
         if let openEra, !isFlatMode, openEra == eraName,
            let filtered = vm.filteredEra(named: eraName) {
             player.playInEra(
@@ -381,7 +486,7 @@ struct MacArtistView: View {
             )
             return
         }
-        let items: [PlaybackListItem] = visibleRows.compactMap { row in
+        let items: [PlaybackListItem] = rows.compactMap { row in
             switch row {
             case .header: return nil
             case .song(let song, let v, let era, let art, _):

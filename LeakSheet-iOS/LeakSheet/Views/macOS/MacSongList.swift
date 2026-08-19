@@ -1,38 +1,42 @@
 #if os(macOS)
 import SwiftUI
 
+/// A row the Mac song list can show. Headers are non-selectable; only `.song`
+/// and `.version` carry an id the selection can land on.
+///
+/// Top-level rather than nested in `MacSongList`: the list is generic over its
+/// header view, and `MacSongList.Row` would need the generic argument spelled
+/// out at every use site.
+enum MacListRow: Identifiable {
+    case header(String, id: String)
+    case song(Song, version: SongVersion?, eraName: String, eraArt: String?, ordinal: Int)
+    case version(SongVersion, song: Song, eraName: String, eraArt: String?, index: Int, ordinal: Int)
+
+    var id: String {
+        switch self {
+        case .header(_, let id): "h:\(id)"
+        // Version id included: two versions of one song can both match a
+        // search, and era+ordinal+name alone would collide (the same
+        // reason FilterPipeline.SearchResult.id carries it).
+        case .song(let s, let v, let era, _, let ordinal): "s:\(era)::\(ordinal)::\(s.baseName)::\(v?.id ?? "")"
+        case .version(let v, _, let era, _, let idx, let ordinal): "v:\(era)::\(ordinal)::\(idx)::\(v.id)"
+        }
+    }
+
+    var isSelectable: Bool {
+        if case .header = self { return false }
+        return true
+    }
+}
+
 /// One flat, selectable list of song/version rows.
 ///
 /// `List(selection:)` is what buys the Mac behaviours for free: click to select,
 /// ↑↓ to move, shift-click to extend, and a focus ring. Return plays the
 /// selection; double-click plays the row under the pointer. Details is no longer
 /// bound to a click at all — the selection drives the inspector.
-struct MacSongList: View {
-    /// A row the list can show. Headers are non-selectable; only `.song` and
-    /// `.version` carry an id the selection can land on.
-    enum Row: Identifiable {
-        case header(String, id: String)
-        case song(Song, version: SongVersion?, eraName: String, eraArt: String?, ordinal: Int)
-        case version(SongVersion, song: Song, eraName: String, eraArt: String?, index: Int, ordinal: Int)
-
-        var id: String {
-            switch self {
-            case .header(_, let id): "h:\(id)"
-            // Version id included: two versions of one song can both match a
-            // search, and era+ordinal+name alone would collide (the same
-            // reason FilterPipeline.SearchResult.id carries it).
-            case .song(let s, let v, let era, _, let ordinal): "s:\(era)::\(ordinal)::\(s.baseName)::\(v?.id ?? "")"
-            case .version(let v, _, let era, _, let idx, let ordinal): "v:\(era)::\(ordinal)::\(idx)::\(v.id)"
-            }
-        }
-
-        var isSelectable: Bool {
-            if case .header = self { return false }
-            return true
-        }
-    }
-
-    let rows: [Row]
+struct MacSongList<Header: View>: View {
+    let rows: [MacListRow]
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -41,11 +45,29 @@ struct MacSongList: View {
     var onToggleExpansion: ((String, Int) -> Void)?
     let onPlay: (SongVersion, String) -> Void
     let onShowDescription: (DescriptionSheet.Payload) -> Void
+    /// Reports the newly selected row so the host can drive the Details panel.
+    let onSelect: (MacListRow?) -> Void
+    /// Page chrome, rendered as the first row so it scrolls away. Pinned above
+    /// the list it cost ~290pt of a 700pt window — a quarter of the screen
+    /// spent on context you read once.
+    @ViewBuilder var header: Header
 
-    @Binding var selection: Row.ID?
+    /// Owned here, not bound from the host.
+    ///
+    /// As `@Binding` to the artist screen's `@State`, every arrow-key press
+    /// invalidated that whole view — which recomputed the row array from
+    /// scratch. On a badge-filtered Ye that is ~6000 rows rebuilt per keypress.
+    /// Selection is this list's business; the host only needs the result.
+    @State private var selection: MacListRow.ID?
 
     var body: some View {
-        List(rows, selection: $selection) { row in
+        List(selection: $selection) {
+            header
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
+
+            ForEach(rows) { row in
             switch row {
             case .header(let text, _):
                 Text(text)
@@ -87,9 +109,13 @@ struct MacSongList: View {
                     if version.isStreamable { onPlay(version, eraName) }
                 }
             }
+            }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+        .onChange(of: selection) { _, id in
+            onSelect(id.flatMap { id in rows.first { $0.id == id } })
+        }
         .onKeyPress(.return) { playSelection() ? .handled : .ignored }
         // Space is safe here and not in the menu bar: `onKeyPress` fires only
         // while the list itself has focus, so it can't steal the key from the
@@ -123,7 +149,7 @@ struct MacSongList: View {
     }
 }
 
-extension MacSongList.Row {
+extension MacListRow {
     /// The detail payload this row describes, for the Details inspector.
     func payload(artistName: String, artistSlug: String) -> SongDetailPayload? {
         switch self {

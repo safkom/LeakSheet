@@ -326,18 +326,30 @@ extension String {
 enum CreditType: String {
     case featuring, producers, collaboration, refs, director, creditedArtists
 
+    // `static let`, not literals in the switch: `Color.tone` builds a dynamic
+    // platform colour (a closure the system calls per appearance), and
+    // `CreditTagsView` reads `color` twice per tag on every body evaluation.
+    // Inline, that allocated a fresh one each time on a list that can be
+    // thousands of rows. The badge palette was already declared this way.
+    //
+    // Dark brightnesses raised where the shipped value could not clear AA on
+    // its own tag (producers 3.67:1, creditedArtists 3.87:1, director 3.45:1).
+    // Hues are unchanged, so the credits still read as the same six colours.
+    private static let featuringColor = Color.tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
+    private static let producersColor = Color.tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
+    private static let collaborationColor = Color.tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)
+    private static let refsColor = Color.tone(hue: 30 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.44)
+    private static let directorColor = Color.tone(hue: 250 / 360, saturation: 0.45, brightness: 0.90, lightBrightness: 0.48)
+    private static let creditedArtistsColor = Color.tone(hue: 340 / 360, saturation: 0.50, brightness: 0.84, lightBrightness: 0.46)
+
     var color: Color {
         switch self {
-        // Dark brightnesses raised where the shipped value could not clear AA
-        // on its own tag (producers 3.67:1, creditedArtists 3.87:1,
-        // director 3.45:1). Hues are unchanged, so the credits still read as
-        // the same six colours.
-        case .featuring: .tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
-        case .producers: .tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
-        case .collaboration: .tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)
-        case .refs: .tone(hue: 30 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.44)
-        case .director: .tone(hue: 250 / 360, saturation: 0.45, brightness: 0.90, lightBrightness: 0.48)
-        case .creditedArtists: .tone(hue: 340 / 360, saturation: 0.50, brightness: 0.84, lightBrightness: 0.46)
+        case .featuring: Self.featuringColor
+        case .producers: Self.producersColor
+        case .collaboration: Self.collaborationColor
+        case .refs: Self.refsColor
+        case .director: Self.directorColor
+        case .creditedArtists: Self.creditedArtistsColor
         }
     }
 
