@@ -88,8 +88,8 @@ struct MiscEntryRowView: View {
         // kind of object as a song row. These used to be 6pt vertical, no
         // horizontal padding, no clip and no hover — visibly a different row
         // family sitting under the same era card.
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
+        .padding(.vertical, Metrics.rowVerticalPadding)
+        .padding(.horizontal, Metrics.rowHorizontalPadding)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .rowHoverHighlight()
         .accessibilityElement(children: .combine)
@@ -153,7 +153,7 @@ struct MiscEntryRowView: View {
                 Image(systemName: "ellipsis.circle")
                     .font(.body)
                     .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
+                    .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Choose link")

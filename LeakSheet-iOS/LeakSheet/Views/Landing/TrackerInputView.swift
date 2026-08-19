@@ -72,7 +72,7 @@ struct TrackerInputView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                        .frame(width: 44, height: 44)   // 44pt HIG hit target
+                        .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .disabled(loading)

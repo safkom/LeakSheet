@@ -243,10 +243,18 @@ extension Color {
         return .primary
     }
 
-    /// Returns near-white or near-black depending on background luminance —
-    /// guaranteed-legible body/title text for any backdrop color.
+    /// White or black — whichever actually contrasts more with `background`.
+    ///
+    /// Compares both candidates rather than splitting at luminance 0.5: the WCAG
+    /// crossover is near 0.179, so every mid-tone backdrop between the two got
+    /// white text when black reads better. An era card from a near-white cover
+    /// lands exactly there (its dimmed gradient is mid-grey), and titled itself
+    /// in white at 3.70:1 where black gives 5.72:1.
     static func preferredText(on background: Color, in scheme: ColorScheme = .dark) -> Color {
-        background.relativeLuminance(in: scheme) < 0.5 ? Color.white : Color.black
+        let luminance = background.relativeLuminance(in: scheme)
+        let againstWhite = 1.05 / (luminance + 0.05)
+        let againstBlack = (luminance + 0.05) / 0.05
+        return againstWhite >= againstBlack ? Color.white : Color.black
     }
 
     /// Linear blend toward `other` (0 = self, 1 = other). Used to approximate

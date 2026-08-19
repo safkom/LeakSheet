@@ -85,10 +85,21 @@ struct DesignTokensColorTests {
         #expect(fixed.contrastRatio(against: .lsBackground, in: scheme) >= 4.5)
     }
 
-    @Test("preferredText flips at the luminance midpoint")
+    @Test("preferredText picks the higher-contrast candidate")
     func preferredText() {
         #expect(Color.preferredText(on: .black).rgbComponents().red > 0.9)
         #expect(Color.preferredText(on: .white).rgbComponents().red < 0.1)
+        // Mid-grey: "dark" by the old 0.5 midpoint test, but black wins on
+        // actual contrast (5.7:1 vs 3.7:1).
+        let midGrey = Color(hex: 0x868686)
+        #expect(Color.preferredText(on: midGrey).rgbComponents().red < 0.1)
+        // Whichever it picks must be the better of the two, everywhere.
+        for value in stride(from: 0.0, through: 1.0, by: 0.05) {
+            let backdrop = Color(red: value, green: value, blue: value)
+            let picked = Color.preferredText(on: backdrop)
+            let other: Color = picked.rgbComponents().red > 0.5 ? .black : .white
+            #expect(picked.contrastRatio(against: backdrop) >= other.contrastRatio(against: backdrop))
+        }
     }
 
     // MARK: - Palette contrast
@@ -160,4 +171,37 @@ struct DesignTokensColorTests {
         (CreditType.director.color, "credit.director"),
         (CreditType.creditedArtists.color, "credit.creditedArtists"),
     ]
+}
+
+/// Era card title legibility.
+///
+/// The card is a two-stop gradient of the cover's dominant colour. The title has
+/// to clear AA against BOTH stops, not against some intermediate mix — a dark
+/// cover in the light appearance produced white text on a near-white card
+/// because the decision was made against a separate blend.
+@Suite("Era card contrast")
+@MainActor
+struct EraDisplayColorsContrastTests {
+    /// Covers the range of dominant colours extraction actually yields: near
+    /// black, near white, saturated, and desaturated mid-tones.
+    private static let dominants: [(Color, String)] = [
+        (Color(hex: 0x101014), "near-black"),
+        (Color(hex: 0xF4F1EC), "near-white"),
+        (Color(hex: 0xE02020), "saturated red"),
+        (Color(hex: 0x1E3A8A), "deep navy"),
+        (Color(hex: 0x7A7A7A), "mid grey"),
+        (Color(hex: 0xC9A227), "gold"),
+        (Color(hex: 0x2F6B4F), "forest"),
+    ]
+
+    @Test("Card title clears AA on both gradient stops", arguments: [ColorScheme.dark, .light])
+    func titleContrast(scheme: ColorScheme) {
+        for (dominant, label) in Self.dominants {
+            let colors = EraDisplayColors.derive(from: dominant, in: scheme)
+            for (stop, which) in [(colors.gradientTop, "top"), (colors.gradientBottom, "bottom")] {
+                let ratio = colors.title.contrastRatio(against: stop, in: scheme)
+                #expect(ratio >= 4.5, "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)")
+            }
+        }
+    }
 }

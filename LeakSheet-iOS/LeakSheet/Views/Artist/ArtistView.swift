@@ -280,7 +280,7 @@ private struct ArtistContentView: View {
                             Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
                         } label: {
                             Image(systemName: "ellipsis")
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .accessibilityHidden(true)
                         }
                         .glassEffect(.regular.interactive(), in: .circle)
@@ -290,7 +290,7 @@ private struct ArtistContentView: View {
                             showQueue = true
                         } label: {
                             Image(systemName: "list.bullet")
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .accessibilityHidden(true)
                         }
                         .glassEffect(.regular.interactive(), in: .circle)

@@ -166,7 +166,7 @@ struct FilterChip: View {
                 .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
+        .frame(minHeight: Metrics.chipHeight)
         .contentShape(Capsule())
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }

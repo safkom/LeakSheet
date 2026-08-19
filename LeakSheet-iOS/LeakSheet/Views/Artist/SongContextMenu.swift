@@ -84,7 +84,7 @@ struct ThreeDotMenu: View {
             Image(systemName: "ellipsis")
                 .font(.body)
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
