@@ -18,15 +18,10 @@ struct LeakSheetCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        // The app has no documents; File ▸ New would open a stray window.
-        CommandGroup(replacing: .newItem) {}
-
-        // ...but closing the only window then left no menu path back to it.
-        CommandGroup(after: .windowList) {
-            Button("LeakSheet") { openWindow(id: "main") }
-                .keyboardShortcut("1", modifiers: [.command, .shift])
-            Button("Now Playing") { openWindow(id: "now-playing") }
-        }
+        // No CommandGroup(replacing: .newItem) and no hand-rolled Window-menu
+        // items: both scenes are singleton `Window`s, so there is no File ▸ New
+        // to remove and each already contributes its own Window-menu entry that
+        // reopens it.
 
         CommandMenu("Playback") {
             Button(player.isPlaying ? "Pause" : "Play") {

@@ -64,9 +64,14 @@ private struct MacEraTile: View {
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 8) {
-                cover
-                    .aspectRatio(1, contentMode: .fill)
-                    .frame(maxWidth: .infinity)
+                // A clear square sized by the grid cell, with the cover drawn
+                // INSIDE it. `aspectRatio(1, .fill)` directly on the cover has
+                // no definite size to work from — CachedImage is already
+                // `.resizable().aspectRatio(.fill)`, so the pair grew without
+                // bound and tiles painted over the header and out of the window.
+                Color.clear
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay { cover }
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay {
                         RoundedRectangle(cornerRadius: 10)

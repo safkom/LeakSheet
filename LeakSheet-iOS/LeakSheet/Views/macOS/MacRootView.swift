@@ -26,9 +26,18 @@ struct MacRootView: View {
         NavigationSplitView {
             MacSidebar(selection: $ui.selection)
         } detail: {
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.lsBackground)
+            // GeometryReader clamps the detail column to the size it is
+            // offered. Without it a tall LazyVGrid (Ye has ~40 eras) reports an
+            // ideal height of the whole grid, the split view sizes to that, and
+            // BOTH columns get pushed up under the titlebar — taking hover
+            // hit-testing with them, so row controls appeared on the wrong row.
+            // Small trackers fit and looked fine, which is why it only showed
+            // up on the big ones.
+            GeometryReader { proxy in
+                detail
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            }
+            .background(Color.lsBackground)
         }
         .frame(minWidth: 900, minHeight: 620)
         .inspector(isPresented: $ui.showInspector) {

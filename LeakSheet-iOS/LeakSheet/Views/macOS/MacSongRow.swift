@@ -28,6 +28,13 @@ struct MacSongRow: View {
     @Environment(FavouritesManager.self) private var favourites
 
     @State private var hovering = false
+    /// `.increased` while this row is the List's selection — see `BadgePill`.
+    @Environment(\.backgroundProminence) private var prominence
+
+    private var onProminentBackground: Bool { prominence == .increased }
+
+    /// The now-playing accent, unless the selection fill is already using it.
+    private var playingTint: Color { onProminentBackground ? .primary : .lsAccent }
 
     private var isPlaying: Bool {
         guard let v = version, let current = player.currentTrack else { return false }
@@ -58,7 +65,7 @@ struct MacSongRow: View {
                 HStack(spacing: 5) {
                     Text(song.baseName)
                         .font(.subheadline)
-                        .foregroundStyle(isPlaying ? Color.lsAccent : .primary)
+                        .foregroundStyle(isPlaying ? playingTint : .primary)
                         .lineLimit(1)
                     if showVersionBadge, let tag = version?.versionTag {
                         Text("[\(tag)]")
@@ -68,7 +75,7 @@ struct MacSongRow: View {
                     if let aka = akaTitle, !indented {
                         Text(aka)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(onProminentBackground ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                             .lineLimit(1)
                             .accessibilityLabel("Also known as \(aka)")
                     }
@@ -123,11 +130,11 @@ struct MacSongRow: View {
             if player.loading {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(Color.lsAccent)
+                    .tint(playingTint)
             } else {
                 Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
                     .font(.caption)
-                    .foregroundStyle(Color.lsAccent)
+                    .foregroundStyle(playingTint)
             }
         } else if showVersionBadge {
             if let b = version?.badge, let badge = Badge(rawValue: b) {
@@ -180,7 +187,7 @@ struct MacSongRow: View {
             if isFavourited {
                 Image(systemName: "heart.fill")
                     .font(.caption2)
-                    .foregroundStyle(Color.lsFavourite)
+                    .foregroundStyle(onProminentBackground ? Color.primary : Color.lsFavourite)
                     .accessibilityLabel("Favourited")
             }
         }

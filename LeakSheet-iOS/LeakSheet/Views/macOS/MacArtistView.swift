@@ -73,7 +73,7 @@ struct MacArtistView: View {
             Divider().overlay(Color.lsBorder)
             content
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.lsBackground)
         .navigationTitle(openEra ?? artist.name)
         .navigationSubtitle(subtitleText)

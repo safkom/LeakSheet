@@ -6,6 +6,7 @@ import SwiftUI
 struct BadgePill: View {
     let text: String
     let variant: BadgeVariant
+
     /// VoiceOver prefix, e.g. "Quality" → "Quality: CD Quality".
     var accessibilityPrefix: String? = nil
     /// Larger type and padding for the description sheet, which reads at
@@ -13,13 +14,21 @@ struct BadgePill: View {
     /// near-identical copy the comment above claims to have folded in.
     var prominent: Bool = false
 
+    /// A selected macOS list row paints an accent-filled background and raises
+    /// `backgroundProminence`. The pill's own tint is chosen for the app's dark
+    /// background and reads as mud on top of that fill, so it steps aside.
+    /// Inert everywhere else — nothing else raises prominence.
+    @Environment(\.backgroundProminence) private var prominence
+
+    private var onProminentBackground: Bool { prominence == .increased }
+
     var body: some View {
         Text(text)
             .font(prominent ? .footnote.weight(.semibold) : .caption2.weight(.semibold))
-            .foregroundStyle(variant.color)
+            .foregroundStyle(onProminentBackground ? AnyShapeStyle(.background) : AnyShapeStyle(variant.color))
             .padding(.horizontal, prominent ? 10 : 7)
             .padding(.vertical, prominent ? 5 : 3)
-            .background(variant.background)
+            .background(onProminentBackground ? AnyShapeStyle(.background.opacity(0.22)) : AnyShapeStyle(variant.background))
             .clipShape(Capsule())
             .fixedSize()
             .accessibilityLabel(accessibilityPrefix.map { "\($0): \(text)" } ?? text)

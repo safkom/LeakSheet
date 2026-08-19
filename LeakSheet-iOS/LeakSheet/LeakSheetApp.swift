@@ -19,10 +19,14 @@ struct LeakSheetApp: App {
         #if os(macOS)
         // Window frames and sidebar state restore automatically on macOS —
         // `restorationBehavior` is the opt-out, so there's nothing to add here.
-        // Named "main" so LeakSheetCommands can bring it forward — ⌥⌘Q toggles
-        // state only this window's inspector observes, and without this the
-        // toggle would be invisible while the Now Playing window is key.
-        WindowGroup(id: "main") {
+        //
+        // `Window`, not `WindowGroup`: the commands raise this window by id
+        // (⌘I and ⌥⌘Q drive an inspector only this window shows), and
+        // `openWindow(id:)` on a WindowGroup OPENS ANOTHER COPY instead of
+        // bringing the existing one forward — two identical main windows.
+        // A Window scene is a singleton, and it also removes File ▸ New and
+        // supplies its own Window-menu item for free.
+        Window("LeakSheet", id: "main") {
             MacRootView()
                 .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)

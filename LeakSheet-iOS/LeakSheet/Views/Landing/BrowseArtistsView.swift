@@ -153,6 +153,9 @@ struct BrowseArtistsView: View {
                     }
                 }
             }
+            // Fill the pane: without this the enclosing detail column centres a
+            // content-sized block, leaving the URL field floating mid-window.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.lsBackground)
             .task { await loadArtists() }
             .onAppear { loadingUrl = "" }

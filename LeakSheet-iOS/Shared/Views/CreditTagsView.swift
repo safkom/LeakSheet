@@ -4,6 +4,12 @@ import SwiftUI
 struct CreditTagsView: View {
     let version: SongVersion
 
+    /// See `BadgePill` — the per-credit tints are picked for the app background
+    /// and vanish on a selected row's accent fill.
+    @Environment(\.backgroundProminence) private var prominence
+
+    private var onProminentBackground: Bool { prominence == .increased }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let feat = version.featuring, !feat.isEmpty {
@@ -31,16 +37,18 @@ struct CreditTagsView: View {
         HStack(alignment: .top, spacing: 4) {
             Text(type.label)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(type.color.opacity(0.8))
+                .foregroundStyle(onProminentBackground
+                    ? AnyShapeStyle(.background.opacity(0.85))
+                    : AnyShapeStyle(type.color.opacity(0.8)))
                 .fixedSize()
             Text(text)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(onProminentBackground ? AnyShapeStyle(.background) : AnyShapeStyle(.secondary))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
-        .background(type.color.opacity(0.10))
+        .background(onProminentBackground ? Color.white.opacity(0.18) : type.color.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(type.accessibilityLabel) \(text)")
