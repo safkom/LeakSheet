@@ -65,7 +65,14 @@ struct MacSongRow: View {
                 HStack(spacing: 5) {
                     Text(song.baseName)
                         .font(.subheadline)
-                        .foregroundStyle(isPlaying ? playingTint : .primary)
+                        // Plain `.primary`, never the accent: SwiftUI inverts a
+                        // primary label on a selected row for free, whereas an
+                        // accent-tinted title on the accent-filled selection is
+                        // blue on blue. `backgroundProminence` is not a reliable
+                        // guard here — it reaches BadgePill but not this read —
+                        // so the playing state is carried by the leading
+                        // speaker glyph alone.
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     if showVersionBadge, let tag = version?.versionTag {
                         Text("[\(tag)]")

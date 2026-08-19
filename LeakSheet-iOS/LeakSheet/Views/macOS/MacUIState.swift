@@ -51,6 +51,14 @@ final class MacUIState {
     /// Set by ⇧⌘V so the Browse pane can pick up a pasted tracker URL.
     var pastedURL: String?
 
+    /// Measured height of the mini player bar.
+    ///
+    /// The bar is a window-level `safeAreaBar`, which insets the detail column
+    /// but NOT the inspector — so the Details panel's Play button sat behind it
+    /// whenever anything was playing. Measured rather than hardcoded because the
+    /// bar grows a progress slider once a duration is known.
+    var playerBarHeight: CGFloat = 0
+
     /// Parsed trackers keyed by slug, most-recently-opened last.
     ///
     /// Capped: a big tracker (Ye is ~9k versions) plus its view model is tens of

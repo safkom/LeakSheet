@@ -43,6 +43,9 @@ struct MacInspector: View {
                 QueueSheet(embedded: true)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: ui.playerBarHeight)
+        }
         .background(Color.lsBackground)
     }
 }

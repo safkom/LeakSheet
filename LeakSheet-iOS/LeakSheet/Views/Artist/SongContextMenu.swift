@@ -57,6 +57,13 @@ struct SongContextMenu: View {
         } label: {
             Label("Details", systemImage: "info.circle")
         }
+        if let link = version.links?.first {
+            Button {
+                Pasteboard.copy(link)
+            } label: {
+                Label("Copy Link", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 

@@ -142,6 +142,13 @@ struct MiniPlayerBar: View {
             .glassEffect(in: .rect(cornerRadius: 16))
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
+            #if os(macOS)
+            // Publish the height so the inspector can clear it — see
+            // MacUIState.playerBarHeight.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                MacUIState.shared.playerBarHeight = height
+            }
+            #endif
             #if !os(macOS)
             .sheet(isPresented: $showNowPlaying) {
                 NowPlayingView()
