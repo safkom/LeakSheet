@@ -82,6 +82,7 @@ struct QueueSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Play \(item.version.name)")
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
@@ -89,6 +90,7 @@ struct QueueSheet: View {
                                 } label: {
                                     Image(systemName: "trash")
                                 }
+                                .accessibilityLabel("Remove from queue")
                             }
                         }
                         .onMove { from, to in

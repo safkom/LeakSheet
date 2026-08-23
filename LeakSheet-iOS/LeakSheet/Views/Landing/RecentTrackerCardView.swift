@@ -40,6 +40,7 @@ struct RecentTrackerCardView: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
+                    .accessibilityHidden(true)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

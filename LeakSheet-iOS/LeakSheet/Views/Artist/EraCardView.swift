@@ -17,9 +17,23 @@ struct EraCardView: View {
 
     private let cornerRadius: CGFloat = 16
 
+    /// Collapsed by default. An era blurb runs to a full screen on the bigger
+    /// trackers, so expanding an era used to show a wall of prose and push
+    /// every song below the fold — the opposite of what tapping an era is for.
+    @State private var descriptionExpanded = false
+
+    /// Long enough that collapsing earns its "More" control. Shorter blurbs
+    /// render whole, so the toggle never appears next to text it would not
+    /// actually shorten.
+    private let descriptionCollapseThreshold = 180
+    private let descriptionCollapsedLines = 3
+
     var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            // Only the header toggles the era. The description below needs its
+            // own control, and a Button inside another Button's label never
+            // receives taps.
+            Button(action: onTap) {
                 HStack(alignment: .center, spacing: 14) {
                     coverArt
                     titleBlock
@@ -29,40 +43,66 @@ struct EraCardView: View {
                         .foregroundStyle(titleColor.opacity(0.6))
                         .accessibilityHidden(true)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(era.name)
+            .accessibilityHint(expanded ? "Collapse era" : "Expand era")
+            .accessibilityAddTraits(.isButton)
 
-                if expanded {
-                    if let alts = era.altNames, !alts.isEmpty {
-                        altNamesLabel(alts, lineLimit: nil)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if let desc = era.description, !desc.isEmpty {
-                        Text(desc)
-                            .font(.subheadline)
-                            .foregroundStyle(bodyColor)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            if expanded {
+                if let alts = era.altNames, !alts.isEmpty {
+                    altNamesLabel(alts, lineLimit: nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let desc = era.description, !desc.isEmpty {
+                    descriptionBlock(desc)
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // Glass + gradient layering — see DECISIONS.md::EraCardView.swift::glass-gradient-layering
-            .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-            .background {
-                cardShape.fill(eraBackground)
-            }
-            .overlay {
-                EraCardBorder(cornerRadius: cornerRadius, expanded: expanded)
-                    .stroke(borderColor, lineWidth: 1)
-            }
-            .clipShape(cardShape)
-            .rowHoverHighlight()
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(era.name)
-        .accessibilityHint(expanded ? "Collapse era" : "Expand era")
-        .accessibilityAddTraits(.isButton)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Glass + gradient layering — see DECISIONS.md::EraCardView.swift::glass-gradient-layering
+        .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        .background {
+            cardShape.fill(eraBackground)
+        }
+        .overlay {
+            EraCardBorder(cornerRadius: cornerRadius, expanded: expanded)
+                .stroke(borderColor, lineWidth: 1)
+        }
+        .clipShape(cardShape)
+        .rowHoverHighlight()
+    }
+
+    @ViewBuilder
+    private func descriptionBlock(_ desc: String) -> some View {
+        let isLong = desc.count > descriptionCollapseThreshold
+        VStack(alignment: .leading, spacing: 6) {
+            Text(desc)
+                .font(.subheadline)
+                .foregroundStyle(bodyColor)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(isLong && !descriptionExpanded ? descriptionCollapsedLines : nil)
+
+            if isLong {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        descriptionExpanded.toggle()
+                    }
+                } label: {
+                    Text(descriptionExpanded ? "Less" : "More")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(titleColor)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(descriptionExpanded ? "Show less of the era description" : "Show the full era description")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Pieces

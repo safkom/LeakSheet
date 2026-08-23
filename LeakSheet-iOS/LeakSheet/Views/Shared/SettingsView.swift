@@ -154,14 +154,19 @@ struct SettingsView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Color.lsAccent)
                         .font(.body)
+                        .accessibilityHidden(true)
                 } else {
                     Image(systemName: "circle")
                         .foregroundStyle(.tertiary)
                         .font(.body)
+                        .accessibilityHidden(true)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Selection was conveyed only by a checkmark-vs-circle glyph.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }

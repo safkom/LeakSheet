@@ -30,7 +30,7 @@ extension ArtistViewModel {
                 state: state, eras: [], searchResults: [], recentResults: [],
                 recentPlaybackItems: [], recentStreamIndex: [:],
                 miscResults: miscResults,
-                miscEraGroups: groupMiscByEra(miscResults)
+                miscEraGroups: groupMiscByEra(miscResults, eraOrder: artist.eras.map(\.name))
             )
         }
 
@@ -241,14 +241,55 @@ extension ArtistViewModel {
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
-    nonisolated static func groupMiscByEra(_ entries: [MiscEntry]) -> [MiscEraGroup] {
+    /// Group a content tab's entries by era, in the artist's own era order.
+    ///
+    /// `eraOrder` is the era tree's ordering. Grouping alone used to emit
+    /// groups in sheet-row order, which put whatever the tab happened to list
+    /// first at the top: on the Ye Misc tab that was "Opt Archive", "Twitter"
+    /// and "Pierre-Louis Auvray" — 4 entries out of 747, each a source name
+    /// the sheet put in its Era column — sitting above every real era with a
+    /// placeholder cover. Ordering by the era tree makes a content tab read in
+    /// the same sequence as the Unreleased list.
+    ///
+    /// Groups whose name matches no era keep their relative order and go last:
+    /// they are real content, so they must not be dropped, but they are also
+    /// not eras and should not lead.
+    nonisolated static func groupMiscByEra(
+        _ entries: [MiscEntry], eraOrder: [String] = []
+    ) -> [MiscEraGroup] {
         var order: [String] = []
         var byEra: [String: [MiscEntry]] = [:]
         for entry in entries {
             if byEra[entry.eraName] == nil { order.append(entry.eraName) }
             byEra[entry.eraName, default: []].append(entry)
         }
-        return order.map { MiscEraGroup(eraName: $0, entries: byEra[$0] ?? []) }
+        guard !eraOrder.isEmpty else {
+            return order.map { MiscEraGroup(eraName: $0, entries: byEra[$0] ?? []) }
+        }
+        // Case/whitespace-insensitive: a tab's Era column is typed by hand and
+        // does not always match the era header's capitalisation exactly.
+        var rank: [String: Int] = [:]
+        for (i, name) in eraOrder.enumerated() {
+            rank[Self.eraMatchKey(name)] = i
+        }
+        let sorted = order.enumerated().sorted { lhs, rhs in
+            let l = rank[Self.eraMatchKey(lhs.element)]
+            let r = rank[Self.eraMatchKey(rhs.element)]
+            switch (l, r) {
+            case let (l?, r?): return l == r ? lhs.offset < rhs.offset : l < r
+            case (nil, nil):   return lhs.offset < rhs.offset
+            case (nil, _):     return false   // unmatched sorts after matched
+            case (_, nil):     return true
+            }
+        }
+        return sorted.map { MiscEraGroup(eraName: $0.element, entries: byEra[$0.element] ?? []) }
+    }
+
+    /// Loose era identity for matching a content tab's Era column against the
+    /// era tree. Deliberately not the backend's `_era_match_key` — this only
+    /// needs to survive casing and stray whitespace.
+    nonisolated static func eraMatchKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {

@@ -141,6 +141,11 @@ struct SongRowView: View {
                 Image(systemName: favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName) ? "heart.fill" : "heart")
             }
             .tint(.pink)
+            .accessibilityLabel(
+                favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName)
+                    ? "Remove \(song.baseName) from favourites"
+                    : "Add \(song.baseName) to favourites"
+            )
 
             if canStream {
                 Button {
@@ -152,6 +157,7 @@ struct SongRowView: View {
                     Image(systemName: "text.append")
                 }
                 .tint(.lsAccent)
+                .accessibilityLabel("Add \(song.baseName) to queue")
             }
         }
         .swipeActions(edge: .leading) {
@@ -167,6 +173,7 @@ struct SongRowView: View {
                     Image(systemName: "play.fill")
                 }
                 .tint(.green)
+                .accessibilityLabel("Play \(song.baseName)")
             }
         }
         .contextMenu {

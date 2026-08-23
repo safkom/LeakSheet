@@ -90,6 +90,7 @@ struct VersionRowView: View {
                     Image(systemName: "text.append")
                 }
                 .tint(.lsAccent)
+                .accessibilityLabel("Add \(version.name) to queue")
             }
         }
         // Leading swipe-to-play, matching SongRowView. Version rows never had
@@ -108,6 +109,7 @@ struct VersionRowView: View {
                     Image(systemName: "play.fill")
                 }
                 .tint(.green)
+                .accessibilityLabel("Play \(version.name)")
             }
         }
         .contextMenu {

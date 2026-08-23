@@ -85,6 +85,7 @@ struct TrackerStatsSheet: View {
                         ForEach(badgeRows) { r in
                             HStack(spacing: 12) {
                                 Text(r.badge.emoji).font(.body).frame(width: 24)
+                                    .accessibilityHidden(true)
                                 Text(r.label).font(.subheadline)
                                 Spacer()
                                 Text("\(r.value)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
@@ -123,6 +124,7 @@ struct TrackerStatsSheet: View {
     private func statRow(_ row: Row) -> some View {
         HStack(spacing: 12) {
             Circle().fill(row.color).frame(width: 12, height: 12).frame(width: 24)
+                .accessibilityHidden(true)
             Text(row.label).font(.subheadline)
             Spacer()
             Text("\(row.value)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
