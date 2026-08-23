@@ -181,24 +181,91 @@ def sweep_tab(html: str, title: str, t: Totals) -> None:
                         t.stars_left_in_availability += 1
 
 
-def collect(corpus: str, limit: int, min_size: int, max_size: int) -> Totals:
+_SHEET_ID_RE = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
+
+
+def _sheet_id(url: str) -> str:
+    """Group key: the workbook a tab belongs to, else the bare host+path."""
+    m = _SHEET_ID_RE.search(url or "")
+    if m:
+        return m.group(1)
+    p = urlparse(url or "")
+    return f"{p.netloc}{p.path}" or "<unknown>"
+
+
+def _load(path: str) -> tuple[str, str, str]:
+    """Return (html, title, url) for a cached tab."""
+    meta_path = path.replace(".html", ".meta.json")
+    title, url = "?", ""
+    if os.path.exists(meta_path):
+        try:
+            meta = json.load(open(meta_path))
+            title, url = meta.get("title", "?"), meta.get("url", "")
+        except (OSError, ValueError):
+            pass
+    return open(path, encoding="utf-8", errors="replace").read(), title, url
+
+
+def collect(
+    corpus: str, limit: int, min_size: int, max_size: int, *, per_sheet: bool = True
+) -> Totals:
+    """Sweep the corpus.
+
+    ``per_sheet`` mirrors production: a workbook has many tabs, and the fetcher
+    parses exactly one of them as the song tab (scoring by era and song count).
+    Sweeping every cached tab instead counts badge sub-tabs, glossaries and
+    artwork indexes as if each were a tracker, which drags every ratio toward
+    whatever those tabs happen to contain — era cover-art coverage especially,
+    since only a main tab carries covers. Off by default only for debugging.
+    """
     t = Totals()
     files = sorted(
         h for h in glob.glob(os.path.join(corpus, "*.html"))
         if min_size < os.path.getsize(h) < max_size
     )
-    if limit:
-        files = files[:limit]
-    for path in files:
-        meta_path = path.replace(".html", ".meta.json")
-        title = "?"
-        if os.path.exists(meta_path):
+
+    if per_sheet:
+        # --limit must cut whole workbooks, never the flat tab list: cache
+        # filenames are URL hashes, so an alphabetical slice splits workbooks
+        # and can drop exactly the main tab a workbook is scored on.
+        by_sheet: dict[str, list[str]] = {}
+        for path in files:
             try:
-                title = json.load(open(meta_path)).get("title", "?")
-            except (OSError, ValueError):
-                pass
+                _, _, url = _load(path)
+            except OSError:
+                t.tabs_failed += 1
+                continue
+            by_sheet.setdefault(_sheet_id(url), []).append(path)
+        keys = sorted(by_sheet)[:limit] if limit else sorted(by_sheet)
+
+        # Same score tuple the fetcher uses to pick a workbook's main tab.
+        selected = []
+        for key in keys:
+            best: tuple[tuple[int, int, int], str, str] | None = None
+            for path in by_sheet[key]:
+                try:
+                    html, title, _ = _load(path)
+                    artist = parse_sheet(html, title)
+                except Exception:  # noqa: BLE001
+                    t.tabs_failed += 1
+                    continue
+                score = (1 if artist.total_songs else 0, len(artist.eras), artist.total_songs)
+                if best is None or score > best[0]:
+                    best = (score, html, title)
+            if best is not None:
+                selected.append((best[1], best[2]))
+    else:
+        selected = []
+        for path in (files[:limit] if limit else files):
+            try:
+                html, title, _ = _load(path)
+            except OSError:
+                t.tabs_failed += 1
+                continue
+            selected.append((html, title))
+
+    for html, title in selected:
         try:
-            html = open(path, encoding="utf-8", errors="replace").read()
             sweep_tab(html, title, t)
         except Exception:  # noqa: BLE001 - a crash is itself a measured defect
             t.tabs_failed += 1
@@ -317,6 +384,11 @@ def main() -> int:
     ap.add_argument("--out", help="write metrics JSON here")
     ap.add_argument("--baseline", help="compare against this metrics JSON")
     ap.add_argument("--report", action="store_true", help="print the full report")
+    ap.add_argument(
+        "--all-tabs", action="store_true",
+        help="sweep every cached tab instead of one main tab per workbook "
+             "(debugging; ratios are not comparable to the default mode)",
+    )
     args = ap.parse_args()
 
     logging.disable(logging.CRITICAL)  # the parser logs unmatched rows per tab
@@ -325,7 +397,10 @@ def main() -> int:
         print(f"corpus not found: {args.corpus}", file=sys.stderr)
         return 2
 
-    t = collect(args.corpus, args.limit, args.min_size, args.max_size)
+    t = collect(
+        args.corpus, args.limit, args.min_size, args.max_size,
+        per_sheet=not args.all_tabs,
+    )
     metrics = to_metrics(t)
 
     if args.report or not (args.out or args.baseline):

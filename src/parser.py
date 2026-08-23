@@ -1441,6 +1441,41 @@ def _parse_era_header_row(
     return era, needs_backfill
 
 
+# Column labels that mark an artwork tab. These tabs DO have Era/Name/Notes
+# columns, so they parse cleanly as song tabs and emit one "song" per cover —
+# 19 of them on the Harry Styles tracker. Two or more hits is deliberately
+# conservative: a single "Image" column also appears on physical-release tabs,
+# which are genuine song content.
+_ARTWORK_COLUMN_SIGNS = frozenset({
+    "art type", "project type", "designer", "cover art", "image type",
+    "use", "used", "used?", "made by", "image",
+})
+_MIN_ARTWORK_SIGNS = 2
+
+
+def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
+    """Return False for tabs that hold something other than songs.
+
+    Trackers keep glossaries, artwork indexes, interview logs, setlists and
+    BPM/key references as ordinary tabs. Run through the song parser they do
+    not fail — they emit plausible-looking junk. The Car Seat Headrest
+    interview tab produced 146 "songs" whose titles were interview headlines,
+    because no Name column was detected and `name` fell back to positional
+    index 1, which happened to be "Interview Title".
+
+    Two signals, in order of how much they catch:
+
+    1. No Name column at all. Glossary ("Portion | Quality"), setlist,
+       BPM/key and interview tabs all lack one; only positional fallback made
+       them look parseable.
+    2. An artwork column signature, for tabs that do have Era/Name/Notes.
+    """
+    if "name" not in col_map:
+        return False
+    labels = {" ".join(c.text.split()).strip().lower().rstrip(":") for c in header_row}
+    return len(labels & _ARTWORK_COLUMN_SIGNS) < _MIN_ARTWORK_SIGNS
+
+
 def parse_sheet(html_content: str, artist_name: str) -> Artist:
     """Parse a Google Sheets HTML export into an Artist model.
 
@@ -1453,6 +1488,33 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     # Step 1: detect column layout from header row.
     header_row_idx, col_map = _detect_header_row(rows)
+
+    # Step 1a: refuse tabs that are not song tabs. Parsing a glossary or an
+    # artwork index yields junk that looks exactly like data — see is_song_tab.
+    if not is_song_tab(rows[header_row_idx], col_map):
+        return Artist(
+            name=artist_name,
+            slug=slugify(artist_name),
+            eras=[],
+            parse_metadata=ParseMetadata(
+                total_rows=len(rows) - header_row_idx - 1,
+                other_rows=len(rows) - header_row_idx - 1,
+                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+            ),
+        )
+
+    # Some tabs carry no era header rows at all: the Era column simply repeats
+    # a value on every song row. Without a header row to anchor them, the
+    # abbreviated-era rule below ("plausible era name + real song data => stay
+    # in the current era") swallows every new value, and the whole tab collapses
+    # into one era named after whatever appeared first. Measured on the
+    # OsamaSon tracker: 8 distinct era values, all 81 songs filed under one.
+    #
+    # When a tab has no era headers, the Era column is the only era signal there
+    # is, so it becomes authoritative. Tabs that DO have header rows keep the
+    # abbreviation heuristic, which exists for sheets that shorten the era name
+    # on song rows.
+    flat_era_mode = not any(_is_era_header(r) for r in rows[header_row_idx + 1:])
 
     # Step 1b: extract announcement notices from header cells and pre-header rows.
     pre_header_rows = rows[:header_row_idx] if header_row_idx > 0 else []
@@ -1666,8 +1728,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     version = _parse_song_row(row, col_map)
                     if version and _looks_like_era_name(row_era):
                         # Abbreviated era names on song rows — see
-                        # docs/decisions.md::parser.py::abbreviated-era-names
-                        if _has_song_data(version):
+                        # docs/decisions.md::parser.py::abbreviated-era-names.
+                        # Suppressed in flat_era_mode: with no header rows in
+                        # the tab, a new Era-column value is a new era, not an
+                        # abbreviation of the current one.
+                        if _has_song_data(version) and not flat_era_mode:
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                             era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
@@ -1938,9 +2003,18 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 
 # Compound availability grammar (Travis Scott tracker — no Quality column):
 # '<avail> - HQ', 'Unconfirmed (Snippet - LQ)', 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
-_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ)\b")
+_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ|CDQ)\b")
 _STAR_RATING_PATTERN = re.compile(r"\s*([⭐★]+)[☆]*\s*$")
-_COMPOUND_QUALITY_NAMES = {"HQ": "High Quality", "LQ": "Low Quality"}
+_COMPOUND_QUALITY_NAMES = {
+    "HQ": "High Quality", "LQ": "Low Quality", "CDQ": "CD Quality",
+}
+
+# U+FE0F selects emoji presentation and is invisible. Sheets emit "⭐️" (U+2B50
+# U+FE0F) as often as bare "⭐", and the selector between two stars broke the
+# `[⭐★]+` run, so the pattern matched nothing at all. Effect measured over
+# 23,695 real versions before this fix: zero carried a rating, and the stars
+# stayed glued onto the availability value, corrupting that field too.
+_VARIATION_SELECTORS = str.maketrans("", "", "️︎")
 
 
 def _split_compound_availability(text: str) -> tuple[str, str | None, int | None]:
@@ -1949,6 +2023,7 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     Only used when the tracker has no dedicated Quality column. Returns the
     input unchanged (with None quality/rating) when no marker is present.
     """
+    text = text.translate(_VARIATION_SELECTORS)
     rating = None
     m = _STAR_RATING_PATTERN.search(text)
     if m:
