@@ -8,12 +8,17 @@ import SwiftUI
 /// mode doesn't share a SwiftUI invalidation boundary with the others
 /// or with the screen's own @State. Only the file boundary is new.
 
-// MARK: - Filter toggles
+// MARK: - Content tabs
 
-/// @Observable reference input — the narrow-inputs rule for value types
-/// doesn't apply here; per-property observation tracking already scopes
-/// this view's invalidation to exactly the flags it reads.
-struct FilterTogglesView: View {
+/// The tracker's pages: the song tree plus one chip per parsed content tab.
+/// Exactly one is active at a time.
+///
+/// Split out of the filter row. Both were one scrolling strip of identical
+/// chips, so "Grails" and "Released" looked like the same kind of control while
+/// doing fundamentally different things — a filter annotates the list you are
+/// on, a tab replaces it. `selectTab` already clears the badge filters when a
+/// tab is chosen, which is the same statement in code.
+struct ContentTabsView: View {
     let vm: ArtistViewModel
 
     /// Icon for a content-tab chip. Badge-annotation kinds (best_of, worst_of,
@@ -28,6 +33,60 @@ struct FilterTogglesView: View {
         default: return "square.grid.2x2"
         }
     }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            GlassEffectContainer {
+                HStack(spacing: 8) {
+                    // The song tree. Named for what these trackers call it —
+                    // the filters beside it (Grails, Snippets, Best Of) are all
+                    // unreleased-leak concepts.
+                    FilterChip(
+                        label: "Unreleased",
+                        icon: "waveform",
+                        isActive: vm.selectedTabKey == nil,
+                        tintColor: .lsAccent
+                    ) {
+                        vm.selectTab(nil)
+                    }
+                    if !vm.availableTabs.isEmpty {
+                        ForEach(vm.availableTabs) { tab in
+                            FilterChip(
+                                label: tab.name,
+                                icon: Self.tabIcon(for: tab.kind),
+                                isActive: vm.selectedTabKey == tab.id,
+                                tintColor: .lsAccent
+                            ) {
+                                vm.selectTab(tab.id)
+                            }
+                        }
+                    } else if vm.hasMiscEntries {
+                        // Older cached payloads without `tabs` keep the
+                        // legacy flat Misc chip.
+                        FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .lsAccent) {
+                            vm.toggleMisc()
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .accessibilityLabel("Tracker sections")
+    }
+}
+
+// MARK: - Filter toggles
+
+/// Badge filters over the song tree. Multi-select, and only meaningful on the
+/// song tree — a content tab lists entries, which carry no badges — so the
+/// caller hides this row entirely while a tab is selected rather than showing
+/// controls that would silently do nothing.
+///
+/// @Observable reference input — the narrow-inputs rule for value types
+/// doesn't apply here; per-property observation tracking already scopes
+/// this view's invalidation to exactly the flags it reads.
+struct FilterTogglesView: View {
+    let vm: ArtistViewModel
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -51,31 +110,11 @@ struct FilterTogglesView: View {
                     FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
                         vm.toggleNoSnippets()
                     }
-                    if !vm.availableTabs.isEmpty {
-                        // One chip per parsed content tab (Misc, Music
-                        // Videos, Released, Best Of, Stems, …), labeled with
-                        // the tracker's own tab name.
-                        ForEach(vm.availableTabs) { tab in
-                            FilterChip(
-                                label: tab.name,
-                                icon: Self.tabIcon(for: tab.kind),
-                                isActive: vm.selectedTabKey == tab.id,
-                                tintColor: .filterMisc
-                            ) {
-                                vm.selectTab(tab.id)
-                            }
-                        }
-                    } else if vm.hasMiscEntries {
-                        // Older cached payloads without `tabs` keep the
-                        // legacy flat Misc chip.
-                        FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .filterMisc) {
-                            vm.toggleMisc()
-                        }
-                    }
                 }
             }
             .padding(.horizontal, 16)
         }
+        .accessibilityLabel("Filters")
     }
 }
 

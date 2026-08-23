@@ -159,7 +159,8 @@ private struct ArtistContentView: View {
 
                 // Stats bar — tap for the full TrackerStats breakdown.
                 ArtistStatsBarView(
-                    stats: vm.artistStats,
+                    stats: vm.visibleStats,
+                    unit: vm.isShowingTabEntries ? "entries" : "tracks",
                     onTap: artist.trackerStats != nil ? { showStats = true } : nil
                 )
 
@@ -175,9 +176,18 @@ private struct ArtistContentView: View {
                     .opacity(lastUpdated == nil ? 0 : 1)
                     .accessibilityHidden(lastUpdated == nil)
 
-                // Filter toggles
-                FilterTogglesView(vm: vm)
-                    .padding(.bottom, 8)
+                // Sections first, then the filters that apply to whichever
+                // section is showing. Filters only act on the song tree, so
+                // they disappear on a content tab rather than sitting there
+                // inert — which also keeps the header from growing a permanent
+                // second row.
+                ContentTabsView(vm: vm)
+                    .padding(.bottom, vm.selectedTabKey == nil ? 6 : 8)
+
+                if vm.selectedTabKey == nil {
+                    FilterTogglesView(vm: vm)
+                        .padding(.bottom, 8)
+                }
 
                 // Branch on computed state — see DECISIONS.md::ArtistView.swift::content-state-branching
                 let contentState = vm.content.state
@@ -256,7 +266,7 @@ private struct ArtistContentView: View {
         }
         .swipeActionsContainer()
         .navigationTitle(artist.name)
-        .navigationSubtitle("\(vm.artistStats.total) tracks")
+        .navigationSubtitle("\(vm.visibleStats.total) \(vm.isShowingTabEntries ? "entries" : "tracks")")
         // .large is iOS/watchOS only; a Mac window title has no large variant.
         #if os(iOS)
         .toolbarTitleDisplayMode(.large)

@@ -110,6 +110,23 @@ final class ArtistViewModel {
     /// these are computed exactly once.
     let artistStats: Stats
     private let eraStatsByName: [String: Stats]
+    private let tabStatsByKey: [String: Stats]
+
+    /// Totals for the list currently on screen. The stats bar and the nav
+    /// subtitle both read this: showing the era tree's totals above a content
+    /// tab's entries made the header describe a list the user wasn't looking at.
+    var visibleStats: Stats {
+        guard let key = selectedTabKey, let stats = tabStatsByKey[key] else {
+            return artistStats
+        }
+        return stats
+    }
+
+    /// Whether the visible list is entries from a content tab rather than the
+    /// song tree — the two are counted in different units.
+    var isShowingTabEntries: Bool {
+        selectedTabKey != nil && tabStatsByKey[selectedTabKey ?? ""] != nil
+    }
 
     // MARK: - Search
 
@@ -230,6 +247,9 @@ final class ArtistViewModel {
     nonisolated struct Precomputed: Sendable {
         let eraStatsByName: [String: Stats]
         let artistStats: Stats
+        /// TabSection.id → that tab's own totals, so the stats bar can describe
+        /// whatever list is actually on screen.
+        let tabStatsByKey: [String: Stats]
         let content: FilteredContent
         /// songKey → every era containing that song, in era order — backs
         /// the description sheet's "Also in" cross-era section.
@@ -279,6 +299,11 @@ final class ArtistViewModel {
                 }
             }
             self.eraStatsByName = statsByName
+            var tabStats: [String: Stats] = [:]
+            for tab in artist.tabs ?? [] {
+                tabStats[tab.id] = ArtistViewModel.computeTabStats(tab.entries)
+            }
+            self.tabStatsByKey = tabStats
             self.artistStats = Stats(
                 total: total, available: available, snippets: snippets,
                 confirmed: confirmed, fullHQ: fullHQ
@@ -418,6 +443,7 @@ final class ArtistViewModel {
     init(artist: Artist, precomputed: Precomputed) {
         self.artist = artist
         self.eraStatsByName = precomputed.eraStatsByName
+        self.tabStatsByKey = precomputed.tabStatsByKey
         self.artistStats = precomputed.artistStats
         self.content = precomputed.content
         self.songKeyEras = precomputed.songKeyEras

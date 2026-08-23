@@ -312,6 +312,31 @@ extension ArtistViewModel {
         let fullHQ: Int
     }
 
+    /// Same shape as `computeEraStats`, over a content tab's entries.
+    ///
+    /// Without this the stats bar kept showing the era tree's totals while a
+    /// content tab was on screen, so the header claimed 9,368 tracks over a
+    /// list of 747 released entries.
+    nonisolated static func computeTabStats(_ entries: [MiscEntry]) -> Stats {
+        var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
+        for entry in entries {
+            total += 1
+            let al = (entry.available ?? "").lowercased()
+            let q = (entry.quality ?? "").lowercased()
+            if entry.isStreamable { available += 1 }
+            if al.contains("snippet") { snippets += 1 }
+            if al.contains("confirmed") && !entry.isStreamable { confirmed += 1 }
+            let isFull = al.contains("full") || al.contains("near full") || al.contains("og file")
+            let isHQ = q.contains("hq") || q.contains("high") || q.contains("cd")
+                || q.contains("lossless") || q.contains("og")
+            if isFull && isHQ { fullHQ += 1 }
+        }
+        return Stats(
+            total: total, available: available, snippets: snippets,
+            confirmed: confirmed, fullHQ: fullHQ
+        )
+    }
+
     nonisolated static func computeEraStats(_ era: Era) -> Stats {
         var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
         for song in era.allSongs {
