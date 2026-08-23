@@ -127,13 +127,19 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
     # Pass the URL: production does, and without it relative-art
     # resolution is never exercised, so the metric measures nothing.
     artist = parse_sheet(html, title, url or None)
-    t.detail[title] = [
-        len(artist.eras),
-        sum(1 for e in artist.eras if e.art_url),
-        artist.total_songs,
-        sum(1 for e in artist.eras for s in e.sections for so in s.songs
-            for v in so.versions if v.leak_date),
-    ]
+    # Keyed by URL, never by title: 353 of 412 titles in a real cache cover
+    # more than one tab (one title spans 26), so a title-keyed map silently
+    # overwrites and a before/after diff then compares two different tabs.
+    # That is exactly how a "lost 765 songs" reading was once produced from
+    # two unrelated files. The title rides along in the value for readability.
+    t.detail[url or title] = {
+        "title": title,
+        "eras": len(artist.eras),
+        "eras_with_art": sum(1 for e in artist.eras if e.art_url),
+        "songs": artist.total_songs,
+        "leak_dates": sum(1 for e in artist.eras for s in e.sections for so in s.songs
+                          for v in so.versions if v.leak_date),
+    }
 
     t.tabs += 1
     misses, labels = _count_unmatched_stats_headers(rows)
@@ -396,7 +402,7 @@ def main() -> int:
     ap.add_argument("--out", help="write metrics JSON here")
     ap.add_argument(
         "--detail",
-        help="write per-workbook {title: [eras, eras_with_art, songs]} JSON here. "
+        help="write per-workbook JSON keyed by tab URL here. "
              "Aggregates hide which tracker moved; diffing two detail files "
              "shows whether a ratio shifted because trackers got worse or "
              "because more eras were discovered.",

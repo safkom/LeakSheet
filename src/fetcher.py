@@ -1341,7 +1341,7 @@ async def _load_secondary_tabs(
             if art_result:
                 _, art_html = art_result
                 with t.phase("art_parse"):
-                    art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                    art_map = await asyncio.to_thread(parse_art_tab, art_html, url_norm)
                 if art_map:
                     apply_art_tab_images(artist, art_map)
         except Exception as e:

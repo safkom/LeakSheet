@@ -73,3 +73,45 @@ class TestImageProxyHosts:
         assert not _image_host_allowed(url)
         config.register_tracker_hosts(["https://selfhosttracker.net/"])
         assert _image_host_allowed(url)
+
+
+class TestArtTabRelativeArt:
+    """The Art tab overwrites era.art_url AFTER parse_sheet resolved it.
+
+    parse_sheet ran _absolutize_era_art, then apply_art_tab_images put the raw
+    "/assets/<sha>.jpg" straight back, so a self-hosted tracker with an Art tab
+    still shipped covers nothing could fetch. Resolving in parse_art_tab fixes
+    it for every caller rather than one call site.
+    """
+
+    ART_TAB = """
+    <html><body><table>
+    <tr><td>Era</td><td>Project Type</td><td>Image</td></tr>
+    <tr><td>Opening Era</td><td>Front Cover</td>
+        <td><img src="/assets/cafebabe.jpg"></td></tr>
+    </table></body></html>
+    """
+    SOURCE = "https://selfhosttracker.net/preview/sheet/1"
+
+    def test_relative_art_tab_image_is_resolved(self):
+        from src.parser import parse_art_tab
+        art = parse_art_tab(self.ART_TAB, self.SOURCE)
+        assert list(art.values()) == ["https://selfhosttracker.net/assets/cafebabe.jpg"]
+
+    def test_without_source_url_value_is_unchanged(self):
+        from src.parser import parse_art_tab
+        assert list(parse_art_tab(self.ART_TAB).values()) == ["/assets/cafebabe.jpg"]
+
+    def test_absolute_art_tab_image_is_left_alone(self):
+        from src.parser import parse_art_tab
+        tab = self.ART_TAB.replace("/assets/cafebabe.jpg", "https://docs.google.com/x/Y")
+        assert list(parse_art_tab(tab, self.SOURCE).values()) == ["https://docs.google.com/x/Y"]
+
+    def test_applied_era_art_survives_the_art_tab(self):
+        """End to end: the whole point is that apply_art_tab_images cannot
+        reintroduce a relative URL."""
+        from src.parser import apply_art_tab_images, parse_art_tab, parse_sheet
+        artist = parse_sheet(RELATIVE_ART_TAB, "Selfhost", SOURCE)
+        apply_art_tab_images(artist, parse_art_tab(self.ART_TAB, self.SOURCE))
+        for era in artist.eras:
+            assert era.art_url is None or urlparse(era.art_url).netloc

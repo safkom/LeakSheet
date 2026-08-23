@@ -2779,8 +2779,14 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
     return None, None, start
 
 
-def parse_art_tab(html: str) -> dict[str, str]:
+def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
+
+    *source_url* resolves relative image sources, exactly as in parse_sheet.
+    Absolutising here rather than at the call site matters because
+    apply_art_tab_images OVERWRITES era.art_url after parse_sheet has already
+    run its own resolution — so an Art tab on a self-hosted tracker would put
+    the unusable "/assets/<sha>.jpg" back.
 
     Art tabs in tracker spreadsheets contain full-resolution era artwork.
     Each row typically has an era name in one cell and one or more images.
@@ -2854,6 +2860,8 @@ def parse_art_tab(html: str) -> dict[str, str]:
     for key, info in era_info.items():
         chosen = info["cover"] or info["first"]
         if chosen:
+            if source_url and not urlparse(chosen).netloc:
+                chosen = urljoin(source_url, chosen)
             result[key] = chosen
 
     return result

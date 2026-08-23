@@ -18,6 +18,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+from collections.abc import Iterator
 
 import pytest
 
@@ -44,17 +45,31 @@ class TestSyntheticInvariants:
         assert len(SYNTHETIC_TABS) >= 8
 
 
-def _corpus_tabs(limit: int = 0) -> list[tuple[str, str, str]]:
-    """(html, title, url) for cached tabs, or [] when the corpus is absent."""
+def _corpus_paths() -> list[str]:
+    """Cached tab paths worth parsing. Cheap: stats files, reads none."""
     if not os.path.isdir(CORPUS_DIR):
         return []
     out = []
     for path in sorted(glob.glob(os.path.join(CORPUS_DIR, "*.html"))):
         try:
-            if not 20_000 < os.path.getsize(path) < 4_000_000:
-                continue
+            if 20_000 < os.path.getsize(path) < 4_000_000:
+                out.append(path)
         except OSError:
             continue
+    return out
+
+
+def corpus_tabs() -> "Iterator[tuple[str, str, str]]":
+    """Yield (html, title, url) one tab at a time.
+
+    A generator, not a list, and called lazily rather than at import. Building
+    the list at module scope read 757 MB of HTML into memory and pushed peak
+    RSS to 1.9 GB — on every bare `pytest` run, because collection imports this
+    module even though the marker deselects every test that needs the corpus.
+    Streaming also means the raw HTML is never all resident at once; only the
+    parsed models in `parsed_corpus` are kept.
+    """
+    for path in _corpus_paths():
         meta_path = path.replace(".html", ".meta.json")
         title, url = "?", ""
         if os.path.exists(meta_path):
@@ -64,33 +79,29 @@ def _corpus_tabs(limit: int = 0) -> list[tuple[str, str, str]]:
             except (OSError, ValueError):
                 pass
         try:
-            out.append((open(path, encoding="utf-8", errors="replace").read(), title, url))
+            yield open(path, encoding="utf-8", errors="replace").read(), title, url
         except OSError:
             continue
-        if limit and len(out) >= limit:
-            break
-    return out
 
 
-CORPUS = _corpus_tabs()
-
+# Presence check only — stats the directory, never opens a file, so the
+# skipif can be evaluated at collection time without the memory cost.
 corpus_required = pytest.mark.skipif(
-    not CORPUS,
+    not _corpus_paths(),
     reason=f"no captured corpus at {CORPUS_DIR} (real tracker HTML is never committed)",
 )
 
-# Parsing the whole corpus takes ~4 minutes, so do it once and share it rather
-# than once per test. Module-scoped and lazy: importing this file must stay
-# cheap for the offline gate, which never touches the corpus.
-_PARSED: list[tuple[str, object]] | None = None
+# Parsing the whole corpus takes minutes, so do it once and share it rather
+# than once per test.
+_PARSED: "list[tuple[str, object]] | None" = None
 
 
-def parsed_corpus() -> list[tuple[str, object]]:
+def parsed_corpus() -> "list[tuple[str, object]]":
     """(title, Artist) for every cached tab that parses. Cached across tests."""
     global _PARSED
     if _PARSED is None:
         out = []
-        for html, title, url in CORPUS:
+        for html, title, url in corpus_tabs():
             try:
                 out.append((title, parse_sheet(html, title, url or None)))
             except Exception:  # noqa: BLE001 - test_parsing_never_raises reports these
@@ -147,7 +158,7 @@ class TestCorpusInvariants:
     def test_parsing_never_raises(self):
         """A crash on one tracker is a 500 for that user."""
         bad = []
-        for html, title, url in CORPUS:
+        for html, title, url in corpus_tabs():
             try:
                 parse_sheet(html, title, url or None)
             except Exception as exc:  # noqa: BLE001 - the point of the test
