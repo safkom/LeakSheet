@@ -83,6 +83,9 @@ class _TableExtractor(HTMLParser):
         self._cell_text = ""
         self._cell_links: list[str] = []
         self._cell_images: list[str] = []
+        # Created again per <td>, but it is READ in the </td> branch, so a
+        # stray closing tag before any opening one would AttributeError.
+        self._cell_link_lines: list[int] = []
         self._colspan = 1
         self._a_href = ""
 
