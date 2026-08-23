@@ -38,7 +38,7 @@ struct ArtistStatsBarView: View {
         value: Int, label: String, color: Color, spoken: String? = nil
     ) -> some View {
         VStack(spacing: 2) {
-            Text("\(value)")
+            Text(value.formatted())
                 .font(.headline.monospacedDigit())
                 .foregroundStyle(color)
             Text(label)

@@ -57,10 +57,16 @@ struct RecentTrackerCardView: View {
     }
 
     // Matches header's navigationSubtitle count — see DECISIONS.md::RecentTrackerCardView.swift::stat-line-count
+    //
+    // .formatted() explicitly, because this builds a String: interpolating an
+    // Int into a String skips the locale grouping that Text/navigationSubtitle
+    // apply automatically (those take a LocalizedStringKey). The same tracker
+    // therefore read "9368 tracks" on this card and "9.368 tracks" in the
+    // header it is supposed to match.
     private var statLine: String {
-        var parts = ["\(entry.totalVersions) tracks"]
-        if entry.availableCount > 0 { parts.append("\(entry.availableCount) available") }
-        if entry.snippetCount > 0 { parts.append("\(entry.snippetCount) snippets") }
+        var parts = ["\(entry.totalVersions.formatted()) tracks"]
+        if entry.availableCount > 0 { parts.append("\(entry.availableCount.formatted()) available") }
+        if entry.snippetCount > 0 { parts.append("\(entry.snippetCount.formatted()) snippets") }
         return parts.joined(separator: " · ")
     }
 

@@ -383,7 +383,7 @@ struct MiscListView: View {
                     era: eraForGroup(group),
                     expanded: expanded,
                     displayColors: vm.eraDisplay[colorKey(group.eraName)],
-                    subtitle: "\(group.entries.count) entr\(group.entries.count == 1 ? "y" : "ies")",
+                    subtitle: "\(group.entries.count.formatted()) entr\(group.entries.count == 1 ? "y" : "ies")",
                     onTap: {
                         withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
                             if expandedEras.contains(group.eraName) {

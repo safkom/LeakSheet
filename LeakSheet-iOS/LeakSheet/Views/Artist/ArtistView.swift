@@ -266,7 +266,7 @@ private struct ArtistContentView: View {
         }
         .swipeActionsContainer()
         .navigationTitle(artist.name)
-        .navigationSubtitle("\(vm.visibleStats.total) \(vm.isShowingTabEntries ? "entries" : "tracks")")
+        .navigationSubtitle("\(vm.visibleStats.total.formatted()) \(vm.isShowingTabEntries ? "entries" : "tracks")")
         // .large is iOS/watchOS only; a Mac window title has no large variant.
         #if os(iOS)
         .toolbarTitleDisplayMode(.large)
