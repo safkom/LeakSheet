@@ -1737,7 +1737,15 @@ async def async_fetch_and_parse(
                     logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
                     if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
                         hub_gid = result_gid
-                    score = (1 if n_songs else 0, n_eras, n_songs)
+                    # Songs outrank eras. Era count used to come first, as a
+                    # proxy for "properly structured tab", but it stopped being
+                    # one once flat-era tabs (no header rows, era implied by the
+                    # Era column) started yielding real era counts: a 5-era,
+                    # 7-song badge sub-tab then outranked the 3-era, 474-song
+                    # main tab on the MIKE tracker, and 43 flat eras beat 26 real
+                    # ones on Dr. Dre — costing 668 songs and every era cover.
+                    # The payload is songs; rank on it.
+                    score = (1 if n_songs else 0, n_songs, n_eras)
                     if score > best_score:
                         best_score = score
                         best_artist = candidate
@@ -1751,7 +1759,12 @@ async def async_fetch_and_parse(
                     if result_gid == unreleased_gid:
                         logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
                         break
-                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
+                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
+                        # Only stop early on a tab that is actually leading.
+                        # This break abandons every gid still in flight, so a
+                        # small tab that merely clears the era floor must not
+                        # trigger it — that is how a 7-song sub-tab pre-empted
+                        # a 474-song main tab.
                         break
                 except (ValueError, KeyError):
                     continue

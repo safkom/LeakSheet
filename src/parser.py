@@ -299,8 +299,17 @@ def _match_column_alias(key: str) -> str | None:
     if canonical:
         return canonical
     for alias, canon in COLUMN_ALIASES.items():
-        if key.startswith(alias) and len(alias) > 2:
-            return canon
+        if len(alias) <= 2 or not key.startswith(alias):
+            continue
+        # Only fire on GLUED text, which is what this fallback is for: a header
+        # cell whose label ran into a notice ("noteswelcome to the tracker").
+        # When the next character is a space the remainder is a separate word,
+        # so the header is a different column that merely starts with an alias
+        # — "Project Type" is not the Era column, and "Dates Added" is not the
+        # bare "Date" column. Matching those silently binds the wrong column.
+        if key[len(alias)] == " ":
+            continue
+        return canon
     return None
 
 
@@ -476,9 +485,14 @@ def _extract_header_notices(
 # _is_era_header and the era — with its cover art, timeline and description —
 # was dropped and its songs glued onto the previous era. Measured over 400
 # cached tabs: 267 era headers lost across 34 tabs (~9% of all trackers).
-# The discography vocabulary below is the complete set harvested from that
-# corpus. Longer alternatives precede their own prefixes ("Total Full" before
-# "Total", "Album Track" before "Album") — regex alternation is first-match.
+#
+# The two vocabularies must NOT be matched the same way. Leak-status words are
+# distinctive enough to identify a stats cell from a single pair: "5 Full" is
+# never anything else. Discography words are ordinary English that shows up in
+# era NAMES — "2009 Album", "1977 Sessions", "2020 Throwaways", and the
+# "38 Special Sessions" case already pinned in tests. Matching those on one
+# pair turned 86 Bonnie McKee song rows into empty eras. A real discography
+# block always states several counts, so require two.
 ERA_STATS_PATTERN = re.compile(
     r"\d+\s+"
     r"("
@@ -489,8 +503,15 @@ ERA_STATS_PATTERN = re.compile(
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
     r"|Released|Deleted|Lost|Privated"
-    # --- discography vocabulary (release-type counts) ---
-    r"|Album Tracks?|Mixtape Tracks?|EP Tracks?|OST Tracks?|TV Tracks?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Release-type counts. Only trusted inside a multi-pair block — see above.
+_DISCOGRAPHY_STATS_PATTERN = re.compile(
+    r"\d+\s+"
+    r"("
+    r"Album Tracks?|Mixtape Tracks?|EP Tracks?|OST Tracks?|TV Tracks?"
     r"|Bonus Tracks?|Compilation Tracks?|Loose Tracks?|Reference Tracks?"
     r"|Promo Singles?|Singles?|Albums?"
     r"|Featuring|Features?|Feats?"
@@ -498,13 +519,27 @@ ERA_STATS_PATTERN = re.compile(
     r"|Remix(?:es)?|Instrumentals?|Acapellas?|Loosies|Loosie"
     r"|Intros?|Interludes?|Outros?|Skits?"
     r"|Demos?|Throwaways?|Sessions?|Original Versions?|Originals?"
-    r"|Not Avai?la?ble|Removed|Unknown|Alt\.? Mix"
+    r"|Not Avai?la?ble|Removed|Alt\.? Mix"
     # "N Total Links" is the global tracker footer, not an era stat — matching
     # it turns the footer row into a phantom era at the bottom of every sheet.
     r"|Total(?!\s+Links)|Others?"
     r")\b",
     re.IGNORECASE,
 )
+
+# Any "<int> <word>" pair, used only to count how many counts a cell states.
+_STAT_PAIR_RE = re.compile(r"\d+\s+[A-Za-z]")
+_MIN_DISCOGRAPHY_PAIRS = 2
+
+
+def era_stats_match(text: str) -> bool:
+    """True if *text* is an era stats block, in either tracker vocabulary."""
+    if ERA_STATS_PATTERN.search(text):
+        return True
+    return (
+        bool(_DISCOGRAPHY_STATS_PATTERN.search(text))
+        and len(_STAT_PAIR_RE.findall(text)) >= _MIN_DISCOGRAPHY_PAIRS
+    )
 
 # Spreadsheet formula errors. These appear in real trackers when a cell's
 # formula breaks, and they must never be mistaken for content — a `#REF!` in
@@ -577,7 +612,7 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     text = row[0].text
-    if not ERA_STATS_PATTERN.search(text):
+    if not era_stats_match(text):
         if not _is_spreadsheet_error(text):
             return False
         # The stats cell is unreadable, so it can carry no evidence either
@@ -1448,32 +1483,59 @@ def _parse_era_header_row(
 # which are genuine song content.
 _ARTWORK_COLUMN_SIGNS = frozenset({
     "art type", "project type", "designer", "cover art", "image type",
-    "use", "used", "used?", "made by", "image",
+    "cover type", "photo type", "use", "used", "used?", "made by", "image",
 })
 _MIN_ARTWORK_SIGNS = 2
+
+# Signatures that identify a tab outright. One hit is enough: no song tab has
+# an "Interviewer(s)" or "Time Signature" column.
+_INTERVIEW_COLUMN_SIGNS = frozenset({
+    "interview title", "interview type", "interviewer", "interviewers",
+    "interviewer(s)",
+})
+_MUSICOLOGY_COLUMN_SIGNS = frozenset({"bpm", "key", "time signature"})
+_MIN_MUSICOLOGY_SIGNS = 2
 
 
 def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
     """Return False for tabs that hold something other than songs.
 
     Trackers keep glossaries, artwork indexes, interview logs, setlists and
-    BPM/key references as ordinary tabs. Run through the song parser they do
+    BPM/key references as ordinary tabs. Run through the song parser these do
     not fail — they emit plausible-looking junk. The Car Seat Headrest
     interview tab produced 146 "songs" whose titles were interview headlines,
     because no Name column was detected and `name` fell back to positional
     index 1, which happened to be "Interview Title".
 
-    Two signals, in order of how much they catch:
+    Rejection is only ever on a POSITIVE signature — never on the absence of a
+    column. Two rounds of measurement proved absence is not evidence:
 
-    1. No Name column at all. Glossary ("Portion | Quality"), setlist,
-       BPM/key and interview tabs all lack one; only positional fallback made
-       them look parseable.
-    2. An artwork column signature, for tabs that do have Era/Name/Notes.
+      * "no Name column" destroyed De La Soul (205 songs under an unlabelled
+        header cell) and Overlord's Lil Uzi Vert discography (283 songs under
+        "Project & Track Title", which no alias covers).
+      * "neither Name nor Era" then destroyed tabs with no header row at all —
+        BIG L (21 songs) and Labrinth (169) start at row 0 with data, so
+        detect_columns returns an empty map and the positional fallback
+        (name=1, notes=2) is what correctly parses them.
+
+    A glossary tab therefore still parses into junk rows here. That is the
+    lesser evil: the fetcher ranks candidate tabs by song count and excludes
+    tabs by name, so a glossary does not get served, whereas a wrongly rejected
+    main tab is unrecoverable.
+
+    `col_map` is unused today but stays in the signature: it is the natural
+    place for a future positive signal that needs resolved columns rather than
+    raw header text.
     """
-    if "name" not in col_map:
+    labels = {
+        " ".join(c.text.split()).strip().lower().rstrip(":").strip('"')
+        for c in header_row
+    }
+    if len(labels & _ARTWORK_COLUMN_SIGNS) >= _MIN_ARTWORK_SIGNS:
         return False
-    labels = {" ".join(c.text.split()).strip().lower().rstrip(":") for c in header_row}
-    return len(labels & _ARTWORK_COLUMN_SIGNS) < _MIN_ARTWORK_SIGNS
+    if labels & _INTERVIEW_COLUMN_SIGNS:
+        return False
+    return len(labels & _MUSICOLOGY_COLUMN_SIGNS) < _MIN_MUSICOLOGY_SIGNS
 
 
 def parse_sheet(html_content: str, artist_name: str) -> Artist:
@@ -2177,6 +2239,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         rating=rating,
         links=merged_links,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
+        preview_date=_get_cell_text(row, col_map.get("preview_date", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )
 

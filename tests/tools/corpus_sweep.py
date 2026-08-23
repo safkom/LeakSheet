@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.parser import ERA_STATS_PATTERN, extract_table, parse_sheet  # noqa: E402
+from src.parser import era_stats_match, extract_table, parse_sheet  # noqa: E402
 
 # Version fields whose population rate we track. A field being rare is not
 # automatically a bug — some columns genuinely do not exist on most trackers —
@@ -46,8 +46,8 @@ VERSION_FIELDS = (
 )
 
 # A cell that looks like "<int> <words>" on most of its lines is an era stats
-# block, whatever vocabulary it uses. Used to count era headers the real
-# ERA_STATS_PATTERN fails to recognise.
+# block, whatever vocabulary it uses. Used to count era headers the parser
+# fails to recognise.
 _STATS_LINE_RE = re.compile(r"^\s*(\d+)\s+([A-Za-z][A-Za-z()/ .\-]{1,40})\s*$")
 
 # Song names that are certainly not song names.
@@ -88,10 +88,11 @@ class Totals:
     art_hosts: collections.Counter = field(default_factory=collections.Counter)
     dropped_columns: collections.Counter = field(default_factory=collections.Counter)
     unmatched_stat_labels: collections.Counter = field(default_factory=collections.Counter)
+    detail: dict = field(default_factory=dict)
 
 
 def _count_unmatched_stats_headers(rows) -> tuple[int, collections.Counter]:
-    """Era-header-shaped rows whose stats cell ERA_STATS_PATTERN rejects.
+    """Era-header-shaped rows whose stats cell the parser rejects.
 
     A multi-line first cell where most lines read "<int> <words>" is an era
     stats block by construction. If the production pattern does not match it,
@@ -110,9 +111,9 @@ def _count_unmatched_stats_headers(rows) -> tuple[int, collections.Counter]:
         hits = sum(1 for m in matches if m)
         if hits < max(2, len(lines) - 1):
             continue
-        # .search, not .match — this must mirror _is_era_header exactly, or the
-        # count measures the sweep's own stricter rule instead of the parser's.
-        if ERA_STATS_PATTERN.search(cell):
+        # Must mirror _is_era_header exactly, or the count measures the sweep's
+        # own rule instead of the parser's.
+        if era_stats_match(cell):
             continue
         misses += 1
         for m in matches:
@@ -124,6 +125,11 @@ def _count_unmatched_stats_headers(rows) -> tuple[int, collections.Counter]:
 def sweep_tab(html: str, title: str, t: Totals) -> None:
     rows = extract_table(html)
     artist = parse_sheet(html, title)
+    t.detail[title] = [
+        len(artist.eras),
+        sum(1 for e in artist.eras if e.art_url),
+        artist.total_songs,
+    ]
 
     t.tabs += 1
     misses, labels = _count_unmatched_stats_headers(rows)
@@ -249,7 +255,9 @@ def collect(
                 except Exception:  # noqa: BLE001
                     t.tabs_failed += 1
                     continue
-                score = (1 if artist.total_songs else 0, len(artist.eras), artist.total_songs)
+                # Must stay identical to the fetcher's score tuple, or the
+                # sweep measures a tab production would never have served.
+                score = (1 if artist.total_songs else 0, artist.total_songs, len(artist.eras))
                 if best is None or score > best[0]:
                     best = (score, html, title)
             if best is not None:
@@ -382,6 +390,13 @@ def main() -> int:
     ap.add_argument("--min-size", type=int, default=20_000)
     ap.add_argument("--max-size", type=int, default=4_000_000)
     ap.add_argument("--out", help="write metrics JSON here")
+    ap.add_argument(
+        "--detail",
+        help="write per-workbook {title: [eras, eras_with_art, songs]} JSON here. "
+             "Aggregates hide which tracker moved; diffing two detail files "
+             "shows whether a ratio shifted because trackers got worse or "
+             "because more eras were discovered.",
+    )
     ap.add_argument("--baseline", help="compare against this metrics JSON")
     ap.add_argument("--report", action="store_true", help="print the full report")
     ap.add_argument(
@@ -405,6 +420,10 @@ def main() -> int:
 
     if args.report or not (args.out or args.baseline):
         report(t)
+    if args.detail:
+        with open(args.detail, "w") as fh:
+            json.dump(t.detail, fh, indent=2, sort_keys=True)
+        print(f"wrote {args.detail}")
     if args.out:
         with open(args.out, "w") as fh:
             json.dump(metrics, fh, indent=2, sort_keys=True)

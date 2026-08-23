@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from src.models import parse_era_stats
-from src.parser import ERA_STATS_PATTERN, parse_sheet
+from src.parser import ERA_STATS_PATTERN, era_stats_match, parse_sheet
 from tests.conftest import read_synthetic
 
 
@@ -77,7 +77,7 @@ class TestVocabularyBoundaries:
         "1 OG File\n45 Full\n1 Tagged\n3 Partial\n4 Snippet(s)\n70 Unavailable",
     ])
     def test_recognised(self, cell):
-        assert ERA_STATS_PATTERN.search(cell)
+        assert era_stats_match(cell)
 
     @pytest.mark.parametrize("text", [
         "2 Chainz",             # artist name, digit-leading
@@ -86,9 +86,33 @@ class TestVocabularyBoundaries:
         "3 Doors Down",
         "Some 3 word title",
         "\U0001f517 3 Total Links",  # global footer, not an era
+        # Era NAMES built from the discography vocabulary. Matching any of
+        # these on a single pair turned 86 Bonnie McKee song rows into empty
+        # eras, because every one of those rows carried the era name
+        # "2009 Album" in its Era column.
+        "2009 Album",
+        "1977 Sessions",
+        "38 Special Sessions",
+        "2020 Throwaways",
+        "2019 Loosies",
+        "2015 Demos",
+        "3 Originals",
     ])
     def test_not_mistaken_for_stats(self, text):
-        assert not ERA_STATS_PATTERN.search(text)
+        assert not era_stats_match(text)
+
+    @pytest.mark.parametrize("cell", [
+        "18 Total\n4 Singles",
+        "2009 Album\n5 Singles\n3 Album Tracks",
+    ])
+    def test_discography_needs_two_pairs(self, cell):
+        # One pair of discography vocabulary is an era name; two or more is a
+        # stats block. Leak-status vocabulary is exempt — "5 Full" alone is
+        # never anything but a stats cell.
+        assert era_stats_match(cell)
+
+    def test_single_leak_status_pair_still_matches(self):
+        assert era_stats_match("5 Full")
 
 
 class TestReleaseTypeRouting:

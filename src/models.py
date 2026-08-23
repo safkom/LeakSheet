@@ -148,6 +148,11 @@ class SongVersion(BaseModel):
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
     # Carti-specific fields
     date_of_recording: str | None = Field(None, description="Date of recording (Carti tracker)")
+    preview_date: str | None = Field(
+        None,
+        description="When a snippet was first previewed. Distinct from "
+                    "leak_date: a preview predates, and often never becomes, a leak.",
+    )
     type: str | None = Field(None, description="Song type (Carti tracker)")
 
 
