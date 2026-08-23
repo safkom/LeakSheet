@@ -8,15 +8,18 @@ skip <=1%, ``test_live`` skip >15% / fuzzy >20%, ``test_all_spreadsheets`` skip
 the parser's own definition. Both the live invariant suite and any ad-hoc
 validation import from here so there is exactly one definition.
 
-These checks are **drift-tolerant** (ratios and accounting identities, never
-exact counts) so they hold on live trackers that change daily. The exact-count
-regression gate is a separate, opt-in concern — see ``tests/accuracy/`` and the
-``accuracy`` marker.
+These checks are **drift-tolerant** (ratios and thresholds, never exact counts)
+so they hold on live trackers that change daily. Structural checks that are
+true of any parse live in ``tests/quality/invariants.py`` and are imported from
+here rather than restated; ground-truth values live in
+``tests/quality/labels/``.
 
 Underscore-prefixed so pytest never collects it as a test module.
 """
 
 from __future__ import annotations
+
+from tests.quality.invariants import check_row_accounting
 
 from collections import Counter
 from dataclasses import dataclass
@@ -105,19 +108,11 @@ def health_violations(
         return v
 
     # --- Row-accounting identity: nothing may vanish silently ---
-    computed_other = md.total_rows - md.song_rows - md.skipped_rows - md.footer_rows
-    if computed_other < 0:
-        v.append(
-            f"row accounting is negative (double-counting): total={md.total_rows} "
-            f"song={md.song_rows} skipped={md.skipped_rows} footer={md.footer_rows}"
-        )
-    if md.other_rows != max(0, computed_other):
-        v.append(f"other_rows {md.other_rows} != computed structural {max(0, computed_other)}")
-    if md.unmatched_rows_total != md.skipped_rows:
-        v.append(
-            f"unmatched_rows_total {md.unmatched_rows_total} out of sync with "
-            f"skipped_rows {md.skipped_rows}"
-        )
+    # Delegated, not re-implemented. This module exists because the suite once
+    # carried five divergent definitions of a healthy parse; adding a second
+    # copy of the accounting identity alongside tests/quality/invariants.py
+    # would start that over.
+    v.extend(check_row_accounting(artist))
 
     # --- Silent data-loss ratios ---
     if md.total_rows > 0:

@@ -3,7 +3,7 @@
 Extracted from the old monolithic tests/test_parser.py — everything here uses
 inline data or public helpers only (no gitignored Trackers/ dumps), so it runs
 in the default offline gate. The tracker-integration assertions that need real
-dumps live in tests/accuracy/ behind the ``accuracy`` marker.
+dumps live in tests/quality/ behind the ``accuracy`` marker.
 """
 
 from __future__ import annotations

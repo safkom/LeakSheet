@@ -18,7 +18,7 @@ asyncio_mode = "auto"
 addopts = "-ra --strict-markers -m 'not live and not accuracy and not slow'"
 markers = [
   "live: hits real Google Sheets / provider hosts over the network. Excluded from the default run; used by the CI 'live' job (see .github/workflows/tests.yml).",
-  "accuracy: exact-count regression gate against local Trackers/ dumps. Skipped automatically when those dumps are absent (clean checkout / CI).",
+  "accuracy: data-quality checks needing real tracker HTML — structural invariants over the whole captured corpus, plus hand-labelled ground truth (tests/quality/). Skipped automatically when that content is absent (clean checkout / CI), since it is never committed.",
   "slow: long-running (e.g. the full 486-tracker mass validation).",
 ]
 filterwarnings = [

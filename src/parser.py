@@ -1526,6 +1526,14 @@ _INTERVIEW_COLUMN_SIGNS = frozenset({
 _MUSICOLOGY_COLUMN_SIGNS = frozenset({"bpm", "key", "time signature"})
 _MIN_MUSICOLOGY_SIGNS = 2
 
+# The glossary tab every template ships: "Portion | <description> | Quality |
+# <description>", defining what Snippet/Tagged/Lossless mean. It resolves to
+# exactly these two columns and nothing else, and yields one "song" per legend
+# entry. This is a statement about the WHOLE resolved header, not a missing
+# column — a headerless song tab resolves to an empty map and is unaffected,
+# and any tab with an era, name, link, length or date column is unaffected too.
+_GLOSSARY_COLUMNS = frozenset({"available_length", "quality"})
+
 
 def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
     """Return False for tabs that hold something other than songs.
@@ -1548,14 +1556,11 @@ def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
         detect_columns returns an empty map and the positional fallback
         (name=1, notes=2) is what correctly parses them.
 
-    A glossary tab therefore still parses into junk rows here. That is the
-    lesser evil: the fetcher ranks candidate tabs by song count and excludes
-    tabs by name, so a glossary does not get served, whereas a wrongly rejected
-    main tab is unrecoverable.
-
-    `col_map` is unused today but stays in the signature: it is the natural
-    place for a future positive signal that needs resolved columns rather than
-    raw header text.
+    The one col_map-based rule is also positive evidence, about the whole
+    resolved header rather than a missing piece of it: a header that resolves
+    to exactly {available_length, quality} and nothing else is the glossary tab
+    every template ships. Both counter-examples above resolve to an empty map
+    or to a much wider one, so neither is touched.
     """
     labels = {
         " ".join(c.text.split()).strip().lower().rstrip(":").strip('"')
@@ -1565,7 +1570,9 @@ def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
         return False
     if labels & _INTERVIEW_COLUMN_SIGNS:
         return False
-    return len(labels & _MUSICOLOGY_COLUMN_SIGNS) < _MIN_MUSICOLOGY_SIGNS
+    if len(labels & _MUSICOLOGY_COLUMN_SIGNS) >= _MIN_MUSICOLOGY_SIGNS:
+        return False
+    return not (col_map and set(col_map) <= _GLOSSARY_COLUMNS)
 
 
 def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
@@ -2118,7 +2125,12 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 # Compound availability grammar (Travis Scott tracker — no Quality column):
 # '<avail> - HQ', 'Unconfirmed (Snippet - LQ)', 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
 _COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ|CDQ)\b")
-_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★]+)[☆]*\s*$")
+# Stars may be separated by whitespace, including newlines — a sheet that puts
+# each star on its own line renders as "⭐\n⭐\n⭐\n⭐". A bare `[⭐★]+` run stops
+# at the first separator, so it stripped one star and left the rest glued to
+# the availability value. The rating is the count of star glyphs in the run.
+_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★][\s⭐★☆]*)\s*$")
+_STAR_GLYPH_RE = re.compile(r"[⭐★]")
 _COMPOUND_QUALITY_NAMES = {
     "HQ": "High Quality", "LQ": "Low Quality", "CDQ": "CD Quality",
 }
@@ -2141,7 +2153,7 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     rating = None
     m = _STAR_RATING_PATTERN.search(text)
     if m:
-        rating = min(len(m.group(1)), 5)
+        rating = min(len(_STAR_GLYPH_RE.findall(m.group(1))), 5)
         text = text[: m.start()].rstrip()
 
     quality = None

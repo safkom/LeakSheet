@@ -1,0 +1,87 @@
+{
+  "artist": "Amerie Tracker - Google disk",
+  "layout_family": "discography-stats (release-type era stats)",
+  "source_url": "https://docs.google.com/spreadsheets/d/1MF5DMz2aasa1vlqdz2n5oSEZaVdjD4l-6n0x7AQTv8M/htmlview/sheet?headers=true&gid=197122594",
+  "sha256": "f754e31a6949fc8c97e01cb70f772a1d96fab12817aafc518f2390d223c5e134",
+  "_comment": "TWO KINDS OF EXPECTATION LIVE HERE AND THEY ARE NOT EQUALLY STRONG. 'spot_checks' are values read directly off the source cells of this exact tab; they are ground truth and a mismatch is a parser bug. 'eras' is a regression baseline over a byte-frozen input (see sha256): a mismatch means behaviour changed and needs triage, not that the parser is wrong. Never re-pin a spot_check to make a test pass.",
+  "eras": [
+    {
+      "name": "All I Have",
+      "songs": 18,
+      "has_art": true
+    },
+    {
+      "name": "Touch",
+      "songs": 27,
+      "has_art": true
+    },
+    {
+      "name": "Because I Love It",
+      "songs": 35,
+      "has_art": true
+    },
+    {
+      "name": "In Love & War",
+      "songs": 17,
+      "has_art": true
+    },
+    {
+      "name": "Cymatika",
+      "songs": 11,
+      "has_art": false
+    },
+    {
+      "name": "BILI",
+      "songs": 1,
+      "has_art": false
+    },
+    {
+      "name": "4AM Mulholland / After 4AM",
+      "songs": 14,
+      "has_art": true
+    },
+    {
+      "name": "LP7",
+      "songs": 2,
+      "has_art": false
+    }
+  ],
+  "spot_checks": [
+    {
+      "era": "All I Have",
+      "song": "Why Don't We Fall In Love",
+      "field": "track_length",
+      "expect": "2:39"
+    },
+    {
+      "era": "All I Have",
+      "song": "Why Don't We Fall In Love",
+      "field": "leak_date",
+      "expect": "Apr 29, 2002"
+    },
+    {
+      "era": "All I Have",
+      "song": "Why Don't We Fall In Love",
+      "field": "type",
+      "expect": "Single / Album Track"
+    },
+    {
+      "era": "All I Have",
+      "song": "Why Don't We Fall In Love",
+      "field": "streaming",
+      "expect": true
+    },
+    {
+      "era": "All I Have",
+      "song": "Talkin' To Me",
+      "field": "track_length",
+      "expect": "3:54"
+    },
+    {
+      "era": "All I Have",
+      "song": "Talkin' To Me",
+      "field": "leak_date",
+      "expect": "Jul 30, 2002"
+    }
+  ]
+}

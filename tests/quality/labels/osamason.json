@@ -1,0 +1,122 @@
+{
+  "artist": "OsamaSon Tracker - Google disk",
+  "layout_family": "leak-status with OG-file columns",
+  "source_url": "https://docs.google.com/spreadsheets/d/1qbJpawdwnw7IUkZ4FfU3oOF17griNjL59X5z6YFiFlY/htmlview",
+  "sha256": "073af7d186eda02468745a4b679acff0825f4e0bc0f5fb3b5998ceca3169a6b0",
+  "_comment": "TWO KINDS OF EXPECTATION LIVE HERE AND THEY ARE NOT EQUALLY STRONG. 'spot_checks' are values read directly off the source cells of this exact tab; they are ground truth and a mismatch is a parser bug. 'eras' is a regression baseline over a byte-frozen input (see sha256): a mismatch means behaviour changed and needs triage, not that the parser is wrong. Never re-pin a spot_check to make a test pass.",
+  "eras": [
+    {
+      "name": "PradaUMari",
+      "songs": 1,
+      "has_art": true
+    },
+    {
+      "name": "Im Da Man",
+      "songs": 15,
+      "has_art": true
+    },
+    {
+      "name": "Vengeance",
+      "songs": 24,
+      "has_art": true
+    },
+    {
+      "name": "Carnival",
+      "songs": 11,
+      "has_art": true
+    },
+    {
+      "name": "BloodyOsama",
+      "songs": 15,
+      "has_art": true
+    },
+    {
+      "name": "2022",
+      "songs": 185,
+      "has_art": true
+    },
+    {
+      "name": "Osama Season",
+      "songs": 274,
+      "has_art": true
+    },
+    {
+      "name": "Flex Musix",
+      "songs": 125,
+      "has_art": true
+    },
+    {
+      "name": "Flex Musix (FLXTRA)",
+      "songs": 91,
+      "has_art": true
+    },
+    {
+      "name": "Jump Out [V1]",
+      "songs": 76,
+      "has_art": true
+    },
+    {
+      "name": "Jump Out [V2]",
+      "songs": 105,
+      "has_art": true
+    },
+    {
+      "name": "psykotic",
+      "songs": 59,
+      "has_art": true
+    },
+    {
+      "name": "NXO",
+      "songs": 8,
+      "has_art": true
+    },
+    {
+      "name": "Nocturnal",
+      "songs": 18,
+      "has_art": true
+    },
+    {
+      "name": "Owner",
+      "songs": 0,
+      "has_art": false
+    }
+  ],
+  "spot_checks": [
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "track_length",
+      "expect": "1:38"
+    },
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "leak_date",
+      "expect": "May 9, 2024"
+    },
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "file_date",
+      "expect": "2021"
+    },
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "quality",
+      "expect": "High Quality"
+    },
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "available_length",
+      "expect": "OG File"
+    },
+    {
+      "era": "PradaUMari",
+      "song": "Cant go",
+      "field": "producers",
+      "expect": "3knoah"
+    }
+  ]
+}

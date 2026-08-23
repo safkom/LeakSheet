@@ -1,0 +1,294 @@
+{
+  "artist": "Ye",
+  "layout_family": "leak-status (classic era-header grammar)",
+  "source_url": "",
+  "local_path_hint": "Trackers/Ye Tracker - Google Drive_files/sheet.html",
+  "sha256": "c65e05ca4ef33d1ef286af6bf2af25768d7878144287c49dd398220abf0a8a96",
+  "_comment": "TWO KINDS OF EXPECTATION LIVE HERE AND THEY ARE NOT EQUALLY STRONG. 'spot_checks' are values a human read off the rendered sheet; they are ground truth and a mismatch is a parser bug. 'eras' is a regression baseline over a byte-frozen input (see sha256): nobody hand-counted 44 eras, so a mismatch means behaviour changed and needs triage, not that the parser is necessarily wrong. Never re-pin a spot_check to make a test pass.",
+  "eras": [
+    {
+      "name": "Before The College Dropout",
+      "songs": 110,
+      "has_art": true
+    },
+    {
+      "name": "The College Dropout",
+      "songs": 78,
+      "has_art": true
+    },
+    {
+      "name": "Late Registration",
+      "songs": 53,
+      "has_art": true
+    },
+    {
+      "name": "Graduation",
+      "songs": 67,
+      "has_art": true
+    },
+    {
+      "name": "808s & Heartbreak",
+      "songs": 73,
+      "has_art": true
+    },
+    {
+      "name": "Good Ass Job",
+      "songs": 150,
+      "has_art": true
+    },
+    {
+      "name": "My Beautiful Dark Twisted Fantasy",
+      "songs": 48,
+      "has_art": true
+    },
+    {
+      "name": "Watch The Throne",
+      "songs": 72,
+      "has_art": true
+    },
+    {
+      "name": "Cruel Summer",
+      "songs": 56,
+      "has_art": true
+    },
+    {
+      "name": "Yeezus",
+      "songs": 118,
+      "has_art": true
+    },
+    {
+      "name": "Cruel Winter [V1]",
+      "songs": 16,
+      "has_art": true
+    },
+    {
+      "name": "Yeezus 2",
+      "songs": 159,
+      "has_art": true
+    },
+    {
+      "name": "So Help Me God",
+      "songs": 99,
+      "has_art": true
+    },
+    {
+      "name": "SWISH",
+      "songs": 83,
+      "has_art": true
+    },
+    {
+      "name": "The Life Of Pablo",
+      "songs": 65,
+      "has_art": true
+    },
+    {
+      "name": "Turbo Grafx 16",
+      "songs": 63,
+      "has_art": true
+    },
+    {
+      "name": "Cruel Winter [V2]",
+      "songs": 15,
+      "has_art": true
+    },
+    {
+      "name": "Hitler",
+      "songs": 164,
+      "has_art": true
+    },
+    {
+      "name": "ye",
+      "songs": 40,
+      "has_art": true
+    },
+    {
+      "name": "KIDS SEE GHOSTS",
+      "songs": 11,
+      "has_art": true
+    },
+    {
+      "name": "Good Ass Job (2018)",
+      "songs": 46,
+      "has_art": true
+    },
+    {
+      "name": "Yandhi [V1]",
+      "songs": 119,
+      "has_art": true
+    },
+    {
+      "name": "Yandhi [V2]",
+      "songs": 211,
+      "has_art": true
+    },
+    {
+      "name": "JESUS IS KING",
+      "songs": 101,
+      "has_art": true
+    },
+    {
+      "name": "JESUS IS KING: The Dr. Dre Version",
+      "songs": 24,
+      "has_art": true
+    },
+    {
+      "name": "God's Country",
+      "songs": 283,
+      "has_art": true
+    },
+    {
+      "name": "DONDA [V1]",
+      "songs": 189,
+      "has_art": true
+    },
+    {
+      "name": "Donda [V2]",
+      "songs": 203,
+      "has_art": true
+    },
+    {
+      "name": "Donda [V3]",
+      "songs": 111,
+      "has_art": true
+    },
+    {
+      "name": "DONDA 2 [V1]",
+      "songs": 290,
+      "has_art": true
+    },
+    {
+      "name": "WAR",
+      "songs": 40,
+      "has_art": true
+    },
+    {
+      "name": "YEBU",
+      "songs": 117,
+      "has_art": true
+    },
+    {
+      "name": "¥$",
+      "songs": 139,
+      "has_art": true
+    },
+    {
+      "name": "VULTURES 1",
+      "songs": 117,
+      "has_art": true
+    },
+    {
+      "name": "VULTURES 2",
+      "songs": 97,
+      "has_art": true
+    },
+    {
+      "name": "VULTURES 3",
+      "songs": 17,
+      "has_art": true
+    },
+    {
+      "name": "BULLY [V1]",
+      "songs": 79,
+      "has_art": true
+    },
+    {
+      "name": "CARTI YE",
+      "songs": 12,
+      "has_art": true
+    },
+    {
+      "name": "CUCK",
+      "songs": 88,
+      "has_art": true
+    },
+    {
+      "name": "DONDA 2 [V2]",
+      "songs": 36,
+      "has_art": true
+    },
+    {
+      "name": "IN A PERFECT WORLD",
+      "songs": 66,
+      "has_art": true
+    },
+    {
+      "name": "BULLY [V2]",
+      "songs": 41,
+      "has_art": true
+    },
+    {
+      "name": "Collaboration with Travis Scott",
+      "songs": 4,
+      "has_art": true
+    },
+    {
+      "name": "Ongoing",
+      "songs": 7,
+      "has_art": true
+    }
+  ],
+  "spot_checks": [
+    {
+      "era": "Yeezus 2",
+      "song": "About Time",
+      "field": "track_length",
+      "expect": "0:42"
+    },
+    {
+      "era": "Yeezus 2",
+      "song": "About Time",
+      "field": "available_length",
+      "expect": "OG File"
+    },
+    {
+      "era": "Yeezus 2",
+      "song": "About Time",
+      "field": "quality",
+      "expect": "Lossless"
+    },
+    {
+      "era": "Yeezus 2",
+      "song": "About Time",
+      "field": "leak_date",
+      "expect": "Mar 20, 2023"
+    },
+    {
+      "era": "Yeezus 2",
+      "song": "About Time",
+      "field": "file_date",
+      "expect": "Nov 11, 2013"
+    },
+    {
+      "era": "Before The College Dropout",
+      "song": "Hey Mama",
+      "field": "featuring",
+      "expect": "John Legend"
+    },
+    {
+      "era": "Before The College Dropout",
+      "song": "Hey Mama",
+      "field": "producers",
+      "expect": "Kanye West"
+    },
+    {
+      "era": "Before The College Dropout",
+      "song": "Baby's Coming",
+      "field": "collaboration",
+      "expect": "Go Getters"
+    },
+    {
+      "era": "Yeezus 2",
+      "song": "Black Skinhead (Remix)",
+      "version_tag": "V3",
+      "field": "badge",
+      "expect": "best"
+    }
+  ],
+  "era_checks": [
+    {
+      "era": "Before The College Dropout",
+      "timeline_first_date": "06/08/1977",
+      "min_timeline_events": 2
+    }
+  ]
+}
