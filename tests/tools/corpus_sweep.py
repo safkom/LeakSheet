@@ -122,13 +122,17 @@ def _count_unmatched_stats_headers(rows) -> tuple[int, collections.Counter]:
     return misses, labels
 
 
-def sweep_tab(html: str, title: str, t: Totals) -> None:
+def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
     rows = extract_table(html)
-    artist = parse_sheet(html, title)
+    # Pass the URL: production does, and without it relative-art
+    # resolution is never exercised, so the metric measures nothing.
+    artist = parse_sheet(html, title, url or None)
     t.detail[title] = [
         len(artist.eras),
         sum(1 for e in artist.eras if e.art_url),
         artist.total_songs,
+        sum(1 for e in artist.eras for s in e.sections for so in s.songs
+            for v in so.versions if v.leak_date),
     ]
 
     t.tabs += 1
@@ -250,8 +254,8 @@ def collect(
             best: tuple[tuple[int, int, int], str, str] | None = None
             for path in by_sheet[key]:
                 try:
-                    html, title, _ = _load(path)
-                    artist = parse_sheet(html, title)
+                    html, title, _url = _load(path)
+                    artist = parse_sheet(html, title, _url or None)
                 except Exception:  # noqa: BLE001
                     t.tabs_failed += 1
                     continue
@@ -259,22 +263,22 @@ def collect(
                 # sweep measures a tab production would never have served.
                 score = (1 if artist.total_songs else 0, artist.total_songs, len(artist.eras))
                 if best is None or score > best[0]:
-                    best = (score, html, title)
+                    best = (score, html, title, _url)
             if best is not None:
-                selected.append((best[1], best[2]))
+                selected.append((best[1], best[2], best[3]))
     else:
         selected = []
         for path in (files[:limit] if limit else files):
             try:
-                html, title, _ = _load(path)
+                html, title, _url = _load(path)
             except OSError:
                 t.tabs_failed += 1
                 continue
-            selected.append((html, title))
+            selected.append((html, title, _url))
 
-    for html, title in selected:
+    for html, title, url in selected:
         try:
-            sweep_tab(html, title, t)
+            sweep_tab(html, title, t, url)
         except Exception:  # noqa: BLE001 - a crash is itself a measured defect
             t.tabs_failed += 1
     return t

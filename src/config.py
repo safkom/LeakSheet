@@ -161,6 +161,15 @@ COLUMN_ALIASES: dict[str, str] = {
     "surface date": "leak_date",
     "surfaced date": "leak_date",
     "og file leak date": "leak_date",
+    # Real headers that used to reach leak_date only by prefix-matching the
+    # bare "date" alias. That fallback now fires on glued text only, so each
+    # needs to be stated. Spelling them out is what makes "Date Recorded"
+    # correct: prefix matching sent it to leak_date, which is a different date.
+    "leaked": "leak_date",
+    "date leaked": "leak_date",
+    "date added": "leak_date",
+    "date of release": "leak_date",
+    "date or art": "leak_date",     # Haunted Mound — one column, either value
 
     # When a snippet was first previewed — deliberately NOT leak_date: a
     # preview predates (and often never becomes) a leak (user-confirmed).
@@ -221,6 +230,8 @@ COLUMN_ALIASES: dict[str, str] = {
     "recording date": "date_of_recording",      # Gucci Mane
     "record date": "date_of_recording",         # 2026-07-20 sweep (4 trackers)
     "shoot date": "date_of_recording",          # music-video tabs (user-confirmed)
+    "date recorded": "date_of_recording",       # was mis-mapped to leak_date
+    "recorded": "date_of_recording",
 
     # Dedicated credit columns — see docs/decisions.md::config.py::COLUMN_ALIASES
     "producer": "producers_col",
