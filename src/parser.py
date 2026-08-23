@@ -2574,6 +2574,22 @@ def _misc_header_key(text: str) -> str:
     return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
+# A date cell is short and carries a digit. Era-header rows on some Misc tabs
+# put the era DESCRIPTION in the column that maps to `date`, which made the
+# header look like it carried track data, so the era-header guard below never
+# fired and the era was emitted as an entry whose "date" was a paragraph — 37
+# of them on the Ye tracker's Misc tab, each rendering a wall of prose beside a
+# calendar icon in the app.
+_MAX_DATE_LEN = 40
+
+
+def _looks_like_date(text: str | None) -> bool:
+    if not text:
+        return False
+    stripped = text.strip()
+    return len(stripped) <= _MAX_DATE_LEN and any(c.isdigit() for c in stripped)
+
+
 def parse_misc_tab(
     html: str, kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
@@ -2684,6 +2700,8 @@ def parse_misc_tab(
 
         def opt(field: str) -> str | None:
             val = cell_text(row, field)
+            if field == "date" and not _looks_like_date(val):
+                return None
             return val or None
 
         entry = MiscEntry(

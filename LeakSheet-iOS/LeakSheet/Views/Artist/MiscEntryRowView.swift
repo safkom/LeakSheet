@@ -40,6 +40,12 @@ struct MiscEntryRowView: View {
         HStack(alignment: .top, spacing: 10) {
             if let previewURL {
                 thumbnail(url: previewURL)
+            } else {
+                // Reserve SongRowView's leading icon slot. Without it a
+                // content-tab row starts 34pt to the left of a song row, so
+                // switching tabs visibly shifted every title and the two lists
+                // read as different row families.
+                Color.clear.frame(width: 24, height: 1)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -165,7 +171,10 @@ struct MiscEntryRowView: View {
     /// The shared pill, not a fifth bespoke copy — BadgePill's own doc comment
     /// already claims to have folded every one of these in.
     private func typePill(_ type: String) -> some View {
-        BadgePill(text: type.uppercased(), variant: .accent, accessibilityPrefix: "Type")
+        // Sentence case, not .uppercased(): every other pill in the app is
+        // sentence case, and shouting one of them made content tabs read as a
+        // different row family from the Unreleased tab.
+        BadgePill(text: type, variant: .entryType, accessibilityPrefix: "Type")
     }
 
     private func metaText(_ text: String, icon: String) -> some View {

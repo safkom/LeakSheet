@@ -126,3 +126,44 @@ class TestReleaseTypeRouting:
         # label means a tracker inventing new vocabulary still shows its counts.
         stats = parse_era_stats("4 Loosies\n2 Throwaways\n1 Skit(s)")
         assert stats.release_types == {"loosies": 4, "throwaways": 2, "skit": 1}
+
+
+class TestMiscEraHeaderRows:
+    """An era header on a Misc tab must not become an entry.
+
+    Some Misc tabs put the era DESCRIPTION in the column that maps to `date`.
+    That made the header row look like it carried track data, so the
+    era-header guard never fired and the era was emitted as an entry whose
+    "date" was a paragraph of prose — 37 of them on the Ye tracker's Misc tab,
+    each rendering a wall of text beside a calendar icon in the app.
+    """
+
+    MISC_TAB = """
+    <html><body><table>
+    <tr><td>Era</td><td>Name</td><td>Notes</td><td>Leak Date</td>
+        <td>Type</td><td>Link(s)</td></tr>
+    <tr><td></td><td>Opening Era</td><td>(2019) (it begins)</td>
+        <td>A long paragraph about the era that is definitely not a date and
+            runs well past any plausible date length.</td>
+        <td></td><td></td></tr>
+    <tr><td>Opening Era</td><td>Real Entry</td><td>note</td>
+        <td>Jul 15, 2024</td><td>Music Video</td>
+        <td><a href="https://youtube.com/watch?v=abc">watch</a></td></tr>
+    </table></body></html>
+    """
+
+    def test_era_header_row_is_not_an_entry(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.MISC_TAB, "misc", ["Opening Era"])
+        assert [e.name for e in entries] == ["Real Entry"]
+
+    def test_real_dates_survive(self):
+        from src.parser import parse_misc_tab
+        entry = parse_misc_tab(self.MISC_TAB, "misc", ["Opening Era"])[0]
+        assert entry.date == "Jul 15, 2024"
+        assert entry.entry_type == "Music Video"
+
+    def test_prose_never_reaches_the_date_field(self):
+        from src.parser import parse_misc_tab
+        for e in parse_misc_tab(self.MISC_TAB, "misc", ["Opening Era"]):
+            assert e.date is None or len(e.date) <= 40
