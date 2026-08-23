@@ -1,0 +1,45 @@
+<!--
+  Synthetic tab using the DISCOGRAPHY-style era stats block — invented artist
+  "PixelDrift". DMCA-safe: no real tracker content.
+
+  Trackers use one of two unrelated vocabularies in the era-stats cell, never
+  both:
+
+    leak-status   "45 Full / 3 Partial / 4 Snippet(s) / 70 Unavailable"
+    discography   "18 Total / 4 Singles / 7 Album Track(s) / 2 Feature(s)"
+
+  Only the first was in ERA_STATS_PATTERN, so every era header in this shape
+  failed _is_era_header and the era — plus its cover art, timeline and
+  description — was dropped, and its songs were glued onto the previous era.
+  Measured over 400 cached real tabs before the fix: 267 era headers lost
+  across 34 tabs.
+
+  This fixture also pins the footer guard: "3 Total Links" is the global
+  tracker footer and must NOT match the bare "Total" alternative, or every
+  sheet grows a phantom era at the bottom.
+
+  Hand-computed expectations (pinned in tests/quality/test_era_stats_vocab.py):
+    eras=3, songs=5, versions=5
+    First Light   : stated_total=3, release_types={singles:1, album track:2}, art present
+    Second Wind   : stated_total=2, release_types={feature:1, remix:1}, art present
+    Third Rail    : stated_total=0 (leak-status era, proves both styles coexist)
+    footer row is a footer, not an era
+-->
+<html><head><title>PixelDrift Tracker - Google Drive</title></head><body>
+<table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Length</td><td>Leak Date</td><td>Available</td><td>Quality</td><td>Link(s)</td></tr>
+
+<tr><td>3 Total<br>1 Single<br>2 Album Track(s)</td><td>First Light</td><td>(2019) (PixelDrift releases the debut)</td><td></td><td></td><td></td><td></td><td><img src="https://docs.google.com/sheets-images-rt/FIRSTLIGHT"></td></tr>
+<tr><td>First Light</td><td>Opening Move</td><td></td><td>3:01</td><td>2019-04-02</td><td>Full</td><td>High Quality</td><td><a href="https://pillows.su/f/open1">listen</a></td></tr>
+<tr><td>First Light</td><td>Second Guess</td><td></td><td>2:44</td><td>2019-04-09</td><td>Full</td><td>High Quality</td><td></td></tr>
+<tr><td>First Light</td><td>Third Time</td><td></td><td>3:30</td><td>2019-05-01</td><td>Snippet</td><td>Low Quality</td><td></td></tr>
+
+<tr><td>2 Total<br>1 Feature(s)<br>1 Remix</td><td>Second Wind</td><td>(2021) (the follow-up arrives)</td><td></td><td></td><td></td><td></td><td><img src="https://docs.google.com/sheets-images-rt/SECONDWIND"></td></tr>
+<tr><td>Second Wind</td><td>Guest Verse<br>(feat. Halcyon)</td><td></td><td>4:00</td><td>2021-06-06</td><td>Full</td><td>High Quality</td><td></td></tr>
+
+<tr><td>1 Full</td><td>Third Rail</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>Third Rail</td><td>Last Stop</td><td></td><td>3:12</td><td>2022-07-07</td><td>Full</td><td>CD Quality</td><td></td></tr>
+
+<tr><td>&#128279; 3 Total Links</td><td></td><td></td><td>3 Total Full</td><td></td><td></td><td></td><td></td></tr>
+</table>
+</body></html>

@@ -219,6 +219,24 @@ class EraStats(BaseModel):
     stem_bounces: int = Field(0, description="Number of stem bounces")
     unavailable: int = Field(0, description="Number of unavailable songs")
 
+    # Discography-style trackers count releases, not leak states:
+    #   "18 Total / 4 Singles / 7 Album Track(s) / 2 Feature(s) / 3 Other"
+    # None of those map onto the leak-status fields above — a Single is not a
+    # Full. They are kept verbatim as {label: count} rather than as ~20 typed
+    # fields that would be zero for every leak-status tracker (and would need
+    # extending again the first time a tracker invents another label). Clients
+    # render the tracker's own wording, which is also what its readers expect.
+    release_types: dict[str, int] = Field(
+        default_factory=dict,
+        description="Release-type counts from discography-style stat blocks, "
+                    "keyed by the sheet's own label (e.g. {'singles': 4})",
+    )
+    stated_total: int = Field(
+        0,
+        description="Total the sheet states outright ('18 Total'), as opposed "
+                    "to the sum `total` derives from the leak-status fields",
+    )
+
     # computed_field, not a plain @property + model_dump() override. Pydantic
     # v2 serialises a NESTED model through pydantic-core, which walks the
     # schema and never calls a Python-level override — so Artist.model_dump()
@@ -236,7 +254,13 @@ class EraStats(BaseModel):
         versions on Die Lit. Verified against all eight Carti eras that report
         a non-zero OG File alongside Total Full: excluding og_files makes
         every one match its parsed version count exactly.
+
+        A discography-style block states its own total outright and populates
+        none of the leak-status fields, so deriving would return 0. Trust the
+        stated number when there is one.
         """
+        if self.stated_total:
+            return self.stated_total
         if self.total_full:
             return (
                 self.total_full + self.tagged + self.partial
@@ -588,6 +612,17 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
     return result
 
 
+# Labels consumed by the typed leak-status fields below. Anything else in a
+# stats block is a release-type count and goes to EraStats.release_types
+# verbatim, so a tracker inventing new wording is preserved, not silently
+# dropped the way an exact-key lookup drops it.
+_LEAK_STATUS_LABELS = frozenset({
+    "og file", "og files", "full", "total full", "tagged",
+    "partial", "partial / cut", "snippet", "snippets",
+    "stem bounce", "stem bounces", "unavailable", "total",
+})
+
+
 def parse_era_stats(raw: str) -> EraStats:
     """Parse a raw era stats string into an EraStats model."""
     pairs = _extract_stat_pairs(raw)
@@ -602,6 +637,12 @@ def parse_era_stats(raw: str) -> EraStats:
         snippets=pairs.get("snippet", pairs.get("snippets", 0)),
         stem_bounces=pairs.get("stem bounce", pairs.get("stem bounces", 0)),
         unavailable=pairs.get("unavailable", 0),
+        stated_total=pairs.get("total", 0),
+        release_types={
+            label: count
+            for label, count in pairs.items()
+            if label not in _LEAK_STATUS_LABELS
+        },
     )
 
 

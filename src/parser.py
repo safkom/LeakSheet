@@ -465,6 +465,20 @@ def _extract_header_notices(
 # ---------------------------------------------------------------------------
 
 # Era stats row forms across 400+ trackers — docs/decisions.md::parser.py::ERA_STATS_PATTERN
+#
+# Two unrelated vocabularies appear in this one cell, and a tracker uses one or
+# the other, never both:
+#
+#   leak-status  "45 Full / 3 Partial / 4 Snippet(s) / 70 Unavailable"
+#   discography  "18 Total / 4 Singles / 7 Album Track(s) / 2 Feature(s)"
+#
+# Only the first was listed here, so every discography-style era header failed
+# _is_era_header and the era — with its cover art, timeline and description —
+# was dropped and its songs glued onto the previous era. Measured over 400
+# cached tabs: 267 era headers lost across 34 tabs (~9% of all trackers).
+# The discography vocabulary below is the complete set harvested from that
+# corpus. Longer alternatives precede their own prefixes ("Total Full" before
+# "Total", "Album Track" before "Album") — regex alternation is first-match.
 ERA_STATS_PATTERN = re.compile(
     r"\d+\s+"
     r"("
@@ -475,7 +489,20 @@ ERA_STATS_PATTERN = re.compile(
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
     r"|Released|Deleted|Lost|Privated"
-    r")",
+    # --- discography vocabulary (release-type counts) ---
+    r"|Album Tracks?|Mixtape Tracks?|EP Tracks?|OST Tracks?|TV Tracks?"
+    r"|Bonus Tracks?|Compilation Tracks?|Loose Tracks?|Reference Tracks?"
+    r"|Promo Singles?|Singles?|Albums?"
+    r"|Featuring|Features?|Feats?"
+    r"|Produsctions?|Productions?"                                      # sic — real typo
+    r"|Remix(?:es)?|Instrumentals?|Acapellas?|Loosies|Loosie"
+    r"|Intros?|Interludes?|Outros?|Skits?"
+    r"|Demos?|Throwaways?|Sessions?|Original Versions?|Originals?"
+    r"|Not Avai?la?ble|Removed|Unknown|Alt\.? Mix"
+    # "N Total Links" is the global tracker footer, not an era stat — matching
+    # it turns the footer row into a phantom era at the bottom of every sheet.
+    r"|Total(?!\s+Links)|Others?"
+    r")\b",
     re.IGNORECASE,
 )
 
