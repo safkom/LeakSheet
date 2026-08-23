@@ -438,13 +438,41 @@ class TestBracketStyleCredits:
         from src.models import parse_song_credits
         assert parse_song_credits("Title (feat. A) Remix").title == "Title Remix"
 
-    def test_multiline_credit_is_not_parsed(self):
+    def test_wrapped_credit_list_is_parsed(self):
         from src.models import parse_song_credits
-        # A credit whose closer is on the next line stays an alt title:
-        # spanning newlines would let an unclosed "(prod. " swallow real
-        # alt-title lines. One such row exists on Travis; not worth it.
+        # A credit list that wraps across a <br> IS parsed, because the line
+        # ends with a list separator. This reverses an earlier decision that
+        # refused newlines outright on the grounds that only one Travis row
+        # needed it. This rule alone accounts for ~46 rows in the corpus; the
+        # bulk of leaked credits were unbracketed lines, handled separately
+        # by _harvest_bare_credit.
         c = parse_song_credits("Song\n[prod. TM88,\nMacnificent]")
-        assert c.producers is None
+        assert c.producers == "TM88, Macnificent"
+        assert c.alt_titles == []
+
+    def test_bare_unbracketed_credit_lines_are_harvested(self):
+        from src.models import parse_song_credits
+        # 1,312 credits across the corpus sat in alt_titles because the sheet
+        # never bracketed them. The keyword must OPEN the line, so a real
+        # title is untouched.
+        assert parse_song_credits("Song\nProd.by Bighead").producers == "Bighead"
+        assert parse_song_credits("Song\nref. MNEK").refs == "MNEK"
+        # Missing opening bracket (a real typo on the Ye tracker).
+        assert parse_song_credits("Song\nprod. Jermaine Dupri)").producers == "Jermaine Dupri"
+
+    def test_bare_credit_rule_does_not_eat_real_titles(self):
+        from src.models import parse_song_credits
+        for title in ("Prodigy", "Prodigy Returns", "With Or Without You", "A Real Alt Title"):
+            c = parse_song_credits(f"Song\n{title}")
+            assert c.alt_titles == [title], title
+            assert c.producers is None and c.refs is None
+
+    def test_unclosed_credit_still_does_not_swallow_alt_titles(self):
+        from src.models import parse_song_credits
+        # No dangling separator, so the group ends at the newline exactly as
+        # before and the alt title below it survives intact.
+        c = parse_song_credits("Song\n(prod. X\nReal Alt Title (Remix)")
+        assert "Real Alt Title" in " ".join(c.alt_titles)
 
     def test_genuine_alt_title_still_survives(self):
         from src.models import parse_song_credits

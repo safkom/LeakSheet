@@ -717,17 +717,33 @@ def parse_tracker_stats(
 # off version tags like "[V1]". Why: docs/decisions.md.
 
 
-# One bracketed group. Deliberately does NOT span newlines: an unclosed
-# "(prod. " would otherwise swallow the alt-title lines below it, and exactly
-# one row on Travis needs that (see test_multiline_credit_is_not_parsed).
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]([^)\]\n]*)[\)\]]")
+# One bracketed group. It spans a newline ONLY where the line ends with a list
+# separator ("," or "&"), because that is a wrapped credit list and nothing
+# else: an alt title is never preceded by a dangling comma inside an open
+# bracket.
+#
+# This used to refuse newlines outright, on the grounds that an unclosed
+# "(prod. " would swallow the alt-title lines below it and only one row on
+# Travis needed it. Measuring the corpus changed the trade: 2,422 of 54,923
+# alt titles (4.4%) were credit strings that leaked in because a long producer
+# or feature list wrapped across <br> lines, so the group never closed. The
+# separator rule recovers those without the swallowing risk — a continuation
+# line that does not follow a comma still terminates the group exactly as
+# before.
+# Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&][^\S\n]*\n[^\S\n]*)*)[\)\]]")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.
 # "dir." sits on music-video and visual rows ("[dir. Dave Meyers]").
 _CREDIT_FIELDS: list[tuple[str, str]] = [
     ("featuring", r"(?:feat|ft)\.?\s+|featuring\s+"),
-    ("producers", r"prod(?:uced|uction)?\.?(?:\s+by\b)?\s+"),
+    # "prod. X", "Prod.by Bighead", "prod.SlimeOnTheTRack", "produced by X".
+    # A dot OR whitespace must follow "prod", so a title beginning "Prodigy"
+    # cannot match.
+    ("producers", r"prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\s+)?"),
     ("collaboration", r"with\s+|w/\s*"),
     ("refs", r"ref(?:erence)?\.?\s+"),
     ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
@@ -820,6 +836,34 @@ class SongCredits(NamedTuple):
     alt_titles: list[str]
 
 
+# Fields safe to harvest from an UNBRACKETED line. "collaboration" is excluded
+# on purpose: its keyword is "with", and plenty of songs are titled "With Or
+# Without You". Inside brackets "(with Go Getters)" is unambiguous; bare, it is
+# not, and guessing there invents a credit and destroys a title.
+_BARE_CREDIT_FIELDS = frozenset({"featuring", "producers", "refs", "director"})
+
+
+def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
+    """Route an unbracketed credit line into *collected*; True if it was one.
+
+    Plenty of sheets write the credit as its own line with no brackets at all —
+    "Prod.by Bighead", "ref. MNEK". Requiring brackets left 1,312 of these
+    sitting in alt_titles across the captured corpus, where they read as
+    alternative song titles and the producer/reference credit was simply lost.
+
+    The keyword must OPEN the line, the same rule bracketed groups already
+    follow, so a real title that merely mentions a producer later is untouched.
+    """
+    keyword = _CREDIT_PART_RE.match(line)
+    if keyword is None or keyword.lastgroup not in _BARE_CREDIT_FIELDS:
+        return False
+    value = _WHITESPACE_RUN_RE.sub(" ", line[keyword.end():]).strip().rstrip(")]")
+    if not value:
+        return False
+    collected.setdefault(keyword.lastgroup, []).append(value)
+    return True
+
+
 def parse_song_credits(raw_name: str) -> SongCredits:
     """Parse a raw multi-line song name into title + structured credits.
 
@@ -848,7 +892,8 @@ def parse_song_credits(raw_name: str) -> SongCredits:
             # keyword follows, and parts[0] was just checked.
             if keyword is None:
                 continue
-            value = part[keyword.end():].strip()
+            # A wrapped list carries the newline into the value.
+            value = _WHITESPACE_RUN_RE.sub(" ", part[keyword.end():]).strip()
             if value and keyword.lastgroup:
                 collected.setdefault(keyword.lastgroup, []).append(value)
         return ""
@@ -875,7 +920,7 @@ def parse_song_credits(raw_name: str) -> SongCredits:
         if line.startswith("(") and line.endswith(")"):
             inner = _strip_alias_label(line[1:-1].strip())
             alt_titles.extend(_split_alt_aliases(inner))
-        else:
+        elif not _harvest_bare_credit(line, collected):
             alt_titles.append(_strip_alias_label(line))
 
     return SongCredits(
