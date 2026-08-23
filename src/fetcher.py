@@ -1341,7 +1341,7 @@ async def _load_secondary_tabs(
             if art_result:
                 _, art_html = art_result
                 with t.phase("art_parse"):
-                    art_map = await asyncio.to_thread(parse_art_tab, art_html)
+                    art_map = await asyncio.to_thread(parse_art_tab, art_html, url_norm)
                 if art_map:
                     apply_art_tab_images(artist, art_map)
         except Exception as e:
@@ -1528,7 +1528,7 @@ async def _aggregate_hub_workbook(
               if result is None:
                   return None
               with t.phase("hub_parse"):
-                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
+                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name, url_norm)
               return display, parsed
           except Exception as e:
               logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
@@ -1631,7 +1631,7 @@ async def async_fetch_and_parse(
             if not gid_is_misc_tab:
                 name = _resolve_artist_name(title, artist_name)
                 with t.phase("parse"):
-                    artist = await asyncio.to_thread(parse_sheet, html, name)
+                    artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
                 # Eras alone aren't enough — a hub tab parses to eras with no
                 # songs, and accepting it here would skip discovery entirely.
                 gid_songs = sum(
@@ -1678,7 +1678,7 @@ async def async_fetch_and_parse(
         if "<table" in base_html.lower():
             name = _resolve_artist_name(title, artist_name)
             with t.phase("parse"):
-                artist = await asyncio.to_thread(parse_sheet, base_html, name)
+                artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
                 artist.source_url = url
                 if write_cache:
@@ -1726,7 +1726,7 @@ async def async_fetch_and_parse(
                 try:
                     name = _resolve_artist_name(title, artist_name)
                     with t.phase("parse"):
-                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
+                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
                     n_eras = len(candidate.eras)
                     n_songs = sum(
                         len(s.songs)
@@ -1737,7 +1737,15 @@ async def async_fetch_and_parse(
                     logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
                     if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
                         hub_gid = result_gid
-                    score = (1 if n_songs else 0, n_eras, n_songs)
+                    # Songs outrank eras. Era count used to come first, as a
+                    # proxy for "properly structured tab", but it stopped being
+                    # one once flat-era tabs (no header rows, era implied by the
+                    # Era column) started yielding real era counts: a 5-era,
+                    # 7-song badge sub-tab then outranked the 3-era, 474-song
+                    # main tab on the MIKE tracker, and 43 flat eras beat 26 real
+                    # ones on Dr. Dre — costing 668 songs and every era cover.
+                    # The payload is songs; rank on it.
+                    score = (1 if n_songs else 0, n_songs, n_eras)
                     if score > best_score:
                         best_score = score
                         best_artist = candidate
@@ -1751,7 +1759,12 @@ async def async_fetch_and_parse(
                     if result_gid == unreleased_gid:
                         logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
                         break
-                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID:
+                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
+                        # Only stop early on a tab that is actually leading.
+                        # This break abandons every gid still in flight, so a
+                        # small tab that merely clears the era floor must not
+                        # trigger it — that is how a 7-song sub-tab pre-empted
+                        # a 474-song main tab.
                         break
                 except (ValueError, KeyError):
                     continue
@@ -1807,7 +1820,7 @@ async def async_fetch_and_parse(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )
         name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name)
+        artist = await asyncio.to_thread(parse_sheet, html, name, url)
         artist.source_url = url
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)

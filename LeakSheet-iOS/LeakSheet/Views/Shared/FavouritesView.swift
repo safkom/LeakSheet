@@ -113,6 +113,7 @@ struct FavouritesView: View {
                                             } label: {
                                                 Image(systemName: "heart.slash")
                                             }
+                                            .accessibilityLabel("Remove from favourites")
                                         }
                                     }
                                 }

@@ -120,6 +120,7 @@ def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]
 COLUMN_ALIASES: dict[str, str] = {
     # Core columns (present in nearly all trackers)
     "era": "era",
+    "project": "era",             # Overlord's Lil Uzi Vert discography tracker
     "name": "name",
     "title": "name",              # Billie Eilish, Childish Gambino, Travis Scott
     "song name": "name",          # XXXTENTACION
@@ -132,12 +133,16 @@ COLUMN_ALIASES: dict[str, str] = {
     "track number / info": "notes",  # Yuno Miles
     "info": "notes",
     "description": "notes",
+    "additional information": "notes",
 
     # Track length variants
     "track length": "track_length",
     "length": "track_length",      # Billie Eilish, Gucci Mane, etc.
     "track duration": "track_length",
     "duration": "track_length",
+    "full length": "track_length",
+    "lenght": "track_length",       # real, recurring misspelling in the wild
+
 
     # Dates
     "file date": "file_date",
@@ -152,6 +157,24 @@ COLUMN_ALIASES: dict[str, str] = {
     "release/leaked date": "leak_date",  # SosMula (2026-07-20 sweep)
     "obtained on:": "leak_date",   # Wu-Tang Clan
     "obtained on": "leak_date",
+    # Both mean "when it got out", same as a leak date (user-confirmed).
+    "surface date": "leak_date",
+    "surfaced date": "leak_date",
+    "og file leak date": "leak_date",
+    # Real headers that used to reach leak_date only by prefix-matching the
+    # bare "date" alias. That fallback now fires on glued text only, so each
+    # needs to be stated. Spelling them out is what makes "Date Recorded"
+    # correct: prefix matching sent it to leak_date, which is a different date.
+    "leaked": "leak_date",
+    "date leaked": "leak_date",
+    "date added": "leak_date",
+    "date of release": "leak_date",
+    "date or art": "leak_date",     # Haunted Mound — one column, either value
+
+    # When a snippet was first previewed — deliberately NOT leak_date: a
+    # preview predates (and often never becomes) a leak (user-confirmed).
+    "first preview": "preview_date",
+    "preview date": "preview_date",
 
     # Availability
     "available length": "available_length",
@@ -188,6 +211,8 @@ COLUMN_ALIASES: dict[str, str] = {
     # Streaming availability (Yes/No) → SongVersion.streaming
     "streaming": "streaming",
     "streaming?": "streaming",
+    "on streaming": "streaming",
+    "on streaming?": "streaming",
     "in circulation": "available_length",  # Yung Lean
 
     # Evidence/provenance links (Travis Scott tracker)
@@ -204,6 +229,9 @@ COLUMN_ALIASES: dict[str, str] = {
     "date of recording": "date_of_recording",  # Carti
     "recording date": "date_of_recording",      # Gucci Mane
     "record date": "date_of_recording",         # 2026-07-20 sweep (4 trackers)
+    "shoot date": "date_of_recording",          # music-video tabs (user-confirmed)
+    "date recorded": "date_of_recording",       # was mis-mapped to leak_date
+    "recorded": "date_of_recording",
 
     # Dedicated credit columns — see docs/decisions.md::config.py::COLUMN_ALIASES
     "producer": "producers_col",

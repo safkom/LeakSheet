@@ -77,10 +77,12 @@ struct TVArtistView: View {
 
     private func statsBar(_ vm: ArtistViewModel) -> some View {
         HStack(spacing: 56) {
-            stat("\(vm.artistStats.total)", "Total", .primary)
-            stat("\(vm.artistStats.available)", "Available", .green)
-            stat("\(vm.artistStats.snippets)", "Snippets", .orange)
-            stat("\(vm.artistStats.fullHQ)", "Full HQ", Color.lsPrimary)
+            // .formatted(): `stat` takes a String, which skips the locale
+            // grouping Text applies to a bare Int.
+            stat(vm.artistStats.total.formatted(), "Total", .primary)
+            stat(vm.artistStats.available.formatted(), "Available", .green)
+            stat(vm.artistStats.snippets.formatted(), "Snippets", .orange)
+            stat(vm.artistStats.fullHQ.formatted(), "Full HQ", Color.lsPrimary)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 60)

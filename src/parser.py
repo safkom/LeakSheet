@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,9 @@ class _TableExtractor(HTMLParser):
         self._cell_text = ""
         self._cell_links: list[str] = []
         self._cell_images: list[str] = []
+        # Created again per <td>, but it is READ in the </td> branch, so a
+        # stray closing tag before any opening one would AttributeError.
+        self._cell_link_lines: list[int] = []
         self._colspan = 1
         self._a_href = ""
 
@@ -299,8 +302,17 @@ def _match_column_alias(key: str) -> str | None:
     if canonical:
         return canonical
     for alias, canon in COLUMN_ALIASES.items():
-        if key.startswith(alias) and len(alias) > 2:
-            return canon
+        if len(alias) <= 2 or not key.startswith(alias):
+            continue
+        # Only fire on GLUED text, which is what this fallback is for: a header
+        # cell whose label ran into a notice ("noteswelcome to the tracker").
+        # When the next character is a space the remainder is a separate word,
+        # so the header is a different column that merely starts with an alias
+        # — "Project Type" is not the Era column, and "Dates Added" is not the
+        # bare "Date" column. Matching those silently binds the wrong column.
+        if key[len(alias)] == " ":
+            continue
+        return canon
     return None
 
 
@@ -339,7 +351,37 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
         if canonical and canonical not in col_map:
             col_map[canonical] = idx
 
+    if "name" not in col_map:
+        col_map |= _infer_name_column(header_row, col_map)
+
     return col_map
+
+
+# Words that identify the song-title column when no alias matched its header.
+_NAME_WORD_RE = re.compile(r"\b(title|name)\b", re.IGNORECASE)
+
+
+def _infer_name_column(
+    header_row: list[_Cell], col_map: dict[str, int]
+) -> dict[str, int]:
+    """Find the song-title column when no alias matched, else return {}.
+
+    Without this, `name` falls back to positional index 1 (see
+    `_parse_song_row`), which is blind to layout. Overlord's Lil Uzi Vert
+    discography puts a "#:" track-number column there and titles a column
+    "Project & Track Title", so all 281 of its songs were named "1", "2", "3".
+
+    Only headers no alias claimed are considered, and only those containing
+    "title" or "name" as a whole word — so this cannot steal a column that a
+    real alias already resolved.
+    """
+    taken = set(col_map.values())
+    for idx, cell in enumerate(header_row):
+        if idx in taken:
+            continue
+        if _NAME_WORD_RE.search(cell.text):
+            return {"name": idx}
+    return {}
 
 
 def detect_dropped_columns(header_row: list[_Cell], col_map: dict[str, int]) -> list[str]:
@@ -465,6 +507,25 @@ def _extract_header_notices(
 # ---------------------------------------------------------------------------
 
 # Era stats row forms across 400+ trackers — docs/decisions.md::parser.py::ERA_STATS_PATTERN
+#
+# Two unrelated vocabularies appear in this one cell, and a tracker uses one or
+# the other, never both:
+#
+#   leak-status  "45 Full / 3 Partial / 4 Snippet(s) / 70 Unavailable"
+#   discography  "18 Total / 4 Singles / 7 Album Track(s) / 2 Feature(s)"
+#
+# Only the first was listed here, so every discography-style era header failed
+# _is_era_header and the era — with its cover art, timeline and description —
+# was dropped and its songs glued onto the previous era. Measured over 400
+# cached tabs: 267 era headers lost across 34 tabs (~9% of all trackers).
+#
+# The two vocabularies must NOT be matched the same way. Leak-status words are
+# distinctive enough to identify a stats cell from a single pair: "5 Full" is
+# never anything else. Discography words are ordinary English that shows up in
+# era NAMES — "2009 Album", "1977 Sessions", "2020 Throwaways", and the
+# "38 Special Sessions" case already pinned in tests. Matching those on one
+# pair turned 86 Bonnie McKee song rows into empty eras. A real discography
+# block always states several counts, so require two.
 ERA_STATS_PATTERN = re.compile(
     r"\d+\s+"
     r"("
@@ -475,9 +536,43 @@ ERA_STATS_PATTERN = re.compile(
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
     r"|Released|Deleted|Lost|Privated"
-    r")",
+    r")\b",
     re.IGNORECASE,
 )
+
+# Release-type counts. Only trusted inside a multi-pair block — see above.
+_DISCOGRAPHY_STATS_PATTERN = re.compile(
+    r"\d+\s+"
+    r"("
+    r"Album Tracks?|Mixtape Tracks?|EP Tracks?|OST Tracks?|TV Tracks?"
+    r"|Bonus Tracks?|Compilation Tracks?|Loose Tracks?|Reference Tracks?"
+    r"|Promo Singles?|Singles?|Albums?"
+    r"|Featuring|Features?|Feats?"
+    r"|Produsctions?|Productions?"                                      # sic — real typo
+    r"|Remix(?:es)?|Instrumentals?|Acapellas?|Loosies|Loosie"
+    r"|Intros?|Interludes?|Outros?|Skits?"
+    r"|Demos?|Throwaways?|Sessions?|Original Versions?|Originals?"
+    r"|Not Avai?la?ble|Removed|Alt\.? Mix"
+    # "N Total Links" is the global tracker footer, not an era stat — matching
+    # it turns the footer row into a phantom era at the bottom of every sheet.
+    r"|Total(?!\s+Links)|Others?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Any "<int> <word>" pair, used only to count how many counts a cell states.
+_STAT_PAIR_RE = re.compile(r"\d+\s+[A-Za-z]")
+_MIN_DISCOGRAPHY_PAIRS = 2
+
+
+def era_stats_match(text: str) -> bool:
+    """True if *text* is an era stats block, in either tracker vocabulary."""
+    if ERA_STATS_PATTERN.search(text):
+        return True
+    return (
+        bool(_DISCOGRAPHY_STATS_PATTERN.search(text))
+        and len(_STAT_PAIR_RE.findall(text)) >= _MIN_DISCOGRAPHY_PAIRS
+    )
 
 # Spreadsheet formula errors. These appear in real trackers when a cell's
 # formula breaks, and they must never be mistaken for content — a `#REF!` in
@@ -550,7 +645,7 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     text = row[0].text
-    if not ERA_STATS_PATTERN.search(text):
+    if not era_stats_match(text):
         if not _is_spreadsheet_error(text):
             return False
         # The stats cell is unreadable, so it can carry no evidence either
@@ -1414,10 +1509,98 @@ def _parse_era_header_row(
     return era, needs_backfill
 
 
-def parse_sheet(html_content: str, artist_name: str) -> Artist:
+# Column labels that mark an artwork tab. These tabs DO have Era/Name/Notes
+# columns, so they parse cleanly as song tabs and emit one "song" per cover —
+# 19 of them on the Harry Styles tracker. Two or more hits is deliberately
+# conservative: a single "Image" column also appears on physical-release tabs,
+# which are genuine song content.
+_ARTWORK_COLUMN_SIGNS = frozenset({
+    "art type", "project type", "designer", "cover art", "image type",
+    "cover type", "photo type", "use", "used", "used?", "made by", "image",
+})
+_MIN_ARTWORK_SIGNS = 2
+
+# Signatures that identify a tab outright. One hit is enough: no song tab has
+# an "Interviewer(s)" or "Time Signature" column.
+_INTERVIEW_COLUMN_SIGNS = frozenset({
+    "interview title", "interview type", "interviewer", "interviewers",
+    "interviewer(s)",
+})
+_MUSICOLOGY_COLUMN_SIGNS = frozenset({"bpm", "key", "time signature"})
+_MIN_MUSICOLOGY_SIGNS = 2
+
+# The glossary tab every template ships: "Portion | <description> | Quality |
+# <description>", defining what Snippet/Tagged/Lossless mean. It resolves to
+# exactly these two columns and nothing else, and yields one "song" per legend
+# entry. This is a statement about the WHOLE resolved header, not a missing
+# column — a headerless song tab resolves to an empty map and is unaffected,
+# and any tab with an era, name, link, length or date column is unaffected too.
+_GLOSSARY_COLUMNS = frozenset({"available_length", "quality"})
+
+
+def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
+    """Return False for tabs that hold something other than songs.
+
+    Trackers keep glossaries, artwork indexes, interview logs, setlists and
+    BPM/key references as ordinary tabs. Run through the song parser these do
+    not fail — they emit plausible-looking junk. The Car Seat Headrest
+    interview tab produced 146 "songs" whose titles were interview headlines,
+    because no Name column was detected and `name` fell back to positional
+    index 1, which happened to be "Interview Title".
+
+    Rejection is only ever on a POSITIVE signature — never on the absence of a
+    column. Two rounds of measurement proved absence is not evidence:
+
+      * "no Name column" destroyed De La Soul (205 songs under an unlabelled
+        header cell) and Overlord's Lil Uzi Vert discography (283 songs under
+        "Project & Track Title", which no alias covers).
+      * "neither Name nor Era" then destroyed tabs with no header row at all —
+        BIG L (21 songs) and Labrinth (169) start at row 0 with data, so
+        detect_columns returns an empty map and the positional fallback
+        (name=1, notes=2) is what correctly parses them.
+
+    The one col_map-based rule is also positive evidence, about the whole
+    resolved header rather than a missing piece of it: a header that resolves
+    to exactly {available_length, quality} and nothing else is the glossary tab
+    every template ships. Both counter-examples above resolve to an empty map
+    or to a much wider one, so neither is touched.
+    """
+    labels = {
+        " ".join(c.text.split()).strip().lower().rstrip(":").strip('"')
+        for c in header_row
+    }
+    if len(labels & _ARTWORK_COLUMN_SIGNS) >= _MIN_ARTWORK_SIGNS:
+        return False
+    if labels & _INTERVIEW_COLUMN_SIGNS:
+        return False
+    if len(labels & _MUSICOLOGY_COLUMN_SIGNS) >= _MIN_MUSICOLOGY_SIGNS:
+        return False
+    return not (col_map and set(col_map) <= _GLOSSARY_COLUMNS)
+
+
+def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
+    """Resolve relative cover-art URLs against the tab they came from.
+
+    Google's htmlview export always emits absolute image URLs, so this is a
+    no-op there. Self-hosted trackers (deftonestracker.net, franktracker.net,
+    tylertracker.net) emit "/assets/<sha>.jpg", which reached clients verbatim
+    and could be fetched by nothing — 268 eras across the captured corpus.
+    """
+    for era in eras:
+        if era.art_url and not urlparse(era.art_url).netloc:
+            era.art_url = urljoin(source_url, era.art_url)
+
+
+def parse_sheet(
+    html_content: str, artist_name: str, source_url: str | None = None
+) -> Artist:
     """Parse a Google Sheets HTML export into an Artist model.
 
     This is the main entry point for parsing a single tracker.
+
+    *source_url* is the URL the HTML came from, used to resolve relative image
+    sources. Optional so callers parsing a local file keep working; without it
+    relative URLs pass through unchanged, exactly as before.
     """
     # Extract cell background colors from the stylesheet (non-neutral only)
     rows = extract_table(html_content)
@@ -1426,6 +1609,33 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     # Step 1: detect column layout from header row.
     header_row_idx, col_map = _detect_header_row(rows)
+
+    # Step 1a: refuse tabs that are not song tabs. Parsing a glossary or an
+    # artwork index yields junk that looks exactly like data — see is_song_tab.
+    if not is_song_tab(rows[header_row_idx], col_map):
+        return Artist(
+            name=artist_name,
+            slug=slugify(artist_name),
+            eras=[],
+            parse_metadata=ParseMetadata(
+                total_rows=len(rows) - header_row_idx - 1,
+                other_rows=len(rows) - header_row_idx - 1,
+                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+            ),
+        )
+
+    # Some tabs carry no era header rows at all: the Era column simply repeats
+    # a value on every song row. Without a header row to anchor them, the
+    # abbreviated-era rule below ("plausible era name + real song data => stay
+    # in the current era") swallows every new value, and the whole tab collapses
+    # into one era named after whatever appeared first. Measured on the
+    # OsamaSon tracker: 8 distinct era values, all 81 songs filed under one.
+    #
+    # When a tab has no era headers, the Era column is the only era signal there
+    # is, so it becomes authoritative. Tabs that DO have header rows keep the
+    # abbreviation heuristic, which exists for sheets that shorten the era name
+    # on song rows.
+    flat_era_mode = not any(_is_era_header(r) for r in rows[header_row_idx + 1:])
 
     # Step 1b: extract announcement notices from header cells and pre-header rows.
     pre_header_rows = rows[:header_row_idx] if header_row_idx > 0 else []
@@ -1639,8 +1849,11 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
                     version = _parse_song_row(row, col_map)
                     if version and _looks_like_era_name(row_era):
                         # Abbreviated era names on song rows — see
-                        # docs/decisions.md::parser.py::abbreviated-era-names
-                        if _has_song_data(version):
+                        # docs/decisions.md::parser.py::abbreviated-era-names.
+                        # Suppressed in flat_era_mode: with no header rows in
+                        # the tab, a new Era-column value is a new era, not an
+                        # abbreviation of the current one.
+                        if _has_song_data(version) and not flat_era_mode:
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                             era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
@@ -1796,6 +2009,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
     # Merge 0-song stub eras — see docs/decisions.md::parser.py::merge-stub-eras
     eras = _merge_empty_stub_eras(eras)
 
+    if source_url:
+        _absolutize_era_art(eras, source_url)
+
     # Step 3c: consolidate group labels within each era's sections
     for era in eras:
         _consolidate_group_labels(era)
@@ -1911,9 +2127,23 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 
 # Compound availability grammar (Travis Scott tracker — no Quality column):
 # '<avail> - HQ', 'Unconfirmed (Snippet - LQ)', 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
-_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ)\b")
-_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★]+)[☆]*\s*$")
-_COMPOUND_QUALITY_NAMES = {"HQ": "High Quality", "LQ": "Low Quality"}
+_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ|CDQ)\b")
+# Stars may be separated by whitespace, including newlines — a sheet that puts
+# each star on its own line renders as "⭐\n⭐\n⭐\n⭐". A bare `[⭐★]+` run stops
+# at the first separator, so it stripped one star and left the rest glued to
+# the availability value. The rating is the count of star glyphs in the run.
+_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★][\s⭐★☆]*)\s*$")
+_STAR_GLYPH_RE = re.compile(r"[⭐★]")
+_COMPOUND_QUALITY_NAMES = {
+    "HQ": "High Quality", "LQ": "Low Quality", "CDQ": "CD Quality",
+}
+
+# U+FE0F selects emoji presentation and is invisible. Sheets emit "⭐️" (U+2B50
+# U+FE0F) as often as bare "⭐", and the selector between two stars broke the
+# `[⭐★]+` run, so the pattern matched nothing at all. Effect measured over
+# 23,695 real versions before this fix: zero carried a rating, and the stars
+# stayed glued onto the availability value, corrupting that field too.
+_VARIATION_SELECTORS = str.maketrans("", "", "️︎")
 
 
 def _split_compound_availability(text: str) -> tuple[str, str | None, int | None]:
@@ -1922,10 +2152,11 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     Only used when the tracker has no dedicated Quality column. Returns the
     input unchanged (with None quality/rating) when no marker is present.
     """
+    text = text.translate(_VARIATION_SELECTORS)
     rating = None
     m = _STAR_RATING_PATTERN.search(text)
     if m:
-        rating = min(len(m.group(1)), 5)
+        rating = min(len(_STAR_GLYPH_RE.findall(m.group(1))), 5)
         text = text[: m.start()].rstrip()
 
     quality = None
@@ -2075,6 +2306,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         rating=rating,
         links=merged_links,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
+        preview_date=_get_cell_text(row, col_map.get("preview_date", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )
 
@@ -2342,6 +2574,22 @@ def _misc_header_key(text: str) -> str:
     return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
+# A date cell is short and carries a digit. Era-header rows on some Misc tabs
+# put the era DESCRIPTION in the column that maps to `date`, which made the
+# header look like it carried track data, so the era-header guard below never
+# fired and the era was emitted as an entry whose "date" was a paragraph — 37
+# of them on the Ye tracker's Misc tab, each rendering a wall of prose beside a
+# calendar icon in the app.
+_MAX_DATE_LEN = 40
+
+
+def _looks_like_date(text: str | None) -> bool:
+    if not text:
+        return False
+    stripped = text.strip()
+    return len(stripped) <= _MAX_DATE_LEN and any(c.isdigit() for c in stripped)
+
+
 def parse_misc_tab(
     html: str, kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
@@ -2452,6 +2700,8 @@ def parse_misc_tab(
 
         def opt(field: str) -> str | None:
             val = cell_text(row, field)
+            if field == "date" and not _looks_like_date(val):
+                return None
             return val or None
 
         entry = MiscEntry(
@@ -2529,8 +2779,14 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
     return None, None, start
 
 
-def parse_art_tab(html: str) -> dict[str, str]:
+def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
+
+    *source_url* resolves relative image sources, exactly as in parse_sheet.
+    Absolutising here rather than at the call site matters because
+    apply_art_tab_images OVERWRITES era.art_url after parse_sheet has already
+    run its own resolution — so an Art tab on a self-hosted tracker would put
+    the unusable "/assets/<sha>.jpg" back.
 
     Art tabs in tracker spreadsheets contain full-resolution era artwork.
     Each row typically has an era name in one cell and one or more images.
@@ -2604,6 +2860,8 @@ def parse_art_tab(html: str) -> dict[str, str]:
     for key, info in era_info.items():
         chosen = info["cover"] or info["first"]
         if chosen:
+            if source_url and not urlparse(chosen).netloc:
+                chosen = urljoin(source_url, chosen)
             result[key] = chosen
 
     return result

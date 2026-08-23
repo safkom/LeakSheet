@@ -214,6 +214,7 @@ struct EvidenceSection: View {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.caption2)
+                                .accessibilityHidden(true)
                             Text(source.label.isEmpty ? Format.shortHost(source.url) : source.label)
                                 .font(.caption)
                                 .multilineTextAlignment(.leading)
@@ -221,6 +222,7 @@ struct EvidenceSection: View {
                             Image(systemName: "arrow.up.right")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
                         }
                         .foregroundStyle(Color.lsAccent)
                         .padding(.horizontal, 10)

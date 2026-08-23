@@ -168,7 +168,9 @@ struct FilterChip: View {
         .buttonStyle(.plain)
         .frame(minHeight: 44)
         .contentShape(Capsule())
-        .accessibilityAddTraits(isActive ? [.isSelected] : [])
+        // .isButton too: without it VoiceOver read the chip as plain text and
+        // never announced it as something you can activate.
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -192,6 +194,7 @@ struct NoticeBannerView: View {
             HStack(spacing: 8) {
                 Image(systemName: isAlert ? "exclamationmark.triangle.fill" : "info.circle.fill")
                     .foregroundStyle(tintColor)
+                    .accessibilityHidden(true)
                 Text(notice.text)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -201,6 +204,7 @@ struct NoticeBannerView: View {
                     Image(systemName: "arrow.up.right")
                         .font(.caption2)
                         .foregroundStyle(tintColor.opacity(0.7))
+                        .accessibilityHidden(true)
                 }
             }
             .padding(12)
@@ -209,5 +213,9 @@ struct NoticeBannerView: View {
         }
         .buttonStyle(.plain)
         .disabled(notice.link == nil)
+        // The kind is carried by an icon a screen reader cannot see, and the
+        // arrow that signals "this opens something" is decoration.
+        .accessibilityLabel("\(isAlert ? "Alert" : "Notice"): \(notice.text)")
+        .accessibilityHint(notice.link == nil ? "" : "Opens in the browser")
     }
 }

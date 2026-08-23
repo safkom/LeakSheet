@@ -43,6 +43,13 @@ extension Color {
     static let badgeRumored = Color(hue: 40/360, saturation: 0.45, brightness: 0.86)      // tentative amber
     static let badgeConflicting = Color(hue: 15/360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
+    // Content-tab entry type ("Production", "Music Video"). Deliberately
+    // neutral: on song rows colour means quality or availability, and the
+    // type pill used lsAccent — the same blue as badgeFull — so "PRODUCTION"
+    // read as an availability badge. Type is what KIND of entry this is, not
+    // its status, so it recedes and leaves colour to carry status.
+    static let badgeEntryType = Color(hue: 0/360, saturation: 0.0, brightness: 0.72)
+
     // MARK: - Hex Initializer
 
     init(hex: UInt, opacity: Double = 1.0) {
@@ -62,8 +69,8 @@ enum BadgeVariant: String {
     case ogfile, full, tagged, stem, partial, snippet, confirmed, unavailable
     case rumored, conflicting
     /// Not a quality/availability value — the content-tab entry type
-    /// ("MUSIC VIDEO", "STEM"), which had its own bespoke pill before.
-    case accent
+    /// ("Production", "Music Video"), which had its own bespoke pill before.
+    case entryType
 
     var color: Color {
         switch self {
@@ -85,7 +92,7 @@ enum BadgeVariant: String {
         case .unavailable: .badgeUnavailable
         case .rumored: .badgeRumored
         case .conflicting: .badgeConflicting
-        case .accent: .lsAccent
+        case .entryType: .badgeEntryType
         }
     }
 
@@ -119,6 +126,12 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
     if a.contains("conflicting") { return .conflicting }
     if a.contains("confirmed") { return .confirmed }
     if a.contains("unavailable") { return .unavailable }
+    // Compound values ("Full Lossless") reach here because the checks above are
+    // exact or more specific. Falling through to .na painted them neutral grey
+    // while a plain "Full" on the next row was blue — the same concept in two
+    // colours. Last, so it can never outrank a more specific match above.
+    if a.contains("full") { return .full }
+    if a.contains("lossless") { return .lossless }
     return .na
 }
 

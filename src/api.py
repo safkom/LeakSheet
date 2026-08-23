@@ -36,7 +36,7 @@ from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
-from src.config import USER_AGENT, register_tracker_hosts
+from src.config import USER_AGENT, register_tracker_hosts, sheet_host_allowed
 from src.models import TrackerEntry, slugify
 from src.parser import parse_artistgrid_csv
 from src.tracker_seed import SEED_TRACKERS
@@ -261,6 +261,29 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 
 # Single source of truth: the hosts resolve_stream_url can emit.
 _STREAM_ALLOWED_DOMAINS = ALLOWED_STREAM_HOSTS
+
+
+def _image_host_allowed(url: str) -> bool:
+    """Hosts the image proxy may fetch from.
+
+    The static lists cover Google's image CDNs. Self-hosted trackers
+    (tylertracker.net, franktracker.net, deftonestracker.net, and whatever the
+    ArtistGrid feed lists next) serve era covers from their own origin as
+    "/assets/<sha>.jpg", so hardcoding them here would go stale the same way it
+    already did — 268 eras in the captured corpus carried a cover URL nothing
+    could fetch.
+
+    Reusing config.sheet_host_allowed instead is a strictly smaller capability
+    than that host already has: the backend downloads and parses full HTML from
+    it, so fetching one image from the same origin adds no reach. The SSRF
+    guard (PublicOnlyAsyncTransport), the 25 MB download cap and the 20 MP
+    decode cap all still apply, and a host only joins that list by appearing in
+    the tracker registry.
+    """
+    if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
+        return True
+    from urllib.parse import urlparse
+    return sheet_host_allowed(urlparse(url).hostname)
 
 
 def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
@@ -987,7 +1010,7 @@ async def proxy_image(
     if not url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
-    if not _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
+    if not _image_host_allowed(url):
         raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
 
     width = _snap_image_width(w) if w else None

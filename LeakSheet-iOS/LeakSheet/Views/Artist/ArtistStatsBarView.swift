@@ -4,6 +4,10 @@ import SwiftUI
 /// `onTap` is set) to open the full `TrackerStats` breakdown.
 struct ArtistStatsBarView: View {
     let stats: ArtistViewModel.Stats
+    /// What the totals count — "tracks" for the song tree, "entries" for a
+    /// content tab. Spoken by VoiceOver; the visible tile label stays "Total"
+    /// so the four tiles keep a uniform width.
+    var unit: String = "tracks"
     var onTap: (() -> Void)? = nil
 
     var body: some View {
@@ -19,7 +23,8 @@ struct ArtistStatsBarView: View {
     private var barContent: some View {
         GlassEffectContainer {
             HStack(spacing: 8) {
-                statItem(value: stats.total, label: "Total", color: .secondary)
+                statItem(value: stats.total, label: "Total", color: .secondary,
+                         spoken: "\(stats.total) \(unit) total")
                 statItem(value: stats.available, label: "Available", color: .green)
                 statItem(value: stats.snippets, label: "Snippets", color: .orange)
                 statItem(value: stats.fullHQ, label: "Full HQ", color: .lsAccent)
@@ -29,9 +34,11 @@ struct ArtistStatsBarView: View {
         }
     }
 
-    private func statItem(value: Int, label: String, color: Color) -> some View {
+    private func statItem(
+        value: Int, label: String, color: Color, spoken: String? = nil
+    ) -> some View {
         VStack(spacing: 2) {
-            Text("\(value)")
+            Text(value.formatted())
                 .font(.headline.monospacedDigit())
                 .foregroundStyle(color)
             Text(label)
@@ -41,5 +48,7 @@ struct ArtistStatsBarView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
         .glassEffect(.regular, in: .rect(cornerRadius: 10))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken ?? "\(value) \(label)")
     }
 }
