@@ -14,7 +14,7 @@ from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +348,37 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
         if canonical and canonical not in col_map:
             col_map[canonical] = idx
 
+    if "name" not in col_map:
+        col_map |= _infer_name_column(header_row, col_map)
+
     return col_map
+
+
+# Words that identify the song-title column when no alias matched its header.
+_NAME_WORD_RE = re.compile(r"\b(title|name)\b", re.IGNORECASE)
+
+
+def _infer_name_column(
+    header_row: list[_Cell], col_map: dict[str, int]
+) -> dict[str, int]:
+    """Find the song-title column when no alias matched, else return {}.
+
+    Without this, `name` falls back to positional index 1 (see
+    `_parse_song_row`), which is blind to layout. Overlord's Lil Uzi Vert
+    discography puts a "#:" track-number column there and titles a column
+    "Project & Track Title", so all 281 of its songs were named "1", "2", "3".
+
+    Only headers no alias claimed are considered, and only those containing
+    "title" or "name" as a whole word — so this cannot steal a column that a
+    real alias already resolved.
+    """
+    taken = set(col_map.values())
+    for idx, cell in enumerate(header_row):
+        if idx in taken:
+            continue
+        if _NAME_WORD_RE.search(cell.text):
+            return {"name": idx}
+    return {}
 
 
 def detect_dropped_columns(header_row: list[_Cell], col_map: dict[str, int]) -> list[str]:
@@ -1538,10 +1568,29 @@ def is_song_tab(header_row: list[_Cell], col_map: dict[str, int]) -> bool:
     return len(labels & _MUSICOLOGY_COLUMN_SIGNS) < _MIN_MUSICOLOGY_SIGNS
 
 
-def parse_sheet(html_content: str, artist_name: str) -> Artist:
+def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
+    """Resolve relative cover-art URLs against the tab they came from.
+
+    Google's htmlview export always emits absolute image URLs, so this is a
+    no-op there. Self-hosted trackers (deftonestracker.net, franktracker.net,
+    tylertracker.net) emit "/assets/<sha>.jpg", which reached clients verbatim
+    and could be fetched by nothing — 268 eras across the captured corpus.
+    """
+    for era in eras:
+        if era.art_url and not urlparse(era.art_url).netloc:
+            era.art_url = urljoin(source_url, era.art_url)
+
+
+def parse_sheet(
+    html_content: str, artist_name: str, source_url: str | None = None
+) -> Artist:
     """Parse a Google Sheets HTML export into an Artist model.
 
     This is the main entry point for parsing a single tracker.
+
+    *source_url* is the URL the HTML came from, used to resolve relative image
+    sources. Optional so callers parsing a local file keep working; without it
+    relative URLs pass through unchanged, exactly as before.
     """
     # Extract cell background colors from the stylesheet (non-neutral only)
     rows = extract_table(html_content)
@@ -1949,6 +1998,9 @@ def parse_sheet(html_content: str, artist_name: str) -> Artist:
 
     # Merge 0-song stub eras — see docs/decisions.md::parser.py::merge-stub-eras
     eras = _merge_empty_stub_eras(eras)
+
+    if source_url:
+        _absolutize_era_art(eras, source_url)
 
     # Step 3c: consolidate group labels within each era's sections
     for era in eras:

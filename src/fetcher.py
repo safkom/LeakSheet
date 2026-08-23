@@ -1528,7 +1528,7 @@ async def _aggregate_hub_workbook(
               if result is None:
                   return None
               with t.phase("hub_parse"):
-                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name)
+                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name, url_norm)
               return display, parsed
           except Exception as e:
               logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
@@ -1631,7 +1631,7 @@ async def async_fetch_and_parse(
             if not gid_is_misc_tab:
                 name = _resolve_artist_name(title, artist_name)
                 with t.phase("parse"):
-                    artist = await asyncio.to_thread(parse_sheet, html, name)
+                    artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
                 # Eras alone aren't enough — a hub tab parses to eras with no
                 # songs, and accepting it here would skip discovery entirely.
                 gid_songs = sum(
@@ -1678,7 +1678,7 @@ async def async_fetch_and_parse(
         if "<table" in base_html.lower():
             name = _resolve_artist_name(title, artist_name)
             with t.phase("parse"):
-                artist = await asyncio.to_thread(parse_sheet, base_html, name)
+                artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
                 artist.source_url = url
                 if write_cache:
@@ -1726,7 +1726,7 @@ async def async_fetch_and_parse(
                 try:
                     name = _resolve_artist_name(title, artist_name)
                     with t.phase("parse"):
-                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name)
+                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
                     n_eras = len(candidate.eras)
                     n_songs = sum(
                         len(s.songs)
@@ -1820,7 +1820,7 @@ async def async_fetch_and_parse(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )
         name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name)
+        artist = await asyncio.to_thread(parse_sheet, html, name, url)
         artist.source_url = url
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)
