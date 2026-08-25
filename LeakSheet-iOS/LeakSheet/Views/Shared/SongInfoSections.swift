@@ -127,6 +127,21 @@ nonisolated enum FileInfoRows {
         var id: String { label }
     }
 
+    /// Round a backend-supplied numeric string, keeping any unit suffix.
+    ///
+    /// `/metadata` forwards the container's own value, which for an MP3 is a
+    /// float — "308.75000823649214" rendered verbatim next to "44100Hz".
+    /// Non-numeric values (and anything already tidy) pass through untouched.
+    static func roundedNumeric(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        let digits = trimmed.prefix { $0.isNumber || $0 == "." || $0 == "-" }
+        guard let number = Double(digits), digits.contains(".") else { return value }
+        let unit = trimmed.dropFirst(digits.count).trimmingCharacters(in: .whitespaces)
+        let rounded = String(Int(number.rounded()))
+        return unit.isEmpty ? rounded : "\(rounded) \(unit)"
+    }
+
     static func rows(from meta: FileMetadata) -> [Row] {
         var rows: [Row] = []
         func add(_ label: String, _ value: String?) {
@@ -137,8 +152,8 @@ nonisolated enum FileInfoRows {
             let profile = meta.codecProfile.map { " (\($0))" } ?? ""
             add("Codec", codec + profile)
         }
-        add("Bitrate", meta.bitrate)
-        add("Sample Rate", meta.sampleRate)
+        add("Bitrate", roundedNumeric(meta.bitrate))
+        add("Sample Rate", roundedNumeric(meta.sampleRate))
         add("Bit Depth", meta.bitsPerSample)
         add("Channels", meta.channels.map(String.init))
         add("Lossless", meta.lossless.map { $0 ? "Yes" : "No" })

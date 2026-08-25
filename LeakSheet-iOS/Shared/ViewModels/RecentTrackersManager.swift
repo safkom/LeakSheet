@@ -94,6 +94,13 @@ final class RecentTrackersManager {
         save()
     }
 
+    /// Drop one tracker. The macOS sidebar lists these as navigable rows, so
+    /// removing a single stale entry has to be possible without Clear All.
+    func remove(_ entry: RecentTracker) {
+        trackers.removeAll { $0.id == entry.id }
+        save()
+    }
+
     // MARK: - Identity & dedup
 
     nonisolated static func identityKey(sourceUrl: String, slug: String) -> String {

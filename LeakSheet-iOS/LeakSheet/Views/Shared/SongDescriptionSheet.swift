@@ -7,6 +7,11 @@ typealias DescriptionSheet = SongDescriptionSheet
 struct SongDescriptionSheet: View {
     let payload: Payload
 
+    /// Set when hosted as the macOS Details inspector rather than presented as
+    /// a sheet — the host supplies the chrome, and there is nothing to dismiss.
+    /// Same convention as `QueueSheet`/`FavouritesView`/`SettingsView`.
+    let embedded: Bool
+
     /// Defined in Shared/Models so FavouritesManager and the tvOS detail screen
     /// can build one without depending on this sheet.
     typealias Payload = SongDetailPayload
@@ -24,8 +29,9 @@ struct SongDescriptionSheet: View {
 
     @State private var active: ActiveVersion
 
-    init(payload: Payload) {
+    init(payload: Payload, embedded: Bool = false) {
         self.payload = payload
+        self.embedded = embedded
         _active = State(initialValue: ActiveVersion(
             version: payload.version, song: payload.song,
             eraName: payload.eraName, eraArt: payload.eraArt
@@ -123,7 +129,26 @@ struct SongDescriptionSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+                .webSheet(item: $safariItem)
+        } else {
+            NavigationStack {
+                content
+                    .navigationTitle("Description")
+                    #if os(iOS)
+                    .toolbarTitleDisplayMode(.inline)
+                    #endif
+                    .toolbar { chromeToolbar }
+            }
+            .presentationBackground(.ultraThinMaterial)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .webSheet(item: $safariItem)
+        }
+    }
+
+    private var content: some View {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -338,11 +363,11 @@ struct SongDescriptionSheet: View {
                     if canStream {
                         Button {
                             play()
-                            dismiss()
+                            if !embedded { dismiss() }
                         } label: {
                             Label("Play", systemImage: "play.fill")
                                 .font(.headline)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? .lsAccent))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(accentColor ?? Color.lsAccent)
@@ -386,6 +411,21 @@ struct SongDescriptionSheet: View {
                             .accessibilityLabel(isFav ? "Remove from favourites" : "Add to favourites")
                     }
                     .buttonStyle(.plain)
+
+                    // Embedded has no toolbar to hang the overflow menu on.
+                    if embedded {
+                        Menu { overflowItems } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.headline)
+                                .frame(width: 52, height: 52)
+                                .background(Color.lsCard)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .frame(width: 52)
+                        .accessibilityLabel("More options")
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 12)
@@ -403,75 +443,79 @@ struct SongDescriptionSheet: View {
                 }
                 .ignoresSafeArea()
             )
-            .navigationTitle("Description")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Menu {
-                        if canStream {
-                            Button {
-                                play()
-                            } label: {
-                                Label("Play", systemImage: "play.fill")
-                            }
-                            Button {
-                                player.addToQueue(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
-                                Haptics.light()
-                            } label: {
-                                Label("Add to Queue", systemImage: "text.append")
-                            }
-                        }
-                        if let song = active.song, let slug = payload.artistSlug {
-                            Button {
-                                favourites.toggle(
-                                    song: song,
-                                    artistSlug: slug,
-                                    artistName: payload.artistName,
-                                    sourceUrl: nil,
-                                    eraName: active.eraName,
-                                    eraArt: active.eraArt
-                                )
-                                Haptics.light()
-                            } label: {
-                                Label("Favourite", systemImage: "heart")
-                            }
-                        } else {
-                            Button {
-                                let slug = payload.artistSlug ?? payload.artistName.slugified
-                                favourites.toggleFromVersion(
-                                    version: active.version,
-                                    artistSlug: slug,
-                                    artistName: payload.artistName,
-                                    sourceUrl: nil,
-                                    eraName: active.eraName,
-                                    eraArt: active.eraArt
-                                )
-                                Haptics.light()
-                            } label: {
-                                Label("Favourite", systemImage: "heart")
-                            }
-                        }
-                        if let link = active.version.links?.first {
-                            Button {
-                                Pasteboard.copy(link)
-                            } label: {
-                                Label("Copy Link", systemImage: "doc.on.doc")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("More options")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Done") { dismiss() }
-                }
+    }
+
+    // MARK: - Chrome
+
+    @ToolbarContentBuilder
+    private var chromeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Menu {
+                overflowItems
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("More options")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button("Done") { dismiss() }
+        }
+    }
+
+    /// Secondary actions — the toolbar menu when presented, the bottom-bar
+    /// menu when embedded.
+    @ViewBuilder
+    private var overflowItems: some View {
+        if canStream {
+            Button {
+                play()
+            } label: {
+                Label("Play", systemImage: "play.fill")
+            }
+            Button {
+                player.addToQueue(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+                Haptics.light()
+            } label: {
+                Label("Add to Queue", systemImage: "text.append")
             }
         }
-        .presentationBackground(.ultraThinMaterial)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .webSheet(item: $safariItem)
+        if let song = active.song, let slug = payload.artistSlug {
+            Button {
+                favourites.toggle(
+                    song: song,
+                    artistSlug: slug,
+                    artistName: payload.artistName,
+                    sourceUrl: nil,
+                    eraName: active.eraName,
+                    eraArt: active.eraArt
+                )
+                Haptics.light()
+            } label: {
+                Label("Favourite", systemImage: "heart")
+            }
+        } else {
+            Button {
+                let slug = payload.artistSlug ?? payload.artistName.slugified
+                favourites.toggleFromVersion(
+                    version: active.version,
+                    artistSlug: slug,
+                    artistName: payload.artistName,
+                    sourceUrl: nil,
+                    eraName: active.eraName,
+                    eraArt: active.eraArt
+                )
+                Haptics.light()
+            } label: {
+                Label("Favourite", systemImage: "heart")
+            }
+        }
+        if let link = active.version.links?.first {
+            Button {
+                Pasteboard.copy(link)
+            } label: {
+                Label("Copy Link", systemImage: "doc.on.doc")
+            }
+        }
     }
 
     // MARK: - Version picker

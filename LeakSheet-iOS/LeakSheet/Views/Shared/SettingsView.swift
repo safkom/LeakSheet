@@ -125,7 +125,9 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Settings")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .task {
                 cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
             }

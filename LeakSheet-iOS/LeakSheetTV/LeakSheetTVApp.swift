@@ -25,7 +25,6 @@ struct LeakSheetTVApp: App {
     var body: some Scene {
         WindowGroup {
             TVRootView()
-                .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
                 .environment(RecentTrackersManager.shared)

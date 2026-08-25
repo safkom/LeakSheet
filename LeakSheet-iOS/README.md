@@ -85,15 +85,23 @@ Per platform:
 
 | | iOS | macOS | tvOS |
 |---|---|---|---|
-| Shell | NavigationStack | NavigationSplitView sidebar | Sidebar TabView |
-| Song actions | swipe + context menu | context menu + right-click | detail screen |
+| Shell | NavigationStack | NavigationSplitView, sidebar selection | Sidebar TabView |
+| Era browsing | accordion | grid of covers, drill into one | accordion |
+| Song list | flattened LazyVStack | `List(selection:)` | focus list |
+| Song actions | swipe + context menu | hover controls, double-click, right-click | detail screen |
+| Details | sheet | inspector panel | detail screen |
 | Refresh | pull to refresh | ⌘R | toolbar button |
 | Queue | sheet | inspector panel (⌥⌘Q) | full-screen |
 | Now Playing | sheet | its own window (⇧⌘0) | full-screen |
+| Settings | sheet | `Settings` scene (⌘,) | sidebar tab |
 | Web links | in-app Safari | default browser | QR code to continue on a phone |
 | Embeds | WKWebView | WKWebView | QR code (no WebKit on tvOS) |
 | Video | inline `AVPlayerLayer` + native fullscreen | AVKit `VideoPlayer` | AVKit `VideoPlayer` |
 | Extras | haptics | menu bar commands, hover states | focus engine, Siri Remote play/pause |
+
+All three follow the system appearance; the palette is appearance-aware
+(`Shared/Utilities/DesignTokens.swift`) and control metrics fork per input
+device (`Shared/Utilities/Metrics.swift`).
 
 ## Project layout
 
@@ -116,7 +124,9 @@ LeakSheet/              — iOS + macOS
     ├── Artist/         — ArtistView + ArtistContentLists + ArtistRowViews, EraCard, SongRow, …
     ├── Player/         — MiniPlayerBar, NowPlayingView, VideoSurfaceView
     ├── Shared/         — SongDescriptionSheet, Settings, Queue, Favourites, sheets
-    └── macOS/          — MacRootView, LeakSheetCommands, MacUIState
+    └── macOS/          — MacRootView, MacSidebar, MacArtistView, MacEraGrid,
+                          MacSongList, MacSongRow, MacInspector,
+                          LeakSheetCommands, MacUIState
 
 LeakSheetTV/            — tvOS
 ├── LeakSheetTVApp.swift

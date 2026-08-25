@@ -3,45 +3,120 @@ import SwiftUI
 // MARK: - App Colors
 
 extension Color {
-    // Core palette (OLED dark)
-    static let lsBackground = Color.black                          // #000000
-    static let lsCard = Color(hex: 0x0F0F0F)                     // #0f0f0f
-    static let lsBorder = Color(hex: 0x242424)                   // #242424
+    // MARK: - Appearance
+
+    /// An appearance-aware colour.
+    ///
+    /// SwiftUI has no cross-platform dynamic `Color` initialiser, so the fork
+    /// lives here once and every token below is built from it. Asset-catalog
+    /// colour sets would work too, but 30 of them is a lot of JSON to keep in
+    /// step with the HSB literals the badge palette is actually derived from.
+    static func adaptive(light: Color, dark: Color) -> Color {
+        #if canImport(AppKit)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(dark) : NSColor(light)
+        })
+        #else
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+        #endif
+    }
+
+    /// A palette tone: one hue, two appearances.
+    ///
+    /// Every badge/credit/filter colour is used as TEXT on a low-opacity wash of
+    /// itself (`BadgePill`, `CreditTagsView`). The tuned values sit at brightness
+    /// 0.75–0.96, which is right on black and illegible on white — so the light
+    /// appearance keeps the hue, nudges saturation up and drops brightness into
+    /// AA range instead of hand-authoring 30 second literals.
+    ///
+    /// `dark` is the original value verbatim; the dark appearance is unchanged.
+    static func tone(
+        hue: Double,
+        saturation: Double,
+        brightness: Double,
+        lightBrightness: Double = 0.52
+    ) -> Color {
+        adaptive(
+            light: Color(hue: hue, saturation: min(saturation * 1.08, 1), brightness: lightBrightness),
+            dark: Color(hue: hue, saturation: saturation, brightness: brightness)
+        )
+    }
+
+    // MARK: - Core palette
+
+    /// App background.
+    ///
+    /// iPhone keeps OLED black (it is a real power saving on that panel and the
+    /// design was drawn for it). A desktop display has no such payoff and a
+    /// full-window pure black reads as a phone app blown up, so the Mac sits a
+    /// few points off zero.
+    static let lsBackground = adaptive(light: Color(hex: 0xFFFFFF), dark: macDark(0x141414, iOS: 0x000000))
+    static let lsCard = adaptive(light: Color(hex: 0xF2F2F5), dark: macDark(0x1C1C1C, iOS: 0x0F0F0F))
+    static let lsBorder = adaptive(light: Color(hex: 0xD9D9DE), dark: Color(hex: 0x242424))
 
     // Text
-    static let lsDim = Color(hex: 0x595959)                     // #595959
+    static let lsDim = adaptive(light: Color(hex: 0x8E8E93), dark: Color(hex: 0x595959))
 
     // Accent
-    static let lsPrimary = Color(hue: 220/360, saturation: 0.70, brightness: 0.96)  // ~#5894f5
+    static let lsPrimary = tone(hue: 220 / 360, saturation: 0.655, brightness: 0.96, lightBrightness: 0.74)
+
+    /// Selected-row fill for the macOS list.
+    ///
+    /// The system default is a saturated accent slab, which fights an OLED-dark
+    /// app whose every panel is tinted by its era art. A neutral lifted row
+    /// reads as "this one" without repainting it.
+    ///
+    /// Two static values rather than one `adaptive` colour: the list's selection
+    /// fill comes from its `tint`, and a tint built from a dynamic platform
+    /// colour is ignored — the list falls back to the system accent. The caller
+    /// picks by scheme.
+    static let lsSelectionDark = Color(hex: 0x3A3A3C)
+    static let lsSelectionLight = Color(hex: 0xD6D6DB)
+
+    static func lsSelection(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? lsSelectionDark : lsSelectionLight
+    }
 
     // Semantic
     static let lsAccent = lsPrimary
-    static let lsError = Color(hex: 0xF85149)                   // #f85149
-    static let lsFavourite = Color(hex: 0xE84057)               // #e84057
+    static let lsError = adaptive(light: Color(hex: 0xC0342D), dark: Color(hex: 0xF85149))
+    static let lsFavourite = adaptive(light: Color(hex: 0xC2264A), dark: Color(hex: 0xE84057))
+
+    /// Picks between two dark-appearance values by platform.
+    private static func macDark(_ mac: UInt, iOS: UInt) -> Color {
+        #if os(macOS)
+        Color(hex: mac)
+        #else
+        Color(hex: iOS)
+        #endif
+    }
 
     // MARK: - Badge Colors
 
     // Quality badges
-    static let badgeOG = Color(hue: 40/360, saturation: 0.90, brightness: 0.96)
-    static let badgeLossless = Color(hue: 200/360, saturation: 0.85, brightness: 0.96)
-    static let badgeHQ = Color(hue: 50/360, saturation: 0.92, brightness: 0.96)
-    static let badgeCD = Color(hue: 130/360, saturation: 0.55, brightness: 0.95)
-    static let badgeLQ = Color(hue: 0/360, saturation: 0.70, brightness: 0.96)
-    static let badgeNA = Color(hue: 0/360, saturation: 0.0, brightness: 0.92)
-    static let badgeRec = Color(hue: 30/360, saturation: 0.65, brightness: 0.95)
+    static let badgeOG = tone(hue: 40 / 360, saturation: 0.90, brightness: 0.96)
+    static let badgeLossless = tone(hue: 200 / 360, saturation: 0.85, brightness: 0.96)
+    static let badgeHQ = tone(hue: 50 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)
+    static let badgeCD = tone(hue: 130 / 360, saturation: 0.55, brightness: 0.95, lightBrightness: 0.42)
+    static let badgeLQ = tone(hue: 0 / 360, saturation: 0.67, brightness: 0.96)
+    static let badgeNA = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.92, lightBrightness: 0.38)
+    static let badgeRec = tone(hue: 30 / 360, saturation: 0.65, brightness: 0.95)
 
     // Availability badges
-    static let badgeOGFile = Color(hue: 140/360, saturation: 0.55, brightness: 0.95)
-    static let badgeFull = Color(hue: 215/360, saturation: 0.70, brightness: 0.96)
-    static let badgeTagged = Color(hue: 150/360, saturation: 0.55, brightness: 0.95)
-    static let badgePartial = Color(hue: 50/360, saturation: 0.92, brightness: 0.96)
-    static let badgeSnippet = Color(hue: 0/360, saturation: 0.70, brightness: 0.96)
-    static let badgeConfirmed = Color(hue: 0/360, saturation: 0.0, brightness: 0.95)
-    static let badgeBeatOnly = Color(hue: 275/360, saturation: 0.50, brightness: 0.96)
-    static let badgeStem = Color(hue: 270/360, saturation: 0.50, brightness: 0.96)
-    static let badgeUnavailable = Color(hue: 0/360, saturation: 0.0, brightness: 0.88)
-    static let badgeRumored = Color(hue: 40/360, saturation: 0.45, brightness: 0.86)      // tentative amber
-    static let badgeConflicting = Color(hue: 15/360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
+    static let badgeOGFile = tone(hue: 140 / 360, saturation: 0.55, brightness: 0.95, lightBrightness: 0.40)
+    static let badgeFull = tone(hue: 215 / 360, saturation: 0.70, brightness: 0.96)
+    static let badgeTagged = tone(hue: 150 / 360, saturation: 0.55, brightness: 0.95, lightBrightness: 0.40)
+    static let badgePartial = tone(hue: 50 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)
+    static let badgeSnippet = tone(hue: 0 / 360, saturation: 0.67, brightness: 0.96)
+    static let badgeConfirmed = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.95, lightBrightness: 0.38)
+    static let badgeBeatOnly = tone(hue: 275 / 360, saturation: 0.50, brightness: 0.96)
+    static let badgeStem = tone(hue: 270 / 360, saturation: 0.50, brightness: 0.96)
+    static let badgeUnavailable = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.88, lightBrightness: 0.40)
+    static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)      // tentative amber
+    static let badgeConflicting = tone(hue: 15 / 360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
     // Content-tab entry type ("Production", "Music Video"). Deliberately
     // neutral: on song rows colour means quality or availability, and the
@@ -138,37 +213,33 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
 // MARK: - Color Utilities
 
 extension Color {
-    /// Extract sRGB components (0–1 range).
+    /// Extract sRGB components (0–1 range) as they resolve in `scheme`.
     ///
     /// Uses SwiftUI's own `resolve(in:)` rather than `UIColor(self)` — the
     /// UIKit round-trip has no macOS equivalent.
     /// See DECISIONS.md::DesignTokens.swift::color-resolve.
     ///
-    /// Resolved in a **dark** environment. A bare `EnvironmentValues()`
-    /// defaults to light, and while the literals in this file are unaffected,
-    /// callers do pass dynamic colours (`.primary`) — which resolved to black
-    /// and made `ensureReadable` brighten white text down to mid-grey. The app
-    /// is force-dark (LeakSheetApp.swift), so dark is the honest environment.
-    var rgbComponents: (red: Double, green: Double, blue: Double) {
+    /// The scheme is a parameter, not a constant, because the palette above is
+    /// appearance-aware: resolving `.lsBackground` in the wrong scheme hands the
+    /// contrast maths the opposite backdrop and every derived colour inverts.
+    /// It defaults to `.dark` so the pinned literal tests keep their meaning.
+    func rgbComponents(in scheme: ColorScheme = .dark) -> (red: Double, green: Double, blue: Double) {
         var env = EnvironmentValues()
-        env.colorScheme = .dark
+        env.colorScheme = scheme
         let c = resolve(in: env)
         return (Double(c.red), Double(c.green), Double(c.blue))
     }
 
-    /// Return a brightened version of this color (each channel clamped to 1.0).
-    func brightened(by amount: Double) -> Color {
-        let (r, g, b) = rgbComponents
-        return Color(
-            red: min(r + amount, 1.0),
-            green: min(g + amount, 1.0),
-            blue: min(b + amount, 1.0)
-        )
+    /// Shift every channel by `amount`, clamped to 0…1. Negative darkens.
+    func brightened(by amount: Double, in scheme: ColorScheme = .dark) -> Color {
+        let (r, g, b) = rgbComponents(in: scheme)
+        func clamp(_ v: Double) -> Double { min(max(v + amount, 0), 1) }
+        return Color(red: clamp(r), green: clamp(g), blue: clamp(b))
     }
 
     /// WCAG relative luminance (0 = black, 1 = white).
-    var relativeLuminance: Double {
-        let (r, g, b) = rgbComponents
+    func relativeLuminance(in scheme: ColorScheme = .dark) -> Double {
+        let (r, g, b) = rgbComponents(in: scheme)
         func linearize(_ c: Double) -> Double {
             c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
@@ -176,35 +247,52 @@ extension Color {
     }
 
     /// WCAG contrast ratio (1:1 = identical, 21:1 = max).
-    func contrastRatio(against other: Color) -> Double {
-        let l1 = max(relativeLuminance, other.relativeLuminance)
-        let l2 = min(relativeLuminance, other.relativeLuminance)
+    func contrastRatio(against other: Color, in scheme: ColorScheme = .dark) -> Double {
+        let l1 = max(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
+        let l2 = min(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
         return (l1 + 0.05) / (l2 + 0.05)
     }
 
-    /// Progressively brighten until WCAG AA contrast ratio is met against `background`.
-    /// Falls back to `.primary` if 20 iterations can't reach the target.
-    func ensureReadable(against background: Color, minRatio: Double = 4.5) -> Color {
+    /// Step away from `background` until WCAG AA contrast is met.
+    ///
+    /// Direction follows the backdrop: brighten on a dark one, darken on a light
+    /// one. Brightening only — which is what this did while the app was
+    /// force-dark — walks a colour on a white page *toward* white and never
+    /// converges. Falls back to `.primary` if 20 steps can't reach the target.
+    func ensureReadable(
+        against background: Color,
+        minRatio: Double = 4.5,
+        in scheme: ColorScheme = .dark
+    ) -> Color {
+        let step = background.relativeLuminance(in: scheme) < 0.5 ? 0.06 : -0.06
         var current = self
         for _ in 0..<20 {
-            if current.contrastRatio(against: background) >= minRatio { return current }
-            current = current.brightened(by: 0.06)
+            if current.contrastRatio(against: background, in: scheme) >= minRatio { return current }
+            current = current.brightened(by: step, in: scheme)
         }
         return .primary
     }
 
-    /// Returns near-white or near-black depending on background luminance —
-    /// guaranteed-legible body/title text for any backdrop color.
-    static func preferredText(on background: Color) -> Color {
-        background.relativeLuminance < 0.5 ? Color.white : Color.black
+    /// White or black — whichever actually contrasts more with `background`.
+    ///
+    /// Compares both candidates rather than splitting at luminance 0.5: the WCAG
+    /// crossover is near 0.179, so every mid-tone backdrop between the two got
+    /// white text when black reads better. An era card from a near-white cover
+    /// lands exactly there (its dimmed gradient is mid-grey), and titled itself
+    /// in white at 3.70:1 where black gives 5.72:1.
+    static func preferredText(on background: Color, in scheme: ColorScheme = .dark) -> Color {
+        let luminance = background.relativeLuminance(in: scheme)
+        let againstWhite = 1.05 / (luminance + 0.05)
+        let againstBlack = (luminance + 0.05) / 0.05
+        return againstWhite >= againstBlack ? Color.white : Color.black
     }
 
     /// Linear blend toward `other` (0 = self, 1 = other). Used to approximate
     /// the effective backdrop where a gradient sits between two colors.
-    func blended(with other: Color, fraction: Double) -> Color {
+    func blended(with other: Color, fraction: Double, in scheme: ColorScheme = .dark) -> Color {
         let f = min(max(fraction, 0), 1)
-        let (r1, g1, b1) = rgbComponents
-        let (r2, g2, b2) = other.rgbComponents
+        let (r1, g1, b1) = rgbComponents(in: scheme)
+        let (r2, g2, b2) = other.rgbComponents(in: scheme)
         return Color(
             red: r1 + (r2 - r1) * f,
             green: g1 + (g2 - g1) * f,
@@ -214,11 +302,11 @@ extension Color {
 
     // MARK: - Filter-specific accent colors
 
-    static let filterBestOf = Color(hue: 45/360, saturation: 0.85, brightness: 0.90)
-    static let filterGrail = Color(hue: 43/360, saturation: 0.92, brightness: 0.96)   // trophy gold (grails + wanted)
-    static let filterRecent = Color(hue: 140/360, saturation: 0.70, brightness: 0.80)
-    static let filterNoSnippets = Color(hue: 280/360, saturation: 0.60, brightness: 0.85)
-    static let filterMisc = Color(hue: 200/360, saturation: 0.65, brightness: 0.85)
+    static let filterBestOf = tone(hue: 45 / 360, saturation: 0.85, brightness: 0.90, lightBrightness: 0.46)
+    static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)   // trophy gold (grails + wanted)
+    static let filterRecent = tone(hue: 140 / 360, saturation: 0.70, brightness: 0.80, lightBrightness: 0.42)
+    static let filterNoSnippets = tone(hue: 280 / 360, saturation: 0.60, brightness: 0.85)
+    static let filterMisc = tone(hue: 200 / 360, saturation: 0.65, brightness: 0.85)
 }
 
 // MARK: - Shared formatters
@@ -268,14 +356,30 @@ extension String {
 enum CreditType: String {
     case featuring, producers, collaboration, refs, director, creditedArtists
 
+    // `static let`, not literals in the switch: `Color.tone` builds a dynamic
+    // platform colour (a closure the system calls per appearance), and
+    // `CreditTagsView` reads `color` twice per tag on every body evaluation.
+    // Inline, that allocated a fresh one each time on a list that can be
+    // thousands of rows. The badge palette was already declared this way.
+    //
+    // Dark brightnesses raised where the shipped value could not clear AA on
+    // its own tag (producers 3.67:1, creditedArtists 3.87:1, director 3.45:1).
+    // Hues are unchanged, so the credits still read as the same six colours.
+    private static let featuringColor = Color.tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
+    private static let producersColor = Color.tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
+    private static let collaborationColor = Color.tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)
+    private static let refsColor = Color.tone(hue: 30 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.44)
+    private static let directorColor = Color.tone(hue: 250 / 360, saturation: 0.45, brightness: 0.90, lightBrightness: 0.48)
+    private static let creditedArtistsColor = Color.tone(hue: 340 / 360, saturation: 0.50, brightness: 0.84, lightBrightness: 0.46)
+
     var color: Color {
         switch self {
-        case .featuring: Color(hue: 200/360, saturation: 0.60, brightness: 0.75)
-        case .producers: Color(hue: 280/360, saturation: 0.50, brightness: 0.75)
-        case .collaboration: Color(hue: 160/360, saturation: 0.50, brightness: 0.70)
-        case .refs: Color(hue: 30/360, saturation: 0.60, brightness: 0.75)
-        case .director: Color(hue: 250/360, saturation: 0.45, brightness: 0.75)
-        case .creditedArtists: Color(hue: 340/360, saturation: 0.50, brightness: 0.75)
+        case .featuring: Self.featuringColor
+        case .producers: Self.producersColor
+        case .collaboration: Self.collaborationColor
+        case .refs: Self.refsColor
+        case .director: Self.directorColor
+        case .creditedArtists: Self.creditedArtistsColor
         }
     }
 

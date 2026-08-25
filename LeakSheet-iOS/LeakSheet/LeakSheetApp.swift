@@ -19,12 +19,15 @@ struct LeakSheetApp: App {
         #if os(macOS)
         // Window frames and sidebar state restore automatically on macOS —
         // `restorationBehavior` is the opt-out, so there's nothing to add here.
-        // Named "main" so LeakSheetCommands can bring it forward — ⌥⌘Q toggles
-        // state only this window's inspector observes, and without this the
-        // toggle would be invisible while the Now Playing window is key.
-        WindowGroup(id: "main") {
+        //
+        // `Window`, not `WindowGroup`: the commands raise this window by id
+        // (⌘I and ⌥⌘Q drive an inspector only this window shows), and
+        // `openWindow(id:)` on a WindowGroup OPENS ANOTHER COPY instead of
+        // bringing the existing one forward — two identical main windows.
+        // A Window scene is a singleton, and it also removes File ▸ New and
+        // supplies its own Window-menu item for free.
+        Window("LeakSheet", id: "main") {
             MacRootView()
-                .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
                 .environment(RecentTrackersManager.shared)
@@ -40,17 +43,22 @@ struct LeakSheetApp: App {
 
         Window("Now Playing", id: "now-playing") {
             NowPlayingView()
-                .preferredColorScheme(.dark)
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
         }
-        .defaultSize(width: 440, height: 660)
+        .defaultSize(width: 460, height: 700)
         .windowResizability(.contentMinSize)
         .keyboardShortcut("0", modifiers: [.command, .shift])
+
+        // ⌘, — the Mac's one place for preferences. It used to be a sidebar row,
+        // which is neither where a Mac user looks nor reachable by keyboard.
+        Settings {
+            SettingsView(embedded: true)
+                .frame(width: 460, height: 520)
+        }
         #else
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.dark)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

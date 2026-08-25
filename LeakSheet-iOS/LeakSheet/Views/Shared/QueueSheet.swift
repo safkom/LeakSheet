@@ -11,7 +11,7 @@ struct QueueSheet: View {
 
     private static let emptyHint: String = {
         #if os(macOS)
-        "Right-click a song and choose Add to Queue."
+        "Hover a song and use its ⋯ menu, or right-click it."
         #else
         "Swipe left on a song to add it to the queue."
         #endif
@@ -19,10 +19,39 @@ struct QueueSheet: View {
 
     var body: some View {
         if embedded {
-            content
+            // The inspector this is hosted in sits OUTSIDE the detail column's
+            // navigation container, so `navigationTitle`/`toolbar` here would
+            // not label the panel — they would overwrite the window's own title
+            // and drop Clear into the main toolbar. Inline header instead.
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Queue (\(player.queue.count))")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if !player.queue.isEmpty {
+                        Button("Clear") { player.clearQueue() }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(Color.lsError)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+                Divider().overlay(Color.lsBorder)
+
+                content
+            }
         } else {
-            NavigationStack { content }
-                .presentationBackground(.ultraThinMaterial)
+            NavigationStack {
+                content
+                    .navigationTitle("Queue (\(player.queue.count))")
+                    #if os(iOS)
+                    .toolbarTitleDisplayMode(.inline)
+                    #endif
+                    .toolbar { chrome }
+            }
+            .presentationBackground(.ultraThinMaterial)
         }
     }
 
@@ -109,38 +138,34 @@ struct QueueSheet: View {
                 }
             }
             .background(Color.lsBackground)
-            .navigationTitle("Queue (\(player.queue.count))")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    if !player.queue.isEmpty {
-                        Button("Clear") {
-                            player.clearQueue()
-                        }
-                        .foregroundStyle(Color.lsError)
-                    }
-                }
-                #if os(iOS)
-                // .onMove needs edit mode on iOS, and there was no way to
-                // enter it — so the whole reorder path (moveInQueue and its
-                // test) was unreachable on the platform that has it. macOS
-                // Lists reorder by drag natively and need no button.
-                ToolbarItem(placement: .primaryAction) {
-                    // Shown whenever the queue is non-empty, not only when it
-                    // has 2+ items: gated on `> 1`, removing rows down to one
-                    // while editing took the button away with edit mode still
-                    // active, and nothing else exits it.
-                    if !player.queue.isEmpty {
-                        EditButton()
-                    }
-                }
-                #endif
-                ToolbarItem(placement: .primaryAction) {
-                    if !embedded {
-                        Button("Done") { dismiss() }
-                    }
-                }
+    }
+
+    @ToolbarContentBuilder
+    private var chrome: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            if !player.queue.isEmpty {
+                Button("Clear") { player.clearQueue() }
+                    .foregroundStyle(Color.lsError)
             }
+        }
+        #if os(iOS)
+        // .onMove needs edit mode on iOS, and there was no way to enter it —
+        // so the whole reorder path (moveInQueue and its test) was unreachable
+        // on the platform that has it. macOS Lists reorder by drag natively
+        // and need no button.
+        ToolbarItem(placement: .primaryAction) {
+            // Shown whenever the queue is non-empty, not only when it has 2+
+            // items: gated on `> 1`, removing rows down to one while editing
+            // took the button away with edit mode still active, and nothing
+            // else exits it.
+            if !player.queue.isEmpty {
+                EditButton()
+            }
+        }
+        #endif
+        ToolbarItem(placement: .primaryAction) {
+            Button("Done") { dismiss() }
+        }
     }
 
     private var queueArtPlaceholder: some View {

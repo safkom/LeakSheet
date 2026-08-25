@@ -16,9 +16,14 @@ struct FavouritesView: View {
     /// sheet — the host supplies the navigation chrome.
     var embedded = false
 
+    /// Where to send a tapped favourite. Nil presents this view's own sheet
+    /// (iOS); the macOS host passes a closure that drives its Details inspector
+    /// so a favourite and a song row open the same surface.
+    var onShowDescription: ((DescriptionSheet.Payload) -> Void)?
+
     private static let emptyHint: String = {
         #if os(macOS)
-        "Right-click a song and choose Favourite to save it here."
+        "Hover a song and use its ⋯ menu, or right-click it."
         #else
         "Swipe left on a song and tap the heart to favourite it."
         #endif
@@ -50,7 +55,11 @@ struct FavouritesView: View {
                                     ForEach(eraGroup.entries) { entry in
                                         Button {
                                             if let payload = entry.toDescriptionPayload {
-                                                showDescription = payload
+                                                if let onShowDescription {
+                                                    onShowDescription(payload)
+                                                } else {
+                                                    showDescription = payload
+                                                }
                                             }
                                         } label: {
                                             HStack(spacing: 10) {
@@ -129,7 +138,9 @@ struct FavouritesView: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Favourites (\(favourites.entries.count))")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .sheet(item: $showDescription) { payload in
                 SongDescriptionSheet(payload: payload)
                     .environment(FavouritesManager.shared)

@@ -24,7 +24,9 @@ struct BadgeLegendSheet: View {
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Legend")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
