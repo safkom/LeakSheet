@@ -9,6 +9,14 @@ import Foundation
 /// the round-trip), and keys files by the full SHA-256 of the URL — the v1
 /// scheme truncated base64(url) to 64 chars, so long URLs sharing a prefix
 /// collided.
+///
+/// v3 (2026-08-26): the payload file IS the response bytes, with no JSON
+/// envelope around them. v2 still wrapped them in a `CachedEntry`, and
+/// `JSONEncoder` base64s a `Data` property by default — so every write
+/// inflated a multi-MB tracker by a third and copied it again, and every cold
+/// read decoded that base64 back, on the slowest path in the app. The etag,
+/// timestamp and version live in the sidecar, which already existed and is the
+/// only thing the load path reads before it knows whether it wants the payload.
 actor CacheService {
     static let shared = CacheService()
 
@@ -21,7 +29,7 @@ actor CacheService {
         var version: Int = CacheService.currentVersion
     }
 
-    private static let currentVersion = 2
+    private static let currentVersion = 3
     /// Age after which a cached entry is treated as stale and discarded on read.
     private static let maxAge: TimeInterval = 7 * 24 * 3600
 
@@ -75,19 +83,18 @@ actor CacheService {
     }
 
     func getCachedTracker(for url: String) -> CachedEntry? {
-        let file = cacheFile(for: url)
-        guard let data = try? Data(contentsOf: file) else { return nil }
-        guard let entry = try? JSONDecoder().decode(CachedEntry.self, from: data) else { return nil }
-        guard entry.version == Self.currentVersion else {
-            // Schema version mismatch — discard stale cache entry
-            try? FileManager.default.removeItem(at: file)
+        // The payload carries no metadata of its own now, so the sidecar is
+        // authoritative: no sidecar means a v2 envelope or a half-written pair,
+        // and either way the bytes cannot be validated. Both files go.
+        guard let meta = readMeta(for: url),
+              meta.version == Self.currentVersion,
+              Date.now.timeIntervalSince(meta.timestamp) <= Self.maxAge
+        else {
+            removeTracker(for: url)
             return nil
         }
-        if Date.now.timeIntervalSince(entry.timestamp) > Self.maxAge {
-            try? FileManager.default.removeItem(at: file)
-            return nil
-        }
-        return entry
+        guard let data = try? Data(contentsOf: cacheFile(for: url)) else { return nil }
+        return CachedEntry(data: data, etag: meta.etag, timestamp: meta.timestamp, version: meta.version)
     }
 
     func getCachedArtist(for url: String) -> Artist? {
@@ -102,23 +109,21 @@ actor CacheService {
 
     /// ETag + timestamp without touching the payload.
     ///
-    /// Falls back to a full read for entries written before the sidecar
-    /// existed, and writes the sidecar on the way out so the next load is
-    /// cheap. Returns nil if the payload itself is missing or stale — the two
-    /// files are only ever written together, but a partial cache directory
-    /// must not make the loader think it has a valid ETag.
+    /// Returns nil if the payload itself is missing or stale — the two files
+    /// are only ever written together, but a partial cache directory must not
+    /// make the loader think it has a valid ETag.
     func getCachedMeta(for url: String) -> CachedMeta? {
-        if let data = try? Data(contentsOf: metaFile(for: url)),
-           let meta = try? JSONDecoder().decode(CachedMeta.self, from: data),
-           meta.version == Self.currentVersion,
-           Date.now.timeIntervalSince(meta.timestamp) <= Self.maxAge,
-           FileManager.default.fileExists(atPath: cacheFile(for: url).path) {
-            return meta
-        }
-        guard let entry = getCachedTracker(for: url) else { return nil }
-        let meta = CachedMeta(etag: entry.etag, timestamp: entry.timestamp)
-        writeMeta(meta, for: url)
+        guard let meta = readMeta(for: url),
+              meta.version == Self.currentVersion,
+              Date.now.timeIntervalSince(meta.timestamp) <= Self.maxAge,
+              FileManager.default.fileExists(atPath: cacheFile(for: url).path)
+        else { return nil }
         return meta
+    }
+
+    private func readMeta(for url: String) -> CachedMeta? {
+        guard let data = try? Data(contentsOf: metaFile(for: url)) else { return nil }
+        return try? JSONDecoder().decode(CachedMeta.self, from: data)
     }
 
     func getCachedEtag(for url: String) -> String? {
@@ -126,11 +131,18 @@ actor CacheService {
     }
 
     /// Store the raw server response bytes for a tracker URL.
+    ///
+    /// The payload is written verbatim — no envelope, no encode pass. The
+    /// sidecar goes out second: a payload without a sidecar reads as a miss,
+    /// which is the safe way round for an interrupted write.
     func cacheTracker(url: String, data: Data, etag: String) {
-        let entry = CachedEntry(data: data, etag: etag, timestamp: .now)
-        guard let entryData = try? JSONEncoder().encode(entry) else { return }
-        try? entryData.write(to: cacheFile(for: url), options: .atomic)
-        writeMeta(CachedMeta(etag: etag, timestamp: entry.timestamp), for: url)
+        let timestamp = Date.now
+        do {
+            try data.write(to: cacheFile(for: url), options: .atomic)
+        } catch {
+            return
+        }
+        writeMeta(CachedMeta(etag: etag, timestamp: timestamp), for: url)
     }
 
     private func writeMeta(_ meta: CachedMeta, for url: String) {

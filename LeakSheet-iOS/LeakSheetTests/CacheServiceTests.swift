@@ -52,14 +52,17 @@ struct CacheServiceTests {
 
         await service.cacheTracker(url: "https://example.com/x", data: artistJSON, etag: "e")
         let file = await service.cacheFileForTesting(url: "https://example.com/x")
+        let meta = await service.metaFileForTesting(url: "https://example.com/x")
 
-        // Rewrite the entry as an older schema version
-        var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
-        raw["version"] = 1
-        try JSONSerialization.data(withJSONObject: raw).write(to: file)
+        // The schema version lives in the sidecar since v3 — the payload is
+        // raw response bytes with nothing of ours in them.
+        var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: meta)) as! [String: Any]
+        raw["version"] = 2
+        try JSONSerialization.data(withJSONObject: raw).write(to: meta)
 
         #expect(await service.getCachedTracker(for: "https://example.com/x") == nil)
         #expect(!FileManager.default.fileExists(atPath: file.path))
+        #expect(!FileManager.default.fileExists(atPath: meta.path))
     }
 
     @Test func `v1 orphan files are swept on init`() async throws {
@@ -134,18 +137,32 @@ struct CacheServiceTests {
         #expect(await service.getCachedEtag(for: url) == "e1")
     }
 
-    @Test func `an entry written before the sidecar existed still resolves`() async throws {
+    @Test func `an entry with no sidecar is discarded, not trusted`() async throws {
         let (service, dir) = makeService()
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let url = "https://example.com/legacy"
         await service.cacheTracker(url: url, data: artistJSON, etag: "old")
-        // Simulate a cache directory from a build that never wrote sidecars.
+        // A v2 envelope, or a write interrupted between the two files. Since v3
+        // the payload is raw bytes carrying no etag, timestamp or version, so a
+        // sidecar-less payload cannot be validated and must not be served.
         try FileManager.default.removeItem(at: await service.metaFileForTesting(url: url))
 
-        #expect(await service.getCachedEtag(for: url) == "old")
-        // …and it back-fills, so the next load is cheap.
-        #expect(FileManager.default.fileExists(atPath: await service.metaFileForTesting(url: url).path))
+        #expect(await service.getCachedEtag(for: url) == nil)
+        #expect(await service.getCachedTracker(for: url) == nil)
+        #expect(!FileManager.default.fileExists(atPath: await service.cacheFileForTesting(url: url).path))
+    }
+
+    @Test func `the payload file is the raw response, not a JSON envelope`() async throws {
+        // v2 wrapped the bytes in a CachedEntry, and JSONEncoder base64s Data —
+        // a third larger on disk plus an encode/decode pass over a multi-MB
+        // tracker on the coldest path in the app.
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        await service.cacheTracker(url: "https://example.com/raw", data: artistJSON, etag: "e")
+        let onDisk = try Data(contentsOf: await service.cacheFileForTesting(url: "https://example.com/raw"))
+        #expect(onDisk == artistJSON)
     }
 
     @Test func `a sidecar without its payload is not treated as a valid cache`() async throws {

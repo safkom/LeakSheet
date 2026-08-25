@@ -379,7 +379,11 @@ struct NowPlayingView: View {
                     )
                 )
         } else if !player.artUrl.isEmpty {
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600)) {
+            // Width matches maxPixelSize, as every other call site does: asking
+            // for 1600 while CachedImage capped the decode at its 1280 default
+            // downloaded bytes that were then thrown away, and 640 already
+            // covers the 280pt frame at 2x.
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 640), maxPixelSize: 640) {
                 artPlaceholder
             }
             .modifier(ArtworkSquare())

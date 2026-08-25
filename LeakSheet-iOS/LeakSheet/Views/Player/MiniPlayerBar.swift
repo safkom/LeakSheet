@@ -77,11 +77,18 @@ struct MiniPlayerBar: View {
                                     }
                                 }
                             }
+
+                            // Claims the empty space beside the labels: a .plain
+                            // Button hit-tests only its drawn content, so the
+                            // padding around the art and text was dead and taps
+                            // there did nothing. Inside the label, not outside —
+                            // the gesture is attached to the label, not the
+                            // modified Button (see DECISIONS.md::contentShape).
+                            Spacer(minLength: 0)
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-
-                    Spacer()
 
                     // Transport controls
                     HStack(spacing: Metrics.hitTarget / 2) {
