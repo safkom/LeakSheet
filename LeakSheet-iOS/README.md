@@ -60,7 +60,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild test -p
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheetTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=27.0' build
 ```
 
-Swift Testing (`import Testing`), 128 cases in `LeakSheetTests/`, all of which
+Swift Testing (`import Testing`), 288 cases in `LeakSheetTests/`, all of which
 run unchanged on both iOS and macOS. There is no tvOS test target — the code
 under test is byte-identical and already covered twice. The schemes are shared,
 so this all works from a clean clone.

@@ -447,12 +447,16 @@ streamable hosts.
 
 ## 5. Gestures & Interactions
 
+Tap never starts playback: an accidental brush of the list used to hijack
+whatever was playing. Play is one gesture away — swipe from the leading edge,
+long-press → Play, the three-dot menu, or the Play button inside Details.
+
 | Element | Tap | Swipe Right | Swipe Left | Long Press |
 |---------|-----|-------------|------------|------------|
-| SongRow (single, streamable) | Play | Play | Add to queue | Context menu |
+| SongRow (single, streamable) | Show description | Play | Add to queue | Context menu |
 | SongRow (single, not streamable) | Show description | — | — | Context menu |
 | SongRow (multi-version) | Expand/collapse | Play primary | Add primary to queue | Context menu |
-| VersionRow (streamable) | Play | Play | Add to queue | Context menu |
+| VersionRow (streamable) | Show description | Play | Add to queue | Context menu |
 | VersionRow (not streamable) | Show description | — | — | Context menu |
 | EraCard header | Toggle expand | — | — | — |
 

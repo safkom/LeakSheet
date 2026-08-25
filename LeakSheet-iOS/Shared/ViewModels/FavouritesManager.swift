@@ -10,7 +10,7 @@ final class FavouritesManager {
     static let shared = FavouritesManager()
 
     private static let storageKey = "leaksheet_favourites"
-    private static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Favourites")
+    private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Favourites")
 
     var entries: [FavouriteEntry] = [] {
         didSet { keyIndex = Set(entries.map(\.key)) }

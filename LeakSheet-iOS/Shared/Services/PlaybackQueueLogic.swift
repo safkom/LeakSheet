@@ -35,11 +35,6 @@ nonisolated struct PlaybackQueueLogic {
     /// list in place for when the user plays something from B.
     private var erasByArtist: [String: [EraSongContext]] = [:]
 
-    /// The era list for whichever artist is currently playing.
-    var artistEras: [EraSongContext] {
-        eraSongs.map { erasByArtist[$0.artistName] ?? [] } ?? []
-    }
-
     private var eraIndex: Int?   // position of eraSongs within its artist's list
     private var songIndex: Int?  // position within eraSongs.versions
     private var listIndex: Int?  // position within playbackList
@@ -64,7 +59,7 @@ nonisolated struct PlaybackQueueLogic {
         return matches.first { eras[$0].versions.count == context.versions.count } ?? matches.first
     }
 
-    /// Register the era context. Resolves its position inside `artistEras`
+    /// Register the era context. Resolves its position inside the artist's list
     /// by multi-field match so two eras sharing a name still disambiguate.
     mutating func setEraSongs(_ context: EraSongContext) {
         playbackList = nil

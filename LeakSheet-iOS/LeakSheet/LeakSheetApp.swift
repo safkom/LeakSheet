@@ -6,7 +6,7 @@ import OSLog
 struct LeakSheetApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
-    private static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "App")
+    private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
     init() {
         configureAudioSession()

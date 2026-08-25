@@ -128,6 +128,14 @@ struct QueueSheet: View {
                                 }
                                 .accessibilityLabel("Remove from queue")
                             }
+                            // macOS ignores swipeActions, so the inspector's
+                            // queue had no per-item remove at all — Clear was
+                            // the only way to take one track out.
+                            .contextMenu {
+                                Button("Remove from Queue", systemImage: "trash", role: .destructive) {
+                                    player.removeFromQueue(at: index)
+                                }
+                            }
                         }
                         .onMove { from, to in
                             player.moveInQueue(from: from, to: to)

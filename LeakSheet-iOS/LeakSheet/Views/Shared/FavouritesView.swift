@@ -124,6 +124,14 @@ struct FavouritesView: View {
                                             }
                                             .accessibilityLabel("Remove from favourites")
                                         }
+                                        // macOS ignores swipeActions, which left
+                                        // this screen with no way to un-favourite
+                                        // anything — the only exit was Clear All.
+                                        .contextMenu {
+                                            Button("Remove from Favourites", systemImage: "heart.slash", role: .destructive) {
+                                                favourites.remove(key: entry.key)
+                                            }
+                                        }
                                     }
                                 }
                             } header: {

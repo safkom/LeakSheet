@@ -278,18 +278,6 @@ struct FilterPipelineTests {
         #expect(a == b)
     }
 
-    // MARK: - Image buckets
-
-    // 2026-07-17: 1600 bucket added to match the backend (full-screen art
-    // was upscaled from 1280 on ~1290px displays).
-    @Test(arguments: [
-        (40.0, 3.0, 128), (64.0, 3.0, 320), (96.0, 3.0, 320),
-        (160.0, 3.0, 640), (300.0, 3.0, 1280), (430.0, 3.0, 1600),
-        (1000.0, 3.0, 1600),
-    ])
-    func `image size buckets`(points: Double, scale: Double, expected: Int) {
-        #expect(ImageCache.bucket(forPointSize: points, scale: scale) == expected)
-    }
 }
 
 /// Tab-mode routing through the filter pipeline (2026-07-17): a selected

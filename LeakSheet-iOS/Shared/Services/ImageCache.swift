@@ -64,15 +64,6 @@ actor ImageCache {
         session.configuration.urlCache?.removeAllCachedResponses()
     }
 
-    /// Smallest bucket that covers `points` at the given display scale.
-    nonisolated static func bucket(forPointSize points: CGFloat, scale: CGFloat) -> Int {
-        let pixels = Int((points * scale).rounded(.up))
-        for bucket in sizeBuckets where pixels <= bucket {
-            return bucket
-        }
-        return sizeBuckets[sizeBuckets.count - 1]
-    }
-
     private nonisolated static func cacheKey(_ url: URL, _ maxPixelSize: Int) -> NSString {
         "\(url.absoluteString)#\(maxPixelSize)" as NSString
     }

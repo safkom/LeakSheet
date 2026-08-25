@@ -6,7 +6,7 @@ import SwiftUI
 struct LeakSheetTVApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
-    private static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "App")
+    private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
     init() {
         // tvOS has the full AVAudioSession API, so this matches iOS exactly.

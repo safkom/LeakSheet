@@ -15,7 +15,7 @@ final class AudioEngine {
     /// Settings screen — which is per-platform.
     static let autoplayNextKey = "leaksheet_autoplay_next"
 
-    private nonisolated static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Audio")
+    private nonisolated static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Audio")
 
     // MARK: - State
 
