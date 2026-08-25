@@ -59,6 +59,47 @@ off-white pixels and resolves to a neutral, and a warm multi-tone cover isn't
 out-voted by one small flat region (median cut groups similar tones into one box
 instead of splitting them across hundreds of fixed buckets).
 
+## TrackerLoader.swift::sticky-artist-name — the name follows the URL, not the entry point
+
+`/sheet` derives the artist slug from the name it is given (`api.py`
+`slug = slugify(req.artist_name)`), and favourites are keyed
+`{artistSlug}::{eraName}::{baseName}`. Explore passed its curated name, but
+reopening the same tracker from Recents (or by pasting the URL) passed nothing,
+so the backend re-inferred the name from the page and returned a different
+slug — every favourite saved through the other route silently stopped matching.
+A sweep of the live corpus found 14 of 356 trackers where the curated and
+inferred names disagree (e.g. `billie-eilish-alt-3` vs `billie-eilish`).
+
+`load()` therefore resolves the name once, from the caller's override or else
+from what Recents recorded for that normalized URL, so every entry point agrees.
+`replayFromCache` additionally refuses a cached copy whose name disagrees with
+the resolved one: the client caches the *response*, which already has any
+override applied, so a mismatched copy carries the other slug and would
+reintroduce the split on the 304 fast path.
+
+The tradeoff is deliberate: a tracker renamed upstream keeps the name it was
+first opened under for as long as it stays in Recents, because the alternative
+is silently splitting the user's favourites in two. Removing the Recents entry
+(swipe, or Clear All) drops the pin and the next open re-infers the name.
+
+## PlaybackQueueLogic.swift::era-identity — era match excludes the version count
+
+An era is located inside its artist's registered list by (name, artist, art
+URL). The version count used to be a fourth **required** field, to disambiguate
+two eras sharing a name — but the registered list is built once from the
+**unfiltered** tracker (`ArtistViewModel.Precomputed.eraPlaybackContexts`) while
+playback starts from the **currently filtered** list
+(`ArtistContentLists.playWithEraContext`). Every era a chip had trimmed
+therefore failed to match, `eraIndex` stayed nil, and auto-advance stopped at
+the end of that era instead of rolling into the next one — with Best Of,
+Grails, Worst Of or No Snippets on, playback died mid-tracker.
+
+The count is still consulted, but only as a tiebreaker *among* eras that match
+on all three identity fields (a tracker can carry two "Bonus Tracks" eras with
+the same art — pinned by `duplicate era names disambiguate via recorded
+position`). Requiring it broke the common case to serve the rare one; as a
+tiebreaker it serves the rare case without touching the common one.
+
 ## ArtistViewModel.swift::song-ordinal — disambiguating same-baseName songs
 
 `ordinal` is the song's position within its era's flattened song list. Leak trackers

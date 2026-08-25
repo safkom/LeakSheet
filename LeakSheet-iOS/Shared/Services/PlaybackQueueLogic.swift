@@ -47,6 +47,23 @@ nonisolated struct PlaybackQueueLogic {
 
     // MARK: - Context
 
+    /// Position of an era inside its artist's registered list.
+    ///
+    /// Identity is (era name, artist, art URL). The version count is only a
+    /// tiebreaker between eras that are otherwise identical — never a
+    /// requirement, because the context usually arrives filtered while the
+    /// registered list is not. See
+    /// DECISIONS.md::PlaybackQueueLogic.swift::era-identity.
+    private static func indexOfEra(_ context: EraSongContext, in eras: [EraSongContext]) -> Int? {
+        let matches = eras.indices.filter { i in
+            eras[i].eraName == context.eraName
+                && eras[i].artistName == context.artistName
+                && eras[i].artUrl == context.artUrl
+        }
+        guard matches.count > 1 else { return matches.first }
+        return matches.first { eras[$0].versions.count == context.versions.count } ?? matches.first
+    }
+
     /// Register the era context. Resolves its position inside `artistEras`
     /// by multi-field match so two eras sharing a name still disambiguate.
     mutating func setEraSongs(_ context: EraSongContext) {
@@ -54,12 +71,7 @@ nonisolated struct PlaybackQueueLogic {
         listIndex = nil
         eraSongs = context
         songIndex = nil
-        eraIndex = (erasByArtist[context.artistName] ?? []).firstIndex { ctx in
-            ctx.eraName == context.eraName
-                && ctx.artistName == context.artistName
-                && ctx.artUrl == context.artUrl
-                && ctx.versions.count == context.versions.count
-        }
+        eraIndex = Self.indexOfEra(context, in: erasByArtist[context.artistName] ?? [])
     }
 
     /// Set the era context and position the cursor at `version`. Full-struct
@@ -238,22 +250,15 @@ nonisolated struct PlaybackQueueLogic {
     }
 
     /// Next era after the current one that has any versions. Prefers the
-    /// recorded position (survives duplicate era names); falls back to the
-    /// same 4-field match `setEraSongs` uses (name+artist+artUrl+versionCount)
-    /// when the position is unset (setArtistEras ran after setEraSongs) —
-    /// matching on name+artist alone would misroute auto-advance when two
-    /// eras share a name.
+    /// recorded position (survives duplicate era names); falls back to the same
+    /// identity match `setEraSongs` uses when the position is unset
+    /// (setArtistEras ran after setEraSongs).
     private mutating func advanceToNextEra(after current: EraSongContext) -> EraSongContext? {
         let eras = erasByArtist[current.artistName] ?? []
         let startIdx: Int
         if let idx = eraIndex, eras.indices.contains(idx) {
             startIdx = idx + 1
-        } else if let idx = eras.firstIndex(where: {
-            $0.eraName == current.eraName
-                && $0.artistName == current.artistName
-                && $0.artUrl == current.artUrl
-                && $0.versions.count == current.versions.count
-        }) {
+        } else if let idx = Self.indexOfEra(current, in: eras) {
             startIdx = idx + 1
         } else {
             return nil

@@ -30,6 +30,11 @@ final class TrackerLoader {
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // A tracker keeps the name it was first opened under, whichever entry
+        // point reopens it — the backend recomputes the slug from the name and
+        // favourites are keyed on that slug. See
+        // DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
+        let resolvedName = artistName ?? recents.savedName(forSourceUrl: trimmed)
         // `loading` drove a spinner but gated nothing, and only the Parse
         // button was ever disabled — so tapping several recents/browse rows
         // started that many loads. They raced into multiple path.append calls,
@@ -58,7 +63,7 @@ final class TrackerLoader {
         do {
             let result = try await APIClient.shared.parseSheet(
                 url: trimmed,
-                artistName: artistName,
+                artistName: resolvedName,
                 forceRefresh: forceRefresh,
                 cachedEtag: cachedEtag,
                 onProgress: { @Sendable phase in
@@ -76,7 +81,7 @@ final class TrackerLoader {
         } catch let apiError as APIError {
             switch apiError {
             case .notModified:
-                return await replayFromCache(trimmed, artistName: artistName, recents: recents)
+                return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
             case .httpError(let status, let msg):
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
             case .invalidURL:
@@ -152,7 +157,13 @@ final class TrackerLoader {
         recents: RecentTrackersManager
     ) async -> Artist? {
         loadPhase = .preparing
-        if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed) {
+        // The cached bytes are the response, so they already carry whatever
+        // name was applied when they were written. A copy cached under a
+        // DIFFERENT name carries a different slug too, and favourites are keyed
+        // on that slug — so drop it and refetch under the resolved name rather
+        // than handing back a second identity for the same tracker.
+        if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed),
+           artistName == nil || artistName == cachedArtist.name {
             recents.saveTracker(artist: cachedArtist)
             return cachedArtist
         }
