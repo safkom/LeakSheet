@@ -124,8 +124,13 @@ struct MacSongList<Header: View>: View {
             // every such song a two-step. Selection is set here too because
             // the tap gesture takes the click from the List.
             .onTapGesture(count: 1) {
-                guard song.hasMultipleVersions, let onToggleExpansion else { return }
+                // Selection is set FIRST and unconditionally: this gesture takes
+                // the click from the List for every song row, so leaving it
+                // behind the multi-version guard meant a single-version song
+                // could never be selected by clicking it and the Details
+                // inspector never followed.
                 selection = row.id
+                guard song.hasMultipleVersions, let onToggleExpansion else { return }
                 onToggleExpansion(eraName, ordinal)
             }
             // Double-click plays. On a multi-version row the first click

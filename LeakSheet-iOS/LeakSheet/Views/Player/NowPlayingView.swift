@@ -15,6 +15,11 @@ struct NowPlayingView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
 
+    /// The Mac window renders in the real system appearance (the scenes no
+    /// longer force dark), so contrast has to be judged against the appearance
+    /// actually on screen — see DECISIONS.md::DesignTokens.swift::scheme-threading.
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var accentColor: Color?
     #if !os(macOS)
     /// iOS only — on the Mac the queue is the main window's inspector (⌥⌘Q),
@@ -30,8 +35,8 @@ struct NowPlayingView: View {
     /// would otherwise render illegible tints.
     private var readableAccent: Color? {
         guard let accent = accentColor else { return nil }
-        let backdrop = accent.blended(with: .lsBackground, fraction: 0.7)
-        return accent.ensureReadable(against: backdrop)
+        let backdrop = accent.blended(with: .lsBackground, fraction: 0.7, in: colorScheme)
+        return accent.ensureReadable(against: backdrop, in: colorScheme)
     }
 
     var body: some View {
@@ -146,12 +151,12 @@ struct NowPlayingView: View {
                             // invisible. Same treatment the Image branch uses.
                             ProgressView()
                                 .controlSize(.regular)
-                                .tint(Color.preferredText(on: accentColor ?? Color.lsAccent))
+                                .tint(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
                                 .frame(width: 56, height: 56)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.title2.weight(.semibold))
-                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent))
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
                                 .frame(width: 56, height: 56)
                                 .contentTransition(.symbolEffect(.replace))
                         }

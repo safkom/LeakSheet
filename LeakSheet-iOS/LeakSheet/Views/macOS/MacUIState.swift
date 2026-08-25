@@ -73,15 +73,36 @@ final class MacUIState {
 
     func tracker(_ slug: String) -> LoadedTracker? { trackers[slug] }
 
+    /// Mark a tracker as most-recently used.
+    ///
+    /// Re-selecting an already-loaded tracker never goes through `store`, so its
+    /// recency was otherwise frozen at first open and three later trackers could
+    /// evict it. Called from the sidebar-selection change rather than from
+    /// `tracker(_:)`, which the detail column reads during `body` — bumping
+    /// recency there would mutate observed state mid-update.
+    func touch(_ slug: String) {
+        guard order.contains(slug), order.last != slug else { return }
+        order.removeAll { $0 == slug }
+        order.append(slug)
+    }
+
     /// LRU insert. The entry just stored is always at the tail, so the eviction
     /// below can never drop what the user is looking at.
+    ///
+    /// It also skips whatever is currently playing: the mini player and the
+    /// Details panel resolve the playing song through this cache
+    /// (`vmForCurrentPlayback`), so evicting that tracker left the bar playing a
+    /// track it could no longer describe.
     func store(_ loaded: LoadedTracker) {
         let slug = loaded.artist.slug
         order.removeAll { $0 == slug }
         order.append(slug)
         trackers[slug] = loaded
+        let playing = PlayerViewModel.shared.artistSlug
         while order.count > Self.limit {
-            trackers.removeValue(forKey: order.removeFirst())
+            guard let victim = order.first(where: { $0 != playing }) else { break }
+            order.removeAll { $0 == victim }
+            trackers.removeValue(forKey: victim)
         }
     }
 

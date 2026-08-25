@@ -41,6 +41,11 @@ struct SongDescriptionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
+    /// Hosted live in the Mac Details inspector, which renders in the real
+    /// system appearance — contrast has to be judged against that, not against
+    /// a hardcoded dark ground. See
+    /// DECISIONS.md::DesignTokens.swift::scheme-threading.
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var accentColor: Color?
     /// In-app Safari for version links + evidence — the sheet must never
@@ -175,7 +180,7 @@ struct SongDescriptionSheet: View {
                                 Text(active.eraName.uppercased())
                                     .font(.caption2.weight(.bold))
                                     .tracking(0.8)
-                                    .foregroundStyle((accentColor ?? .lsAccent).ensureReadable(against: .lsBackground))
+                                    .foregroundStyle((accentColor ?? .lsAccent).ensureReadable(against: .lsBackground, in: colorScheme))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 4)
                                     .background((accentColor ?? .lsAccent).opacity(0.15))
@@ -204,7 +209,7 @@ struct SongDescriptionSheet: View {
                                 // so ensureReadable brightened the title to
                                 // mid-grey on every open until the artwork
                                 // task landed. A concrete colour is exact.
-                                .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground))
+                                .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
                             if let sub = subtitle {
                                 Text(sub)
                                     .font(.subheadline)
@@ -367,7 +372,7 @@ struct SongDescriptionSheet: View {
                         } label: {
                             Label("Play", systemImage: "play.fill")
                                 .font(.headline)
-                                .foregroundStyle(Color.preferredText(on: accentColor ?? .lsAccent))
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? .lsAccent, in: colorScheme))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(accentColor ?? Color.lsAccent)

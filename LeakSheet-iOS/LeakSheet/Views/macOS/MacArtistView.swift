@@ -518,6 +518,12 @@ private struct MacFilterChip: View {
     var tint: Color = .lsAccent
     var onTap: () -> Void
 
+    /// `tint` is a `Color.tone`, whose light variant is a DARKER mid-tone than
+    /// its dark one — judging the label against the wrong variant picks the
+    /// wrong text colour outright. See
+    /// DECISIONS.md::DesignTokens.swift::scheme-threading.
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: onTap) {
             Label(label, systemImage: icon)
@@ -525,7 +531,7 @@ private struct MacFilterChip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .frame(minHeight: Metrics.chipHeight)
-                .foregroundStyle(isActive ? Color.preferredText(on: tint) : Color.secondary)
+                .foregroundStyle(isActive ? Color.preferredText(on: tint, in: colorScheme) : Color.secondary)
                 .background(isActive ? tint : Color.lsCard, in: Capsule())
                 .overlay { Capsule().stroke(Color.lsBorder, lineWidth: isActive ? 0 : 1) }
         }

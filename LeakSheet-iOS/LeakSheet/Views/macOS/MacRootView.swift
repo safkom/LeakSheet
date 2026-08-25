@@ -79,6 +79,7 @@ struct MacRootView: View {
             // `vmForInspector` had already moved on, so the version picker
             // resolved one tracker's song against another's era tree.
             ui.selectedSong = nil
+            if case .tracker(let slug) = selection { ui.touch(slug) }
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })
             else { return }
