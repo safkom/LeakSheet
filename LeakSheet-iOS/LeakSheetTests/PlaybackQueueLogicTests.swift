@@ -55,6 +55,23 @@ struct PlaybackQueueLogicTests {
         #expect(logic.next() == .stop)
     }
 
+    @Test func `era rollover survives a filter trimming the era`() {
+        // The eras are registered unfiltered, but a row plays through the
+        // CURRENTLY FILTERED list (Best Of / Grails / No Snippets), so the
+        // context arrives with fewer versions than the registered era.
+        // Matching the era on its version count made rollover fail there and
+        // playback stopped mid-tracker.
+        var logic = PlaybackQueueLogic()
+        let full = era("Yeezus", versions: [version("A"), version("B"), version("C")])
+        let second = era("Donda", versions: [version("X")])
+        logic.setArtistEras([full, second])
+
+        let filtered = era("Yeezus", versions: [version("A")])
+        _ = logic.playInEra(filtered.versions[0], context: filtered)
+
+        #expect(playedName(logic.next()) == "X")
+    }
+
     @Test func `duplicate name-tag pairs advance by position, not first match`() {
         // Two distinct '???' mystery tracks with the same (name, tag) but
         // different notes. Starting at the SECOND must advance to C — the

@@ -51,9 +51,16 @@ struct QueueSheet: View {
                                 }
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.version.name)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        if let b = item.version.badge, let badge = Badge(rawValue: b) {
+                                            Text(badge.emoji)
+                                                .font(.caption)
+                                                .accessibilityLabel(badge.label)
+                                        }
+                                        Text(item.version.name)
+                                            .font(.subheadline)
+                                            .lineLimit(1)
+                                    }
                                     Text(item.eraName.isEmpty ? item.artistName : "\(item.artistName) · \(item.eraName)")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)

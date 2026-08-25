@@ -506,9 +506,19 @@ struct SongDescriptionSheet: View {
             )
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.version.versionTag ?? entry.version.name)
-                    .font(.caption.weight(.bold))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(entry.version.versionTag ?? entry.version.name)
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                    // The chip's own badge, same as VersionRowView: without it
+                    // the picker showed only quality/availability, so the ⭐
+                    // version was indistinguishable from its siblings.
+                    if let b = entry.version.badge, let badge = Badge(rawValue: b) {
+                        Text(badge.emoji)
+                            .font(.caption2)
+                            .accessibilityLabel(badge.label)
+                    }
+                }
                 // Era name: the reason this picker reaches across eras at
                 // all, so every chip says where its version lives.
                 Text(entry.eraName)
