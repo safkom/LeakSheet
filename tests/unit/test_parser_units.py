@@ -550,6 +550,42 @@ class TestUnclosedCreditBrackets:
         assert self._c("X\n(prod. ???").producers == "???"
 
 
+class TestWrappedCreditLists:
+    """A credit list that wraps immediately after its keyword.
+
+    The group regex allowed a continuation line only after a comma or an
+    ampersand. Sheets wrap right after the keyword just as often —
+    "(prod. \\nLondon On Da Track)" — so the group never matched, the names
+    ended up in alt_titles with a stray ")" attached, and the credit was lost.
+    37 name cells corpus-wide.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_wrap_after_the_keyword(self):
+        c = self._c("T.I. - Whole Lotta Cash\n(feat. London Jae & Young Thug) (prod. \nLondon On Da Track)")
+        assert c.producers == "London On Da Track"
+        assert c.featuring == "London Jae & Young Thug"
+        assert c.alt_titles == []
+
+    def test_wrap_directly_after_the_dot(self):
+        c = self._c("Song (feat.\nDrake &\nFuture)")
+        assert (c.title, c.featuring, c.alt_titles) == ("Song", "Drake & Future", [])
+
+    def test_wrap_inside_the_list_still_works(self):
+        c = self._c("Song (prod. A, \nB & C)")
+        assert c.producers == "A, B & C"
+
+    def test_a_wrapped_group_that_is_not_a_credit_is_left_alone(self):
+        """Widening what the group can MATCH is only safe because take_group
+        hands back a non-credit group verbatim."""
+        c = self._c("Song\n(Some Title.\nMore Title)")
+        assert c.producers is None
+        assert c.alt_titles == ["(Some Title.", "More Title)"]
+
+
 class TestAliasLabelStripping:
     """Some trackers label the alias line rather than just writing it.
 

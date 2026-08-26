@@ -733,10 +733,17 @@ def parse_tracker_stats(
 # separator rule recovers those without the swallowing risk — a continuation
 # line that does not follow a comma still terminates the group exactly as
 # before.
+#
+# A dot joins the comma and ampersand for the same reason: the wrap often lands
+# immediately after the keyword rather than inside the list — "(prod. \nLondon
+# On Da Track)" — which left the title reading "… (prod." and the names sitting
+# in alt_titles. 37 name cells corpus-wide. Widening what the group CAN match
+# is safe on its own: take_group hands back any group whose first part is not a
+# credit keyword completely untouched.
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&][^\S\n]*\n[^\S\n]*)*)[\)\]]")
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&.][^\S\n]*\n[^\S\n]*)*)[\)\]]")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.
