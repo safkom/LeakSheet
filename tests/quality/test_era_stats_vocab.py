@@ -15,7 +15,13 @@ from __future__ import annotations
 import pytest
 
 from src.models import parse_era_stats
-from src.parser import ERA_STATS_PATTERN, era_stats_match, parse_sheet
+from src.parser import (
+    ERA_STATS_PATTERN,
+    _is_era_header,
+    _is_stats_only_cell,
+    era_stats_match,
+    parse_sheet,
+)
 from tests.conftest import read_synthetic
 
 
@@ -65,6 +71,28 @@ class TestDiscographyEraHeaders:
         # matches it, every sheet grows a phantom era at the bottom.
         assert not any("Total Links" in e.name for e in drift.eras)
         assert drift.parse_metadata.footer_rows == 1
+
+    def test_wide_global_footer_is_not_an_era(self, drift):
+        """The footer shape real trackers write: counts spread across cells.
+
+        Release types in the first cell, leak status in the third, quality in
+        the fourth, badge totals with emoji in the last. Neither stats pattern
+        knows "Album Track", "Not Available" or "Best Of", so the digit-leading
+        rule inside _is_era_header read them as era names and the row became an
+        era card holding nothing — 22 across the captured corpus, 15 of them
+        rendered as "Untitled Era N".
+        """
+        assert [e.name for e in drift.eras] == [
+            "First Light", "Second Wind", "Third Rail"
+        ]
+        assert not any(e.name.startswith("Untitled Era") for e in drift.eras)
+
+    def test_wide_footer_leaves_no_phantom_section_either(self, drift):
+        """Rejecting it as an era must not file it as a section instead."""
+        for era in drift.eras:
+            for section in era.sections:
+                assert "Album Track" not in section.name
+                assert "Best Of" not in section.name
 
 
 class TestVocabularyBoundaries:
@@ -167,3 +195,51 @@ class TestMiscEraHeaderRows:
         from src.parser import parse_misc_tab
         for e in parse_misc_tab(self.MISC_TAB, "misc", ["Opening Era"]):
             assert e.date is None or len(e.date) <= 40
+
+
+class TestStatsOnlyCells:
+    """The shape test that separates a counts cell from an era name.
+
+    Vocabulary cannot do this job: a global footer states its counts in whatever
+    wording the maintainer chose, and half of it appears in neither stats
+    pattern. Every line being "<int> <label>" is what identifies it.
+    """
+
+    @pytest.mark.parametrize("cell", [
+        "1352 Total\n99 Album Track\n221 Throwaway\n486 OG",
+        "1353 Total\n916 Not Available\n65 Low Quality\n143 High Quality",
+        "\u2b50 43 Best Of\n\U0001f947 44 Wanted\n\U0001f3c6 42 Grails",
+        "5 Total\n3 Confirmed\n1 Full",
+    ])
+    def test_counts_cells_are_recognised(self, cell):
+        assert _is_stats_only_cell(cell)
+
+    @pytest.mark.parametrize("cell", [
+        "38 Special Sessions",     # one line: an era name, not a stats block
+        "2009 Album",
+        "Donda [V2]",
+        "",
+        "3 Total\nSome Era Name",  # a name among the counts means it is a header
+        "First Light\n(2019 - 2020)",
+    ])
+    def test_era_names_are_not_counts_cells(self, cell):
+        assert not _is_stats_only_cell(cell)
+
+    def test_a_real_era_header_survives_the_guard(self):
+        """The guard skips counts cells; it must not skip the era name too."""
+        from src.parser import _Cell
+        row = [
+            _Cell(text="3 Total\n1 Single\n2 Album Track"),
+            _Cell(text="First Light"),
+        ]
+        assert _is_era_header(row)
+
+    def test_a_counts_only_row_is_not_a_header(self):
+        from src.parser import _Cell
+        row = [
+            _Cell(text="1352 Total\n99 Album Track\n221 Throwaway"),
+            _Cell(text=""),
+            _Cell(text="1353 Total\n798 Confirmed\n271 Full"),
+            _Cell(text="\u2b50 43 Best Of\n\U0001f3c6 42 Grails"),
+        ]
+        assert not _is_era_header(row)

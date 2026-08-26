@@ -575,6 +575,13 @@ def slugify(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Regex to extract "N Label" pairs from stats text.
+# Decorative emoji trackers hang off stat labels ("🔗 616 Total Links",
+# "⭐ 43 Best Of"). Shared with the parser, which has to recognise the same
+# cells to tell an era header from the sheet's global stats footer.
+EMOJI_RUN_RE = re.compile(
+    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"
+)
+
 # Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
 # Also handles emoji-prefixed labels ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
@@ -590,11 +597,7 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
       "🔗 616 Total Links\\n❌ 0 Missing Links..."
     """
     # Strip all emoji characters first
-    cleaned = re.sub(
-        r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+",
-        "",
-        raw,
-    )
+    cleaned = EMOJI_RUN_RE.sub("", raw)
     # Replace newlines with a separator that won't interfere
     cleaned = cleaned.replace("\n", " ")
     # Collapse multiple spaces

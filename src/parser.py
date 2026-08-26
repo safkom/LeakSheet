@@ -22,6 +22,7 @@ from src.config import COLUMN_ALIASES
 from src.models import (
     Artist,
     Badge,
+    EMOJI_RUN_RE,
     Era,
     MiscEntry,
     Notice,
@@ -589,6 +590,29 @@ def _is_spreadsheet_error(text: str) -> bool:
     return bool(_SPREADSHEET_ERROR_RE.match(text.strip()))
 
 
+# A cell whose every line reads "<int> <label>" states counts. Whatever the
+# vocabulary, it carries no era name — see _is_era_header.
+_STAT_ONLY_LINE_RE = re.compile(r"^\d+\s+[A-Za-z][A-Za-z0-9()/&.\-' ]*$")
+_MIN_STAT_ONLY_LINES = 2
+
+
+def _is_stats_only_cell(text: str) -> bool:
+    """True if *text* is nothing but "<int> <label>" lines.
+
+    The global stats footer states its counts in several cells at once — leak
+    status in one, quality in another, badge totals in a third. Any of them can
+    use wording neither stats pattern lists ("99 Album Track", "43 Best Of"), so
+    a vocabulary test cannot recognise them. Their SHAPE can: every line is a
+    count. Requiring two lines keeps a one-line era name like "38 Special
+    Sessions" out of it, which is the case the stats vocabularies are already
+    careful about.
+    """
+    lines = [l for l in (EMOJI_RUN_RE.sub("", ln).strip() for ln in text.split("\n")) if l]
+    if len(lines) < _MIN_STAT_ONLY_LINES:
+        return False
+    return all(_STAT_ONLY_LINE_RE.match(l) for l in lines)
+
+
 # Row values that indicate a section divider (not a song or era name).
 # These strings appear as standalone cell values in the spreadsheet to
 # separate song groups (e.g. "surfaced" = officially released material).
@@ -662,19 +686,30 @@ def _is_era_header(row: list[_Cell]) -> bool:
     # content (numbers + keywords) in every cell.
     _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
     for c in row:
-        first_line = c.text.split("\n")[0].strip()
-        if not first_line:
+        text = c.text.strip()
+        if not text:
             continue
+        # Check for images (era art) — a strong signal this is an era header
+        if c.images:
+            return True
+        # A cell that is nothing but counts holds no era name, whatever
+        # vocabulary it counts in. Without this the sheet's global stats footer
+        # became an era: its release-type cell ("1352 Total / 99 Album Track /
+        # …") and its badge cell ("⭐ 43 Best Of / 🥇 44 Wanted / …") are both
+        # invisible to ERA_STATS_PATTERN, so the digit-leading rule below read
+        # them as era names. Measured over the corpus: 22 phantom eras across
+        # 19 trackers, 15 of them cards literally named "Untitled Era N", one
+        # of them claiming 1,352 versions and holding none.
+        if _is_stats_only_cell(text):
+            continue
+        first_line = text.split("\n")[0].strip()
         # If the first line doesn't start with a digit, it's likely an era name
         if not _NUMERIC_STAT_RE.match(first_line):
             return True
         # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
         if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
             return True
-        # Check for images (era art) — a strong signal this is an era header
-        if c.images:
-            return True
-    # Every non-empty cell starts with "N something" — pure stats row
+    # Every non-empty cell states counts — pure stats row
     return False
 
 
