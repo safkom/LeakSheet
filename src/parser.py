@@ -1614,7 +1614,16 @@ def parse_sheet(
     # Extract cell background colors from the stylesheet (non-neutral only)
     rows = extract_table(html_content)
     if not rows:
-        return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
+        # An empty ParseMetadata, not None: this was the one return path that
+        # left it unset, so every consumer had to special-case a tab with no
+        # table. Zeroes state the truth — nothing was read — and keep the
+        # row-accounting identity holding on every path.
+        return Artist(
+            name=artist_name,
+            slug=slugify(artist_name),
+            eras=[],
+            parse_metadata=ParseMetadata(),
+        )
 
     # Step 1: detect column layout from header row.
     header_row_idx, col_map = _detect_header_row(rows)

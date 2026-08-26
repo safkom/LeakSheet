@@ -51,14 +51,45 @@ VERSION_FIELDS = (
 _STATS_LINE_RE = re.compile(r"^\s*(\d+)\s+([A-Za-z][A-Za-z()/ .\-]{1,40})\s*$")
 
 # Song names that are certainly not song names.
+#
+# A bare number is NOT one of them, though it reads like the archetypal
+# track-number-column bug. Measured over the corpus, the rule fired 427 times
+# and almost every hit was a real title: Tyler's "911" and "435", Ye's "530",
+# Bon Iver's "1867", KAYTRANADA's "2013". A metric that is 90% false cannot be
+# watched, so it was never going to catch the real thing it was aimed at.
 _JUNK_NAME_RES = (
-    re.compile(r"^\s*\d+\s*$"),                       # bare number
-    re.compile(r"^\s*(19|20)\d{2}\s*$"),              # bare year
     re.compile(r"^https?://", re.IGNORECASE),         # bare URL
     re.compile(r"^#(REF|N/A|VALUE|DIV/0|NAME|NULL|NUM|ERROR)", re.IGNORECASE),
 )
 
-_TIME_RE = re.compile(r"^\d{1,3}:[0-5]\d(:[0-5]\d)?$")
+# Header and glossary rows emitted as songs — the defect that WAS buried inside
+# the old bad-track-length count. A song whose track_length is the literal
+# column header means the header row was parsed as data.
+_HEADER_LEAK_VALUES = frozenset({
+    "track length", "length of the song", "duration", "track duration",
+})
+# Google Sheets' epoch zero. A duration cell formatted as a date renders as
+# this, so it is a formatting artifact rather than content.
+_SHEETS_EPOCH_ZERO = "dec 30, 1899"
+
+_TIME_RE = re.compile(r"^\d{1,3}:[0-5?]\d(:[0-5]\d)?$")
+# Trackers write these for "we don't know how long it is". They are content,
+# not parse failures — the same allowance tests/quality/invariants.py makes.
+# Without it the metric counted 15,201 values, ~99% of them legitimate.
+_UNKNOWN_TIME = re.compile(
+    r"^(n/?a|\?+:?\?*|-|—|\.|x|tba|tbd|unknown|info needed)$", re.IGNORECASE
+)
+# Annotations trackers hang off a duration: "~2:00" approximate, "2:44*" and
+# "2:00+" flagged, ">10:00" bounded, and a second line naming the take
+# ("03:12\n(Open Vrs)"). None of them change whether the cell parsed correctly.
+_DURATION_ANNOTATION = re.compile(r"^[~>< ]+|[*+ ]+$")
+
+
+def _duration_core(value: str) -> str:
+    """The duration itself, with tracker annotations stripped."""
+    return _DURATION_ANNOTATION.sub("", value.split("\n")[0].strip())
+
+
 _STAR_RE = re.compile(r"[⭐★☆️]")
 
 
@@ -81,6 +112,7 @@ class Totals:
     tabs_with_unmatched_stats: int = 0
     junk_song_names: int = 0
     bad_track_length: int = 0
+    header_rows_as_songs: int = 0
     bad_rating: int = 0
     stars_left_in_availability: int = 0
     era_stats_shortfall: int = 0
@@ -148,11 +180,14 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
         t.unmatched_stats_headers += misses
         t.unmatched_stat_labels.update(labels)
 
+    # parse_sheet's empty-rows and non-song-tab early returns can leave this
+    # unset; dereferencing it unguarded was the whole of `defect_tabs_failed`.
     md = artist.parse_metadata
-    t.rows += md.total_rows
-    t.rows_skipped += md.skipped_rows
-    t.rows_fuzzy += md.fuzzy_matched_rows
-    t.dropped_columns.update(md.dropped_columns)
+    if md is not None:
+        t.rows += md.total_rows
+        t.rows_skipped += md.skipped_rows
+        t.rows_fuzzy += md.fuzzy_matched_rows
+        t.dropped_columns.update(md.dropped_columns)
 
     for era in artist.eras:
         t.eras += 1
@@ -164,8 +199,12 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
                 t.art_relative += 1
 
         era_songs = sum(len(s.songs) for s in era.sections)
-        # The sheet's own stats block is maintainer-written ground truth: if it
-        # claims N songs and we parsed fewer, the difference is data we lost.
+        # The sheet's own stats block is maintainer-written ground truth. It
+        # counts VERSIONS — one line per link — not songs, so this has to be
+        # compared against the version count. Comparing songs reported 15,250
+        # missing where 2,261 were actually missing: 85% of the metric was the
+        # ordinary fact that a song has more than one version.
+        era_versions = sum(len(so.versions) for s in era.sections for so in s.songs)
         claimed = era.stats.total if era.stats else 0
         if not era_songs:
             t.eras_zero_song += 1
@@ -175,8 +214,8 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
             # every newly-detected empty era reads as a regression.
             if claimed:
                 t.eras_starved += 1
-        if claimed and era_songs < claimed:
-            t.era_stats_shortfall += claimed - era_songs
+        if claimed and era_versions < claimed:
+            t.era_stats_shortfall += claimed - era_versions
 
         for section in era.sections:
             for song in section.songs:
@@ -189,8 +228,15 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
                         val = getattr(v, f, None)
                         if val not in (None, "", [], False):
                             t.field_hits[f] += 1
-                    if v.track_length and not _TIME_RE.match(v.track_length.strip()):
-                        t.bad_track_length += 1
+                    if v.track_length:
+                        tl = v.track_length.strip()
+                        low = tl.lower()
+                        if low in _HEADER_LEAK_VALUES or low == _SHEETS_EPOCH_ZERO:
+                            t.header_rows_as_songs += 1
+                        else:
+                            core = _duration_core(tl)
+                            if not _TIME_RE.match(core) and not _UNKNOWN_TIME.match(core):
+                                t.bad_track_length += 1
                     if v.rating is not None and not 1 <= v.rating <= 5:
                         t.bad_rating += 1
                     if v.available_length and _STAR_RE.search(v.available_length):
@@ -201,12 +247,19 @@ _SHEET_ID_RE = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
 
 
 def _sheet_id(url: str) -> str:
-    """Group key: the workbook a tab belongs to, else the bare host+path."""
+    """Group key: the workbook a tab belongs to.
+
+    Google tabs share a spreadsheet id, so they group on their own. Self-hosted
+    trackers serve each tab from its own path — "/preview/sheet/937104017.html"
+    — so keying on host+path made every tab its own "workbook": 24 for
+    tylertracker.net alone. The sweep then scored 24 sub-tabs as 24 trackers,
+    counting 318 art-less sub-tab eras against a corpus-wide art ratio that only
+    a main tab can satisfy. One tracker per host is what production serves.
+    """
     m = _SHEET_ID_RE.search(url or "")
     if m:
         return m.group(1)
-    p = urlparse(url or "")
-    return f"{p.netloc}{p.path}" or "<unknown>"
+    return urlparse(url or "").netloc or "<unknown>"
 
 
 def _load(path: str) -> tuple[str, str, str]:
@@ -309,6 +362,7 @@ def to_metrics(t: Totals) -> dict[str, Any]:
         "defect_art_relative": t.art_relative,
         "defect_junk_song_names": t.junk_song_names,
         "defect_bad_track_length": t.bad_track_length,
+        "defect_header_rows_as_songs": t.header_rows_as_songs,
         "defect_bad_rating": t.bad_rating,
         "defect_stars_in_availability": t.stars_left_in_availability,
         "defect_era_stats_shortfall": t.era_stats_shortfall,
