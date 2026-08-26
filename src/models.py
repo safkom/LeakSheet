@@ -745,8 +745,10 @@ _CREDIT_FIELDS: list[tuple[str, str]] = [
     ("featuring", r"(?:feat|ft)\.?\s+|featuring\s+"),
     # "prod. X", "Prod.by Bighead", "prod.SlimeOnTheTRack", "produced by X".
     # A dot OR whitespace must follow "prod", so a title beginning "Prodigy"
-    # cannot match.
-    ("producers", r"prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\s+)?"),
+    # cannot match. "by" is consumed on a word boundary rather than requiring
+    # whitespace after it: a truncated "(prod.by" with no name left the filler
+    # word itself standing as the producer, 443 times across the corpus.
+    ("producers", r"prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\b\s*)?"),
     ("collaboration", r"with\s+|w/\s*"),
     ("refs", r"ref(?:erence)?\.?\s+"),
     ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
@@ -846,24 +848,57 @@ class SongCredits(NamedTuple):
 _BARE_CREDIT_FIELDS = frozenset({"featuring", "producers", "refs", "director"})
 
 
-def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
-    """Route an unbracketed credit line into *collected*; True if it was one.
+# An opening bracket the line never closes. Maintainers leave these behind
+# constantly — see _harvest_bare_credit.
+_UNCLOSED_OPENER_RE = re.compile(r"^[\(\[]\s*")
 
-    Plenty of sheets write the credit as its own line with no brackets at all —
-    "Prod.by Bighead", "ref. MNEK". Requiring brackets left 1,312 of these
-    sitting in alt_titles across the captured corpus, where they read as
-    alternative song titles and the producer/reference credit was simply lost.
+
+def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
+    """Route a credit line no bracketed group claimed into *collected*.
+
+    Returns True if it was a credit.
+
+    Two shapes reach here. Plenty of sheets write the credit as its own line
+    with no brackets at all — "Prod.by Bighead", "ref. MNEK". Requiring
+    brackets left 1,312 of these sitting in alt_titles across the captured
+    corpus, where they read as alternative song titles and the credit was
+    simply lost.
+
+    The second shape is a bracket that was opened and never closed:
+    "(prod.SlimeOnTheTRack", "[Prod.Swagg B", "(prod. BoogzDaBeast, Nascent,
+    RONNY J, MIKE DEAN,". _CREDIT_GROUP_RE needs the closer, so the whole line
+    fell through as an alt title — 1,086 name cells corpus-wide, leaving 608
+    alt_titles that are really credits, 505 of them on one tracker.
 
     The keyword must OPEN the line, the same rule bracketed groups already
     follow, so a real title that merely mentions a producer later is untouched.
+    A stripped opener also lifts the "collaboration" exclusion: "with" is
+    ambiguous bare (plenty of songs are titled "With Or Without You") but not
+    after a bracket, which is the same reasoning that lets closed groups
+    harvest it.
     """
-    keyword = _CREDIT_PART_RE.match(line)
-    if keyword is None or keyword.lastgroup not in _BARE_CREDIT_FIELDS:
+    text = line.strip()
+    opener = _UNCLOSED_OPENER_RE.match(text)
+    bracketed = bool(opener) and not text.endswith((")", "]"))
+    if bracketed:
+        text = text[opener.end():]
+    keyword = _CREDIT_PART_RE.match(text)
+    if keyword is None:
         return False
-    value = _WHITESPACE_RUN_RE.sub(" ", line[keyword.end():]).strip().rstrip(")]")
-    if not value:
+    if not bracketed and keyword.lastgroup not in _BARE_CREDIT_FIELDS:
         return False
-    collected.setdefault(keyword.lastgroup, []).append(value)
+    # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
+    # That dangling separator is truncation, not a name.
+    # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
+    # That dangling separator is truncation, not a name.
+    value = _WHITESPACE_RUN_RE.sub(" ", text[keyword.end():]).strip().rstrip(")] ,&")
+    if value:
+        collected.setdefault(keyword.lastgroup, []).append(value)
+    # True even with nothing to store. A line that is only "(prod.by" names no
+    # producer, but it is still a credit line, not an alternative song title —
+    # sending it back would put "(prod.by" in alt_titles and, because a row
+    # with no credit and no other data reads as a section label, drop the song
+    # with it.
     return True
 
 

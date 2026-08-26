@@ -480,6 +480,76 @@ class TestBracketStyleCredits:
         assert c.producers == "Ging" and c.alt_titles == ["Flavors"]
 
 
+class TestUnclosedCreditBrackets:
+    """A bracket the maintainer opened and never closed is still a credit.
+
+    _CREDIT_GROUP_RE needs the closer, so "(prod.SlimeOnTheTRack" fell through
+    whole and landed in alt_titles, where it reads as an alternative song title
+    and the producer is lost. 1,086 name cells across the captured corpus carry
+    an unclosed credit opener; 608 alt_titles were really credits, 505 of them
+    on one tracker.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_glued_unclosed_producer(self):
+        c = self._c("Fact\n(prod.SlimeOnTheTRack")
+        assert (c.title, c.producers, c.alt_titles) == ("Fact", "SlimeOnTheTRack", [])
+
+    def test_square_bracket_variant(self):
+        c = self._c("Bandz\n[Prod.RuffinUglyAzz")
+        assert (c.producers, c.alt_titles) == ("RuffinUglyAzz", [])
+
+    def test_truncated_list_drops_its_dangling_separator(self):
+        c = self._c("Hurricane\n(prod. BoogzDaBeast, Nascent, MIKE DEAN,")
+        assert c.producers == "BoogzDaBeast, Nascent, MIKE DEAN"
+
+    def test_collaboration_is_allowed_once_a_bracket_opened_it(self):
+        """"with" is ambiguous bare — plenty of songs are titled "With Or
+        Without You" — but not after a bracket."""
+        c = self._c("Song\n(with Go Getters")
+        assert (c.collaboration, c.alt_titles) == ("Go Getters", [])
+
+    def test_a_bare_with_line_is_still_an_alt_title(self):
+        c = self._c("Precious\nWith Child")
+        assert (c.collaboration, c.alt_titles) == (None, ["With Child"])
+
+    def test_an_unclosed_bracket_that_is_not_a_credit_stays_a_title(self):
+        c = self._c("Song\n(Some Alt Title")
+        assert c.alt_titles == ["(Some Alt Title"]
+
+    def test_a_closed_group_is_unaffected(self):
+        c = self._c("Song\n(Alt Title)")
+        assert c.alt_titles == ["Alt Title"]
+
+    def test_dangling_by_is_not_a_producer(self):
+        """"(prod.by" with no name left the filler word standing as the
+        producer — 443 values across the corpus read "by"."""
+        c = self._c("Talkin Shit\n(prod.by")
+        assert c.producers is None
+
+    def test_a_valueless_credit_line_is_still_consumed(self):
+        """It names no producer, but it is not an alternative title either.
+
+        Sending it back to alt_titles also dropped the SONG: a row with no
+        credit and no other data reads as a section label, so 30 real tracks on
+        one tracker were being filed as labels instead of songs.
+        """
+        c = self._c("Talkin Shit\n(prod.by")
+        assert c.alt_titles == []
+
+    def test_by_still_separates_a_real_producer(self):
+        assert self._c("X\n(prod.by RicoFinesse").producers == "RicoFinesse"
+        assert self._c("X (prod. by !llmind)").producers == "!llmind"
+        assert self._c("X (produced by Mike Dean)").producers == "Mike Dean"
+
+    def test_the_trackers_own_unknown_notation_is_kept(self):
+        """"???" is how these sheets write "producer unknown". It is content."""
+        assert self._c("X\n(prod. ???").producers == "???"
+
+
 class TestAliasLabelStripping:
     """Some trackers label the alias line rather than just writing it.
 
