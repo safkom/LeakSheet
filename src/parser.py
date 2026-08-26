@@ -2816,6 +2816,24 @@ _ART_ERA_HEADERS = frozenset({"era", "album", "project", "era/project"})
 _ART_TYPE_HEADERS = ("project type", "type", "image type", "category", "art type")
 
 
+class ArtMap(dict):
+    """era match key -> cover URL, remembering which keys are stand-ins.
+
+    A *synthetic* key is a version-stripped alias the parser invents so an era
+    spelled without a tag ("Donda") still resolves against an Art tab that
+    spells it "Donda [V1]". It names one specific version's cover, so it must
+    never serve a DIFFERENT version — see _apply_era_art. A dict subclass
+    rather than a second return value: every caller already treats this as a
+    plain mapping.
+    """
+
+    __slots__ = ("synthetic",)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.synthetic: set[str] = set()
+
+
 def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
     """Locate the Era and Project Type columns and the first data row.
 
@@ -2926,7 +2944,7 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
             era_info[key]["cover"] = img_url
 
     # Build final map: prefer cover-labelled image, fall back to first image
-    result: dict[str, str] = {}
+    result = ArtMap()
     for key, info in era_info.items():
         chosen = info["cover"] or info["first"]
         if chosen:
@@ -2937,9 +2955,12 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     # Also file each entry under its version-stripped key, so an era named
     # "Donda" still resolves against an Art tab that says "Donda [V1]" (and
     # vice versa). First versioned entry wins, matching the old behaviour.
+    # Marked synthetic: the key names one version's cover, and handing it to a
+    # sibling version is how "Cruel Winter [V1]" came to show [V2]'s artwork.
     for base, versioned in base_keys.items():
         if base not in result and versioned in result:
             result[base] = result[versioned]
+            result.synthetic.add(base)
 
     return result
 
@@ -2956,17 +2977,42 @@ def apply_art_tab_images(artist: Artist, art_map: dict[str, str]) -> None:
 
 
 def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
-    # Version-aware key first: "Donda [V2]" has its own cover on the Art tab and
-    # must not fall through to the version-stripped "donda", which resolves to
-    # whichever version came first.
+    """Give *era* its Art-tab cover, if the tab names one for this version.
+
+    Version-aware key first: "Donda [V2]" has its own cover on the Art tab and
+    must not fall through to the version-stripped "donda", which resolves to
+    whichever version came first.
+
+    A tagged era may still fall through to the stripped key when the Art tab
+    genuinely lists the era without a tag — but a SYNTHETIC stripped key is one
+    specific sibling's cover, so for a tagged era it is wrong data. On the Ye
+    tracker the Art tab lists only "Cruel Winter [V2]"; the alias made "cruel
+    winter" resolve to it, so "Cruel Winter [V1]" was served its sibling's
+    cover and lost the correct one the main tab had already given it. 55 such
+    aliases across the captured corpus.
+
+    It is still better than a blank card when there is nothing else, so it is
+    demoted to a last resort rather than dropped: taken only after every other
+    name and key has missed, and only for an era that has no artwork at all.
+    """
+    synthetic = getattr(art_map, "synthetic", frozenset())
+    stand_in: str | None = None
     for name in (era.name, *era.alt_names):
-        for key in (
-            _era_match_key(name, keep_discriminators=True),
-            _era_match_key(name),
-        ):
-            if key and key in art_map:
-                era.art_url = art_map[key]
-                return
+        exact = _era_match_key(name, keep_discriminators=True)
+        if exact and exact in art_map:
+            era.art_url = art_map[exact]
+            return
+        stripped = _era_match_key(name)
+        if not stripped or stripped not in art_map:
+            continue
+        if stripped in synthetic and VERSION_TAG_PATTERN.search(name):
+            if stand_in is None:
+                stand_in = art_map[stripped]
+            continue
+        era.art_url = art_map[stripped]
+        return
+    if stand_in is not None and not era.art_url:
+        era.art_url = stand_in
 
 
 # ---------------------------------------------------------------------------
