@@ -628,6 +628,49 @@ class TestGluedFeatureKeyword:
         assert self._c("Song (ft. A)").featuring == "A"
 
 
+class TestAdditionalAndCoProduction:
+    """"(add. prod. X)" and "(co-prod. Y)" open with neither keyword.
+
+    take_group requires the group's first part to open with a credit keyword,
+    so these were handed back whole and the credit stayed inside the title —
+    145 name cells corpus-wide, A$AP Rocky's entire Purple Swag family among
+    them.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_additional_production_joins_the_producers(self):
+        c = self._c("Purple Swag [V4]\n(feat. ???) (prod. A$AP Ty Beats) (add. prod. A$AP Rocky)")
+        assert c.producers == "A$AP Ty Beats, A$AP Rocky"
+        assert c.title == "Purple Swag [V4]"
+
+    @pytest.mark.parametrize("group,expected", [
+        ("(co-prod. X)", "X"),
+        ("(co prod. X)", "X"),
+        ("(coprod. X)", "X"),
+        ("(add prod. Z)", "Z"),
+        ("(additional production by Y)", "Y"),
+        ("(Co-Produced by Timbaland)", "Timbaland"),
+    ])
+    def test_forms(self, group, expected):
+        assert self._c(f"Song {group}").producers == expected
+
+    @pytest.mark.parametrize("raw", [
+        "Cold Shoulder (prod. Zaytoven)",
+        "Addicted (prod. X)",
+    ])
+    def test_a_title_starting_with_co_or_add_is_untouched(self, raw):
+        # The prefix must be followed by "prod", so these keep their own
+        # producer credit and their own title.
+        assert self._c(raw).title == raw.split(" (")[0]
+
+    def test_a_non_production_add_group_is_left_alone(self):
+        c = self._c("Song (Add. Vocals by X)")
+        assert c.producers is None and c.title == "Song (Add. Vocals by X)"
+
+
 class TestAliasLabelStripping:
     """Some trackers label the alias line rather than just writing it.
 

@@ -759,7 +759,14 @@ _CREDIT_FIELDS: list[tuple[str, str]] = [
     # cannot match. "by" is consumed on a word boundary rather than requiring
     # whitespace after it: a truncated "(prod.by" with no name left the filler
     # word itself standing as the producer, 443 times across the corpus.
-    ("producers", r"prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\b\s*)?"),
+    # An "add. prod." / "co-prod." group opens with neither keyword, so
+    # take_group handed the whole thing back and the credit stayed inside the
+    # title — 145 cells corpus-wide, A$AP Rocky's entire Purple Swag family
+    # among them. Folded into `producers` rather than given a field of its own:
+    # a new field costs a model change and a decode on every client for a
+    # distinction the sheets themselves make inconsistently.
+    ("producers",
+     r"(?:add(?:itional)?\.?\s+|co-?\s*)?prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\b\s*)?"),
     ("collaboration", r"with\s+|w/\s*"),
     ("refs", r"ref(?:erence)?\.?\s+"),
     ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
