@@ -580,3 +580,27 @@ rows serving an era that doesn't (`Donda` → V1's cover), and an era that tags
 itself against an Art tab that doesn't. An era whose sibling is tagged but which
 has no row of its own still inherits — `Cruel Winter [V1]` has no Art tab row and
 takes `[V2]`'s image rather than losing its art.
+
+---
+
+## fetcher.py::cache-collapse-guard — a partial parse must not replace a good one
+
+`_set_cached_parsed` refuses to overwrite a cached parse when the new one
+carries less than `CACHE_COLLAPSE_RATIO` (0.8) of its tracks. The result is
+still returned to the caller; only the write is skipped.
+
+A partial fetch — some tabs short, or a sibling hub workbook that failed to
+load — parses cleanly and is indistinguishable from a healthy result, so it was
+cached like any other and then kept alive by stale-while-revalidate. Production
+served the Ye tracker at **5,817 tracks across 36 eras** for exactly that
+reason, with era order scrambled because the partial merge appends sibling
+tabs in completion order, while a fresh parse of the same URL on the same code
+gave **9,382 across 44** in sheet order. Nothing surfaced it: the counts looked
+plausible, no error was raised, and only a forced refresh cleared it.
+
+The guard is deliberately one-sided. Growth always writes, a modest shrink
+always writes (trackers do lose tracks — DMCA, restructures), and the old copy
+wins only while it is still inside `STALE_CACHE_TTL`; past that it would not be
+served anyway, so a genuinely shrunken tracker recovers on its own instead of
+being frozen forever. The refusal is logged at WARNING so a systematically
+broken tab is visible rather than silent — which was the real defect here.

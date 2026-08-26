@@ -117,3 +117,65 @@ class TestTempFilesAreNotCacheEntries:
         monkeypatch.setattr(fetcher, "_last_sheet_evict", 0.0)
         fetcher._evict_sheet_cache()
         assert not (fetcher.CACHE_DIR / f"{_cache_key(URL)}.html").exists()
+
+
+class TestCollapseGuard:
+    """A partial fetch parses cleanly and looks like any other result, so it
+    used to be cached and then served by stale-while-revalidate until someone
+    forced a refresh. Ye sat at 5,817 tracks / 36 eras for exactly that reason
+    while a fresh parse of the same URL gave 9,382 / 44.
+    """
+
+    @staticmethod
+    def _artist_with(versions: int, eras: int = 4) -> Artist:
+        from src.models import Era, Section, Song, SongVersion
+        per_era = max(1, versions // max(1, eras))
+        built, remaining = [], versions
+        for i in range(eras):
+            take = per_era if i < eras - 1 else remaining
+            remaining -= take
+            songs = [
+                Song(base_name=f"s{i}-{n}", versions=[SongVersion(name=f"s{i}-{n}")])
+                for n in range(take)
+            ]
+            built.append(Era(name=f"Era {i}", sections=[Section(songs=songs)]))
+        return Artist(name="Ye", slug="ye", eras=built)
+
+    def _cached_versions(self, tmp_path) -> int:
+        raw = json.loads((tmp_path / f"{_cache_key(URL)}.parsed.json").read_text())
+        return raw["total_versions"]
+
+    def test_a_collapsed_parse_does_not_overwrite_a_good_one(self, tmp_path):
+        _set_cached_parsed(URL, self._artist_with(100))
+        _set_cached_parsed(URL, self._artist_with(40))
+        assert self._cached_versions(tmp_path) == 100
+
+    def test_a_modest_shrink_is_a_real_edit_and_is_written(self, tmp_path):
+        # Trackers lose tracks legitimately (DMCA, restructure); only a
+        # collapse past the ratio is treated as a partial fetch.
+        _set_cached_parsed(URL, self._artist_with(100))
+        _set_cached_parsed(URL, self._artist_with(90))
+        assert self._cached_versions(tmp_path) == 90
+
+    def test_growth_is_always_written(self, tmp_path):
+        _set_cached_parsed(URL, self._artist_with(100))
+        _set_cached_parsed(URL, self._artist_with(160))
+        assert self._cached_versions(tmp_path) == 160
+
+    def test_the_first_parse_is_always_written(self, tmp_path):
+        _set_cached_parsed(URL, self._artist_with(10))
+        assert self._cached_versions(tmp_path) == 10
+
+    def test_a_genuinely_shrunken_tracker_recovers_once_the_entry_is_stale(self, tmp_path):
+        """The guard prefers the old copy only while it would still be served.
+        Past STALE_CACHE_TTL it is worthless, so a smaller parse must win or
+        the tracker is frozen forever."""
+        _set_cached_parsed(URL, self._artist_with(100))
+        key = _cache_key(URL)
+        meta_file = tmp_path / f"{key}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - (fetcher.STALE_CACHE_TTL + 60)
+        meta_file.write_text(json.dumps(meta))
+
+        _set_cached_parsed(URL, self._artist_with(40))
+        assert self._cached_versions(tmp_path) == 40

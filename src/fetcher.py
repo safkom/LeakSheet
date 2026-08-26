@@ -838,12 +838,69 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
     return None
 
 
+# A parse returning less than this share of the cached entry's tracks is
+# treated as a partial fetch rather than a real edit to the sheet.
+CACHE_COLLAPSE_RATIO = 0.8
+
+
+def _collapse_reason(key: str, data: dict) -> str | None:
+    """Why ``data`` must not overwrite the cached parse, or None if it may.
+
+    A partial fetch — some tabs short, or a sibling workbook that failed to
+    load — parses cleanly and looks like any other result, so it was cached and
+    then served by stale-while-revalidate until something forced a refresh. The
+    Ye tracker sat at 5,817 tracks across 36 eras for exactly that reason, with
+    its era order scrambled by the partial merge, while a fresh parse of the
+    same URL gave 9,382 across 44.
+
+    The old entry is preferred only while it is still worth something: past
+    ``STALE_CACHE_TTL`` it would not be served anyway, so a tracker that
+    genuinely shrank recovers on its own rather than being frozen forever.
+    """
+    parsed_file = CACHE_DIR / f"{key}.parsed.json"
+    if not parsed_file.exists():
+        return None
+    try:
+        previous = json.loads(parsed_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(previous, dict):
+        return None
+
+    old = previous.get("total_versions") or 0
+    new = data.get("total_versions") or 0
+    if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
+        return None
+
+    try:
+        meta = json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
+        age = time.time() - _parsed_timestamp(meta)
+    except (OSError, json.JSONDecodeError, TypeError):
+        age = 0.0
+    if age > STALE_CACHE_TTL:
+        return None
+
+    old_eras = len(previous.get("eras") or [])
+    new_eras = len(data.get("eras") or [])
+    return (
+        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
+    )
+
+
 def _set_cached_parsed(url: str, artist: Artist) -> None:
     """Write parsed Artist JSON to cache, with content hash in metadata."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
     try:
         data = artist.model_dump()
+        reason = _collapse_reason(key, data)
+        if reason is not None:
+            # Served to this caller, but not persisted: the good copy stays,
+            # and the next request is not poisoned by a transient failure.
+            logger.warning(
+                "Refusing to cache a collapsed parse for %s (%s)", url[:80], reason
+            )
+            return
         _atomic_write_text(
             CACHE_DIR / f"{key}.parsed.json",
             json.dumps(data, ensure_ascii=False),
