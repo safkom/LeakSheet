@@ -57,6 +57,14 @@ actor ImageCache {
         memCache.removeAllObjects()
     }
 
+    /// On-disk bytes held by the image URLCache.
+    ///
+    /// Settings reported only the tracker cache while Clear cache emptied this
+    /// too, so the number never matched what the button freed.
+    func diskUsageBytes() -> Int64 {
+        Int64(session.configuration.urlCache?.currentDiskUsage ?? 0)
+    }
+
     /// Full purge (Settings → Clear cache): in-memory images plus the
     /// URLCache's disk store.
     func clearAll() {

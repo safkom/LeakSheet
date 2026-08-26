@@ -222,8 +222,13 @@ extension ArtistViewModel {
                     if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.grails && !isGrailOrWantedVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
-                    let dateStr = version.leakDate ?? version.fileDate
-                    guard let dateStr, !dateStr.isEmpty else { continue }
+                    // previewDate last: a leak/file date is the real event,
+                    // but a preview-only version has nothing else, and those
+                    // were invisible to Recents entirely.
+                    let dateStr = [version.leakDate, version.fileDate, version.previewDate]
+                        .compactMap { $0 }
+                        .first { !$0.isEmpty }
+                    guard let dateStr else { continue }
                     results.append(RecentResult(
                         song: song, version: version, era: era,
                         timestamp: parseLeakDate(dateStr), songOrdinal: songOrdinal

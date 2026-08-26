@@ -9,7 +9,7 @@ private func version(_ name: String, tag: String? = nil, notes: String? = nil) -
     SongVersion(
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: notes, ogFilename: nil,
-        ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+        ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
         availableLength: nil, quality: nil, streaming: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
@@ -199,7 +199,7 @@ struct CrossArtistEraListTests {
             name: name, versionTag: nil, badge: nil, featuring: nil, producers: nil,
             collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
             altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: nil, availableLength: "Full",
+            trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil, availableLength: "Full",
             quality: nil, streaming: nil, links: ["https://pillows.su/f/abc123"],
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )

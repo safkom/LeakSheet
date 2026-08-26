@@ -642,6 +642,7 @@ struct SongDescriptionSheet: View {
             ("Duration", active.version.trackLength),
             ("File Date", active.version.fileDate),
             ("Leak Date", active.version.leakDate),
+            ("Preview Date", active.version.previewDate),
             ("Type", active.version.type),
             ("Recording", active.version.dateOfRecording),
         ].compactMap { label, val in

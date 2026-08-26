@@ -12,14 +12,15 @@ struct FilterPipelineTests {
     private func version(
         _ name: String, tag: String? = nil, badge: String? = nil,
         available: String? = "Full", quality: String? = "High Quality",
-        leakDate: String? = nil, link: String? = "https://pillows.su/f/abc123",
+        leakDate: String? = nil, previewDate: String? = nil,
+        link: String? = "https://pillows.su/f/abc123",
         altTitles: [String]? = nil
     ) -> SongVersion {
         SongVersion(
             name: name, versionTag: tag, badge: badge, featuring: nil,
             producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: altTitles,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: leakDate,
+            trackLength: nil, fileDate: nil, leakDate: leakDate, previewDate: previewDate,
             availableLength: available, quality: quality, streaming: nil,
             links: link.map { [$0] }, dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
@@ -163,6 +164,25 @@ struct FilterPipelineTests {
         for (idx, result) in content.recentResults.enumerated() {
             #expect(content.recentStreamIndex[result.id] == idx)
         }
+    }
+
+    @Test func `a preview-only version still reaches recents`() {
+        // leak/file date wins when present; a preview-only version has neither
+        // and used to be skipped outright, so snippets never showed in Recents.
+        let previewOnly = song("Preview Only", versions: [
+            version("Preview Only", leakDate: nil, previewDate: "05/01/2024"),
+        ])
+        let eraC = era("Era C", songs: [previewOnly])
+        let withPreview = Artist(
+            name: "Test Artist", slug: "test-artist", sourceUrl: nil,
+            eras: [eraC], trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let content = ArtistViewModel.computeContent(
+            artist: withPreview, state: FilterState(recents: true), eraStats: [:]
+        )
+        #expect(content.recentResults.count == 1)
+        #expect(content.recentResults.first?.version.name == "Preview Only")
     }
 
     @Test func `recents respect bestOf`() {
@@ -351,7 +371,7 @@ struct WorstOfFilterTests {
             name: "Good", versionTag: nil, badge: "best", featuring: nil,
             producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
             availableLength: "Full", quality: "High Quality", streaming: nil,
             links: ["https://pillows.su/f/a"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
@@ -360,7 +380,7 @@ struct WorstOfFilterTests {
             name: "Bad", versionTag: nil, badge: "worst", featuring: nil,
             producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
             availableLength: "Full", quality: "Low Quality", streaming: nil,
             links: ["https://pillows.su/f/b"], dateOfRecording: nil, type: nil,
             sources: nil, rating: nil
@@ -413,7 +433,7 @@ struct CrossEraIndexTests {
             name: name, versionTag: nil, badge: nil, featuring: nil,
             producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil,
             notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: nil,
+            trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
             availableLength: "Full", quality: nil, streaming: nil, links: nil,
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
@@ -518,7 +538,7 @@ struct CrossEraIndexTests {
             producers: nil, collaboration: nil, refs: nil, director: nil,
             creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
             ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
-            leakDate: nil, availableLength: "Full", quality: nil, streaming: nil,
+            leakDate: nil, previewDate: nil, availableLength: "Full", quality: nil, streaming: nil,
             links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
         let payload = DescriptionSheet.Payload(
@@ -548,7 +568,7 @@ struct CrossEraIndexTests {
                 producers: nil, collaboration: nil, refs: nil, director: nil,
                 creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
                 ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
-                leakDate: nil, availableLength: available, quality: "High Quality",
+                leakDate: nil, previewDate: nil, availableLength: available, quality: "High Quality",
                 streaming: nil, links: ["https://pillows.su/f/abc123"],
                 dateOfRecording: nil, type: nil, sources: nil, rating: nil
             )
@@ -590,7 +610,7 @@ struct CrossEraIndexTests {
             producers: nil, collaboration: nil, refs: nil, director: nil,
             creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
             ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil,
-            leakDate: nil, availableLength: nil, quality: nil, streaming: nil,
+            leakDate: nil, previewDate: nil, availableLength: nil, quality: nil, streaming: nil,
             links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )
         let payload = DescriptionSheet.Payload(
@@ -720,7 +740,7 @@ struct BadgeLogicTests {
                 name: "Hurricane", versionTag: tag, badge: badge, featuring: nil,
                 producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
                 altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
-                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
                 availableLength: "Full", quality: "CD Quality", streaming: nil,
                 links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
             )
@@ -748,7 +768,7 @@ struct BadgeLogicTests {
                 name: "x", versionTag: nil, badge: badge, featuring: nil,
                 producers: nil, collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
                 altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil,
-                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+                samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
                 availableLength: nil, quality: nil, streaming: nil, links: nil,
                 dateOfRecording: nil, type: nil, sources: nil, rating: nil
             )

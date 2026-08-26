@@ -70,6 +70,7 @@ final class FavouritesManager {
                 trackLength: trackLength,
                 fileDate: nil,
                 leakDate: leakDate,
+                previewDate: nil,
                 availableLength: availableLength,
                 quality: quality,
                 streaming: nil,

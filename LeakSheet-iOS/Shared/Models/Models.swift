@@ -259,6 +259,10 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let trackLength: String?
     let fileDate: String?
     let leakDate: String?
+    /// When a snippet/preview first surfaced. Often months ahead of the leak
+    /// date, and for a preview-only version it is the ONLY date there is — so
+    /// Recents could not see those versions at all.
+    let previewDate: String?
     let availableLength: String?
     let quality: String?
     /// Streaming Yes/No from a main-tab Streaming column (backend 2026-07-24).
@@ -339,6 +343,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         case trackLength = "track_length"
         case fileDate = "file_date"
         case leakDate = "leak_date"
+        case previewDate = "preview_date"
         case availableLength = "available_length"
         case dateOfRecording = "date_of_recording"
     }
@@ -407,6 +412,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
             trackLength: length,
             fileDate: nil,
             leakDate: date,
+            previewDate: nil,
             availableLength: available,
             quality: quality,
             streaming: streaming,
@@ -507,8 +513,12 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
 
 nonisolated struct TrackerStats: Codable, Hashable, Sendable {
     // Links
+    /// Every link the tracker counted, working or not — the denominator that
+    /// turns "42 missing" into "42 of 1,203 missing".
+    let totalLinks: Int?
     let missingLinks: Int?
     let sourcesNeeded: Int?
+    let notAvailableLinks: Int?
     // Quality
     let lossless: Int?
     let cdQuality: Int?
@@ -538,8 +548,10 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case lossless, full, tagged, partial, snippets, unavailable, recordings, special, wanted, grails
+        case totalLinks = "total_links"
         case missingLinks = "missing_links"
         case sourcesNeeded = "sources_needed"
+        case notAvailableLinks = "not_available_links"
         case cdQuality = "cd_quality"
         case highQuality = "high_quality"
         case lowQuality = "low_quality"
@@ -585,11 +597,16 @@ nonisolated struct DiscoveryArtist: Codable, Identifiable, Sendable {
     let credit: String?
     let best: Bool?
     let upToDate: Bool?
+    /// TrackerHub's link-health flag. Tri-state on purpose: the source encodes
+    /// "partially working" as neither true nor false, and a tracker whose links
+    /// are known dead is worth saying so BEFORE the user opens it.
+    let workingLinks: Bool?
 
     var id: String { url }
 
     enum CodingKeys: String, CodingKey {
         case name, url, credit, best
         case upToDate = "up_to_date"
+        case workingLinks = "working_links"
     }
 }

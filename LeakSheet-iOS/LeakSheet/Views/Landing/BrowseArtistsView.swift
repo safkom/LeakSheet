@@ -104,6 +104,16 @@ struct BrowseArtistsView: View {
                                                     .font(.caption2)
                                                     .foregroundStyle(.orange)
                                             }
+                                            // Link health is tri-state upstream:
+                                            // only a definite false is worth a
+                                            // warning, and it is worth it BEFORE
+                                            // the user opens a tracker whose
+                                            // files are all gone.
+                                            if artist.workingLinks == false {
+                                                Text("dead links")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(Color.lsError)
+                                            }
                                         }
                                     }
 
