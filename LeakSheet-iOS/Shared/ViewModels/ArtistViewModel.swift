@@ -231,6 +231,13 @@ final class ArtistViewModel {
         (artist.tabs ?? []).filter { !Self.badgeTabKinds.contains($0.kind) }
     }
 
+    /// Display name of the selected content tab, for anything that has to name
+    /// the page — nil on the song tree, or on the legacy flat Misc mode.
+    var selectedTabName: String? {
+        guard let key = selectedTabKey else { return nil }
+        return availableTabs.first { $0.id == key }?.name
+    }
+
     // MARK: - Init
 
     /// The heavy startup pass — era stats + the unfiltered content tree —
@@ -411,9 +418,15 @@ final class ArtistViewModel {
     /// `limit` nil warms every era (the background pass from ArtistView).
     func warmEraArt(limit: Int? = nil) async {
         let eras = limit.map { Array(artist.eras.prefix($0)) } ?? artist.eras
+        // Keyed on the cover, not the era: sibling eras legitimately share one
+        // (a tracker that lists a single cover for "[V1]" and "[V2]"), and
+        // de-duping by era name fetched and colour-extracted it once per era.
+        // The result is applied to every era using that URL below either way.
+        var seenArt = Set<String>()
         let targets: [(artUrl: String, url: URL)] = eras.compactMap { era in
             guard let art = era.artUrl,
                   eraDisplay[era.name] == nil,
+                  seenArt.insert(art).inserted,
                   let url = APIClient.shared.imageProxyURL(for: art, width: 320)
             else { return nil }
             return (art, url)

@@ -34,7 +34,11 @@ struct SongRowView: View {
     /// sits on its own line under the title: inline it stole width from the
     /// name on every row, and the repeated "aka" prefix read as noise.
     private var akaTitle: String? {
-        for v in song.versions {
+        // The row's own version leads. Scanning every version first meant a
+        // collapsed multi-version row could advertise an alias belonging to a
+        // take it is not representing.
+        let ordered = version.map { [$0] + song.versions } ?? song.versions
+        for v in ordered {
             if let alt = v.altTitles?.first(where: {
                 !$0.isEmpty && $0.caseInsensitiveCompare(song.baseName) != .orderedSame
             }) {

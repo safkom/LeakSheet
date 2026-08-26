@@ -364,8 +364,11 @@ struct MiscListView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
             } else {
+                // Name the page the user is actually on: this branch renders
+                // every content tab, so a filtered-empty Stems page announced
+                // "No Misc Entries".
                 ContentUnavailableView(
-                    "No Misc Entries",
+                    "No \(vm.selectedTabName ?? "Misc") Entries",
                     systemImage: "film.stack",
                     description: Text("Nothing matches the current filters.")
                 )
