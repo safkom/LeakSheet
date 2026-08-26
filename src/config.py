@@ -121,6 +121,10 @@ COLUMN_ALIASES: dict[str, str] = {
     # Core columns (present in nearly all trackers)
     "era": "era",
     "project": "era",             # Overlord's Lil Uzi Vert discography tracker
+    # Carti's Released tab ships both; the first in header order wins, which
+    # is the release era — it leads on the sheet.
+    "rel. era": "era",
+    "rec. era": "era",
     "name": "name",
     "title": "name",              # Billie Eilish, Childish Gambino, Travis Scott
     "song name": "name",          # XXXTENTACION
@@ -134,6 +138,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "info": "notes",
     "description": "notes",
     "additional information": "notes",
+    "info / notes": "notes",       # 2026-08-26 sweep
 
     # Track length variants
     "track length": "track_length",
@@ -149,6 +154,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "creation date": "file_date",  # Kid Cudi
     "date created": "file_date",
     "year": "file_date",           # Avicii
+    "date made": "file_date",      # 2026-08-26 sweep (8 trackers)
     # Bare 'Date' means the surfaced/leaked date in most trackers
     # (user-confirmed 2026-07-20; 19 trackers in the TrackerHub sweep).
     "date": "leak_date",
@@ -175,6 +181,7 @@ COLUMN_ALIASES: dict[str, str] = {
     # preview predates (and often never becomes) a leak (user-confirmed).
     "first preview": "preview_date",
     "preview date": "preview_date",
+    "previewed": "preview_date",   # 2026-08-26 sweep
 
     # Availability
     "available length": "available_length",
@@ -197,12 +204,18 @@ COLUMN_ALIASES: dict[str, str] = {
     "download(s)": "links",       # XXXTENTACION
     "downloads": "links",
     "download": "links",
+    "download / link": "links",     # 2026-08-26 sweep
+    "snippet/song link": "links",   # 2026-08-26 sweep
     "og link(s)": "links",        # XXXTENTACION (secondary links)
     "main link": "links",         # Juice WRLD
     "alternate links": "alt_links",  # Juice WRLD
     "alternate link": "alt_links",
     "alt links": "alt_links",
     "alt link": "alt_links",
+    # Abbreviation with the dot kept. The header normaliser strips a trailing
+    # colon but nothing internal, so the dotted form matched nothing.
+    "alt. links": "alt_links",
+    "alt. link": "alt_links",
     "mirror links": "alt_links",
     "mirror link": "alt_links",
     "mirrors": "alt_links",
@@ -214,6 +227,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "on streaming": "streaming",
     "on streaming?": "streaming",
     "in circulation": "available_length",  # Yung Lean
+    "currently avalible": "available_length",  # sic — 2026-08-26 sweep
 
     # Evidence/provenance links (Travis Scott tracker)
     "sources": "sources",
@@ -246,4 +260,23 @@ COLUMN_ALIASES: dict[str, str] = {
     "file name": "og_filename_col",
     "filename": "og_filename_col",
     "instrumental name": "og_filename_col",
+    "instrumental file": "og_filename_col",  # 2026-08-26 sweep
 }
+
+# Headers seen in the 2026-08-26 corpus sweep that are deliberately NOT mapped,
+# recorded so the next sweep does not re-litigate them. Counts are workbooks.
+#
+#   Image, Project Type, Art Type, Use, Designer, Cover Art  — art-tab headers.
+#       is_song_tab already rejects those tabs; they appear here only because
+#       the tab is scanned before it is rejected.
+#   Engineer (6), Recording Location (4), Creator (5), Platform (3),
+#   File Type (3), Origin (2), Price (2)  — real data with no field to hold it.
+#       Adding one costs a model field plus a decode on every client for a
+#       handful of workbooks; revisit if a sweep shows them spreading.
+#   # (3), #: (3)  — track-number columns. Deliberately unmapped: binding one
+#       to `name` is exactly how Overlord's Lil Uzi Vert tracker came to have
+#       281 songs called "1", "2", "3" (see _infer_name_column).
+#   Tracklist (12), Album (5), Release (5), Category (8)  — ambiguous. "Album"
+#       is an era on a discography tracker and a track's parent release
+#       elsewhere, and binding `era` wrongly is expensive; left unmapped until
+#       one meaning is shown to dominate.

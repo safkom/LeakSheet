@@ -385,26 +385,46 @@ def _infer_name_column(
     return {}
 
 
-def detect_dropped_columns(header_row: list[_Cell], col_map: dict[str, int]) -> list[str]:
-    """Return header cell texts that matched no known column alias.
+def _header_label(cell: _Cell) -> str:
+    """The comparable label of a header cell: first line, parenthetical cut."""
+    first_line = cell.text.strip().split("\n")[0].strip()
+    paren = first_line.find("(")
+    if paren > 0:
+        first_line = first_line[:paren].strip()
+    return first_line[:60]
 
-    A non-empty header cell missing from ``col_map`` means every value in
-    that column is silently dropped — surfaced via ParseMetadata so unknown
-    tracker layouts are visible instead of quietly losing fields.
+
+def detect_dropped_columns(
+    header_row: list[_Cell], col_map: dict[str, int]
+) -> tuple[list[str], list[str]]:
+    """Header cells whose values never reach the model, split by reason.
+
+    Returns ``(unknown, duplicate)``.
+
+    *unknown* is a header no alias covers — a layout nobody has taught the
+    parser, and the list worth reading when a new tracker looks wrong.
+
+    *duplicate* is a header an alias DOES cover, whose canonical field a
+    different column already claimed: a sheet with two "Name" columns, or with
+    both "Available" and "In Circulation". Its values are lost just as
+    silently, but the cause is the sheet's shape rather than a gap in the
+    aliases, and no amount of alias work will change it. Reported together they
+    were indistinguishable, and 11 of the corpus's most frequent "dropped"
+    headers were this kind — noise in the one diagnostic that exists to find
+    real gaps.
     """
     mapped = set(col_map.values())
-    dropped: list[str] = []
+    unknown: list[str] = []
+    duplicate: list[str] = []
     for idx, cell in enumerate(header_row):
-        text = cell.text.strip()
-        if not text or idx in mapped:
+        if idx in mapped:
             continue
-        first_line = text.split("\n")[0].strip()
-        paren = first_line.find("(")
-        if paren > 0:
-            first_line = first_line[:paren].strip()
-        if first_line:
-            dropped.append(first_line[:60])
-    return dropped
+        label = _header_label(cell)
+        if not label:
+            continue
+        key = re.sub(r"\s+", " ", label.strip().lower()).rstrip(":").strip()
+        (duplicate if _match_column_alias(key) else unknown).append(label)
+    return unknown, duplicate
 
 
 def _extract_header_notices(
@@ -1673,7 +1693,7 @@ def parse_sheet(
             parse_metadata=ParseMetadata(
                 total_rows=len(rows) - header_row_idx - 1,
                 other_rows=len(rows) - header_row_idx - 1,
-                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map)[0],
             ),
         )
 
@@ -2071,6 +2091,9 @@ def parse_sheet(
         _sort_era_versions(era)
 
     # Step 4: build parse metadata
+    unknown_columns, duplicate_columns = detect_dropped_columns(
+        rows[header_row_idx], col_map
+    )
     metadata = ParseMetadata(
         total_rows=total_rows,
         song_rows=song_rows,
@@ -2080,7 +2103,8 @@ def parse_sheet(
         footer_rows=footer_rows,
         other_rows=max(0, total_rows - song_rows - skipped_rows - footer_rows),
         fuzzy_matched_rows=fuzzy_matched_rows,
-        dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+        dropped_columns=unknown_columns,
+        duplicate_columns=duplicate_columns,
     )
 
     logger.debug(

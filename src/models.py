@@ -402,6 +402,16 @@ class ParseMetadata(BaseModel):
         default_factory=list,
         description="Non-empty header cells that matched no known column alias",
     )
+    duplicate_columns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Header cells an alias DOES cover, whose canonical field a "
+            "different column already claimed (a sheet with two 'Name' "
+            "columns). Their values are dropped too, but no alias work can "
+            "change that — kept apart from dropped_columns so the gap list "
+            "stays readable"
+        ),
+    )
 
 
 class MiscEntry(BaseModel):

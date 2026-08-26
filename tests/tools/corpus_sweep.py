@@ -119,6 +119,7 @@ class Totals:
     field_hits: collections.Counter = field(default_factory=collections.Counter)
     art_hosts: collections.Counter = field(default_factory=collections.Counter)
     dropped_columns: collections.Counter = field(default_factory=collections.Counter)
+    duplicate_columns: collections.Counter = field(default_factory=collections.Counter)
     unmatched_stat_labels: collections.Counter = field(default_factory=collections.Counter)
     detail: dict = field(default_factory=dict)
 
@@ -188,6 +189,7 @@ def sweep_tab(html: str, title: str, t: Totals, url: str = "") -> None:
         t.rows_skipped += md.skipped_rows
         t.rows_fuzzy += md.fuzzy_matched_rows
         t.dropped_columns.update(md.dropped_columns)
+        t.duplicate_columns.update(md.duplicate_columns)
 
     for era in artist.eras:
         t.eras += 1
@@ -439,8 +441,13 @@ def report(t: Totals) -> None:
             print(f"  {v:6d}  {k}")
     if t.dropped_columns:
         print()
-        print("dropped columns (top 25):")
+        print("unmapped columns — alias gaps (top 25):")
         for k, v in t.dropped_columns.most_common(25):
+            print(f"  {v:6d}  {k}")
+    if t.duplicate_columns:
+        print()
+        print("duplicate columns — a claimed field's second column (top 15):")
+        for k, v in t.duplicate_columns.most_common(15):
             print(f"  {v:6d}  {k}")
     if t.art_hosts:
         print()

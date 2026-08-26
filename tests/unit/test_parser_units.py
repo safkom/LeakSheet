@@ -1408,18 +1408,64 @@ class TestSweepDrivenColumnWiring:
         assert v.og_filenames == ["glass_house_final", "glass_house_alt"]
 
 
+class TestSweepDrivenAliases2026_08:
+    """Headers the 2026-08-26 corpus sweep found reaching no field."""
+
+    @pytest.mark.parametrize("header,field,value", [
+        ("Alt. Link", "alt_links", "https://mirror.example/x"),
+        ("Download / Link", "links", "https://pillows.su/f/abc"),
+        ("Snippet/Song Link", "links", "https://pillows.su/f/def"),
+        ("Currently Avalible", "available_length", "Full"),
+        ("Previewed", "preview_date", "Jul 4, 2023"),
+        ("Instrumental File", "og_filename_col", "beat_v3"),
+        ("Info / Notes", "notes", "a note"),
+        ("Date Made", "file_date", "2019"),
+    ])
+    def test_header_now_resolves(self, header, field, value):
+        from src.parser import _Cell, detect_columns
+        col_map = detect_columns([_Cell(text="Era"), _Cell(text="Name"), _Cell(text=header)])
+        assert col_map.get(field) == 2, f"{header!r} should map to {field}"
+
+    def test_a_track_number_column_is_still_not_the_title(self):
+        """Binding "#" to `name` is how one tracker came to have 281 songs
+        called "1", "2", "3" — it must stay unmapped."""
+        from src.parser import _Cell, detect_columns
+        col_map = detect_columns([_Cell(text="#"), _Cell(text="Project & Track Title"), _Cell(text="Notes")])
+        assert col_map["name"] == 1
+
+
 class TestDroppedColumns:
     def test_unknown_header_surfaced(self):
         from src.parser import _Cell, detect_dropped_columns
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Bit Rate"), _Cell(text="Quality")]
         col_map = detect_columns(header)
-        dropped = detect_dropped_columns(header, col_map)
-        assert "Bit Rate" in dropped and "Era" not in dropped and "Quality" not in dropped
+        unknown, duplicate = detect_dropped_columns(header, col_map)
+        assert "Bit Rate" in unknown and "Era" not in unknown and "Quality" not in unknown
+        assert duplicate == []
 
     def test_fully_mapped_header_drops_nothing(self):
         from src.parser import _Cell, detect_dropped_columns
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Notes"), _Cell(text="Quality")]
-        assert detect_dropped_columns(header, detect_columns(header)) == []
+        assert detect_dropped_columns(header, detect_columns(header)) == ([], [])
+
+    def test_a_second_column_for_a_claimed_field_is_a_duplicate_not_a_gap(self):
+        """A sheet with two Name columns loses the second one's values, but no
+        alias work can change that — so it must not sit in the gap list."""
+        from src.parser import _Cell, detect_dropped_columns
+        header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Song"), _Cell(text="Bit Rate")]
+        unknown, duplicate = detect_dropped_columns(header, detect_columns(header))
+        assert unknown == ["Bit Rate"]
+        assert duplicate == ["Song"]
+
+    def test_both_lists_reach_parse_metadata(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table><tr><td>Era</td><td>Name</td><td>Song</td><td>Bit Rate</td></tr>"
+            "<tr><td>Era One</td><td>Track</td><td>x</td><td>320</td></tr></table>"
+        )
+        md = parse_sheet(html, "Test").parse_metadata
+        assert md.dropped_columns == ["Bit Rate"]
+        assert md.duplicate_columns == ["Song"]
 
 
 class TestParserRobustness:
