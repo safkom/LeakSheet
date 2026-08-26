@@ -11,9 +11,23 @@ struct SongContextMenu: View {
     let eraArt: String?
     var onPlay: ((SongVersion) -> Void)?
     var onShowDescription: (DescriptionSheet.Payload) -> Void
+    /// Classified links a content-tab entry carries beyond its audio stream —
+    /// images, videos, archives, embeds. Songs have none, so this is empty for
+    /// them and the section disappears. It lives in the shared menu rather
+    /// than in a second trailing control, because a content-tab row is meant
+    /// to be indistinguishable from a song row.
+    var extraLinks: [MiscLink] = []
+    var onSelectLink: ((MiscLink) -> Void)?
 
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
+
+    private var isFavourited: Bool {
+        if let song {
+            return favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
+        }
+        return favourites.isFavouritedByVersion(version, artistSlug: artistSlug, eraName: eraName)
+    }
 
     var body: some View {
         if version.isStreamable {
@@ -32,22 +46,27 @@ struct SongContextMenu: View {
                 Label("Add to Queue", systemImage: "text.append")
             }
         }
-        if let song {
-            Button {
+        // A payload with no Song is still favouritable — Now Playing, the
+        // description sheet opened from the player, and content-tab rows all
+        // carry a bare version, and every one of them silently lost the
+        // Favourite item.
+        Button {
+            if let song {
                 favourites.toggle(
-                    song: song,
-                    artistSlug: artistSlug,
-                    artistName: artistName,
-                    sourceUrl: sourceUrl,
-                    eraName: eraName,
-                    eraArt: eraArt
+                    song: song, artistSlug: artistSlug, artistName: artistName,
+                    sourceUrl: sourceUrl, eraName: eraName, eraArt: eraArt
                 )
-            } label: {
-                Label(
-                    favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "Unfavourite" : "Favourite",
-                    systemImage: favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "heart.fill" : "heart"
+            } else {
+                favourites.toggleFromVersion(
+                    version: version, artistSlug: artistSlug, artistName: artistName,
+                    sourceUrl: sourceUrl, eraName: eraName, eraArt: eraArt
                 )
             }
+        } label: {
+            Label(
+                isFavourited ? "Unfavourite" : "Favourite",
+                systemImage: isFavourited ? "heart.fill" : "heart"
+            )
         }
         Button {
             onShowDescription(DescriptionSheet.Payload(
@@ -64,6 +83,19 @@ struct SongContextMenu: View {
                 Label("Copy Link", systemImage: "doc.on.doc")
             }
         }
+        if let onSelectLink, !extraLinks.isEmpty {
+            // SwiftUI.Section explicitly: the app's own `Section` model (an
+            // era's song grouping) shadows it in every file that imports both.
+            SwiftUI.Section("Links") {
+                ForEach(extraLinks) { link in
+                    Button {
+                        onSelectLink(link)
+                    } label: {
+                        Label(link.label, systemImage: link.kind.systemImage)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -78,6 +110,8 @@ struct ThreeDotMenu: View {
     let eraArt: String?
     var onPlay: ((SongVersion) -> Void)?
     var onShowDescription: (DescriptionSheet.Payload) -> Void
+    var extraLinks: [MiscLink] = []
+    var onSelectLink: ((MiscLink) -> Void)?
 
     var body: some View {
         Menu {
@@ -85,7 +119,8 @@ struct ThreeDotMenu: View {
                 version: version, song: song,
                 artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
                 eraName: eraName, eraArt: eraArt,
-                onPlay: onPlay, onShowDescription: onShowDescription
+                onPlay: onPlay, onShowDescription: onShowDescription,
+                extraLinks: extraLinks, onSelectLink: onSelectLink
             )
         } label: {
             Image(systemName: "ellipsis")

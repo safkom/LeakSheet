@@ -407,8 +407,12 @@ struct MiscListView: View {
                     ForEach(Array(group.entries.enumerated()), id: \.element.id) { idx, entry in
                         MiscEntryRowView(
                             entry: entry,
+                            artistName: artistName,
+                            artistSlug: artistSlug,
+                            eraArt: eraArtUrl(for: entry.eraName),
+                            onPlay: { _ in playEntry(entry, in: entries) },
                             onShowDescription: onShowDescription,
-                            onSelectLink: { link in handleLinkSelection(link, for: entry, in: entries) }
+                            onSelectLink: onOpenLink
                         )
                         .contentShape(Rectangle())
                         .accessibilityAddTraits(.isButton)
@@ -441,30 +445,27 @@ struct MiscListView: View {
         ))
     }
 
-    /// Stream-kind links play with continuation across every other
-    /// stream-kind entry in the visible list, matching era/song playback;
-    /// everything else (image, video, archive, generic link) opens
-    /// externally — the OS decides how to handle it (Safari, a video app, a
-    /// zip download).
-    private func handleLinkSelection(_ link: MiscLink, for entry: MiscEntry, in entries: [MiscEntry]) {
-        switch link.kind {
-        case .stream:
-            Haptics.light()
-            let streamable = entries.filter(\.isStreamable)
-            guard let idx = streamable.firstIndex(where: { $0.id == entry.id }) else { return }
-            let items = streamable.map {
-                PlaybackListItem(
-                    version: $0.asSongVersion,
-                    artistName: artistName,
-                    eraName: $0.eraName,
-                    artUrl: eraArtUrl(for: $0.eraName) ?? "",
-                    artistSlug: artistSlug
-                )
-            }
-            player.playInList(items, startAt: idx)
-        case .image, .video, .embed, .archive, .link:
-            onOpenLink(link)
+    /// Play an entry with continuation across every other streamable entry in
+    /// the visible list, the same context an era or a search result gets.
+    ///
+    /// Non-audio links (image, video, archive, embed, generic) go straight to
+    /// `onOpenLink`, which the row hands to the shared context menu — they are
+    /// content-tab-only data, so they live inside the same menu a song row
+    /// shows rather than in a control only these rows have.
+    private func playEntry(_ entry: MiscEntry, in entries: [MiscEntry]) {
+        Haptics.light()
+        let streamable = entries.filter(\.isStreamable)
+        guard let idx = streamable.firstIndex(where: { $0.id == entry.id }) else { return }
+        let items = streamable.map {
+            PlaybackListItem(
+                version: $0.asSongVersion,
+                artistName: artistName,
+                eraName: $0.eraName,
+                artUrl: eraArtUrl(for: $0.eraName) ?? "",
+                artistSlug: artistSlug
+            )
         }
+        player.playInList(items, startAt: idx)
     }
 
     /// Era art for a misc entry — matched against the main-tab eras by name.
