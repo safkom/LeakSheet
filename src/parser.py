@@ -556,7 +556,7 @@ ERA_STATS_PATTERN = re.compile(
     r"|Leaks?|Snippets?|Partials?"
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
-    r"|Released|Deleted|Lost|Privated"
+    r"|Released|Deleted|Losts?|Privated"
     r")\b",
     re.IGNORECASE,
 )
@@ -574,6 +574,9 @@ _DISCOGRAPHY_STATS_PATTERN = re.compile(
     r"|Intros?|Interludes?|Outros?|Skits?"
     r"|Demos?|Throwaways?|Sessions?|Original Versions?|Originals?"
     r"|Not Avai?la?ble|Removed|Alt\.? Mix"
+    # Visual-media counts, from trackers that fold videos into the era block
+    # (UPSAHL). Longer form first so the label reads right in a match dump.
+    r"|Music Video Snippets?|Music Videos?"
     # "N Total Links" is the global tracker footer, not an era stat — matching
     # it turns the footer row into a phantom era at the bottom of every sheet.
     r"|Total(?!\s+Links)|Others?"

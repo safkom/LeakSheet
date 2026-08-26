@@ -142,6 +142,20 @@ class TestVocabularyBoundaries:
     def test_single_leak_status_pair_still_matches(self):
         assert era_stats_match("5 Full")
 
+    @pytest.mark.parametrize("cell", [
+        # "Lost" was listed; the plural was not, so "2 Losts" failed and the
+        # era header's NAME cell became a song inside an era called "2 Losts".
+        "2 Losts",
+        "11 Losts\n1 Music Video\n1 Music Video Snippet",
+    ])
+    def test_visual_media_and_plural_loss_counts(self, cell):
+        assert era_stats_match(cell)
+
+    def test_one_music_video_pair_is_not_a_stats_cell(self):
+        # Release-type vocabulary still needs two pairs, so an era NAMED after
+        # a video ("1 Music Video Special") is untouched.
+        assert not era_stats_match("1 Music Video")
+
 
 class TestReleaseTypeRouting:
     def test_leak_status_labels_do_not_leak_into_release_types(self):

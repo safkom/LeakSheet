@@ -33,7 +33,12 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.parser import era_stats_match, extract_table, parse_sheet  # noqa: E402
+from src.parser import (  # noqa: E402
+    _FOOTER_KEYWORDS_RE,
+    era_stats_match,
+    extract_table,
+    parse_sheet,
+)
 
 # Version fields whose population rate we track. A field being rare is not
 # automatically a bug — some columns genuinely do not exist on most trackers —
@@ -147,6 +152,12 @@ def _count_unmatched_stats_headers(rows) -> tuple[int, collections.Counter]:
         # Must mirror _is_era_header exactly, or the count measures the sweep's
         # own rule instead of the parser's.
         if era_stats_match(cell):
+            continue
+        # The global stats footer is stats-shaped and is SUPPOSED to be
+        # rejected — counting it as a lost era header put four labels at 20
+        # hits each on top of a list whose whole job is surfacing the real
+        # ones, which numbered three.
+        if _FOOTER_KEYWORDS_RE.search(cell.lower()):
             continue
         misses += 1
         for m in matches:
