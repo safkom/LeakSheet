@@ -586,6 +586,48 @@ class TestWrappedCreditLists:
         assert c.alt_titles == ["(Some Title.", "More Title)"]
 
 
+class TestGluedFeatureKeyword:
+    """"feat."/"ft." with no space before the name.
+
+    The featuring keyword required whitespace after the dot while the producers
+    keyword already accepted the glued form, so "(feat.Dc2trill, Draft Day &
+    Lil Yachty)" parsed as part of the title. Giving featuring the same
+    dot-or-space rule also reaches "(Ft.)" — an empty credit the sheets leave
+    behind — which was riding along in 74 song titles.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_glued_feat(self):
+        c = self._c("Name It After Me\n(feat.Dc2trill, Draft Day & Lil Yachty)")
+        assert c.featuring == "Dc2trill, Draft Day & Lil Yachty"
+        assert c.title == "Name It After Me"
+
+    def test_glued_ft(self):
+        assert self._c("Nechie - Savage\n(ft.Young Thug) (prod. MP808)").featuring == "Young Thug"
+
+    def test_inline_glued_feat(self):
+        c = self._c("Girlfriend (feat.black kray)")
+        assert (c.title, c.featuring) == ("Girlfriend", "black kray")
+
+    def test_empty_credit_leaves_the_title(self):
+        assert self._c("Team Toon - Live Dat Life (Ft.)").title == "Team Toon - Live Dat Life"
+
+    @pytest.mark.parametrize("raw", ["Feature Song", "Ftw Anthem", "Fte Records"])
+    def test_a_word_merely_starting_with_the_keyword_is_not_a_credit(self, raw):
+        c = self._c(raw)
+        assert c.title == raw and c.featuring is None
+
+    def test_spelled_out_featuring_still_works(self):
+        assert self._c("Song (featuring Drake)").featuring == "Drake"
+
+    def test_the_spaced_forms_are_unchanged(self):
+        assert self._c("Song (feat. Drake)").featuring == "Drake"
+        assert self._c("Song (ft. A)").featuring == "A"
+
+
 class TestAliasLabelStripping:
     """Some trackers label the alias line rather than just writing it.
 

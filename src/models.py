@@ -749,7 +749,11 @@ _CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&.][^\S\n]*\n[^\S\n]*)*)[\)
 # the match order, so nothing here may be a prefix of a later entry.
 # "dir." sits on music-video and visual rows ("[dir. Dave Meyers]").
 _CREDIT_FIELDS: list[tuple[str, str]] = [
-    ("featuring", r"(?:feat|ft)\.?\s+|featuring\s+"),
+    # "feat. X", "ft. X", "feat.Dc2trill", "featuring X". Same dot-or-space
+    # rule the producers entry uses, so "Feature" and "ftw" cannot match while
+    # a glued "feat.Name" can — 13 name cells carried the glued form and had
+    # their feature credit read as part of the title.
+    ("featuring", r"(?:feat|ft)(?:\.\s*|\s+)|featuring\s+"),
     # "prod. X", "Prod.by Bighead", "prod.SlimeOnTheTRack", "produced by X".
     # A dot OR whitespace must follow "prod", so a title beginning "Prodigy"
     # cannot match. "by" is consumed on a word boundary rather than requiring
