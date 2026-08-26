@@ -2803,6 +2803,7 @@ def parse_misc_tab(
 
         entry = MiscEntry(
             era_name=current_era,
+            row_index=len(entries),
             section=current_section,
             name=first_line,
             notes=opt("notes"),

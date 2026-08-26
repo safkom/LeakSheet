@@ -1494,6 +1494,44 @@ class TestBadgeTabVersionTargeting:
         assert artist.eras[0].songs[0].versions[0].badge is not None
 
 
+class TestMiscEntryIdentity:
+    """A tab's entries must be distinguishable from each other.
+
+    Content repeats constantly on these tabs — the Ye Stems tab lists ten
+    entries called "Beat 1" in one era with no date — so an identity derived
+    from content alone collides, and SwiftUI's ForEach silently keeps only the
+    first: 458 of 1,721 stem rows never reached the screen while the stats bar
+    above them counted all of them. 527 rows across the Ye tracker's tabs.
+    """
+
+    TAB = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Link(s)</td></tr>"
+        "<tr><td>2 Released</td><td>Debut Era</td><td></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/a'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/c'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def test_identical_rows_get_distinct_identities(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert len(entries) == 3
+        keys = {(e.source_tab, e.row_index, e.era_name, e.name) for e in entries}
+        assert len(keys) == 3
+
+    def test_the_index_is_the_row_position_in_the_tab(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert [e.row_index for e in entries] == [0, 1, 2]
+
+    def test_links_still_belong_to_their_own_row(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert [e.links[0][-1] for e in entries] == ["a", "b", "c"]
+
+
 class TestDroppedColumns:
     def test_unknown_header_surfaced(self):
         from src.parser import _Cell, detect_dropped_columns

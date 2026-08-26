@@ -421,6 +421,15 @@ class MiscEntry(BaseModel):
     own column sets and are kept fully separate from the era/song tree.
     """
     era_name: str = Field("", description="Era label from the last era header row")
+    row_index: int = Field(
+        0,
+        description=(
+            "Position within this tab, 0-based. Content repeats constantly on "
+            "these tabs — a Stems tab lists ten entries called 'Beat 1' — so "
+            "identity derived from the content alone collides, and a client "
+            "keyed on it silently renders one row where the tab has ten"
+        ),
+    )
     section: str = Field(
         "",
         description=(

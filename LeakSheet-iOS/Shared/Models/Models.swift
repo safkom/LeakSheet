@@ -355,6 +355,9 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
 /// separate from the era/song tree.
 nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     let eraName: String
+    /// Position within its tab, from the backend. Optional so payloads cached
+    /// before the field existed still decode — see `id`.
+    let rowIndex: Int?
     let name: String
     let notes: String?
     let entryType: String?
@@ -366,7 +369,19 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     let links: [String]
     let sourceTab: String
 
-    var id: String { "\(sourceTab)::\(eraName)::\(name)::\(date ?? "")" }
+    /// Row identity. `rowIndex` is what makes it unique: these tabs repeat
+    /// content constantly — the Ye Stems tab lists ten entries called "Beat 1"
+    /// in one era with no date — and ForEach silently keeps only the first row
+    /// per duplicate id, so 458 of that tab's 1,721 rows never rendered while
+    /// the stats bar above them counted all of them. 527 rows across the
+    /// tracker. Falls back to the old content-derived shape for payloads
+    /// cached before the backend sent an index.
+    var id: String {
+        guard let rowIndex else {
+            return "\(sourceTab)::\(eraName)::\(name)::\(date ?? "")"
+        }
+        return "\(sourceTab)::\(rowIndex)::\(eraName)::\(name)"
+    }
 
     var streamableLink: String? {
         links.first { StreamResolver.isStreamableURL($0) }
@@ -427,6 +442,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, notes, date, length, available, quality, streaming, links
         case eraName = "era_name"
+        case rowIndex = "row_index"
         case entryType = "entry_type"
         case sourceTab = "source_tab"
     }
