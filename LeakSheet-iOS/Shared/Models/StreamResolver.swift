@@ -32,11 +32,38 @@ enum StreamResolver {
         !s.isEmpty && s.allSatisfy(\.isHexDigit)
     }
 
+    /// Query keys Google Docs glues onto every link it rewrites through its
+    /// redirector. They are not part of the file URL, and the sheet parser
+    /// carries them through verbatim.
+    private nonisolated static let googleWrapperKeys: Set<String> = [
+        "sa", "source", "ust", "usg", "ved",
+    ]
+
+    /// A link with Google's redirect tracking removed.
+    ///
+    /// Two shapes reach us. On Drive links the params sit in a real query
+    /// (`open?id=X&usp=…&sa=D&…`), which classification already ignored. On
+    /// pillows links they are glued straight onto the path with no `?` at all
+    /// (`/f/{id}&sa=D&source=editors&…`), which made the id fail `isID` — so
+    /// 25 links in the live corpus carried no play affordance at all.
+    ///
+    /// Only strips when EVERY trailing `&key=value` pair is a known wrapper
+    /// key, so a genuine multi-param link is left alone.
+    nonisolated static func canonical(_ link: String) -> String {
+        guard let marker = link.range(of: "&sa=") else { return link }
+        let tail = link[marker.lowerBound...].dropFirst()
+        let keys = tail.split(separator: "&").compactMap {
+            $0.split(separator: "=", maxSplits: 1).first.map(String.init)
+        }
+        guard !keys.isEmpty, keys.allSatisfy(googleWrapperKeys.contains) else { return link }
+        return String(link[..<marker.lowerBound])
+    }
+
     /// Classify a link. Trailing path segments are ignored the way the old
     /// patterns did (they matched an id followed by `/`, `?`, `#`, or end),
     /// so `/file/d/{id}/view?usp=sharing` still resolves.
     nonisolated static func target(for link: String) -> Target? {
-        guard let comps = URLComponents(string: link),
+        guard let comps = URLComponents(string: canonical(link)),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
               var host = comps.host?.lowercased()
         else { return nil }
@@ -94,15 +121,21 @@ enum StreamResolver {
 
     /// Returns the proxied stream URL for a file-sharing link.
     nonisolated static func streamURL(for originalLink: String) -> URL? {
-        guard isStreamableURL(originalLink),
-              let encoded = originalLink.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        // `.urlQueryAllowed` leaves `&`, `=` and `?` unescaped, but the link is
+        // nested as the VALUE of the backend's own `url=` parameter — so
+        // everything after the first `&` arrived as separate top-level params
+        // and the backend saw a truncated URL. Escape everything outside the
+        // RFC 3986 unreserved set.
+        let link = canonical(originalLink)
+        guard isStreamableURL(link),
+              let encoded = link.addingPercentEncoding(withAllowedCharacters: .leakSheetURLValue)
         else { return nil }
         return URL(string: "\(APIClient.baseURL)/stream?url=\(encoded)")
     }
 
     /// Returns the original-quality download URL for a file-sharing link.
     nonisolated static func originalQualityURL(for originalLink: String) -> URL? {
-        switch target(for: originalLink) {
+        switch target(for: canonical(originalLink)) {
         case .pillows(let id):
             return URL(string: "https://api.pillows.su/api/download/\(id)")
 
@@ -133,4 +166,13 @@ enum StreamResolver {
             return nil
         }
     }
+}
+
+extension CharacterSet {
+    /// RFC 3986 unreserved characters. Anything else is escaped, which is what
+    /// a URL nested inside another URL's query value requires — `.urlQueryAllowed`
+    /// keeps sub-delimiters like `&` and `=` and would split the value in two.
+    nonisolated(unsafe) static let leakSheetURLValue = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
 }
