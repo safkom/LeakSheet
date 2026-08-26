@@ -2530,6 +2530,23 @@ def _badge_for_entry(entry: MiscEntry, tab_default: Badge) -> Badge:
     return tab_default
 
 
+def _badge_target(song: Song, entry_tag: str | None) -> SongVersion:
+    """The version a highlight-tab row is talking about.
+
+    Highlight tabs name a specific take — "⭐ Gotta Pose [V1]" — and the tag is
+    the only thing distinguishing it from its siblings. Stamping versions[0]
+    put the star on whichever take sorted first, which after _sort_era_versions
+    is rarely the one the tab named. Falls back to the first version when the
+    row carries no tag, or names one this song does not have.
+    """
+    if entry_tag:
+        wanted = entry_tag.strip().lower()
+        for version in song.versions:
+            if (version.version_tag or "").strip().lower() == wanted:
+                return version
+    return song.versions[0]
+
+
 def apply_badge_tabs(
     artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
 ) -> int:
@@ -2571,7 +2588,7 @@ def apply_badge_tabs(
             continue
         for entry in entries:
             _, entry_name = extract_badge(entry.name)
-            _, base_name = extract_version_tag(entry_name)
+            entry_tag, base_name = extract_version_tag(entry_name)
             song_key = _song_match_key(base_name)
             if not song_key:
                 continue
@@ -2584,7 +2601,7 @@ def apply_badge_tabs(
                 continue
             if any(v.badge is not None for v in song.versions):
                 continue
-            song.versions[0].badge = _badge_for_entry(entry, tab_default)
+            _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
             applied += 1
     return applied
 

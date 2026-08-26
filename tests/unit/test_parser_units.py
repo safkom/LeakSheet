@@ -1434,6 +1434,66 @@ class TestSweepDrivenAliases2026_08:
         assert col_map["name"] == 1
 
 
+class TestBadgeTabVersionTargeting:
+    """A highlight tab names a specific take; the badge must land on it.
+
+    apply_badge_tabs stamped versions[0], but the tab writes "⭐ Gotta Pose
+    [V1]" and _sort_era_versions has already reordered the list by then. 14
+    placements across 6 corpus workbooks were landing on the wrong take.
+    """
+
+    MAIN = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+        "<tr><td>2 Full</td><td>Debut Era</td><td></td><td></td><td></td></tr>"
+        "<tr><td>Debut Era</td><td>Gotta Pose [Demo 1]</td><td></td><td>Low Quality</td>"
+        "<td><a href='https://pillows.su/f/a'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Gotta Pose [V1]</td><td></td><td>Lossless</td>"
+        "<td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "</table>"
+    )
+    BADGE_TAB = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Link(s)</td></tr>"
+        "<tr><td>Debut Era</td><td>\u2b50 Gotta Pose [V1]</td>"
+        "<td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def _apply(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        entries = parse_misc_tab(self.BADGE_TAB, "best_of", [e.name for e in artist.eras])
+        applied = apply_badge_tabs(artist, [("best_of", entries)])
+        return artist, applied
+
+    def test_the_badge_lands_on_the_named_version(self):
+        artist, applied = self._apply()
+        assert applied == 1
+        song = artist.eras[0].songs[0]
+        # _sort_era_versions puts the V-take first, so this is not versions[0]
+        # by accident — assert against the tag, not the index.
+        badged = [v for v in song.versions if v.badge is not None]
+        assert len(badged) == 1
+        assert badged[0].version_tag == "V1"
+
+    def test_an_untagged_row_still_falls_back_to_the_first_version(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        tab = self.BADGE_TAB.replace("Gotta Pose [V1]", "Gotta Pose")
+        entries = parse_misc_tab(tab, "best_of", [e.name for e in artist.eras])
+        assert apply_badge_tabs(artist, [("best_of", entries)]) == 1
+        assert artist.eras[0].songs[0].versions[0].badge is not None
+
+    def test_a_tag_the_song_does_not_have_falls_back(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        tab = self.BADGE_TAB.replace("Gotta Pose [V1]", "Gotta Pose [V9]")
+        entries = parse_misc_tab(tab, "best_of", [e.name for e in artist.eras])
+        assert apply_badge_tabs(artist, [("best_of", entries)]) == 1
+        assert artist.eras[0].songs[0].versions[0].badge is not None
+
+
 class TestDroppedColumns:
     def test_unknown_header_surfaced(self):
         from src.parser import _Cell, detect_dropped_columns
