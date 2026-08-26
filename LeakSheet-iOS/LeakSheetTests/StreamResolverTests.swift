@@ -104,4 +104,51 @@ struct StreamResolverTests {
         #expect(StreamResolver.streamURL(for: "https://youtube.com/watch?v=1") == nil)
         #expect(StreamResolver.originalQualityURL(for: "https://mega.nz/file/x") == nil)
     }
+
+    // MARK: - Google redirect wrapper + nested-URL encoding
+
+    /// Google Docs glues its redirect params straight onto the path on these —
+    /// no `?` — so the id failed isID and 25 links in the live corpus showed no
+    /// play affordance at all.
+    @Test func `a pillows link with glued google tracking is still streamable`() {
+        let link = "https://pillows.su/f/274b47d9d17ae027929947fc28218bde"
+            + "&sa=D&source=editors&ust=1768409055962135&usg=AOvVaw0brfg"
+        #expect(StreamResolver.target(for: link) == .pillows(id: "274b47d9d17ae027929947fc28218bde"))
+        #expect(StreamResolver.originalQualityURL(for: link)?.absoluteString
+                == "https://api.pillows.su/api/download/274b47d9d17ae027929947fc28218bde")
+    }
+
+    @Test func `the wrapper is stripped before the link is proxied`() {
+        let link = "https://pillows.su/f/abc123&sa=D&source=editors&ust=1&usg=X"
+        let proxied = try! #require(StreamResolver.streamURL(for: link)).absoluteString
+        #expect(!proxied.contains("sa%3DD"))
+        #expect(!proxied.contains("&sa="))
+        #expect(proxied.contains("pillows.su%2Ff%2Fabc123"))
+    }
+
+    /// Only a tail that is ENTIRELY wrapper params may be dropped — a real
+    /// parameter that happens to sit beside them must survive.
+    @Test func `a genuine parameter is not mistaken for tracking`() {
+        let link = "https://drive.google.com/open?id=1ABCdef&sa=D&keep=me"
+        #expect(StreamResolver.canonical(link) == link)
+    }
+
+    /// The link is nested as the value of the backend's own `url=` param, so
+    /// every reserved character has to be escaped or the value is truncated at
+    /// the first `&` — which dropped the file id on `uc?export=download&id=…`.
+    @Test func `nested url escapes the separators that would split it`() {
+        let link = "https://drive.google.com/uc?export=download&id=1ABCdefGHIjkl"
+        let proxied = try! #require(StreamResolver.streamURL(for: link)).absoluteString
+        let value = String(proxied.split(separator: "=", maxSplits: 1).last!)
+        #expect(!value.contains("&"), "an unescaped & splits the value: \(value)")
+        #expect(!value.contains("?"))
+        #expect(value.removingPercentEncoding == link)
+    }
+
+    @Test func `drive links keep working with their own params attached`() {
+        let link = "https://drive.google.com/open?id=1M8LE0Rog4LMTykX35CbihvCRGYfBVrCV&usp=drive_copy"
+        #expect(StreamResolver.target(for: link) == .gdrive)
+        let proxied = try! #require(StreamResolver.streamURL(for: link)).absoluteString
+        #expect(proxied.contains("usp%3Ddrive_copy"))
+    }
 }

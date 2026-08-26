@@ -15,7 +15,7 @@ final class AudioEngine {
     /// Settings screen — which is per-platform.
     static let autoplayNextKey = "leaksheet_autoplay_next"
 
-    private nonisolated static let log = Logger(subsystem: "eu.safko.LeakSheet", category: "Audio")
+    private nonisolated static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Audio")
 
     // MARK: - State
 
@@ -247,8 +247,17 @@ final class AudioEngine {
         }
     }
 
+    /// Abandon any in-flight seek. Bumping the generation makes the outgoing
+    /// seek's completion a no-op, so it cannot clear the flag for whatever is
+    /// loaded next.
+    private func cancelPendingSeek() {
+        seekGeneration &+= 1
+        seekInFlight = false
+    }
+
     func stopTrack() {
         streamFormat = nil
+        cancelPendingSeek()
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = nil
         observations.forEach { $0.invalidate() }
@@ -430,6 +439,13 @@ final class AudioEngine {
         // Cancel any pending loading timeout
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = nil
+
+        // A seek against the OUTGOING item is now moot: replaceCurrentItem
+        // cancels it, but its completion still arrives and used to match the
+        // generation, so `seekInFlight` stayed true and the time observer
+        // suppressed every currentTime write — the new track played with a
+        // frozen scrubber until the stale completion landed.
+        cancelPendingSeek()
 
         // Invalidate all previous KVO observations
         observations.forEach { $0.invalidate() }

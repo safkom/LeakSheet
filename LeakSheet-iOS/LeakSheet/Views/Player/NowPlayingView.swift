@@ -9,9 +9,23 @@ struct NowPlayingView: View {
     /// versions) from the bare SongVersion the player holds.
     @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
     @Environment(\.dismiss) private var dismiss
+    #if os(macOS)
+    /// The queue is the main window's inspector on the Mac; this button has to
+    /// bring that window forward, not open a sheet over this one.
+    @Environment(\.openWindow) private var openWindow
+    #endif
+
+    /// The Mac window renders in the real system appearance (the scenes no
+    /// longer force dark), so contrast has to be judged against the appearance
+    /// actually on screen — see DECISIONS.md::DesignTokens.swift::scheme-threading.
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var accentColor: Color?
+    #if !os(macOS)
+    /// iOS only — on the Mac the queue is the main window's inspector (⌥⌘Q),
+    /// not a sheet stacked on top of this one.
     @State private var showQueue = false
+    #endif
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showFullScreenVideo = false
 
@@ -21,12 +35,41 @@ struct NowPlayingView: View {
     /// would otherwise render illegible tints.
     private var readableAccent: Color? {
         guard let accent = accentColor else { return nil }
-        let backdrop = accent.blended(with: .lsBackground, fraction: 0.7)
-        return accent.ensureReadable(against: backdrop)
+        let backdrop = accent.blended(with: .lsBackground, fraction: 0.7, in: colorScheme)
+        return accent.ensureReadable(against: backdrop, in: colorScheme)
     }
 
     var body: some View {
+        #if os(macOS)
+        // No NavigationStack: this is a window, and its titlebar already
+        // supplies the chrome an inline nav bar would duplicate.
+        content
+            .toolbar { overflowMenu }
+        #else
         NavigationStack {
+            content
+                .toolbarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.headline)
+                        }
+                        .accessibilityLabel("Close now playing")
+                    }
+                    overflowMenu
+                }
+                .sheet(isPresented: $showQueue) {
+                    QueueSheet()
+                        .environment(PlayerViewModel.shared)
+                }
+        }
+        #endif
+    }
+
+    private var content: some View {
             VStack(spacing: 24) {
                 Spacer()
 
@@ -108,12 +151,12 @@ struct NowPlayingView: View {
                             // invisible. Same treatment the Image branch uses.
                             ProgressView()
                                 .controlSize(.regular)
-                                .tint(Color.preferredText(on: accentColor ?? Color.lsAccent))
+                                .tint(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
                                 .frame(width: 56, height: 56)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.title2.weight(.semibold))
-                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent))
+                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
                                 .frame(width: 56, height: 56)
                                 .contentTransition(.symbolEffect(.replace))
                         }
@@ -172,7 +215,13 @@ struct NowPlayingView: View {
 
                     // Queue
                     Button {
+                        #if os(macOS)
+                        MacUIState.shared.inspectorTab = .queue
+                        MacUIState.shared.showInspector = true
+                        openWindow(id: "main")
+                        #else
                         showQueue = true
+                        #endif
                     } label: {
                         Image(systemName: "list.bullet")
                             .font(.body)
@@ -246,17 +295,24 @@ struct NowPlayingView: View {
                 }
                 .ignoresSafeArea()
             )
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.headline)
-                    }
-                    .accessibilityLabel("Close now playing")
+            .sheet(item: $showDescription) { payload in
+                SongDescriptionSheet(payload: payload)
+                    .environment(FavouritesManager.shared)
+                    .environment(PlayerViewModel.shared)
+                    .environment(artistVM)
+            }
+            .task(id: player.artUrl) {
+                guard !player.artUrl.isEmpty,
+                      let url = APIClient.shared.imageProxyURL(for: player.artUrl, width: 128) else {
+                    accentColor = nil
+                    return
                 }
+                accentColor = await EraColorExtractor.shared.extractColor(from: url, cacheKey: player.artUrl)
+            }
+    }
+
+    @ToolbarContentBuilder
+    private var overflowMenu: some ToolbarContent {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         if let track = player.currentTrack {
@@ -295,26 +351,6 @@ struct NowPlayingView: View {
                     }
                     .accessibilityLabel("More options")
                 }
-            }
-            .sheet(isPresented: $showQueue) {
-                QueueSheet()
-                    .environment(PlayerViewModel.shared)
-            }
-            .sheet(item: $showDescription) { payload in
-                SongDescriptionSheet(payload: payload)
-                    .environment(FavouritesManager.shared)
-                    .environment(PlayerViewModel.shared)
-                    .environment(artistVM)
-            }
-            .task(id: player.artUrl) {
-                guard !player.artUrl.isEmpty,
-                      let url = APIClient.shared.imageProxyURL(for: player.artUrl, width: 128) else {
-                    accentColor = nil
-                    return
-                }
-                accentColor = await EraColorExtractor.shared.extractColor(from: url, cacheKey: player.artUrl)
-            }
-        }
     }
 
     @ViewBuilder
@@ -343,18 +379,42 @@ struct NowPlayingView: View {
                     )
                 )
         } else if !player.artUrl.isEmpty {
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600)) {
+            // Width matches maxPixelSize, as every other call site does: asking
+            // for 1600 while CachedImage capped the decode at its 1280 default
+            // downloaded bytes that were then thrown away, and 640 already
+            // covers the 280pt frame at 2x.
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 640), maxPixelSize: 640) {
                 artPlaceholder
             }
-            .frame(width: 280, height: 280)
+            .modifier(ArtworkSquare())
         } else {
             artPlaceholder
-                .frame(width: 280, height: 280)
+                .modifier(ArtworkSquare())
         }
     }
 
     private var artPlaceholder: some View {
         ArtworkPlaceholder(cornerRadius: 0)
             .font(.system(size: 48))
+    }
+}
+
+/// Square artwork frame. Fixed on iPhone (one screen size class per device);
+/// window-relative on the Mac, where the Now Playing window is resizable and a
+/// hard 280pt square left the rest of it empty.
+private struct ArtworkSquare: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        GeometryReader { proxy in
+            let side = max(120, min(proxy.size.width - 48, proxy.size.height))
+            content
+                .frame(width: side, height: side)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .layoutPriority(1)
+        #else
+        content.frame(width: 280, height: 280)
+        #endif
     }
 }

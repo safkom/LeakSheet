@@ -57,6 +57,13 @@ struct SongContextMenu: View {
         } label: {
             Label("Details", systemImage: "info.circle")
         }
+        if let link = version.links?.first {
+            Button {
+                Pasteboard.copy(link)
+            } label: {
+                Label("Copy Link", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 
@@ -84,7 +91,7 @@ struct ThreeDotMenu: View {
             Image(systemName: "ellipsis")
                 .font(.body)
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

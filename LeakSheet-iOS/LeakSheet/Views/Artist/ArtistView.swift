@@ -109,6 +109,7 @@ private struct ArtistContentView: View {
     }
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     /// era name (lowercased) → art URL, first occurrence wins — mirrors the
     /// case-insensitive `.first { }` lookup misc entries used to do directly
@@ -264,6 +265,10 @@ private struct ArtistContentView: View {
                     .transition(.opacity)
             }
         }
+        // Era card gradients and header contrast are derived per appearance.
+        .onChange(of: colorScheme, initial: true) { _, scheme in
+            vm.setColorScheme(scheme)
+        }
         .swipeActionsContainer()
         .navigationTitle(artist.name)
         .navigationSubtitle("\(vm.visibleStats.total.formatted()) \(vm.isShowingTabEntries ? "entries" : "tracks")")
@@ -285,7 +290,7 @@ private struct ArtistContentView: View {
                             Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
                         } label: {
                             Image(systemName: "ellipsis")
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .accessibilityHidden(true)
                         }
                         .glassEffect(.regular.interactive(), in: .circle)
@@ -295,7 +300,7 @@ private struct ArtistContentView: View {
                             showQueue = true
                         } label: {
                             Image(systemName: "list.bullet")
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .accessibilityHidden(true)
                         }
                         .glassEffect(.regular.interactive(), in: .circle)

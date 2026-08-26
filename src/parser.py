@@ -1131,8 +1131,15 @@ def _normalize_unicode(text: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
-def _era_match_key(full_era_name: str) -> str:
+def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> str:
     """Extract the matching key from an era name, lowercased for matching.
+
+    *keep_discriminators* preserves the two things that tell sibling eras apart:
+    a ``[V1]``/``[V2]`` version tag and a parenthetical like ``(2018)``. Song
+    rows reference their era without either, so the default drops both — but an
+    Art tab names each one's cover explicitly ("Donda [V2]", "Good Ass Job
+    (2018)"), and collapsing those onto one key handed every sibling the first
+    one's artwork. See docs/decisions.md::parser.py::art-version-keys.
 
     Era headers contain full names like "Before Baby Keem(as Hykeem Carter...)"
     but song rows only use "Before Baby Keem".  We extract the text before
@@ -1148,18 +1155,20 @@ def _era_match_key(full_era_name: str) -> str:
     - "Super geëky" → "super geeky"  (diacritics normalized)
     """
     key = full_era_name
-    # Strip from first '(' onward
-    paren_idx = key.find("(")
-    if paren_idx > 0:
-        key = key[:paren_idx]
-    elif paren_idx == 0:
-        # Entire name is parenthetical — use content inside parens
-        close = key.find(")")
-        if close > 0:
-            key = key[1:close]
+    if not keep_discriminators:
+        # Strip from first '(' onward
+        paren_idx = key.find("(")
+        if paren_idx > 0:
+            key = key[:paren_idx]
+        elif paren_idx == 0:
+            # Entire name is parenthetical — use content inside parens
+            close = key.find(")")
+            if close > 0:
+                key = key[1:close]
     key = key.strip()
     # Strip version tags like [V1], [V2], [V3]
-    key = VERSION_TAG_PATTERN.sub("", key).strip()
+    if not keep_discriminators:
+        key = VERSION_TAG_PATTERN.sub("", key).strip()
     # Strip trailing asterisk used by some trackers (e.g. Travis Scott) to
     # denote the "features/collabs within this era" sub-section.  We want
     # "Rodeo*" to resolve to the same "Rodeo" era as non-asterisk rows.
@@ -2753,7 +2762,14 @@ def parse_misc_tab(
 # Art-tab header labels. The tab has its own layout (no Name/Links columns),
 # so it gets its own tiny header detection rather than COLUMN_ALIASES.
 _ART_ERA_HEADERS = frozenset({"era", "album", "project", "era/project"})
-_ART_TYPE_HEADERS = frozenset({"project type", "type", "art type", "image type", "category"})
+# Ordered best-first, NOT a set: an art tab can carry both an "Art Type" column
+# (the medium — Digital / Scan / Photo) and a "Project Type" column (the role —
+# Front Cover / Booklet / Promo Art). Only the role column can identify a cover,
+# and on the Ye tab the medium column comes first, so first-match-wins bound
+# type_idx to it and the cover preference below never fired for a single era —
+# every era silently fell back to whichever artwork was listed first.
+# See docs/decisions.md::parser.py::art-type-column-priority.
+_ART_TYPE_HEADERS = ("project type", "type", "image type", "category", "art type")
 
 
 def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
@@ -2767,12 +2783,16 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
         if any(cell.images for cell in row):
             break  # already into the data; no header row above it
         era_idx = type_idx = None
+        type_rank = len(_ART_TYPE_HEADERS)
         for c_idx, cell in enumerate(row):
             key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
             if era_idx is None and key in _ART_ERA_HEADERS:
                 era_idx = c_idx
-            if type_idx is None and key in _ART_TYPE_HEADERS:
-                type_idx = c_idx
+            # Best-ranked header wins, not the leftmost one.
+            if key in _ART_TYPE_HEADERS:
+                rank = _ART_TYPE_HEADERS.index(key)
+                if rank < type_rank:
+                    type_rank, type_idx = rank, c_idx
         if era_idx is not None or type_idx is not None:
             return era_idx, type_idx, idx + 1
     start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
@@ -2813,6 +2833,9 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     # First pass: collect all images per era key, noting which have cover descriptions.
     # era_info: {era_key: {"cover": url, "first": url}}
     era_info: dict[str, dict[str, str | None]] = {}
+    # Version-stripped key → the FIRST versioned key filed under it, so an era
+    # the Art tab spells without a version tag still resolves.
+    base_keys: dict[str, str] = {}
     # Art tabs leave the era cell blank on an era's continuation rows, so the
     # last seen era carries forward. Without this a blank era cell fell back
     # to the first non-empty cell — the artwork's own name — filing the image
@@ -2837,9 +2860,12 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
             continue
         last_era_name = era_name
 
-        key = _era_match_key(era_name)
+        # Version-aware: the Art tab lists each version's own cover, so
+        # "Donda [V2]" must not collapse onto "Donda [V1]".
+        key = _era_match_key(era_name, keep_discriminators=True)
         if not key:
             continue
+        base_keys.setdefault(_era_match_key(era_name), key)
 
         if key not in era_info:
             era_info[key] = {"cover": None, "first": None}
@@ -2864,6 +2890,13 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
                 chosen = urljoin(source_url, chosen)
             result[key] = chosen
 
+    # Also file each entry under its version-stripped key, so an era named
+    # "Donda" still resolves against an Art tab that says "Donda [V1]" (and
+    # vice versa). First versioned entry wins, matching the old behaviour.
+    for base, versioned in base_keys.items():
+        if base not in result and versioned in result:
+            result[base] = result[versioned]
+
     return result
 
 
@@ -2879,15 +2912,17 @@ def apply_art_tab_images(artist: Artist, art_map: dict[str, str]) -> None:
 
 
 def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
-    key = _era_match_key(era.name)
-    if key and key in art_map:
-        era.art_url = art_map[key]
-        return
-    for alt in era.alt_names:
-        alt_key = _era_match_key(alt)
-        if alt_key and alt_key in art_map:
-            era.art_url = art_map[alt_key]
-            return
+    # Version-aware key first: "Donda [V2]" has its own cover on the Art tab and
+    # must not fall through to the version-stripped "donda", which resolves to
+    # whichever version came first.
+    for name in (era.name, *era.alt_names):
+        for key in (
+            _era_match_key(name, keep_discriminators=True),
+            _era_match_key(name),
+        ):
+            if key and key in art_map:
+                era.art_url = art_map[key]
+                return
 
 
 # ---------------------------------------------------------------------------

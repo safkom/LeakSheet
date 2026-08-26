@@ -115,3 +115,60 @@ class TestArtTabRelativeArt:
         apply_art_tab_images(artist, parse_art_tab(self.ART_TAB, self.SOURCE))
         for era in artist.eras:
             assert era.art_url is None or urlparse(era.art_url).netloc
+
+
+# Ye's Art tab carries BOTH an "Art Type" column (the medium) and a "Project
+# Type" column (the role), and names each version's cover separately. Two
+# separate bugs collapsed onto the same symptom — every era wearing the wrong
+# artwork — so both shapes are pinned here.
+VERSIONED_ART_TAB = """
+<html><body><table>
+<tr><td>Era</td><td>Name</td><td>Notes</td><td>Designer</td><td>Art Type</td>
+    <td>Image</td><td>Project Type</td><td>Use</td></tr>
+<tr><td>Donda [V1]</td><td>Donda</td><td>notes</td><td>x</td><td>Digital</td>
+    <td><img src="https://cdn/v1-promo.jpg"></td><td>Promo Art</td><td>Used</td></tr>
+<tr><td>Donda [V1]</td><td>Donda</td><td>notes</td><td>x</td><td>Digital</td>
+    <td><img src="https://cdn/v1-cover.jpg"></td><td>Front Cover</td><td>Used</td></tr>
+<tr><td>Donda [V2]</td><td>Donda</td><td>notes</td><td>x</td><td>Digital</td>
+    <td><img src="https://cdn/v2-cover.jpg"></td><td>Front Cover</td><td>Used</td></tr>
+<tr><td>Good Ass Job (2018)</td><td>GAJ</td><td>notes</td><td>x</td><td>Digital</td>
+    <td><img src="https://cdn/gaj-2018.jpg"></td><td>Front Cover</td><td>Used</td></tr>
+</table></body></html>
+"""
+
+
+class TestArtTabColumnAndVersionKeys:
+    def test_project_type_column_wins_over_art_type(self):
+        """"Art Type" holds the medium (Digital/Scan), so it can never say
+        "cover". Binding to it silently disabled the cover preference for every
+        era on the tracker and each one fell back to its first-listed artwork."""
+        from src.parser import parse_art_tab
+        art = parse_art_tab(VERSIONED_ART_TAB)
+        assert art["donda [v1]"] == "https://cdn/v1-cover.jpg", "must skip the Promo Art row"
+
+    def test_each_version_keeps_its_own_cover(self):
+        from src.parser import parse_art_tab
+        art = parse_art_tab(VERSIONED_ART_TAB)
+        assert art["donda [v1]"] == "https://cdn/v1-cover.jpg"
+        assert art["donda [v2]"] == "https://cdn/v2-cover.jpg"
+
+    def test_parenthetical_discriminator_is_kept(self):
+        from src.parser import parse_art_tab
+        assert parse_art_tab(VERSIONED_ART_TAB)["good ass job (2018)"] == "https://cdn/gaj-2018.jpg"
+
+    def test_untagged_era_still_resolves_through_the_base_key(self):
+        """An Art tab that tags its rows must still serve an era that doesn't."""
+        from src.parser import parse_art_tab
+        assert parse_art_tab(VERSIONED_ART_TAB)["donda"] == "https://cdn/v1-cover.jpg"
+
+    def test_applied_end_to_end_gives_each_version_its_own_art(self):
+        from src.models import Artist, Era
+        from src.parser import apply_art_tab_images, parse_art_tab
+        artist = Artist(name="Ye", slug="ye", eras=[
+            Era(name="Donda [V1]"), Era(name="Donda [V2]"), Era(name="Donda [V3]"),
+        ])
+        apply_art_tab_images(artist, parse_art_tab(VERSIONED_ART_TAB))
+        assert artist.eras[0].art_url == "https://cdn/v1-cover.jpg"
+        assert artist.eras[1].art_url == "https://cdn/v2-cover.jpg"
+        # V3 has no Art tab row: falls back to the base key rather than losing art.
+        assert artist.eras[2].art_url == "https://cdn/v1-cover.jpg"

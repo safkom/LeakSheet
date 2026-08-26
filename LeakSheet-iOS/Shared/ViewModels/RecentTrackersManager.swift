@@ -94,6 +94,31 @@ final class RecentTrackersManager {
         save()
     }
 
+    /// Drop one tracker. The macOS sidebar lists these as navigable rows, so
+    /// removing a single stale entry has to be possible without Clear All.
+    func remove(_ entry: RecentTracker) {
+        trackers.removeAll { $0.id == entry.id }
+        save()
+    }
+
+    /// The name this tracker URL was last opened under, if it is in recents.
+    ///
+    /// The backend derives the artist slug from the name it is given, and
+    /// favourites are keyed on that slug — so the same tracker opened under two
+    /// names has two identities. See
+    /// DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
+    func savedName(forSourceUrl url: String) -> String? {
+        Self.savedName(forSourceUrl: url, in: trackers)
+    }
+
+    /// Pure half, so the URL-variant matching is testable without the singleton.
+    nonisolated static func savedName(forSourceUrl url: String, in trackers: [RecentTracker]) -> String? {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let key = identityKey(sourceUrl: trimmed, slug: "")
+        return trackers.first { $0.id == key }?.name
+    }
+
     // MARK: - Identity & dedup
 
     nonisolated static func identityKey(sourceUrl: String, slug: String) -> String {

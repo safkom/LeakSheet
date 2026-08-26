@@ -14,12 +14,17 @@ platform-neutral views) belongs to both; each platform owns its own view tree.
 | | iOS | macOS | tvOS |
 |---|---|---|---|
 | Target | `LeakSheet` | `LeakSheet` | `LeakSheetTV` |
-| Shell | `NavigationStack` | `NavigationSplitView` sidebar | sidebar `TabView` |
+| Shell | `NavigationStack` | `NavigationSplitView`, selection-driven detail | sidebar `TabView` |
+| Era browsing | accordion (`EraCardView`) | `LazyVGrid` of covers, drill-in | accordion |
+| Song list | flattened `LazyVStack` | `List(selection:)` | focus list |
 | Player bar | `safeAreaBar` | `safeAreaBar` (window bottom) | `safeAreaBar` |
-| Song actions | swipe + context menu | context menu + right-click | detail screen |
+| Song actions | swipe + context menu | hover controls, double-click, right-click | detail screen |
+| Details | sheet | `.inspector` tab | detail screen |
 | Refresh | `.refreshable` | ⌘R | toolbar button |
-| Queue | sheet | `.inspector` (⌥⌘Q) | full-screen |
+| Queue | sheet | `.inspector` tab (⌥⌘Q) | full-screen |
 | Now Playing | sheet | separate `Window` (⇧⌘0) | full-screen |
+| Settings | sheet | `Settings` scene (⌘,) | sidebar tab |
+| Appearance | system | system | system |
 | Web links | `SFSafariViewController` | `NSWorkspace` | QR code |
 | Embeds | `WKWebView` | `WKWebView` (AppKit) | QR code — no WebKit on tvOS |
 | Video | `AVPlayerLayer` + `AVPlayerViewController` | AVKit `VideoPlayer` | AVKit `VideoPlayer` |
@@ -31,10 +36,19 @@ platform-neutral views) belongs to both; each platform owns its own view tree.
 Liquid Glass (`glassEffect`, `GlassEffectContainer`, `buttonStyle(.glass)`,
 `safeAreaBar`) is available on all three platforms and is used unchanged.
 
-Platform divergence is confined to `Shared/Utilities/Platform.swift`, the
+Platform divergence is confined to `Shared/Utilities/Platform.swift`,
+`Shared/Utilities/Metrics.swift` (control metrics per input device), the
 `#if os(macOS)` regions in `AudioEngine`/`LeakSheetApp`/`VideoSurfaceView`/
-`EmbedPlayerView`/`SafariView`, two mid-chain `#if`s in `ArtistView`, and the
-per-platform view folders. See [DECISIONS.md](DECISIONS.md).
+`EmbedPlayerView`/`SafariView`/`MiniPlayerBar`/`NowPlayingView`, two mid-chain
+`#if`s in `ArtistView`, and the per-platform view folders.
+
+macOS forks its own row and list views (`LeakSheet/Views/macOS/`) rather than
+sharing the iOS ones: the iOS screen is an accordion driven by taps and swipes,
+the Mac one a grid plus a selectable `List` driven by clicks, keys and hover.
+They agree on `ArtistViewModel` — every filter, search and playback path is the
+same code. Leaf views (`BadgePill`, `CreditTagsView`, `EraCardView`,
+`ArtworkPlaceholder`) stay shared and read `Metrics`.
+See [DECISIONS.md](DECISIONS.md).
 
 ---
 
@@ -433,12 +447,16 @@ streamable hosts.
 
 ## 5. Gestures & Interactions
 
+Tap never starts playback: an accidental brush of the list used to hijack
+whatever was playing. Play is one gesture away — swipe from the leading edge,
+long-press → Play, the three-dot menu, or the Play button inside Details.
+
 | Element | Tap | Swipe Right | Swipe Left | Long Press |
 |---------|-----|-------------|------------|------------|
-| SongRow (single, streamable) | Play | Play | Add to queue | Context menu |
+| SongRow (single, streamable) | Show description | Play | Add to queue | Context menu |
 | SongRow (single, not streamable) | Show description | — | — | Context menu |
 | SongRow (multi-version) | Expand/collapse | Play primary | Add primary to queue | Context menu |
-| VersionRow (streamable) | Play | Play | Add to queue | Context menu |
+| VersionRow (streamable) | Show description | Play | Add to queue | Context menu |
 | VersionRow (not streamable) | Show description | — | — | Context menu |
 | EraCard header | Toggle expand | — | — | — |
 

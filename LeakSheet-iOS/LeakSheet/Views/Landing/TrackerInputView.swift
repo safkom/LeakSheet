@@ -33,7 +33,11 @@ struct TrackerInputView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .glassEffect(focused ? .regular.tint(.lsAccent) : .regular, in: .rect(cornerRadius: 12))
+        // Tint via opacity, not by swapping the tint in and out — see
+        // DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity. At full
+        // strength the focused field renders as a solid accent-coloured slab
+        // that swallows the text inside it.
+        .glassEffect(.regular.tint(.lsAccent.opacity(focused ? 0.28 : 0)), in: .rect(cornerRadius: 12))
         .animation(.default, value: loading)
     }
 
@@ -68,7 +72,7 @@ struct TrackerInputView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                        .frame(width: 44, height: 44)   // 44pt HIG hit target
+                        .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .disabled(loading)

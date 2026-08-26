@@ -6,7 +6,14 @@ struct MiniPlayerBar: View {
     /// Forwarded to Now Playing so its description sheet can resolve the song
     /// behind the playing version. Nil when nothing relevant is loaded.
     @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
+    #if !os(macOS)
     @State private var showNowPlaying = false
+    #endif
+    #if os(macOS)
+    /// Now Playing is a real window on the Mac (⇧⌘0). Raising the same window
+    /// on a click keeps one surface instead of a modal sheet duplicating it.
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     var body: some View {
         if let track = player.currentTrack {
@@ -33,7 +40,11 @@ struct MiniPlayerBar: View {
                 HStack(spacing: 10) {
                     // Tappable area for now playing view
                     Button {
+                        #if os(macOS)
+                        openWindow(id: "now-playing")
+                        #else
                         showNowPlaying = true
+                        #endif
                     } label: {
                         HStack(spacing: 10) {
                             // Art
@@ -66,23 +77,30 @@ struct MiniPlayerBar: View {
                                     }
                                 }
                             }
+
+                            // Claims the empty space beside the labels: a .plain
+                            // Button hit-tests only its drawn content, so the
+                            // padding around the art and text was dead and taps
+                            // there did nothing. Inside the label, not outside —
+                            // the gesture is attached to the label, not the
+                            // modified Button (see DECISIONS.md::contentShape).
+                            Spacer(minLength: 0)
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
-                    Spacer()
-
                     // Transport controls
-                    HStack(spacing: 20) {
-                        // Transport buttons carry a 44x44 hit target (HIG minimum);
-                        // the glyphs render smaller but the whole frame is tappable.
+                    HStack(spacing: Metrics.hitTarget / 2) {
+                        // Hit targets follow Metrics: the 44pt HIG minimum on
+                        // touch, roughly half that for a pointer.
                         Button {
                             player.playPrevious()
                         } label: {
                             Image(systemName: "backward.fill")
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -96,10 +114,10 @@ struct MiniPlayerBar: View {
                             player.togglePlay()
                         } label: {
                             Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 38))
+                                .font(.system(size: Metrics.hitTarget * 0.86))
                                 .foregroundStyle(Color.lsAccent)
                                 .opacity(player.loading ? 0 : 1)
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .overlay {
                                     if player.loading {
                                         ProgressView()
@@ -118,7 +136,7 @@ struct MiniPlayerBar: View {
                             Image(systemName: "forward.fill")
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                                .frame(width: 44, height: 44)
+                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -131,6 +149,14 @@ struct MiniPlayerBar: View {
             .glassEffect(in: .rect(cornerRadius: 16))
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
+            #if os(macOS)
+            // Publish the height so the inspector can clear it — see
+            // MacUIState.playerBarHeight.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                MacUIState.shared.playerBarHeight = height
+            }
+            #endif
+            #if !os(macOS)
             .sheet(isPresented: $showNowPlaying) {
                 NowPlayingView()
                     .environment(PlayerViewModel.shared)
@@ -139,6 +165,7 @@ struct MiniPlayerBar: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            #endif
         }
     }
 

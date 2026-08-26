@@ -67,6 +67,21 @@ struct RecentTrackerDedupTests {
         )
     }
 
+    @Test func `saved name is found across url variants and is nil when unknown`() {
+        // The backend derives the artist slug from the name it is given, and
+        // favourites are keyed on that slug — so reopening a tracker must reuse
+        // the name it was first opened under, even when the URL is a variant.
+        let saved = entry(
+            url: "https://docs.google.com/spreadsheets/d/AAA/htmlview",
+            slug: "billie-eilish-alt-3", name: "Billie Eilish [Alt #3]"
+        )
+        let variant = "https://docs.google.com/spreadsheets/d/AAA/edit?usp=sharing"
+
+        #expect(RecentTrackersManager.savedName(forSourceUrl: variant, in: [saved]) == "Billie Eilish [Alt #3]")
+        #expect(RecentTrackersManager.savedName(forSourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", in: [saved]) == nil)
+        #expect(RecentTrackersManager.savedName(forSourceUrl: "  ", in: [saved]) == nil)
+    }
+
     @Test func `url variants of the same tracker collapse keeping the newest`() {
         let newest = entry(url: "https://docs.google.com/spreadsheets/d/AAA/htmlview", name: "New")
         let older = entry(url: "https://docs.google.com/spreadsheets/d/AAA/edit?usp=sharing", name: "Old")

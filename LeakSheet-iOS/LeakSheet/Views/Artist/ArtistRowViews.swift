@@ -161,12 +161,12 @@ struct FilterChip: View {
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .foregroundStyle(isActive ? .white : .secondary)
+                .foregroundStyle(isActive ? AnyShapeStyle(Color.preferredText(on: tintColor)) : AnyShapeStyle(.secondary))
                 // Tint via opacity — see DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity
                 .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
+        .frame(minHeight: Metrics.chipHeight)
         .contentShape(Capsule())
         // .isButton too: without it VoiceOver read the chip as plain text and
         // never announced it as something you can activate.

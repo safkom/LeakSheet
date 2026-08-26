@@ -6,6 +6,7 @@ import SwiftUI
 struct BadgePill: View {
     let text: String
     let variant: BadgeVariant
+
     /// VoiceOver prefix, e.g. "Quality" → "Quality: CD Quality".
     var accessibilityPrefix: String? = nil
     /// Larger type and padding for the description sheet, which reads at
@@ -19,7 +20,16 @@ struct BadgePill: View {
             .foregroundStyle(variant.color)
             .padding(.horizontal, prominent ? 10 : 7)
             .padding(.vertical, prominent ? 5 : 3)
-            .background(variant.background)
+            // Opaque base under the tint, so the pill composites against the
+            // app background rather than whatever row is behind it. The tint is
+            // only 15%; over a selected row's fill it drifted off the contrast
+            // the palette is tested at, which is why the pill used to invert
+            // itself on selection and look washed out.
+            .background {
+                Capsule()
+                    .fill(Color.lsBackground)
+                    .overlay { Capsule().fill(variant.background) }
+            }
             .clipShape(Capsule())
             .fixedSize()
             .accessibilityLabel(accessibilityPrefix.map { "\($0): \(text)" } ?? text)

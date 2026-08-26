@@ -9,7 +9,7 @@ private func version(_ name: String, tag: String? = nil, notes: String? = nil) -
     SongVersion(
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: notes, ogFilename: nil,
-        ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil,
+        ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
         availableLength: nil, quality: nil, streaming: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
@@ -53,6 +53,23 @@ struct PlaybackQueueLogicTests {
         #expect(playedName(logic.next()) == "X")
         #expect(playedName(logic.next()) == "Y")
         #expect(logic.next() == .stop)
+    }
+
+    @Test func `era rollover survives a filter trimming the era`() {
+        // The eras are registered unfiltered, but a row plays through the
+        // CURRENTLY FILTERED list (Best Of / Grails / No Snippets), so the
+        // context arrives with fewer versions than the registered era.
+        // Matching the era on its version count made rollover fail there and
+        // playback stopped mid-tracker.
+        var logic = PlaybackQueueLogic()
+        let full = era("Yeezus", versions: [version("A"), version("B"), version("C")])
+        let second = era("Donda", versions: [version("X")])
+        logic.setArtistEras([full, second])
+
+        let filtered = era("Yeezus", versions: [version("A")])
+        _ = logic.playInEra(filtered.versions[0], context: filtered)
+
+        #expect(playedName(logic.next()) == "X")
     }
 
     @Test func `duplicate name-tag pairs advance by position, not first match`() {
@@ -182,7 +199,7 @@ struct CrossArtistEraListTests {
             name: name, versionTag: nil, badge: nil, featuring: nil, producers: nil,
             collaboration: nil, refs: nil, director: nil, creditedArtists: nil,
             altTitles: nil, notes: nil, ogFilename: nil, ogFilenames: nil, samples: nil,
-            trackLength: nil, fileDate: nil, leakDate: nil, availableLength: "Full",
+            trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil, availableLength: "Full",
             quality: nil, streaming: nil, links: ["https://pillows.su/f/abc123"],
             dateOfRecording: nil, type: nil, sources: nil, rating: nil
         )

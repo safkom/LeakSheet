@@ -84,7 +84,10 @@ struct SongRowView: View {
                 // version's badges + a version count, so the song can be
                 // judged at a glance without expanding.
                 if hasMultiple && !showVersionBadge {
-                    HStack(spacing: 6) {
+                    // FlowLayout, not HStack: the badge row wraps internally at
+                    // accessibility text sizes while an HStack does not, so the
+                    // version count was drawn across the wrapped pills.
+                    FlowLayout(spacing: 6) {
                         // bestPlayableVersion, matching what the row's play
                         // action uses — badges must describe the version a tap
                         // actually plays, or this is the "Lossless · OG File"

@@ -59,6 +59,47 @@ off-white pixels and resolves to a neutral, and a warm multi-tone cover isn't
 out-voted by one small flat region (median cut groups similar tones into one box
 instead of splitting them across hundreds of fixed buckets).
 
+## TrackerLoader.swift::sticky-artist-name — the name follows the URL, not the entry point
+
+`/sheet` derives the artist slug from the name it is given (`api.py`
+`slug = slugify(req.artist_name)`), and favourites are keyed
+`{artistSlug}::{eraName}::{baseName}`. Explore passed its curated name, but
+reopening the same tracker from Recents (or by pasting the URL) passed nothing,
+so the backend re-inferred the name from the page and returned a different
+slug — every favourite saved through the other route silently stopped matching.
+A sweep of the live corpus found 14 of 356 trackers where the curated and
+inferred names disagree (e.g. `billie-eilish-alt-3` vs `billie-eilish`).
+
+`load()` therefore resolves the name once, from the caller's override or else
+from what Recents recorded for that normalized URL, so every entry point agrees.
+`replayFromCache` additionally refuses a cached copy whose name disagrees with
+the resolved one: the client caches the *response*, which already has any
+override applied, so a mismatched copy carries the other slug and would
+reintroduce the split on the 304 fast path.
+
+The tradeoff is deliberate: a tracker renamed upstream keeps the name it was
+first opened under for as long as it stays in Recents, because the alternative
+is silently splitting the user's favourites in two. Removing the Recents entry
+(swipe, or Clear All) drops the pin and the next open re-infers the name.
+
+## PlaybackQueueLogic.swift::era-identity — era match excludes the version count
+
+An era is located inside its artist's registered list by (name, artist, art
+URL). The version count used to be a fourth **required** field, to disambiguate
+two eras sharing a name — but the registered list is built once from the
+**unfiltered** tracker (`ArtistViewModel.Precomputed.eraPlaybackContexts`) while
+playback starts from the **currently filtered** list
+(`ArtistContentLists.playWithEraContext`). Every era a chip had trimmed
+therefore failed to match, `eraIndex` stayed nil, and auto-advance stopped at
+the end of that era instead of rolling into the next one — with Best Of,
+Grails, Worst Of or No Snippets on, playback died mid-tracker.
+
+The count is still consulted, but only as a tiebreaker *among* eras that match
+on all three identity fields (a tracker can carry two "Bonus Tracks" eras with
+the same art — pinned by `duplicate era names disambiguate via recorded
+position`). Requiring it broke the common case to serve the rare one; as a
+tiebreaker it serves the rare case without touching the common one.
+
 ## ArtistViewModel.swift::song-ordinal — disambiguating same-baseName songs
 
 `ordinal` is the song's position within its era's flattened song list. Leak trackers
@@ -318,3 +359,102 @@ the LAST entry — the backmost layer — to be a fully opaque bitmap. That is t
 reverse of the natural back-to-front drawing order, so the array is reversed on
 write. (`Array(...)` matters: JSONSerialization cannot serialize a
 `ReversedCollection`.)
+
+## MacRootView.swift::selection-shell — sidebar selection, not a push stack
+
+The detail column is driven by the sidebar selection; there is no
+`NavigationStack`. The push-stack shape it replaced had to clear its path on
+every section change to dodge a crash (the stack's root changed identity while a
+value was pushed), which meant visiting Favourites threw the loaded tracker away.
+Selection has no such coupling, so trackers stay parsed in `MacUIState` and the
+three pieces of state that existed only to work around the push shape
+(`prepared`, `refreshedArtist`, `refreshToken`) are gone.
+
+## MacRootView.swift::geometry-clamp — the detail column is size-clamped
+
+`GeometryReader` clamps the detail column to the size it is offered. A tall
+`LazyVGrid` reports an ideal height of the whole grid, so a tracker with ~40 eras
+sized the whole `NavigationSplitView` to that and pushed BOTH columns up under
+the titlebar — taking hover hit-testing with them, so row controls appeared on
+the row below. Small trackers fit and looked fine, which is why it only showed up
+on the big ones.
+
+## LeakSheetApp.swift::window-scene — `Window`, not `WindowGroup`
+
+The commands raise the main window by id (⌘I and ⌥⌘Q drive an inspector only
+that window shows). `openWindow(id:)` on a `WindowGroup` opens ANOTHER instance
+instead of bringing the existing one forward, which produced two identical main
+windows. A `Window` scene is a singleton, and it also removes File ▸ New and
+contributes its own Window-menu item, so the explicit
+`CommandGroup(replacing: .newItem)` and hand-rolled menu items are unnecessary.
+
+## LeakSheetCommands.swift::arrow-modifiers — ⌥⌘←/→ for previous/next
+
+A menu key equivalent is matched before the first responder sees the event, so
+binding the bare-⌘ arrows — the system's move-to-start/end-of-line shortcuts —
+made them play tracks instead of moving the caret in the tracker URL field. This
+is the same trap the file's own header records for bare `Space`; `MacSongList`
+can safely bind Space because `onKeyPress` only fires while the list has focus.
+
+## MacEraGrid.swift::tile-sizing — a clear square with the cover inside
+
+`aspectRatio(1, contentMode: .fill)` on the cover has no definite size to work
+from — `CachedImage` is already `.resizable().aspectRatio(.fill)`, so the pair
+grew without bound and tiles painted over the header and out of the window. A
+`Color.clear` square sized by the grid cell, with the cover drawn into it as an
+overlay and clipped, bounds it.
+
+## MacArtistView.swift::flat-modes — badge filters skip the grid
+
+`isEraExpanded` returns true for EVERY era while a badge filter is active and
+`toggleEra` is a no-op, so an era grid would be a dead end there. Search, the
+badge filters and recents all render one flat cross-era list instead. Content
+tabs carry `MiscEntry` values rather than songs, so they still render through the
+shared `MiscListView` accordion.
+
+## DesignTokens.swift::adaptive-palette — one dynamic-colour fork
+
+SwiftUI has no cross-platform dynamic `Color` initialiser, so `Color.adaptive`
+forks on AppKit/UIKit once and every token is built from it. `Color.tone`
+derives each badge's light variant from the same hue rather than hand-authoring
+30 second literals. Asset-catalog colour sets would also work, but the palette is
+declared in HSB and the catalog would have to be kept in step by hand.
+
+## DesignTokens.swift::scheme-parameter — contrast maths takes the scheme
+
+`rgbComponents` used to hardcode `colorScheme = .dark`, which was honest while
+the app forced dark. With an appearance-aware palette, resolving `.lsBackground`
+in the wrong scheme hands the contrast maths the opposite backdrop and every
+derived colour inverts. The scheme is a parameter now, defaulting to `.dark` so
+the pinned literal tests keep their meaning.
+
+## DesignTokens.swift::preferred-text-crossover — compare, don't split at 0.5
+
+`preferredText` chose white below luminance 0.5 and black above. The WCAG
+crossover is near 0.179, so every mid-tone backdrop in between got white text
+where black reads better. It compares both candidates now.
+
+## EraDisplayColors.swift::adaptive-dimming — dark dimming scales with the cover
+
+The dark card is the cover colour multiplied down toward black. A fixed 0.55/0.40
+was tuned on mid-dark covers; a near-white one landed the card in a mid-tone band
+where white clears AA on neither gradient stop and black clears it on neither
+either. The multiplier steps down for bright covers until the card is dark enough
+to title in white, floored at 0.20 so a white cover keeps a hint of its own tone.
+The title itself is chosen against the LIGHTER of the two real stops — deriving
+it from a separate blend is what let a dark cover title itself white on a
+near-white light-appearance card.
+
+## Metrics.swift::input-device-metrics — 44pt is a finger, not a pointer
+
+Touch platforms want the 44pt HIG hit target; a Mac driven by a pointer wants
+roughly half that, and rows sized for a finger waste about a third of a desktop
+window's vertical space. Forked once rather than at the ~15 call sites that would
+otherwise each carry an `#if os(macOS)`.
+
+## QueueSheet.swift::embedded-chrome — no navigation chrome in the inspector
+
+The inspector sits OUTSIDE the detail column's navigation container, so
+`navigationTitle`/`toolbar` there do not label the panel — they overwrite the
+window's own title and drop Clear into the main toolbar. The embedded path
+renders its count and Clear as an inline header instead.

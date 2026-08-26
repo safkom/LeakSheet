@@ -13,7 +13,17 @@ struct SettingsView: View {
     var embedded = false
 
     @State private var cacheSizeBytes: Int64 = 0
+    @State private var imageCacheBytes: Int64 = 0
     @State private var clearingCache = false
+
+    /// Shown so a sideloaded build can be identified. Without it there was no
+    /// way to say which version you were running.
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
+    }
 
     private var customURLInvalid: Bool {
         let trimmed = customServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -82,12 +92,21 @@ struct SettingsView: View {
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Text("Cached images")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(imageCacheBytes.formatted(.byteCount(style: .file)))
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                     Button(role: .destructive) {
                         clearingCache = true
                         Task {
                             await CacheService.shared.clearCache()
                             await ImageCache.shared.clearAll()
                             cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
+                            imageCacheBytes = await ImageCache.shared.diskUsageBytes()
                             clearingCache = false
                         }
                     } label: {
@@ -121,13 +140,29 @@ struct SettingsView: View {
                         Text("Leave empty to use the default server.")
                     }
                 }
+
+                SwiftUI.Section {
+                    HStack {
+                        Text("Version")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(appVersion)
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("About")
+                }
             }
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Settings")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .task {
                 cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
+                imageCacheBytes = await ImageCache.shared.diskUsageBytes()
             }
             .toolbar {
                 if !embedded {

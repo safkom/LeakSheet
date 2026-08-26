@@ -34,7 +34,9 @@ struct TrackerTimelineSheet: View {
             }
             .background(Color.lsBackground)
             .navigationTitle("Timeline")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

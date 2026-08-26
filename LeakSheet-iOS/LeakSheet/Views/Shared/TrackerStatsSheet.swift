@@ -63,6 +63,17 @@ struct TrackerStatsSheet: View {
 
     private var missingLinks: Int { stats.missingLinks ?? 0 }
     private var sourcesNeeded: Int { stats.sourcesNeeded ?? 0 }
+    private var totalLinks: Int { stats.totalLinks ?? 0 }
+    private var deadLinks: Int { stats.notAvailableLinks ?? 0 }
+
+    /// Working links over the tracker's own total. "42 missing" alone says
+    /// nothing about whether that is most of the tracker or a rounding error —
+    /// the denominator was on the wire all along and simply wasn't decoded.
+    private var linkHealth: (working: Int, total: Int, percent: Int)? {
+        guard totalLinks > 0 else { return nil }
+        let working = max(0, totalLinks - missingLinks - deadLinks)
+        return (working, totalLinks, Int((Double(working) / Double(totalLinks) * 100).rounded()))
+    }
 
     var body: some View {
         NavigationStack {
@@ -94,6 +105,27 @@ struct TrackerStatsSheet: View {
                         }
                     }
                 }
+                if let health = linkHealth {
+                    SwiftUI.Section {
+                        HStack {
+                            Text("Working links")
+                                .font(.subheadline)
+                            Spacer()
+                            Text("\(health.working.formatted()) of \(health.total.formatted())")
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text("\(health.percent)%")
+                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(health.percent >= 80 ? Color.badgeFull : Color.badgeRec)
+                        }
+                        .listRowBackground(Color.lsCard)
+                        if deadLinks > 0 {
+                            statRow(Row(label: "Dead links", value: deadLinks, color: .lsError))
+                        }
+                    } header: {
+                        Text("Links")
+                    }
+                }
                 if missingLinks > 0 || sourcesNeeded > 0 {
                     SwiftUI.Section {
                         if missingLinks > 0 {
@@ -112,7 +144,9 @@ struct TrackerStatsSheet: View {
             .scrollContentBackground(.hidden)
             .background(Color.lsBackground)
             .navigationTitle("Stats")
+            #if os(iOS)
             .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

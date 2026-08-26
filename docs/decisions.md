@@ -535,3 +535,48 @@ column fills `SongVersion.producers` only when the name-cell `(prod. …)` credi
 didn't already set it (the name-cell credit wins on conflict). Dedicated `artist`
 columns land in the additive `credited_artists` field — the row's performer, not a
 feature — so they never overwrite the primary artist.
+
+---
+
+## parser.py::art-cover-column — the cover test reads the Project Type column
+
+Tracker Notes prose mentions "cover" constantly (626 rows on the Ye art tab), so
+matching `\bcover\b` against the whole row fired almost everywhere and the era's
+*first* row won regardless of what it depicted. The test reads the Project Type
+column only.
+
+## parser.py::art-type-column-priority — "Project Type" beats "Art Type"
+
+`_ART_TYPE_HEADERS` is an ordered tuple, not a set, and the header scan takes the
+best-ranked match rather than the leftmost one.
+
+An art tab can carry two type columns: **Art Type** holds the medium (Digital /
+Scan / Photo / Recreation) and **Project Type** holds the role (Front Cover /
+Back Cover / Promo Art / Booklet / Concept Art). Only the role column can
+identify a cover. On the Ye tab the medium column comes first, so first-match-wins
+bound `type_idx` to it, `_COVER_RE` never matched a single row, and the cover
+preference documented above was dead for **every era on every tracker with both
+columns** — each era silently fell back to whichever artwork happened to be
+listed first. Found 2026-08-26 by comparing rendered era art against the tab.
+
+## parser.py::art-version-keys — art keys keep [V1] and (2018)
+
+`_era_match_key(..., keep_discriminators=True)` preserves a version tag and a
+parenthetical; the default still strips both, because song rows reference their
+era without them.
+
+An Art tab names each sibling's cover explicitly — `Donda [V1]`, `Donda [V2]`,
+`Donda [V3]`, `Good Ass Job (2018)` — but the stripped key collapsed all of them
+onto one entry, first-wins, so every version wore the first version's artwork.
+On Ye that was 6 eras (Donda V2/V3, Yandhi V2, DONDA 2 V2, BULLY V2, Good Ass Job
+2018); Donda V3's real cover is the plain black sleeve, and it was showing V1's
+orange artwork instead.
+
+`parse_art_tab` files every entry under BOTH the discriminating key and the
+stripped one (first versioned entry wins the stripped slot), and `_apply_era_art`
+tries the discriminating key first, then the stripped one, for the era name and
+then each alt name. That keeps two older shapes working: an Art tab that tags its
+rows serving an era that doesn't (`Donda` → V1's cover), and an era that tags
+itself against an Art tab that doesn't. An era whose sibling is tagged but which
+has no row of its own still inherits — `Cruel Winter [V1]` has no Art tab row and
+takes `[V2]`'s image rather than losing its art.
