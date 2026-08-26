@@ -488,6 +488,67 @@ struct CrossEraIndexTests {
         #expect(unique.map(\.eraName) == ["Donda 2"])
     }
 
+    @Test func `unidentified tracks are not linked to each other`() async {
+        // "???" is how these trackers write "nobody knows what this is". Each
+        // such row is its own mystery track, which is why the backend sends
+        // them with an empty songKey — and why the base-name fallback must not
+        // group them. Indexing them put all 319 of Ye's "???" rows under one
+        // key, so tapping any one of them opened a version picker listing every
+        // unidentified track on the tracker, with colliding ids, and the sheet
+        // could re-point itself at an unrelated song.
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [
+                era("War", songs: [song("???", key: ""), song("???", key: "")]),
+                era("Donda 2", songs: [song("???", key: ""), song("Real Song", key: "real song")]),
+            ],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let placeholder = song("???", key: "")
+        let payload = DescriptionSheet.Payload(
+            song: placeholder, version: placeholder.versions[0],
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        let refs = await MainActor.run { vm.crossEraRefs(for: payload) }
+        #expect(refs.isEmpty)
+        // The sheet still resolves to the song it was opened with.
+        let resolved = await MainActor.run { vm.resolvedSong(for: payload) }
+        #expect(resolved?.baseName == "???")
+        #expect(resolved?.versions.count == 1)
+    }
+
+    @Test func `a payload with no song still refuses a placeholder name`() async {
+        // Now Playing and Favourites carry a bare SongVersion, so the lookup
+        // falls back to the version's derived base name — the same rule has to
+        // hold there.
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [era("War", songs: [song("???", key: ""), song("Real Song", key: "real song")])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let bare = song("???", key: "").versions[0]
+        let payload = DescriptionSheet.Payload(
+            song: nil, version: bare,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        #expect(await MainActor.run { vm.crossEraRefs(for: payload) }.isEmpty)
+
+        // A real title still resolves through the base-name index.
+        let real = song("Real Song", key: "real song").versions[0]
+        let realPayload = DescriptionSheet.Payload(
+            song: nil, version: real,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        #expect(await MainActor.run { vm.crossEraRefs(for: realPayload) }.map(\.eraName) == ["War"])
+    }
+
     @Test func `resolved song keeps the full version set for description sheets`() async {
         let fullSong = song("This One Here", key: "this one here", versions: 2)
         let filteredSong = Song(

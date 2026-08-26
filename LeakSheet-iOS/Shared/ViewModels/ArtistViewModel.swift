@@ -296,6 +296,15 @@ final class ArtistViewModel {
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
                 for song in era.allSongs {
+                    // A placeholder title identifies nothing, so indexing it
+                    // groups every unidentified track in the tracker under one
+                    // key: 319 of them on Ye. The description sheet then
+                    // listed all 319 as "versions" of whichever "???" was
+                    // tapped, with colliding ids, and could re-point itself at
+                    // an unrelated track. The backend says so by sending these
+                    // with an empty songKey; the base-name fallback has to
+                    // honour the same rule.
+                    guard !song.isPlaceholder else { continue }
                     byBaseName[song.baseName, default: []].append(
                         CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
                     )
@@ -361,9 +370,12 @@ final class ArtistViewModel {
             if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
                 return refs
             }
+            guard !payloadSong.isPlaceholder else { return [] }
             return baseNameEras[payloadSong.baseName] ?? []
         }
-        return baseNameEras[payload.version.derivedBaseName] ?? []
+        let derived = payload.version.derivedBaseName
+        guard !Song.isPlaceholderName(derived) else { return [] }
+        return baseNameEras[derived] ?? []
     }
 
     /// How many era covers are warmed before the artist screen is pushed.

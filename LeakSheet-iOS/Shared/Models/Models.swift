@@ -132,6 +132,25 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
 
     var primary: SongVersion? { versions.first }
 
+    /// Names the fanbase uses for a track nobody has identified. Mirrors the
+    /// backend's `_PLACEHOLDER_BASE_NAMES`, which is why such a song is sent
+    /// with an empty `songKey`: rows sharing one of these names are distinct
+    /// mystery tracks, not versions of one song.
+    static let placeholderBaseNames: Set<String> = [
+        "???", "??", "?", "unknown", "untitled", "tba", "n/a",
+    ]
+
+    /// True when this song's title identifies nothing — see above.
+    var isPlaceholder: Bool {
+        Self.isPlaceholderName(baseName)
+    }
+
+    static func isPlaceholderName(_ name: String) -> Bool {
+        placeholderBaseNames.contains(
+            name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        )
+    }
+
     var computedBadge: Badge? {
         if let b = badge { return Badge(rawValue: b) }
         return Badge.mostSignificant(in: versions)
