@@ -18,8 +18,7 @@ struct SongRowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool {
-        guard let v = version, let current = player.currentTrack else { return false }
-        return current.name == v.name && current.versionTag == v.versionTag
+        player.isNowPlaying(version, inEra: eraName)
     }
 
     private var canStream: Bool {
@@ -141,11 +140,11 @@ struct SongRowView: View {
                     Haptics.light()
                 }
             } label: {
-                Image(systemName: favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName) ? "heart.fill" : "heart")
+                Image(systemName: favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "heart.fill" : "heart")
             }
             .tint(.pink)
             .accessibilityLabel(
-                favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName)
+                favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
                     ? "Remove \(song.baseName) from favourites"
                     : "Add \(song.baseName) to favourites"
             )

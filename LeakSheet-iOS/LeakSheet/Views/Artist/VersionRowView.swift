@@ -22,8 +22,7 @@ struct VersionRowView: View {
     @Environment(PlayerViewModel.self) private var player
 
     private var isPlaying: Bool {
-        guard let current = player.currentTrack else { return false }
-        return current.name == version.name && current.versionTag == version.versionTag
+        player.isNowPlaying(version, inEra: eraName)
     }
 
     private var canStream: Bool {

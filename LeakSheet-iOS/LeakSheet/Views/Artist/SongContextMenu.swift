@@ -44,8 +44,8 @@ struct SongContextMenu: View {
                 )
             } label: {
                 Label(
-                    favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName) ? "Unfavourite" : "Favourite",
-                    systemImage: favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName) ? "heart.fill" : "heart"
+                    favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "Unfavourite" : "Favourite",
+                    systemImage: favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "heart.fill" : "heart"
                 )
             }
         }

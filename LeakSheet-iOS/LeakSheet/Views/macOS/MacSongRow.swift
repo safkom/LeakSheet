@@ -30,8 +30,7 @@ struct MacSongRow: View {
     @State private var hovering = false
 
     private var isPlaying: Bool {
-        guard let v = version, let current = player.currentTrack else { return false }
-        return current.name == v.name && current.versionTag == v.versionTag
+        player.isNowPlaying(version, inEra: eraName)
     }
 
     private var canStream: Bool { version?.isStreamable ?? false }
@@ -199,7 +198,7 @@ struct MacSongRow: View {
     }
 
     private var isFavourited: Bool {
-        favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName)
+        favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
     }
 
     private func play(_ v: SongVersion) {

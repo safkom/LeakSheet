@@ -3,12 +3,12 @@ import Testing
 
 @testable import LeakSheet
 
-private func version(_ name: String, tag: String? = nil) -> SongVersion {
+private func version(_ name: String, tag: String? = nil, link: String? = nil) -> SongVersion {
     SongVersion(
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
-        availableLength: nil, quality: nil, streaming: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] }, dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
@@ -175,5 +175,141 @@ struct FavouriteBadgeSourceTests {
             trackLength: nil, leakDate: nil
         )
         #expect((entry.primaryVersion?.quality ?? entry.quality) == "CD Quality")
+    }
+}
+
+
+/// Placeholder favourites (2026-08-26).
+///
+/// "???" is how these trackers write "nobody knows what this is", and one era
+/// carries dozens. Keying on artist + era + name gave all of them the same
+/// key: 282 Ye songs collided, so favouriting one filled the heart on every
+/// other unidentified track in that era.
+@Suite("Placeholder favourite identity")
+struct PlaceholderFavouriteKeyTests {
+    @Test("two unidentified tracks in one era get different keys")
+    func distinctKeys() {
+        let a = FavouritesManager.key(
+            artistSlug: "ye", eraName: "God's Country", baseName: "???",
+            discriminator: FavouritesManager.discriminator(for: version("???", link: "https://pillows.su/f/a"))
+        )
+        let b = FavouritesManager.key(
+            artistSlug: "ye", eraName: "God's Country", baseName: "???",
+            discriminator: FavouritesManager.discriminator(for: version("???", link: "https://pillows.su/f/b"))
+        )
+        #expect(a != b)
+    }
+
+    @Test(arguments: ["???", "??", "?", "Unknown", "untitled", "TBA", "n/a"])
+    func `every placeholder spelling is discriminated`(name: String) {
+        let plain = FavouritesManager.key(artistSlug: "ye", eraName: "E", baseName: name)
+        let keyed = FavouritesManager.key(
+            artistSlug: "ye", eraName: "E", baseName: name, discriminator: "https://x/1"
+        )
+        #expect(plain != keyed)
+    }
+
+    @Test("a real title's key is byte-identical to before, so nothing migrates")
+    func realTitlesUnchanged() {
+        #expect(
+            FavouritesManager.key(
+                artistSlug: "ye", eraName: "DONDA", baseName: "Hurricane",
+                discriminator: "https://pillows.su/f/a"
+            ) == "ye::DONDA::Hurricane"
+        )
+    }
+
+    @Test("a placeholder with no link keeps the undiscriminated key")
+    func noLinkNoDiscriminator() {
+        #expect(
+            FavouritesManager.key(
+                artistSlug: "ye", eraName: "E", baseName: "???",
+                discriminator: FavouritesManager.discriminator(for: version("???"))
+            ) == "ye::E::???"
+        )
+    }
+
+    @Test("stored placeholder entries are re-keyed onto their file")
+    func migration() {
+        func stored(_ link: String?) -> FavouritesManager.FavouriteEntry {
+            FavouritesManager.FavouriteEntry(
+                key: "ye::God's Country::???",
+                artistSlug: "ye", artistName: "Ye", sourceUrl: nil,
+                eraName: "God's Country", eraArt: nil, songBaseName: "???",
+                songVersionCount: 1, badge: nil, addedAt: Date(),
+                primaryVersion: version("???", link: link), primaryVersionName: nil,
+                primaryVersionTag: nil, links: nil, quality: nil,
+                availableLength: nil, notes: nil, trackLength: nil, leakDate: nil
+            )
+        }
+        let migrated = FavouritesManager.migratingPlaceholderKeys(
+            [stored("https://pillows.su/f/a"), stored("https://pillows.su/f/b"), stored(nil)]
+        )
+        #expect(migrated[0].key == "ye::God's Country::???::https://pillows.su/f/a")
+        #expect(migrated[1].key == "ye::God's Country::???::https://pillows.su/f/b")
+        // Nothing to tell it apart by — left alone rather than guessed at.
+        #expect(migrated[2].key == "ye::God's Country::???")
+        #expect(Set(migrated.map(\.key)).count == 3)
+    }
+}
+
+/// Now-playing row identity (2026-08-26).
+@MainActor
+@Suite("Now playing row identity")
+struct NowPlayingIdentityTests {
+    private func v(_ name: String, tag: String? = nil, link: String) -> SongVersion {
+        version(name, tag: tag, link: link)
+    }
+
+    /// Drives the shared engine directly: PlayerViewModel is a facade over it,
+    /// and the predicate under test reads only currentTrack and eraName.
+    private func withPlaying(
+        _ track: SongVersion, era: String, _ body: (PlayerViewModel) -> Void
+    ) {
+        let engine = AudioEngine.shared
+        let savedTrack = engine.currentTrack
+        let savedEra = engine.eraName
+        engine.currentTrack = track
+        engine.eraName = era
+        body(PlayerViewModel.shared)
+        engine.currentTrack = savedTrack
+        engine.eraName = savedEra
+    }
+
+    @Test("two unidentified tracks in one era do not both light up")
+    func placeholdersInOneEra() {
+        let playing = v("???", link: "https://pillows.su/f/a")
+        let other = v("???", link: "https://pillows.su/f/b")
+        withPlaying(playing, era: "God's Country") { player in
+            #expect(player.isNowPlaying(playing, inEra: "God's Country"))
+            #expect(!player.isNowPlaying(other, inEra: "God's Country"))
+        }
+    }
+
+    @Test("the same song in another era does not light up")
+    func sameNameOtherEra() {
+        let playing = v("Hurricane", tag: "V4", link: "https://pillows.su/f/a")
+        let twin = v("Hurricane", tag: "V4", link: "https://pillows.su/f/z")
+        withPlaying(playing, era: "DONDA [V1]") { player in
+            #expect(player.isNowPlaying(playing, inEra: "DONDA [V1]"))
+            #expect(!player.isNowPlaying(twin, inEra: "Donda [V2]"))
+        }
+    }
+
+    @Test("a row with no era still resolves — misc entries carry none")
+    func emptyEraIsNotAMismatch() {
+        let playing = v("Some Video", link: "https://youtu.be/x")
+        withPlaying(playing, era: "") { player in
+            #expect(player.isNowPlaying(playing, inEra: ""))
+        }
+    }
+
+    @Test("nothing playing means no row is playing")
+    func nothingPlaying() {
+        let engine = AudioEngine.shared
+        let saved = engine.currentTrack
+        engine.currentTrack = nil
+        #expect(!PlayerViewModel.shared.isNowPlaying(v("X", link: "https://x/1"), inEra: "E"))
+        engine.currentTrack = saved
     }
 }
