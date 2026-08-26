@@ -48,6 +48,11 @@ final class MacUIState {
     /// Set by ⇧⌘V so the Browse pane can pick up a pasted tracker URL.
     var pastedURL: String?
 
+    /// Bumped by ⌘F. The artist screen owns the search field's focus state, so
+    /// the menu command cannot set it directly — it nudges this instead and the
+    /// screen focuses on the change.
+    var focusSearchToken = 0
+
     /// Measured height of the mini player bar.
     ///
     /// The bar is a window-level `safeAreaBar`, which insets the detail column

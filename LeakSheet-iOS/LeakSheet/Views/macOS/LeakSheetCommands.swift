@@ -79,6 +79,17 @@ struct LeakSheetCommands: Commands {
             .keyboardShortcut("v", modifiers: [.shift, .command])
         }
 
+        // Standard Find slot, so ⌘F lands where a Mac user expects it. The
+        // artist screen owns the search field's focus, so this nudges a token
+        // it observes rather than reaching into the view.
+        CommandGroup(replacing: .textEditing) {
+            Button("Find") {
+                ui.focusSearchToken += 1
+                openWindow(id: "main")
+            }
+            .keyboardShortcut("f", modifiers: .command)
+        }
+
         CommandGroup(after: .toolbar) {
             // The inspector these drive lives only in the main window. Bring it
             // forward too, or toggling while the Now Playing window is key

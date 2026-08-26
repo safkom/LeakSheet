@@ -23,6 +23,7 @@ struct MacArtistView: View {
 
     @Environment(PlayerViewModel.self) private var player
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var searchFocused: Bool
 
     /// era name (lowercased) → art URL, first occurrence wins. Precomputed once
     /// so `MiscListView` takes a small dictionary instead of the whole era tree.
@@ -83,6 +84,12 @@ struct MacArtistView: View {
         .navigationTitle(openEra ?? artist.name)
         .navigationSubtitle(subtitleText)
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
+        .searchFocused($searchFocused)
+        // ⌘F is the standard Find shortcut and the search field is right there,
+        // but nothing bound the two — the field could only be reached with the
+        // mouse. The command bumps a token because focus state belongs to this
+        // view, not to the menu.
+        .onChange(of: ui.focusSearchToken) { _, _ in searchFocused = true }
         .toolbar { toolbarItems }
         .sheet(isPresented: $showStats) {
             if let trackerStats = artist.trackerStats { TrackerStatsSheet(stats: trackerStats) }
@@ -144,7 +151,7 @@ struct MacArtistView: View {
                     ForEach(vm.availableTabs) { tab in
                         MacFilterChip(
                             label: tab.name,
-                            icon: FilterTogglesView.tabIcon(for: tab.kind),
+                            icon: ContentTabsView.tabIcon(for: tab.kind),
                             isActive: vm.selectedTabKey == tab.id,
                             tint: .filterMisc
                         ) { vm.selectTab(tab.id) }
