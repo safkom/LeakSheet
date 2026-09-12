@@ -19,6 +19,17 @@ class Badge(str, Enum):
     AI = "ai"              # 🤖
 
 
+# Display precedence when one song carries several differently-badged
+# versions. Lower wins. Mirrored by `Badge.displayPriority` on iOS.
+_BADGE_PRIORITY: dict[Badge, int] = {
+    Badge.GRAIL: 0,
+    Badge.BEST: 1,
+    Badge.SPECIAL: 2,
+    Badge.WANTED: 3,
+    Badge.WORST: 4,
+    Badge.AI: 5,
+}
+
 # Mapping from emoji characters → Badge enum
 EMOJI_TO_BADGE: dict[str, Badge] = {
     "⭐": Badge.BEST,
@@ -171,11 +182,21 @@ class Song(BaseModel):
 
     @property
     def badge(self) -> Badge | None:
-        """Return the badge from any version (badges are per-song semantically)."""
+        """Return the song's badge — the most significant one across versions.
+
+        A big tracker can badge several versions of one song differently (Ye's
+        "Hurricane" has best, special AND worst versions). Taking the first
+        badged version made the result depend on row order, so a song with a
+        ⭐ version could be labelled 🗑️. Positive badges outrank negative ones;
+        the iOS client mirrors this ordering in `Badge.displayPriority`.
+        """
+        best: Badge | None = None
         for v in self.versions:
-            if v.badge is not None:
-                return v.badge
-        return None
+            if v.badge is None:
+                continue
+            if best is None or _BADGE_PRIORITY[v.badge] < _BADGE_PRIORITY[best]:
+                best = v.badge
+        return best
 
     @property
     def primary(self) -> SongVersion | None:

@@ -288,6 +288,42 @@ class TestSongCreditParsing:
         title, feat, prod, *_ = parse_song_credits("After You [V2](prod. Dom $olo)")
         assert title == "After You [V2]" and prod == "Dom $olo"
 
+    def test_version_tag_is_not_mistaken_for_a_credit(self):
+        from src.models import parse_song_credits
+        title, feat, prod, *_ = parse_song_credits("Living Reckless [V1]")
+        assert title == "Living Reckless [V1]" and prod is None and feat is None
+
+
+class TestSongBadgePrecedence:
+    """A song with several differently-badged versions must report the most
+    significant badge, not whichever version happens to come first."""
+
+    def _song(self, *badges):
+        from src.models import Badge, Song, SongVersion
+        return Song(
+            base_name="Hurricane",
+            versions=[
+                SongVersion(name="Hurricane", badge=Badge(b) if b else None)
+                for b in badges
+            ],
+        )
+
+    def test_positive_badge_outranks_worst(self):
+        from src.models import Badge
+        # Ye "Hurricane" (DONDA [V3]): worst comes first, special later.
+        assert self._song("worst", None, "special").badge == Badge.SPECIAL
+
+    def test_grail_outranks_best(self):
+        from src.models import Badge
+        assert self._song("best", "grail").badge == Badge.GRAIL
+
+    def test_single_badge_unchanged(self):
+        from src.models import Badge
+        assert self._song(None, "best", None).badge == Badge.BEST
+
+    def test_no_badges(self):
+        assert self._song(None, None).badge is None
+
     def test_ref_credits(self):
         from src.models import parse_song_credits
         c = parse_song_credits("RATHER LIE [Clean](ref. Keith Lawson)")
