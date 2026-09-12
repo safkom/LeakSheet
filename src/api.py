@@ -676,8 +676,15 @@ async def parse_sheet(
             raw, etag, age = cached
             if not etag:
                 # Legacy cache entry without a stored hash — compute once.
+                # Off the loop: `raw` is the whole parsed artist (6.5 MB for
+                # Ye), so json.loads plus a sorted re-dump and a SHA-256 stalls
+                # every other request for as long as it runs. The miss path
+                # below was moved to a thread for exactly this reason and this
+                # branch was missed.
                 with timer.phase("etag"):
-                    etag = compute_content_hash(json.loads(raw))
+                    etag = await asyncio.to_thread(
+                        lambda: compute_content_hash(json.loads(raw))
+                    )
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:

@@ -906,31 +906,51 @@ def _collapse_reason(key: str, data: dict) -> str | None:
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
         return None
+
+    try:
+        meta = json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    try:
+        age = time.time() - _parsed_timestamp(meta)
+    except TypeError:
+        age = 0.0
+
+    # The counts live in the small meta sidecar, which is read here anyway.
+    # Reading them out of the parse itself meant a full multi-MB json.loads on
+    # every successful write just to compare two integers — doubling peak
+    # memory on a box the README says cannot fit two Ye-sized parses at once.
+    # Entries written before the counts existed fall back to that read once,
+    # and are rewritten with counts by the write below.
+    old = meta.get("total_versions")
+    old_eras = meta.get("era_count")
+    if old is None or old_eras is None:
+        previous = _legacy_parsed_counts(parsed_file)
+        if previous is None:
+            return None
+        old, old_eras = previous
+
+    new = data.get("total_versions") or 0
+    if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
+        return None
+    if age > STALE_CACHE_TTL:
+        return None
+
+    new_eras = len(data.get("eras") or [])
+    return (
+        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
+    )
+
+
+def _legacy_parsed_counts(parsed_file: Path) -> tuple[int, int] | None:
+    """(total_versions, era count) read out of a pre-counts cache entry."""
     try:
         previous = json.loads(parsed_file.read_text())
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(previous, dict):
         return None
-
-    old = previous.get("total_versions") or 0
-    new = data.get("total_versions") or 0
-    if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
-        return None
-
-    try:
-        meta = json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
-        age = time.time() - _parsed_timestamp(meta)
-    except (OSError, json.JSONDecodeError, TypeError):
-        age = 0.0
-    if age > STALE_CACHE_TTL:
-        return None
-
-    old_eras = len(previous.get("eras") or [])
-    new_eras = len(data.get("eras") or [])
-    return (
-        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
-    )
+    return (previous.get("total_versions") or 0, len(previous.get("eras") or []))
 
 
 def _set_cached_parsed(url: str, artist: Artist) -> None:
@@ -960,6 +980,10 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         _write_meta(key, {
             "content_hash": compute_content_hash(data),
             "parsed_timestamp": time.time(),
+            # Read back by _collapse_reason, so the collapse check costs a
+            # small sidecar read instead of re-parsing the whole entry.
+            "total_versions": data.get("total_versions") or 0,
+            "era_count": len(data.get("eras") or []),
         })
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
@@ -1283,6 +1307,39 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # ---------------------------------------------------------------------------
 # Async variants
 # ---------------------------------------------------------------------------
+
+async def _fetch_base_html(
+    client: httpx.AsyncClient,
+    url_norm: str,
+    *,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+) -> tuple[str, str]:
+    """Base page HTML + title, served from the HTML cache when it is fresh.
+
+    async_fetch_sheet_html reads this cache before going to the network; the
+    two base-page fetches inside async_fetch_and_parse did not, so a cold
+    request re-downloaded the page even with a fresh copy already on disk.
+
+    Only a page that actually carries tables is written, which is the rule
+    async_fetch_sheet_html already follows for this key: its cached read
+    returns immediately without re-checking, so a table-less page stored here
+    would later be handed back as the sheet and skip GID discovery entirely.
+    """
+    if use_cache and cache_ttl > 0:
+        cached = await _async_get_cached(url_norm, cache_ttl)
+        if cached is not None:
+            return cached
+    r = await client.get(url_norm, timeout=timeout)
+    r.raise_for_status()
+    html = r.text
+    title_match = TITLE_PATTERN.search(html)
+    title = title_match.group(1) if title_match else ""
+    if use_cache and "<table" in html.lower():
+        await _async_set_cache(url_norm, html, title)
+    return html, title
+
 
 async def async_fetch_sheet_html(
     url: str,
@@ -1721,10 +1778,12 @@ async def async_fetch_and_parse(
             base_page_paths: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
-                    base_resp = await client.get(url_norm, timeout=timeout)
-                    base_resp.raise_for_status()
-                named_tabs = _discover_named_tabs(base_resp.text)
-                base_page_paths = _page_path_map(base_resp.text)
+                    base_html, _ = await _fetch_base_html(
+                        client, url_norm, timeout=timeout,
+                        cache_ttl=cache_ttl, use_cache=use_cache,
+                    )
+                named_tabs = _discover_named_tabs(base_html)
+                base_page_paths = _page_path_map(base_html)
             except httpx.HTTPError:
                 pass  # Can't tell — fall back to trusting parse_sheet below
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
@@ -1762,17 +1821,23 @@ async def async_fetch_and_parse(
                 # GID produced 0 eras or 0 songs — fall through to discovery
             # else: gid is the Misc/Music-Videos tab — fall through to full discovery,
             # see docs/decisions.md::fetcher.py::gid-subpage-discovery
+        except AccessDeniedError:
+            # "This tracker is private" is an answer, not a failure to retry.
+            # Swallowing it here sent the request on to full discovery, which
+            # fails differently, so the API's dedicated 403 — the one that
+            # explains the sheet is private rather than echoing a provider's
+            # wording — was unreachable from this path.
+            raise
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
     try:
         with t.phase("base_fetch"):
-            r = await client.get(url_norm, timeout=timeout)
-            r.raise_for_status()
-            base_html = r.text
-        title_match = TITLE_PATTERN.search(base_html)
-        title = title_match.group(1) if title_match else ""
+            base_html, title = await _fetch_base_html(
+                client, url_norm, timeout=timeout,
+                cache_ttl=cache_ttl, use_cache=use_cache,
+            )
 
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():

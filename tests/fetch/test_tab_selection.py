@@ -298,3 +298,31 @@ class TestHubSectionIdentity:
         named = [s for s in target.eras[0].sections if s.name == "Extras"]
         assert len(named) == 1
         assert [s.base_name for s in named[0].songs] == ["Two", "Three"]
+
+
+class TestPrivateSheetPropagates:
+    """A 403 from the sheet is an answer, not a failure to retry.
+
+    The gid branch caught (FetchError, httpx.HTTPError, ValueError) and fell
+    through to full discovery. AccessDeniedError is a FetchError, so "this
+    tracker is private" was swallowed and re-surfaced as whatever discovery
+    failed with — making the API's dedicated 403, the one that says the sheet
+    is private instead of echoing a provider's wording, unreachable from here.
+    """
+
+    async def test_access_denied_is_not_swallowed_by_the_gid_branch(
+        self, workbook_client, patch_sheets_client, monkeypatch
+    ):
+        from src import fetcher
+        from src.fetcher import AccessDeniedError
+
+        async def denied(url, **kwargs):
+            raise AccessDeniedError(f"Access denied (403): {url}")
+
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        monkeypatch.setattr(fetcher, "async_fetch_sheet_html", denied)
+
+        with pytest.raises(AccessDeniedError):
+            await async_fetch_and_parse(
+                f"{URL}#gid=100", use_cache=False, write_cache=False
+            )
