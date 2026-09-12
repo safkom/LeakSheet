@@ -50,6 +50,7 @@ from src.fetcher import (
     async_get_cached_parsed_bytes,
     get_cached_parsed_bytes,
     clear_cache,
+    close_sheets_client,
     compute_content_hash,
     DEFAULT_CACHE_TTL,
     InvalidURLError,
@@ -65,6 +66,7 @@ from src.streaming import (
     GdriveInterstitialError,
     PublicOnlyAsyncTransport,
     TTLCache,
+    UpstreamStatusError,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
@@ -376,7 +378,7 @@ async def lifespan(app: FastAPI):
     if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
         prewarm_task = asyncio.create_task(_prewarm_loop())
     yield
-    # Shutdown: stop background work and close both shared HTTP clients.
+    # Shutdown: stop background work and close all three shared HTTP clients.
     if prewarm_task is not None:
         prewarm_task.cancel()
         try:
@@ -386,6 +388,7 @@ async def lifespan(app: FastAPI):
     if _proxy_client is not None:
         await _proxy_client.aclose()
     await close_shared_client()
+    await close_sheets_client()
 
 
 app = FastAPI(
@@ -1151,6 +1154,30 @@ async def proxy_image(
         raise HTTPException(status_code=502, detail="Image proxy error")
 
 
+def _parse_content_length(raw: str | None) -> int | None:
+    """Upstream Content-Length as an int, or None when absent or unusable.
+
+    This used to be a bare int() sitting outside the try that guards the rest
+    of proxy_stream, so a malformed header raised ValueError, returned 500, and
+    leaked the streamed response — every other early exit in that handler
+    aclose()s it. A length we cannot read is not a fatal condition: it only
+    means the client gets no Content-Length.
+
+    httpx joins repeated headers with ", ", so a duplicated Content-Length
+    arrives as "123, 123". Identical values still describe one length;
+    conflicting ones do not.
+    """
+    if not raw:
+        return None
+    parts = {p.strip() for p in raw.split(",") if p.strip()}
+    if len(parts) != 1:
+        return None
+    try:
+        return int(parts.pop())
+    except ValueError:
+        return None
+
+
 async def _get_image_capped(
     url: str, headers: dict[str, str]
 ) -> tuple[httpx.Response, bytes]:
@@ -1752,6 +1779,20 @@ async def proxy_stream(
         # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
+    except UpstreamStatusError as e:
+        # Relay what upstream actually said, so a client can tell "this file is
+        # gone" from "the host is throttling us". Everything else stays 502.
+        # Only the status code crosses over — see UpstreamStatusError.
+        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        if e.status_code in (404, 410):
+            raise HTTPException(status_code=404, detail="Upstream file not found")
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Upstream rate limited",
+                headers={"Retry-After": "30"},
+            )
+        raise HTTPException(status_code=502, detail="Upstream error")
     except ValueError as e:
         # The message names internal hosts and SSRF-check internals (a DNS
         # failure surfaced as "imgur.gg cdnUrl host does not resolve:
@@ -1781,7 +1822,7 @@ async def proxy_stream(
     raw_ct = resp.headers.get("content-type")
     raw_cd = resp.headers.get("content-disposition")
     ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
-    total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
+    total_size = _parse_content_length(resp.headers.get("content-length"))
 
     # MIME sniffing on first chunk — see docs/decisions.md::api.py::mime-sniffing
     _stream_iter = resp.aiter_bytes(chunk_size=65536)

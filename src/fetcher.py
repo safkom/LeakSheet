@@ -160,6 +160,19 @@ def _get_sheets_client() -> httpx.AsyncClient:
     return _sheets_client
 
 
+async def close_sheets_client() -> None:
+    """Close the shared sheet-fetch client. Call on application shutdown.
+
+    The lifespan closed the image-proxy and streaming clients but not this one,
+    so every restart dropped its pooled connections instead of closing them.
+    Mirrors streaming.close_shared_client.
+    """
+    global _sheets_client
+    if _sheets_client is not None and not _sheets_client.is_closed:
+        await _sheets_client.aclose()
+    _sheets_client = None
+
+
 async def _refresh_tracker_hosts() -> None:
     """Harvest fetchable hosts from the ArtistGrid feed (best effort).
 
@@ -1170,13 +1183,10 @@ def _run_sync(coro_factory):
     this from async code; use the ``async_*`` functions directly.
     """
     async def _runner():
-        global _sheets_client
         try:
             return await coro_factory()
         finally:
-            if _sheets_client is not None and not _sheets_client.is_closed:
-                await _sheets_client.aclose()
-            _sheets_client = None
+            await close_sheets_client()
     return asyncio.run(_runner())
 
 

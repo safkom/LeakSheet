@@ -588,6 +588,23 @@ _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
 _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
 
 
+class UpstreamStatusError(ValueError):
+    """Upstream answered with a status we cannot stream.
+
+    Carries the code so the API can tell the client what actually happened: a
+    deleted file (404) and a rate-limited host (429) were both collapsed into a
+    generic 502, so clients could not tell "gone" from "try again later".
+    Subclasses ValueError because every existing caller already handles that.
+
+    The code is all it carries — messages on this path have named internal
+    hosts and SSRF-check internals before now.
+    """
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"Upstream returned {status_code}")
+        self.status_code = status_code
+
+
 class GdriveInterstitialError(Exception):
     """Raised when Google Drive returns an HTML virus-scan interstitial that
     could not be bypassed via the confirm-form retry."""
@@ -754,7 +771,7 @@ async def stream_audio(
                 return resp
             if resp.status_code not in (200, 206, 416):
                 logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
-                raise ValueError(f"Upstream returned {resp.status_code}")
+                raise UpstreamStatusError(resp.status_code)
             ct = resp.headers.get("content-type", "")
             if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
                 logger.warning("Upstream %s returned non-media content-type: %s", stream_url, ct)
@@ -789,7 +806,7 @@ async def stream_audio(
         # (Range Not Satisfiable) instead of a generic upstream error.
         if resp.status_code not in (200, 206, 416):
             logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
-            raise ValueError(f"Upstream returned {resp.status_code}")
+            raise UpstreamStatusError(resp.status_code)
 
         if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
             logger.warning("Upstream %s returned non-audio content-type: %s", stream_url, ct)

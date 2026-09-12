@@ -181,3 +181,75 @@ class TestStreamEndpointGdriveMapping:
     def test_unresolvable_url_still_400s(self, api_client):
         r = api_client.get("/stream", params={"url": "https://not-a-supported-host.example/x"})
         assert r.status_code == 400
+
+
+class TestMalformedContentLength:
+    """A Content-Length we cannot read must not be fatal.
+
+    The parse was a bare int() outside the try that guards the rest of
+    proxy_stream, so a malformed header raised ValueError, returned 500, and
+    left the streamed response unclosed — every other early exit in that
+    handler aclose()s it, so this one leaked a pooled connection until timeout.
+    """
+
+    def test_garbage_length_still_streams(self, api_client, monkeypatch):
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "audio/mpeg", "content-length": "not-a-number"},
+            [b"hello"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 200
+        assert r.content == b"hello"
+
+    def test_duplicated_identical_length_is_still_usable(self, api_client, monkeypatch):
+        # httpx joins repeated headers with ", " — two agreeing values still
+        # describe one length.
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "audio/mpeg", "content-length": "5, 5"}, [b"hello"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 200
+        assert r.headers.get("content-length") == "5"
+
+    def test_conflicting_lengths_are_discarded(self, api_client, monkeypatch):
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "audio/mpeg", "content-length": "5, 9"}, [b"hello"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 200
+
+
+class TestUpstreamStatusIsRelayed:
+    """404 and 429 were both collapsed into 502, so a client could not tell a
+    deleted file from a throttled host and had no basis for retrying."""
+
+    def _raise(self, monkeypatch, code):
+        from src.streaming import UpstreamStatusError
+
+        async def raiser(stream_url, *, range_header=None):
+            raise UpstreamStatusError(code)
+
+        monkeypatch.setattr(api, "stream_audio", raiser)
+
+    def test_gone_becomes_404(self, api_client, monkeypatch):
+        self._raise(monkeypatch, 404)
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 404
+
+    def test_410_also_becomes_404(self, api_client, monkeypatch):
+        self._raise(monkeypatch, 410)
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 404
+
+    def test_throttled_becomes_429_with_retry_after(self, api_client, monkeypatch):
+        self._raise(monkeypatch, 429)
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 429
+        assert r.headers["Retry-After"] == "30"
+
+    def test_anything_else_stays_502(self, api_client, monkeypatch):
+        self._raise(monkeypatch, 500)
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 502
+
+    def test_no_upstream_detail_leaks_to_the_client(self, api_client, monkeypatch):
+        self._raise(monkeypatch, 404)
+        body = api_client.get("/stream", params={"url": PILLOWS}).text.lower()
+        assert "pillows" not in body and "api.pillows.su" not in body
