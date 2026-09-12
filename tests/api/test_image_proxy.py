@@ -385,3 +385,16 @@ class TestImageProxyEndpoint:
 
         r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
         assert r.status_code == 200
+
+    def test_referer_decision_uses_the_hostname_not_a_substring(self):
+        """The Google Referer went out to anything whose URL merely CONTAINED
+        a Google domain, because the check was `h in url` over the whole URL."""
+        from src.api import _GOOGLE_IMAGE_DOMAINS, _is_allowed_domain
+
+        def is_google(u):
+            return _is_allowed_domain(u, set(), _GOOGLE_IMAGE_DOMAINS)
+
+        assert is_google("https://lh3.googleusercontent.com/abc")
+        assert is_google("https://google.com/x")
+        assert not is_google("https://attacker.tld/?x=google.com")
+        assert not is_google("https://google.com.attacker.tld/x")

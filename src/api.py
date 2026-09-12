@@ -263,6 +263,13 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 _STREAM_ALLOWED_DOMAINS = ALLOWED_STREAM_HOSTS
 
 
+# Google image CDNs, for the Referer decision below. Parent domains: a
+# subdomain of any of these counts.
+_GOOGLE_IMAGE_DOMAINS = {
+    "googleusercontent.com", "ggpht.com", "google.com", "gstatic.com",
+}
+
+
 def _image_host_allowed(url: str) -> bool:
     """Hosts the image proxy may fetch from.
 
@@ -403,6 +410,12 @@ _RATE_LIMIT_PATHS = ("/sheet", "/stream", "/metadata")
 # the least abusable of the four — disk-cached, 25MB download cap, 20MP decode
 # cap, SSRF allowlist.
 _IMAGE_RATE_LIMIT_MULTIPLIER = 10
+# POST /cache/clear is the one privileged endpoint, and it was throttled by
+# nothing: the guard above is opt-in via LEAKSHEET_RATE_LIMIT_PER_MIN, which is
+# off by default, so token guessing was unbounded. This ceiling is fixed rather
+# than derived from that variable — an operator flushing the cache does not
+# approach it, and brute force must not depend on an optional setting.
+_ADMIN_RATE_LIMIT_PER_MIN = 10
 _RATE_LIMIT_WINDOW_S = 60.0
 _rate_hits: dict[str, list[float]] = {}
 _rate_last_prune = 0.0
@@ -462,13 +475,17 @@ class _RateLimitMiddleware:
         await self.app(scope, receive, send)
 
     def _should_limit(self, scope) -> bool:
+        path = scope.get("path", "").rstrip("/")
+        # Checked before the opt-in limit below, so the admin endpoint is
+        # throttled even with LEAKSHEET_RATE_LIMIT_PER_MIN unset.
+        if path.endswith("/cache/clear"):
+            return self._over("|admin", _ADMIN_RATE_LIMIT_PER_MIN, scope)
         try:
             limit = int(os.environ.get("LEAKSHEET_RATE_LIMIT_PER_MIN", "0") or 0)
         except ValueError:
             limit = 0
         if limit <= 0:
             return False
-        path = scope.get("path", "").rstrip("/")
         # Separate bucket + ceiling for image-proxy; see the constants above.
         if path.endswith("/image-proxy"):
             key_suffix, limit = "|img", limit * _IMAGE_RATE_LIMIT_MULTIPLIER
@@ -476,6 +493,9 @@ class _RateLimitMiddleware:
             key_suffix = ""
         else:
             return False
+        return self._over(key_suffix, limit, scope)
+
+    def _over(self, key_suffix: str, limit: int, scope) -> bool:
         key = _client_ip(scope) + key_suffix
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_S
@@ -1016,6 +1036,13 @@ async def proxy_image(
     width = _snap_image_width(w) if w else None
     base_headers = {
         "Cache-Control": _CC_IMAGE,
+        # Deliberately wider than the app-wide CORS allowlist. Era colours are
+        # extracted by reading proxied covers through a canvas, so the clients
+        # request them with crossorigin="anonymous" (web/src/App.vue,
+        # EraCard.vue) — and in local dev that request carries a localhost
+        # Origin the allowlist does not name. What this can serve is bounded by
+        # _image_host_allowed, re-checked after redirects, so the reach is
+        # public tracker art and nothing else.
         "Access-Control-Allow-Origin": "*",
     }
 
@@ -1031,10 +1058,12 @@ async def proxy_image(
             if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
 
-    # Conditional headers — send browser-like headers for Google domains
-    is_google = any(h in url for h in (
-        'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
-    ))
+    # Conditional headers — send browser-like headers for Google domains.
+    # Matched on the parsed hostname, not as a substring of the whole URL:
+    # "https://attacker.tld/?x=google.com" contains the string and was being
+    # handed a docs.google.com Referer. _is_allowed_domain is the check this
+    # file already uses correctly everywhere else.
+    is_google = _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS)
     headers = {}
     if is_google:
         headers["Referer"] = "https://docs.google.com/"

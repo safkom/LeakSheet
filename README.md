@@ -126,7 +126,7 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | Var | Default | Purpose |
 |---|---|---|
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
-| `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata` |
+| `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata`. `/cache/clear` carries its own fixed cap of 10/min that applies whether or not this is set |
 | `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
 | `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed |
 | `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
