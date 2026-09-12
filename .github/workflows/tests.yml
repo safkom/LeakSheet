@@ -19,14 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: pip
-      - run: pip install -r requirements-dev.txt
+          enable-cache: true
+      - run: uv sync --frozen
       # Bare pytest = the offline gate (addopts excludes live/accuracy/slow).
       # Deterministic, no network, no Trackers/ dumps needed. This gates merges.
-      - run: pytest
+      - run: uv run pytest
 
   live:
     name: Live invariants (latest data)
@@ -36,11 +35,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: pip
-      - run: pip install -r requirements-dev.txt
+          enable-cache: true
+      - run: uv sync --frozen
       # The locked public URL set only (excludes the slow full TrackerHub
       # sweep, which is a deliberate local/cron-scale run, not a PR gate).
-      - run: pytest -m "live and not slow" -ra
+      - run: uv run pytest -m "live and not slow" -ra

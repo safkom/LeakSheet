@@ -1,8 +1,21 @@
 FROM python:3.11-slim
+
+# Pinned, not :latest — a floating installer would undo the point of uv.lock.
+COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Dependencies in their own layer, before the source: editing src/ then rebuilds
+# without re-resolving. --frozen fails rather than silently relocking if
+# uv.lock and pyproject.toml have drifted apart.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
 COPY src ./src
+
+# The venv uv builds, so `gunicorn` and `python` below resolve to it.
+ENV PATH="/app/.venv/bin:$PATH"
+
 EXPOSE 8080
 # /health, not /docs: probing the docs route rendered the whole Swagger page
 # and silently made the container's liveness depend on docs staying enabled.

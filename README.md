@@ -44,12 +44,12 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 ## Quick Start
 
-You'll need Python 3.10+ and (for the web app) Node 18+.
+You'll need [uv](https://docs.astral.sh/uv/) and (for the web app) Node 18+. uv installs
+Python 3.11 itself, from `.python-version`, so there is nothing else to set up.
 
 ```bash
 # Backend
-pip install -r requirements.txt
-uvicorn src.api:app --reload          # → http://localhost:8000
+uv run uvicorn src.api:app --reload   # → http://localhost:8000
 
 # Web app (separate terminal)
 cd web && npm install && npm run dev  # → http://localhost:5173
@@ -60,18 +60,23 @@ Then open the frontend and paste any supported tracker URL. For the iOS app, ope
 ### One-liner: parse a tracker from the CLI
 
 ```bash
-python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https://yetracker.net/'); print(f'{a.name}: {a.total_songs} songs')"
+uv run python -c "from src.fetcher import fetch_and_parse; a = fetch_and_parse('https://yetracker.net/'); print(f'{a.name}: {a.total_songs} songs')"
 ```
 
 ### Tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                  # offline gate: deterministic, no network, no local dumps needed
-pytest -m accuracy      # exact-count regression vs local Trackers/ dumps (skips if absent)
-pytest -m live          # fetches the locked live tracker set, drift-tolerant invariants
-pytest -m "live and slow"  # full ArtistGrid sweep (deliberate, slow)
+uv run pytest                  # offline gate: deterministic, no network, no local dumps needed
+uv run pytest -m accuracy      # exact-count regression vs local Trackers/ dumps
+uv run pytest -m live          # fetches the locked live tracker set, drift-tolerant invariants
+uv run pytest -m "live and slow"  # full ArtistGrid sweep (deliberate, slow)
 ```
+
+`-m accuracy` needs real tracker HTML under `Trackers/` and `.cache/`, which is never
+committed — on a clean checkout those tests skip themselves and the command is a no-op.
+
+Dependencies live in `pyproject.toml` and are pinned in `uv.lock`; `uv run` syncs the
+environment before it runs anything. To change one, edit `pyproject.toml` then `uv lock`.
 
 The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|live|accuracy`) with one
 shared health definition in `tests/_health.py`. CI runs the offline gate on every push and a

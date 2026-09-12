@@ -183,7 +183,7 @@ class _Cell:
 try:
     from lxml import etree
     from lxml import html as _lxml_html
-except ImportError:  # pragma: no cover - lxml is in requirements
+except ImportError:  # pragma: no cover - lxml is a pinned dependency
     _lxml_html = None
 
 
