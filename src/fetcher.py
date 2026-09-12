@@ -382,6 +382,22 @@ def _extract_sheet_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _same_site(host: str | None, base_host: str | None) -> bool:
+    """True when *host* belongs to the same site as *base_host*.
+
+    Either direction counts, so a base of ``x.net`` reaches ``cdn.x.net`` and a
+    base of ``www.x.net`` reaches ``x.net``.
+    """
+    if not host or not base_host:
+        return False
+    host, base_host = host.lower(), base_host.lower()
+    return (
+        host == base_host
+        or host.endswith("." + base_host)
+        or base_host.endswith("." + host)
+    )
+
+
 def _build_sheet_html_url(
     base_url: str, gid: str, page_paths: dict[str, str] | None = None
 ) -> str:
@@ -398,8 +414,25 @@ def _build_sheet_html_url(
 
     if page_paths and (path := page_paths.get(gid)):
         if path.startswith(("http://", "https://")):
-            return path
-        return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
+            # page_paths is scraped out of the fetched page's own JavaScript,
+            # so an absolute entry is attacker-controlled the moment any
+            # allow-listed tracker is compromised. The base URL was checked
+            # once, before this; without the same check here a sub-page could
+            # aim the fetcher at any public host and have the response parsed
+            # and cached. No refresh: the base-URL assertion already warmed the
+            # host set earlier in this request.
+            #
+            # A sheet pointing at its own CDN subdomain (base x.net serving
+            # tabs from cdn.x.net) is the normal case and stays allowed — what
+            # this rejects is an unrelated host.
+            tab_host = urlparse(path).hostname
+            if sheet_host_allowed(tab_host) or _same_site(tab_host, parsed.hostname):
+                return path
+            logger.warning(
+                "ignoring off-allowlist tab URL from page switcher: %s", path[:120]
+            )
+        else:
+            return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     if _is_google_sheets_url(base_url):
         sheet_id = _extract_sheet_id(base_url)

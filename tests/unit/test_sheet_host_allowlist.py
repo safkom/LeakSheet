@@ -152,3 +152,36 @@ class TestHostHarvesting:
         assert sheet_host_allowed("newone.net")
         # Banner row — a link, but no credits and no status flags.
         assert not sheet_host_allowed("discord.gg")
+
+
+class TestSubPageGuard:
+    """The allowlist has to hold for every tab, not just the URL we were given.
+
+    A workbook's tab URLs come out of the page's own JavaScript
+    (``_discover_page_urls``), so an absolute entry there is written by whoever
+    controls the sheet. The base URL is checked once, up front; before this
+    guard a sub-page could send the fetcher at any public host and have the
+    response parsed and written to the disk cache.
+    """
+
+    BASE = "https://docs.google.com/spreadsheets/d/SHEET/htmlview"
+
+    def test_off_allowlist_absolute_tab_url_is_ignored(self):
+        url = fetcher._build_sheet_html_url(
+            self.BASE, "42", {"42": "https://evil.example/1.html"}
+        )
+        assert "evil.example" not in url
+        # Falls through to the query form, which is same-host by construction.
+        assert url.startswith("https://docs.google.com/")
+        assert "gid=42" in url
+
+    def test_allowlisted_absolute_tab_url_is_used(self):
+        register_tracker_hosts(["https://yetracker.net/"])
+        url = fetcher._build_sheet_html_url(
+            self.BASE, "42", {"42": "https://yetracker.net/7.html"}
+        )
+        assert url == "https://yetracker.net/7.html"
+
+    def test_relative_tab_url_stays_on_the_base_host(self):
+        url = fetcher._build_sheet_html_url(self.BASE, "42", {"42": "/7.html"})
+        assert url == "https://docs.google.com/7.html"

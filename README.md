@@ -134,10 +134,13 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 
-> The backend fetches URLs server-side, so every outbound path is guarded: `/sheet` only
+> The backend fetches URLs server-side, so every outbound path is guarded. `/sheet` only
 > fetches allowlisted tracker hosts (built-in seed + the ArtistGrid feed +
-> `LEAKSHEET_EXTRA_SHEET_HOSTS`), and the audio/image proxies re-validate the final host
-> after redirects. Non-public addresses are rejected on every hop.
+> `LEAKSHEET_EXTRA_SHEET_HOSTS`), and that check covers every tab of a workbook, not just
+> the URL it was handed — a sheet's own page-switcher JavaScript can name absolute tab
+> URLs, which are honoured only for an allowlisted host or the sheet's own domain. The
+> audio and image proxies re-validate the host they LAND on after redirects, not just the
+> one they were given. Non-public addresses are rejected on every hop.
 
 ### Deployment
 

@@ -1053,11 +1053,16 @@ async def proxy_image(
             google_url = _rewrite_google_size(url, width)
             if google_url is not None:
                 try:
-                    resp = await _get_proxy_client().get(google_url, headers=headers)
+                    # Capped, like the fallback path below. A plain .get() here
+                    # buffered the whole body before the content-type check —
+                    # the same shape that was "enough to OOM the worker" and
+                    # prompted _get_image_capped, which was then only wired
+                    # into the other branch.
+                    resp, gdata = await _get_image_capped(google_url, headers)
                     ct = resp.headers.get("content-type", "")
                     if resp.status_code == 200 and ct.startswith("image/"):
                         return Response(
-                            content=resp.content, media_type=ct,
+                            content=gdata, media_type=ct,
                             headers={**base_headers, "X-Cache-Status": "origin"},
                         )
                 except httpx.HTTPError as exc:
@@ -1129,6 +1134,21 @@ async def _get_image_capped(
     """
     req = _get_proxy_client().build_request("GET", url, headers=headers)
     resp = await _get_proxy_client().send(req, stream=True)
+
+    # The allowlist was checked on the URL we were GIVEN. follow_redirects=True
+    # means an allow-listed host can still 30x anywhere, so re-check the url we
+    # LANDED on. PublicOnlyAsyncTransport already refuses private targets at
+    # connect time, which is why this is an allowlist check and not
+    # assert_public_redirect_target: that one re-resolves the host over DNS to
+    # redo work the transport has done, and the image proxy serves dozens of
+    # thumbnails per screen.
+    #
+    # Runs before any body byte is read, so nothing off-host is ever relayed.
+    final_url = str(resp.url)
+    if final_url != url and not _image_host_allowed(final_url):
+        await resp.aclose()
+        logger.warning("image proxy: redirect off allowlist -> %s", final_url[:120])
+        raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
         if resp.status_code != 200 or not ct.startswith("image/"):
