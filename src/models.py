@@ -402,6 +402,16 @@ class ParseMetadata(BaseModel):
         default_factory=list,
         description="Non-empty header cells that matched no known column alias",
     )
+    duplicate_columns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Header cells an alias DOES cover, whose canonical field a "
+            "different column already claimed (a sheet with two 'Name' "
+            "columns). Their values are dropped too, but no alias work can "
+            "change that — kept apart from dropped_columns so the gap list "
+            "stays readable"
+        ),
+    )
 
 
 class MiscEntry(BaseModel):
@@ -411,6 +421,15 @@ class MiscEntry(BaseModel):
     own column sets and are kept fully separate from the era/song tree.
     """
     era_name: str = Field("", description="Era label from the last era header row")
+    row_index: int = Field(
+        0,
+        description=(
+            "Position within this tab, 0-based. Content repeats constantly on "
+            "these tabs — a Stems tab lists ten entries called 'Beat 1' — so "
+            "identity derived from the content alone collides, and a client "
+            "keyed on it silently renders one row where the tab has ten"
+        ),
+    )
     section: str = Field(
         "",
         description=(
@@ -575,6 +594,13 @@ def slugify(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Regex to extract "N Label" pairs from stats text.
+# Decorative emoji trackers hang off stat labels ("🔗 616 Total Links",
+# "⭐ 43 Best Of"). Shared with the parser, which has to recognise the same
+# cells to tell an era header from the sheet's global stats footer.
+EMOJI_RUN_RE = re.compile(
+    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"
+)
+
 # Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
 # Also handles emoji-prefixed labels ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
@@ -590,11 +616,7 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
       "🔗 616 Total Links\\n❌ 0 Missing Links..."
     """
     # Strip all emoji characters first
-    cleaned = re.sub(
-        r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+",
-        "",
-        raw,
-    )
+    cleaned = EMOJI_RUN_RE.sub("", raw)
     # Replace newlines with a separator that won't interfere
     cleaned = cleaned.replace("\n", " ")
     # Collapse multiple spaces
@@ -730,20 +752,40 @@ def parse_tracker_stats(
 # separator rule recovers those without the swallowing risk — a continuation
 # line that does not follow a comma still terminates the group exactly as
 # before.
+#
+# A dot joins the comma and ampersand for the same reason: the wrap often lands
+# immediately after the keyword rather than inside the list — "(prod. \nLondon
+# On Da Track)" — which left the title reading "… (prod." and the names sitting
+# in alt_titles. 37 name cells corpus-wide. Widening what the group CAN match
+# is safe on its own: take_group hands back any group whose first part is not a
+# credit keyword completely untouched.
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&][^\S\n]*\n[^\S\n]*)*)[\)\]]")
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&.][^\S\n]*\n[^\S\n]*)*)[\)\]]")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.
 # "dir." sits on music-video and visual rows ("[dir. Dave Meyers]").
 _CREDIT_FIELDS: list[tuple[str, str]] = [
-    ("featuring", r"(?:feat|ft)\.?\s+|featuring\s+"),
+    # "feat. X", "ft. X", "feat.Dc2trill", "featuring X". Same dot-or-space
+    # rule the producers entry uses, so "Feature" and "ftw" cannot match while
+    # a glued "feat.Name" can — 13 name cells carried the glued form and had
+    # their feature credit read as part of the title.
+    ("featuring", r"(?:feat|ft)(?:\.\s*|\s+)|featuring\s+"),
     # "prod. X", "Prod.by Bighead", "prod.SlimeOnTheTRack", "produced by X".
     # A dot OR whitespace must follow "prod", so a title beginning "Prodigy"
-    # cannot match.
-    ("producers", r"prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\s+)?"),
+    # cannot match. "by" is consumed on a word boundary rather than requiring
+    # whitespace after it: a truncated "(prod.by" with no name left the filler
+    # word itself standing as the producer, 443 times across the corpus.
+    # An "add. prod." / "co-prod." group opens with neither keyword, so
+    # take_group handed the whole thing back and the credit stayed inside the
+    # title — 145 cells corpus-wide, A$AP Rocky's entire Purple Swag family
+    # among them. Folded into `producers` rather than given a field of its own:
+    # a new field costs a model change and a decode on every client for a
+    # distinction the sheets themselves make inconsistently.
+    ("producers",
+     r"(?:add(?:itional)?\.?\s+|co-?\s*)?prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\b\s*)?"),
     ("collaboration", r"with\s+|w/\s*"),
     ("refs", r"ref(?:erence)?\.?\s+"),
     ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
@@ -843,24 +885,57 @@ class SongCredits(NamedTuple):
 _BARE_CREDIT_FIELDS = frozenset({"featuring", "producers", "refs", "director"})
 
 
-def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
-    """Route an unbracketed credit line into *collected*; True if it was one.
+# An opening bracket the line never closes. Maintainers leave these behind
+# constantly — see _harvest_bare_credit.
+_UNCLOSED_OPENER_RE = re.compile(r"^[\(\[]\s*")
 
-    Plenty of sheets write the credit as its own line with no brackets at all —
-    "Prod.by Bighead", "ref. MNEK". Requiring brackets left 1,312 of these
-    sitting in alt_titles across the captured corpus, where they read as
-    alternative song titles and the producer/reference credit was simply lost.
+
+def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
+    """Route a credit line no bracketed group claimed into *collected*.
+
+    Returns True if it was a credit.
+
+    Two shapes reach here. Plenty of sheets write the credit as its own line
+    with no brackets at all — "Prod.by Bighead", "ref. MNEK". Requiring
+    brackets left 1,312 of these sitting in alt_titles across the captured
+    corpus, where they read as alternative song titles and the credit was
+    simply lost.
+
+    The second shape is a bracket that was opened and never closed:
+    "(prod.SlimeOnTheTRack", "[Prod.Swagg B", "(prod. BoogzDaBeast, Nascent,
+    RONNY J, MIKE DEAN,". _CREDIT_GROUP_RE needs the closer, so the whole line
+    fell through as an alt title — 1,086 name cells corpus-wide, leaving 608
+    alt_titles that are really credits, 505 of them on one tracker.
 
     The keyword must OPEN the line, the same rule bracketed groups already
     follow, so a real title that merely mentions a producer later is untouched.
+    A stripped opener also lifts the "collaboration" exclusion: "with" is
+    ambiguous bare (plenty of songs are titled "With Or Without You") but not
+    after a bracket, which is the same reasoning that lets closed groups
+    harvest it.
     """
-    keyword = _CREDIT_PART_RE.match(line)
-    if keyword is None or keyword.lastgroup not in _BARE_CREDIT_FIELDS:
+    text = line.strip()
+    opener = _UNCLOSED_OPENER_RE.match(text)
+    bracketed = bool(opener) and not text.endswith((")", "]"))
+    if bracketed:
+        text = text[opener.end():]
+    keyword = _CREDIT_PART_RE.match(text)
+    if keyword is None:
         return False
-    value = _WHITESPACE_RUN_RE.sub(" ", line[keyword.end():]).strip().rstrip(")]")
-    if not value:
+    if not bracketed and keyword.lastgroup not in _BARE_CREDIT_FIELDS:
         return False
-    collected.setdefault(keyword.lastgroup, []).append(value)
+    # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
+    # That dangling separator is truncation, not a name.
+    # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
+    # That dangling separator is truncation, not a name.
+    value = _WHITESPACE_RUN_RE.sub(" ", text[keyword.end():]).strip().rstrip(")] ,&")
+    if value:
+        collected.setdefault(keyword.lastgroup, []).append(value)
+    # True even with nothing to store. A line that is only "(prod.by" names no
+    # producer, but it is still a credit line, not an alternative song title —
+    # sending it back would put "(prod.by" in alt_titles and, because a row
+    # with no credit and no other data reads as a section label, drop the song
+    # with it.
     return True
 
 

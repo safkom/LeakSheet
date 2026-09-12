@@ -22,6 +22,7 @@ from src.config import COLUMN_ALIASES
 from src.models import (
     Artist,
     Badge,
+    EMOJI_RUN_RE,
     Era,
     MiscEntry,
     Notice,
@@ -384,26 +385,46 @@ def _infer_name_column(
     return {}
 
 
-def detect_dropped_columns(header_row: list[_Cell], col_map: dict[str, int]) -> list[str]:
-    """Return header cell texts that matched no known column alias.
+def _header_label(cell: _Cell) -> str:
+    """The comparable label of a header cell: first line, parenthetical cut."""
+    first_line = cell.text.strip().split("\n")[0].strip()
+    paren = first_line.find("(")
+    if paren > 0:
+        first_line = first_line[:paren].strip()
+    return first_line[:60]
 
-    A non-empty header cell missing from ``col_map`` means every value in
-    that column is silently dropped — surfaced via ParseMetadata so unknown
-    tracker layouts are visible instead of quietly losing fields.
+
+def detect_dropped_columns(
+    header_row: list[_Cell], col_map: dict[str, int]
+) -> tuple[list[str], list[str]]:
+    """Header cells whose values never reach the model, split by reason.
+
+    Returns ``(unknown, duplicate)``.
+
+    *unknown* is a header no alias covers — a layout nobody has taught the
+    parser, and the list worth reading when a new tracker looks wrong.
+
+    *duplicate* is a header an alias DOES cover, whose canonical field a
+    different column already claimed: a sheet with two "Name" columns, or with
+    both "Available" and "In Circulation". Its values are lost just as
+    silently, but the cause is the sheet's shape rather than a gap in the
+    aliases, and no amount of alias work will change it. Reported together they
+    were indistinguishable, and 11 of the corpus's most frequent "dropped"
+    headers were this kind — noise in the one diagnostic that exists to find
+    real gaps.
     """
     mapped = set(col_map.values())
-    dropped: list[str] = []
+    unknown: list[str] = []
+    duplicate: list[str] = []
     for idx, cell in enumerate(header_row):
-        text = cell.text.strip()
-        if not text or idx in mapped:
+        if idx in mapped:
             continue
-        first_line = text.split("\n")[0].strip()
-        paren = first_line.find("(")
-        if paren > 0:
-            first_line = first_line[:paren].strip()
-        if first_line:
-            dropped.append(first_line[:60])
-    return dropped
+        label = _header_label(cell)
+        if not label:
+            continue
+        key = re.sub(r"\s+", " ", label.strip().lower()).rstrip(":").strip()
+        (duplicate if _match_column_alias(key) else unknown).append(label)
+    return unknown, duplicate
 
 
 def _extract_header_notices(
@@ -535,7 +556,7 @@ ERA_STATS_PATTERN = re.compile(
     r"|Leaks?|Snippets?|Partials?"
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
-    r"|Released|Deleted|Lost|Privated"
+    r"|Released|Deleted|Losts?|Privated"
     r")\b",
     re.IGNORECASE,
 )
@@ -553,6 +574,9 @@ _DISCOGRAPHY_STATS_PATTERN = re.compile(
     r"|Intros?|Interludes?|Outros?|Skits?"
     r"|Demos?|Throwaways?|Sessions?|Original Versions?|Originals?"
     r"|Not Avai?la?ble|Removed|Alt\.? Mix"
+    # Visual-media counts, from trackers that fold videos into the era block
+    # (UPSAHL). Longer form first so the label reads right in a match dump.
+    r"|Music Video Snippets?|Music Videos?"
     # "N Total Links" is the global tracker footer, not an era stat — matching
     # it turns the footer row into a phantom era at the bottom of every sheet.
     r"|Total(?!\s+Links)|Others?"
@@ -587,6 +611,29 @@ _SPREADSHEET_ERROR_RE = re.compile(
 def _is_spreadsheet_error(text: str) -> bool:
     """Return True if *text* is nothing but a spreadsheet error value."""
     return bool(_SPREADSHEET_ERROR_RE.match(text.strip()))
+
+
+# A cell whose every line reads "<int> <label>" states counts. Whatever the
+# vocabulary, it carries no era name — see _is_era_header.
+_STAT_ONLY_LINE_RE = re.compile(r"^\d+\s+[A-Za-z][A-Za-z0-9()/&.\-' ]*$")
+_MIN_STAT_ONLY_LINES = 2
+
+
+def _is_stats_only_cell(text: str) -> bool:
+    """True if *text* is nothing but "<int> <label>" lines.
+
+    The global stats footer states its counts in several cells at once — leak
+    status in one, quality in another, badge totals in a third. Any of them can
+    use wording neither stats pattern lists ("99 Album Track", "43 Best Of"), so
+    a vocabulary test cannot recognise them. Their SHAPE can: every line is a
+    count. Requiring two lines keeps a one-line era name like "38 Special
+    Sessions" out of it, which is the case the stats vocabularies are already
+    careful about.
+    """
+    lines = [l for l in (EMOJI_RUN_RE.sub("", ln).strip() for ln in text.split("\n")) if l]
+    if len(lines) < _MIN_STAT_ONLY_LINES:
+        return False
+    return all(_STAT_ONLY_LINE_RE.match(l) for l in lines)
 
 
 # Row values that indicate a section divider (not a song or era name).
@@ -662,19 +709,30 @@ def _is_era_header(row: list[_Cell]) -> bool:
     # content (numbers + keywords) in every cell.
     _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
     for c in row:
-        first_line = c.text.split("\n")[0].strip()
-        if not first_line:
+        text = c.text.strip()
+        if not text:
             continue
+        # Check for images (era art) — a strong signal this is an era header
+        if c.images:
+            return True
+        # A cell that is nothing but counts holds no era name, whatever
+        # vocabulary it counts in. Without this the sheet's global stats footer
+        # became an era: its release-type cell ("1352 Total / 99 Album Track /
+        # …") and its badge cell ("⭐ 43 Best Of / 🥇 44 Wanted / …") are both
+        # invisible to ERA_STATS_PATTERN, so the digit-leading rule below read
+        # them as era names. Measured over the corpus: 22 phantom eras across
+        # 19 trackers, 15 of them cards literally named "Untitled Era N", one
+        # of them claiming 1,352 versions and holding none.
+        if _is_stats_only_cell(text):
+            continue
+        first_line = text.split("\n")[0].strip()
         # If the first line doesn't start with a digit, it's likely an era name
         if not _NUMERIC_STAT_RE.match(first_line):
             return True
         # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
         if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
             return True
-        # Check for images (era art) — a strong signal this is an era header
-        if c.images:
-            return True
-    # Every non-empty cell starts with "N something" — pure stats row
+    # Every non-empty cell states counts — pure stats row
     return False
 
 
@@ -1614,7 +1672,16 @@ def parse_sheet(
     # Extract cell background colors from the stylesheet (non-neutral only)
     rows = extract_table(html_content)
     if not rows:
-        return Artist(name=artist_name, slug=slugify(artist_name), eras=[])
+        # An empty ParseMetadata, not None: this was the one return path that
+        # left it unset, so every consumer had to special-case a tab with no
+        # table. Zeroes state the truth — nothing was read — and keep the
+        # row-accounting identity holding on every path.
+        return Artist(
+            name=artist_name,
+            slug=slugify(artist_name),
+            eras=[],
+            parse_metadata=ParseMetadata(),
+        )
 
     # Step 1: detect column layout from header row.
     header_row_idx, col_map = _detect_header_row(rows)
@@ -1629,7 +1696,7 @@ def parse_sheet(
             parse_metadata=ParseMetadata(
                 total_rows=len(rows) - header_row_idx - 1,
                 other_rows=len(rows) - header_row_idx - 1,
-                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+                dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map)[0],
             ),
         )
 
@@ -2027,6 +2094,9 @@ def parse_sheet(
         _sort_era_versions(era)
 
     # Step 4: build parse metadata
+    unknown_columns, duplicate_columns = detect_dropped_columns(
+        rows[header_row_idx], col_map
+    )
     metadata = ParseMetadata(
         total_rows=total_rows,
         song_rows=song_rows,
@@ -2036,7 +2106,8 @@ def parse_sheet(
         footer_rows=footer_rows,
         other_rows=max(0, total_rows - song_rows - skipped_rows - footer_rows),
         fuzzy_matched_rows=fuzzy_matched_rows,
-        dropped_columns=detect_dropped_columns(rows[header_row_idx], col_map),
+        dropped_columns=unknown_columns,
+        duplicate_columns=duplicate_columns,
     )
 
     logger.debug(
@@ -2459,6 +2530,23 @@ def _badge_for_entry(entry: MiscEntry, tab_default: Badge) -> Badge:
     return tab_default
 
 
+def _badge_target(song: Song, entry_tag: str | None) -> SongVersion:
+    """The version a highlight-tab row is talking about.
+
+    Highlight tabs name a specific take — "⭐ Gotta Pose [V1]" — and the tag is
+    the only thing distinguishing it from its siblings. Stamping versions[0]
+    put the star on whichever take sorted first, which after _sort_era_versions
+    is rarely the one the tab named. Falls back to the first version when the
+    row carries no tag, or names one this song does not have.
+    """
+    if entry_tag:
+        wanted = entry_tag.strip().lower()
+        for version in song.versions:
+            if (version.version_tag or "").strip().lower() == wanted:
+                return version
+    return song.versions[0]
+
+
 def apply_badge_tabs(
     artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
 ) -> int:
@@ -2500,7 +2588,7 @@ def apply_badge_tabs(
             continue
         for entry in entries:
             _, entry_name = extract_badge(entry.name)
-            _, base_name = extract_version_tag(entry_name)
+            entry_tag, base_name = extract_version_tag(entry_name)
             song_key = _song_match_key(base_name)
             if not song_key:
                 continue
@@ -2513,7 +2601,7 @@ def apply_badge_tabs(
                 continue
             if any(v.badge is not None for v in song.versions):
                 continue
-            song.versions[0].badge = _badge_for_entry(entry, tab_default)
+            _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
             applied += 1
     return applied
 
@@ -2715,6 +2803,7 @@ def parse_misc_tab(
 
         entry = MiscEntry(
             era_name=current_era,
+            row_index=len(entries),
             section=current_section,
             name=first_line,
             notes=opt("notes"),
@@ -2770,6 +2859,24 @@ _ART_ERA_HEADERS = frozenset({"era", "album", "project", "era/project"})
 # every era silently fell back to whichever artwork was listed first.
 # See docs/decisions.md::parser.py::art-type-column-priority.
 _ART_TYPE_HEADERS = ("project type", "type", "image type", "category", "art type")
+
+
+class ArtMap(dict):
+    """era match key -> cover URL, remembering which keys are stand-ins.
+
+    A *synthetic* key is a version-stripped alias the parser invents so an era
+    spelled without a tag ("Donda") still resolves against an Art tab that
+    spells it "Donda [V1]". It names one specific version's cover, so it must
+    never serve a DIFFERENT version — see _apply_era_art. A dict subclass
+    rather than a second return value: every caller already treats this as a
+    plain mapping.
+    """
+
+    __slots__ = ("synthetic",)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.synthetic: set[str] = set()
 
 
 def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
@@ -2882,7 +2989,7 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
             era_info[key]["cover"] = img_url
 
     # Build final map: prefer cover-labelled image, fall back to first image
-    result: dict[str, str] = {}
+    result = ArtMap()
     for key, info in era_info.items():
         chosen = info["cover"] or info["first"]
         if chosen:
@@ -2893,9 +3000,12 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     # Also file each entry under its version-stripped key, so an era named
     # "Donda" still resolves against an Art tab that says "Donda [V1]" (and
     # vice versa). First versioned entry wins, matching the old behaviour.
+    # Marked synthetic: the key names one version's cover, and handing it to a
+    # sibling version is how "Cruel Winter [V1]" came to show [V2]'s artwork.
     for base, versioned in base_keys.items():
         if base not in result and versioned in result:
             result[base] = result[versioned]
+            result.synthetic.add(base)
 
     return result
 
@@ -2912,17 +3022,42 @@ def apply_art_tab_images(artist: Artist, art_map: dict[str, str]) -> None:
 
 
 def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
-    # Version-aware key first: "Donda [V2]" has its own cover on the Art tab and
-    # must not fall through to the version-stripped "donda", which resolves to
-    # whichever version came first.
+    """Give *era* its Art-tab cover, if the tab names one for this version.
+
+    Version-aware key first: "Donda [V2]" has its own cover on the Art tab and
+    must not fall through to the version-stripped "donda", which resolves to
+    whichever version came first.
+
+    A tagged era may still fall through to the stripped key when the Art tab
+    genuinely lists the era without a tag — but a SYNTHETIC stripped key is one
+    specific sibling's cover, so for a tagged era it is wrong data. On the Ye
+    tracker the Art tab lists only "Cruel Winter [V2]"; the alias made "cruel
+    winter" resolve to it, so "Cruel Winter [V1]" was served its sibling's
+    cover and lost the correct one the main tab had already given it. 55 such
+    aliases across the captured corpus.
+
+    It is still better than a blank card when there is nothing else, so it is
+    demoted to a last resort rather than dropped: taken only after every other
+    name and key has missed, and only for an era that has no artwork at all.
+    """
+    synthetic = getattr(art_map, "synthetic", frozenset())
+    stand_in: str | None = None
     for name in (era.name, *era.alt_names):
-        for key in (
-            _era_match_key(name, keep_discriminators=True),
-            _era_match_key(name),
-        ):
-            if key and key in art_map:
-                era.art_url = art_map[key]
-                return
+        exact = _era_match_key(name, keep_discriminators=True)
+        if exact and exact in art_map:
+            era.art_url = art_map[exact]
+            return
+        stripped = _era_match_key(name)
+        if not stripped or stripped not in art_map:
+            continue
+        if stripped in synthetic and VERSION_TAG_PATTERN.search(name):
+            if stand_in is None:
+                stand_in = art_map[stripped]
+            continue
+        era.art_url = art_map[stripped]
+        return
+    if stand_in is not None and not era.art_url:
+        era.art_url = stand_in
 
 
 # ---------------------------------------------------------------------------

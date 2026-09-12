@@ -176,12 +176,33 @@ def check_ios_contract(artist: Artist) -> list[str]:
     return out
 
 
+def check_tab_entry_identity(artist: Artist) -> list[str]:
+    """Every entry in a tab must be distinguishable from its siblings.
+
+    Clients key list rows on entry identity, and SwiftUI's ForEach keeps only
+    the FIRST row per duplicate id — silently. Content alone does not identify
+    these rows: a Stems tab lists ten entries called "Beat 1" under one era
+    with no date, and 458 of the Ye tracker's 1,721 stem rows never rendered
+    while the stats bar above them counted all 1,721.
+    """
+    out = []
+    for tab in artist.tabs:
+        seen = set()
+        for entry in tab.entries:
+            key = (entry.source_tab, entry.row_index, entry.era_name, entry.name)
+            if key in seen:
+                out.append(f"tab {tab.name!r}: duplicate entry identity {key!r}")
+            seen.add(key)
+    return out
+
+
 ALL_CHECKS = (
     check_row_accounting,
     check_era_integrity,
     check_art_urls,
     check_field_sanity,
     check_ios_contract,
+    check_tab_entry_identity,
 )
 
 

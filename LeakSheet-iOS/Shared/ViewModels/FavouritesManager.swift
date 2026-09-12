@@ -114,21 +114,65 @@ final class FavouritesManager {
 
     // MARK: - Key
 
-    static func key(artistSlug: String, eraName: String, baseName: String) -> String {
-        "\(artistSlug)::\(eraName)::\(baseName)"
+    /// Favourite identity.
+    ///
+    /// Artist + era + song name identifies a normal song. It does NOT identify
+    /// a placeholder: "???" is how these trackers write "nobody knows what
+    /// this is", and one era carries dozens of them — 282 Ye songs shared a
+    /// key, so favouriting one filled the heart on every other unidentified
+    /// track in that era.
+    ///
+    /// A placeholder's identity is the file it points at, which is the same
+    /// discriminator the now-playing indicator uses and the only thing that
+    /// tells two mystery tracks apart. Appended for placeholders ONLY, so
+    /// every existing key is byte-identical and nothing needs migrating except
+    /// the placeholder entries themselves.
+    static func key(
+        artistSlug: String, eraName: String, baseName: String,
+        discriminator: String? = nil
+    ) -> String {
+        let base = "\(artistSlug)::\(eraName)::\(baseName)"
+        guard Song.isPlaceholderName(baseName),
+              let discriminator, !discriminator.isEmpty
+        else { return base }
+        return "\(base)::\(discriminator)"
+    }
+
+    /// What tells two rows with the same placeholder name apart.
+    static func discriminator(for version: SongVersion?) -> String? {
+        version?.links?.first
     }
 
     // MARK: - Queries
 
-    func isFavourited(artistSlug: String, eraName: String, baseName: String) -> Bool {
+    func isFavourited(
+        artistSlug: String, eraName: String, baseName: String,
+        discriminator: String? = nil
+    ) -> Bool {
         // Set, not `entries.contains { }`: this runs once per visible row on
         // every scroll frame, against an array that grows with the library.
-        keyIndex.contains(Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName))
+        keyIndex.contains(Self.key(
+            artistSlug: artistSlug, eraName: eraName,
+            baseName: baseName, discriminator: discriminator
+        ))
+    }
+
+    /// Whether *song* is favourited — the row-level query. Carries the song so
+    /// a placeholder title can be told apart from its namesakes.
+    func isFavourited(song: Song, artistSlug: String, eraName: String) -> Bool {
+        isFavourited(
+            artistSlug: artistSlug, eraName: eraName, baseName: song.baseName,
+            discriminator: Self.discriminator(for: song.primary)
+        )
     }
 
     /// Check if a version is favourited by deriving its base name.
     func isFavouritedByVersion(_ version: SongVersion, artistSlug: String, eraName: String) -> Bool {
-        isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: version.derivedBaseName)
+        isFavourited(
+            artistSlug: artistSlug, eraName: eraName,
+            baseName: version.derivedBaseName,
+            discriminator: Self.discriminator(for: version)
+        )
     }
 
     /// Group by artist → era, for global favourites panel. Use `groupedByArtist` for the cached version.
@@ -140,7 +184,10 @@ final class FavouritesManager {
 
     @discardableResult
     func toggle(song: Song, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
-        let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName)
+        let k = Self.key(
+            artistSlug: artistSlug, eraName: eraName, baseName: song.baseName,
+            discriminator: Self.discriminator(for: song.primary)
+        )
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
             _groupedCache = nil
@@ -181,7 +228,10 @@ final class FavouritesManager {
     @discardableResult
     func toggleFromVersion(version: SongVersion, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
         let baseName = version.derivedBaseName
-        let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName)
+        let k = Self.key(
+            artistSlug: artistSlug, eraName: eraName, baseName: baseName,
+            discriminator: Self.discriminator(for: version)
+        )
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
             _groupedCache = nil
@@ -312,7 +362,7 @@ final class FavouritesManager {
             // Migrate here too: this branch returned early, so the cohort
             // most likely to hold pre-version-tag keys was the one cohort
             // that never got the rewrite.
-            entries = Self.migratingVersionTags(migrated)
+            entries = Self.migratingPlaceholderKeys(Self.migratingVersionTags(migrated))
             save()
             UserDefaults.standard.removeObject(forKey: Self.storageKey)
             return
@@ -321,7 +371,7 @@ final class FavouritesManager {
         guard let data = try? Data(contentsOf: Self.storageFile) else { return }
         do {
             let stored = try JSONDecoder().decode([FavouriteEntry].self, from: data)
-            let migrated = Self.migratingVersionTags(stored)
+            let migrated = Self.migratingPlaceholderKeys(Self.migratingVersionTags(stored))
             entries = migrated
             // Persist the rewrite, or it re-runs on every launch forever.
             if migrated.map(\.key) != stored.map(\.key) { save() }
@@ -343,6 +393,31 @@ final class FavouritesManager {
         pattern: #"\s*\[(?:Demo(?:\s+\d+)?|OG File|Master File|Instrumental|Rough Mix|Final(?:\s+Mix)?(?:\s+\d+)?|Remix|Mix [A-Z]|Live)\]\s*$"#,
         options: [.caseInsensitive]
     )
+
+    /// Re-key placeholder favourites onto their file.
+    ///
+    /// Everything saved before the key gained a discriminator keyed "???" on
+    /// artist + era + name alone, which every unidentified track in that era
+    /// shares. Those entries are already broken — 282 of them collide on the
+    /// Ye tracker — so this is not preserving behaviour, it is unsticking it:
+    /// each keeps the file its stored version points at, which is what the
+    /// rows now look up. An entry whose stored version has no link keeps its
+    /// old key; there is nothing to tell it apart by.
+    static func migratingPlaceholderKeys(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
+        var seen = Set(stored.map(\.key))
+        return stored.map { entry in
+            guard Song.isPlaceholderName(entry.songBaseName),
+                  let discriminator = discriminator(for: entry.primaryVersion)
+            else { return entry }
+            let newKey = key(
+                artistSlug: entry.artistSlug, eraName: entry.eraName,
+                baseName: entry.songBaseName, discriminator: discriminator
+            )
+            guard newKey != entry.key, !seen.contains(newKey) else { return entry }
+            seen.insert(newKey)
+            return entry.rekeyed(to: newKey, baseName: entry.songBaseName)
+        }
+    }
 
     static func migratingVersionTags(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
         guard let regex = orphanedTagRE else { return stored }

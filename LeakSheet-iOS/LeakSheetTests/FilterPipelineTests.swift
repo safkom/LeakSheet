@@ -304,9 +304,9 @@ struct FilterPipelineTests {
 /// TabSection's entries flow into `miscResults` so the existing misc list
 /// UI renders every parsed tab.
 struct TabModeFilterTests {
-    private func entry(_ name: String, era: String = "Era 1", tab: String) -> MiscEntry {
+    private func entry(_ name: String, era: String = "Era 1", tab: String, row: Int = 0) -> MiscEntry {
         MiscEntry(
-            eraName: era, name: name, notes: nil, entryType: nil, date: nil,
+            eraName: era, rowIndex: row, name: name, notes: nil, entryType: nil, date: nil,
             length: nil, available: nil, quality: nil, streaming: nil,
             links: [], sourceTab: tab
         )
@@ -315,7 +315,7 @@ struct TabModeFilterTests {
     private func artistWithTabs() -> Artist {
         let released = TabSection(
             kind: "released", name: "📻 Released",
-            entries: [entry("Hurricane", tab: "released"), entry("Moon", tab: "released")]
+            entries: [entry("Hurricane", tab: "released", row: 0), entry("Moon", tab: "released", row: 1)]
         )
         let stems = TabSection(
             kind: "stems", name: "🌱 Stems",
@@ -486,6 +486,67 @@ struct CrossEraIndexTests {
             vm.crossEraRefs(for: payload("Unique", "unique", era: "Donda 2"))
         }
         #expect(unique.map(\.eraName) == ["Donda 2"])
+    }
+
+    @Test func `unidentified tracks are not linked to each other`() async {
+        // "???" is how these trackers write "nobody knows what this is". Each
+        // such row is its own mystery track, which is why the backend sends
+        // them with an empty songKey — and why the base-name fallback must not
+        // group them. Indexing them put all 319 of Ye's "???" rows under one
+        // key, so tapping any one of them opened a version picker listing every
+        // unidentified track on the tracker, with colliding ids, and the sheet
+        // could re-point itself at an unrelated song.
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [
+                era("War", songs: [song("???", key: ""), song("???", key: "")]),
+                era("Donda 2", songs: [song("???", key: ""), song("Real Song", key: "real song")]),
+            ],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let placeholder = song("???", key: "")
+        let payload = DescriptionSheet.Payload(
+            song: placeholder, version: placeholder.versions[0],
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        let refs = await MainActor.run { vm.crossEraRefs(for: payload) }
+        #expect(refs.isEmpty)
+        // The sheet still resolves to the song it was opened with.
+        let resolved = await MainActor.run { vm.resolvedSong(for: payload) }
+        #expect(resolved?.baseName == "???")
+        #expect(resolved?.versions.count == 1)
+    }
+
+    @Test func `a payload with no song still refuses a placeholder name`() async {
+        // Now Playing and Favourites carry a bare SongVersion, so the lookup
+        // falls back to the version's derived base name — the same rule has to
+        // hold there.
+        let artist = Artist(
+            name: "T", slug: "t", sourceUrl: nil,
+            eras: [era("War", songs: [song("???", key: ""), song("Real Song", key: "real song")])],
+            trackerStats: nil, notices: nil,
+            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = await MainActor.run { ArtistViewModel(artist: artist) }
+        let bare = song("???", key: "").versions[0]
+        let payload = DescriptionSheet.Payload(
+            song: nil, version: bare,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        #expect(await MainActor.run { vm.crossEraRefs(for: payload) }.isEmpty)
+
+        // A real title still resolves through the base-name index.
+        let real = song("Real Song", key: "real song").versions[0]
+        let realPayload = DescriptionSheet.Payload(
+            song: nil, version: real,
+            artistName: artist.name, artistSlug: artist.slug,
+            eraName: "War", eraArt: nil
+        )
+        #expect(await MainActor.run { vm.crossEraRefs(for: realPayload) }.map(\.eraName) == ["War"])
     }
 
     @Test func `resolved song keeps the full version set for description sheets`() async {
@@ -792,11 +853,43 @@ struct BadgeLogicTests {
 /// tab listed first at the top: on the Ye Misc tab that was "Opt Archive",
 /// "Twitter" and "Pierre-Louis Auvray" — 4 entries of 747, each a source name
 /// the sheet happened to put in its Era column — above every real era.
+@Suite("Tab entry identity")
+struct MiscEntryIdentityTests {
+    private func beat(_ row: Int?) -> MiscEntry {
+        MiscEntry(
+            eraName: "Before The College Dropout", rowIndex: row, name: "Beat 1",
+            notes: nil, entryType: nil, date: nil, length: nil, available: nil,
+            quality: nil, streaming: nil, links: [], sourceTab: "stems"
+        )
+    }
+
+    @Test("identical rows keep distinct ids")
+    func identicalRowsAreDistinct() {
+        // The Ye Stems tab lists ten entries called "Beat 1" in one era with
+        // no date. ForEach keeps only the first row per duplicate id, so 458
+        // of its 1,721 rows never rendered while the stats bar counted them.
+        let rows = (0..<10).map { beat($0) }
+        #expect(Set(rows.map(\.id)).count == 10)
+    }
+
+    @Test("a row is found by its own id, not a twin's")
+    func lookupFindsTheRightRow() {
+        let rows = (0..<10).map { beat($0) }
+        #expect(rows.firstIndex(where: { $0.id == rows[4].id }) == 4)
+    }
+
+    @Test("payloads cached before the index existed still decode and group")
+    func legacyPayloadFallsBack() {
+        let legacy = beat(nil)
+        #expect(legacy.id == "stems::Before The College Dropout::Beat 1::")
+    }
+}
+
 @Suite("Misc era grouping")
 struct MiscEraGroupingTests {
-    private func entry(_ name: String, era: String) -> MiscEntry {
+    private func entry(_ name: String, era: String, row: Int = 0) -> MiscEntry {
         MiscEntry(
-            eraName: era, name: name, notes: nil, entryType: nil, date: nil,
+            eraName: era, rowIndex: row, name: name, notes: nil, entryType: nil, date: nil,
             length: nil, available: nil, quality: nil, streaming: nil,
             links: [], sourceTab: "misc"
         )

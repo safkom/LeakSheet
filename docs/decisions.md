@@ -604,3 +604,47 @@ wins only while it is still inside `STALE_CACHE_TTL`; past that it would not be
 served anyway, so a genuinely shrunken tracker recovers on its own instead of
 being frozen forever. The refusal is logged at WARNING so a systematically
 broken tab is visible rather than silent — which was the real defect here.
+
+## api.py::payload-duplication — measured, kept on purpose (2026-08-26)
+
+A full Ye response is **11.56 MB raw / 1.86 MB gzipped**. Two parts of it are
+duplication, and the deep review measured both before deciding to keep them.
+
+`Artist.misc_entries` (0.36 MB, **3.13%**) repeats the Misc and Music Videos
+entries that are already inside `tabs`. It exists so a client that predates
+`tabs` still finds those entries, and iOS still falls back to it when `tabs`
+is empty. Removing it needs either a request flag or a client-version signal,
+and the `/sheet` warm path serves the parsed-cache file's raw bytes verbatim —
+so a per-request variant means either a second cache entry or post-processing
+the payload on every hit. Three percent does not buy that, and it breaks
+anyone on an older build.
+
+`Song.dict`'s convenience fields — `available_length`, `quality`,
+`track_length`, `leak_date`, `file_date` lifted from the primary version
+(0.50 MB, **4.34%** across 4,117 songs) — are read by exactly one place:
+`web/FavouritesPanel.vue` reads `song.quality`, and falls back to
+`versions[0].quality` when it is absent. Dropping the four nobody reads is
+worth ~3.5% raw / ~2.9% gzip.
+
+Both removed together: 11.56 -> 10.68 MB raw (-7.6%), 1.86 -> 1.74 MB gzip
+(-6.2%).
+
+Rejected at that price. The review's own rule was "under ~3% is not worth a
+back-compat cost", and neither piece clears it on its own. Revisit if a client
+ever needs to fetch a tracker on a metered connection, where the honest fix is
+a slimmer *shape* — versions without their notes prose, which is 1.47 MB by
+itself — rather than shaving duplicates.
+
+## models.py::EraStats — parsed, served, and not yet shown (2026-08-26)
+
+`Era.stats` (the maintainer's own per-era counts), `Era.stats_raw`,
+`Era.highlighted_producers` and `MiscEntry.section` are parsed and sent, and no
+client decodes them. That is a gap, not a defect: displaying an era's stated
+counts beside the app's derived ones is a design question, not a fix, and
+`MiscEntry.section` has no display site at all today because badge tabs are
+annotation sources rather than pages.
+
+They stay on the wire regardless — `Era.dict` already documents why: the
+`/sheet` warm path serves the parsed-cache bytes as the response, so excluding
+a field from the response also strips it from the cache round-trip and blinds
+the starved-era health check.

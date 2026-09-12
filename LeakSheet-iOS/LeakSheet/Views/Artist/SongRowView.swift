@@ -18,8 +18,7 @@ struct SongRowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool {
-        guard let v = version, let current = player.currentTrack else { return false }
-        return current.name == v.name && current.versionTag == v.versionTag
+        player.isNowPlaying(version, inEra: eraName)
     }
 
     private var canStream: Bool {
@@ -35,7 +34,11 @@ struct SongRowView: View {
     /// sits on its own line under the title: inline it stole width from the
     /// name on every row, and the repeated "aka" prefix read as noise.
     private var akaTitle: String? {
-        for v in song.versions {
+        // The row's own version leads. Scanning every version first meant a
+        // collapsed multi-version row could advertise an alias belonging to a
+        // take it is not representing.
+        let ordered = version.map { [$0] + song.versions } ?? song.versions
+        for v in ordered {
             if let alt = v.altTitles?.first(where: {
                 !$0.isEmpty && $0.caseInsensitiveCompare(song.baseName) != .orderedSame
             }) {
@@ -141,11 +144,11 @@ struct SongRowView: View {
                     Haptics.light()
                 }
             } label: {
-                Image(systemName: favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName) ? "heart.fill" : "heart")
+                Image(systemName: favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "heart.fill" : "heart")
             }
             .tint(.pink)
             .accessibilityLabel(
-                favourites.isFavourited(artistSlug: artistSlug, eraName: eraName, baseName: song.baseName)
+                favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
                     ? "Remove \(song.baseName) from favourites"
                     : "Add \(song.baseName) to favourites"
             )

@@ -15,6 +15,30 @@ final class PlayerViewModel {
     /// Canonical artist slug for the playing track — favourites key material.
     var artistSlug: String { engine.artistSlug }
     var eraName: String { engine.eraName }
+
+    /// Whether *version*, as listed under *era*, is the track now loaded.
+    ///
+    /// Name plus version tag is not identity. On the Ye tracker 697 versions
+    /// share a (name, tag) pair — 228 of them the placeholder ("???", nil) —
+    /// and a song like "Hurricane" appears in several eras, so playing one row
+    /// lit the now-playing indicator on every twin in the list.
+    ///
+    /// The era narrows it to one list; the link set separates rows within that
+    /// list, because two unidentified tracks are different tracks precisely
+    /// because they point at different files. Compared raw rather than through
+    /// `streamableLink`, which parses every URL — this runs in `body` for every
+    /// visible row.
+    ///
+    /// An empty era on either side is not a mismatch: misc entries and bare
+    /// Now Playing payloads carry no era, and treating that as "not playing"
+    /// would break the indicator entirely for them.
+    func isNowPlaying(_ version: SongVersion?, inEra era: String) -> Bool {
+        guard let version, let current = currentTrack else { return false }
+        guard current.name == version.name,
+              current.versionTag == version.versionTag else { return false }
+        if !eraName.isEmpty, !era.isEmpty, eraName != era { return false }
+        return current.links == version.links
+    }
     var artUrl: String { engine.artUrl }
     var isPlaying: Bool { engine.isPlaying }
     var currentTime: TimeInterval { engine.currentTime }

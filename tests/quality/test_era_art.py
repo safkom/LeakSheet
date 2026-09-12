@@ -161,6 +161,57 @@ class TestArtTabColumnAndVersionKeys:
         from src.parser import parse_art_tab
         assert parse_art_tab(VERSIONED_ART_TAB)["donda"] == "https://cdn/v1-cover.jpg"
 
+    def test_a_sibling_version_never_overwrites_art_the_era_already_has(self):
+        """The Ye case: the Art tab lists only "[V2]", but "[V1]" has its own
+        cover from the main tab.
+
+        parse_art_tab files each versioned entry under a version-stripped alias
+        too, so an era spelled without a tag still resolves. That alias names
+        ONE version's cover, and handing it to a sibling replaced [V1]'s
+        correct main-tab artwork with [V2]'s. Both Cruel Winter eras rendered
+        the same image; 55 aliases of this shape across the captured corpus.
+        """
+        from src.models import Artist, Era
+        from src.parser import apply_art_tab_images, parse_art_tab
+        tab = """
+        <html><body><table>
+        <tr><td>Era</td><td>Name</td><td>Project Type</td><td>Image</td></tr>
+        <tr><td>Cruel Winter [V2]</td><td>Champions</td><td>Front Cover</td>
+            <td><img src="https://cdn/cw-v2.jpg"></td></tr>
+        </table></body></html>
+        """
+        artist = Artist(name="Ye", slug="ye", eras=[
+            Era(name="Cruel Winter [V1]", art_url="https://cdn/cw-v1-inline.jpg"),
+            Era(name="Cruel Winter [V2]"),
+        ])
+        apply_art_tab_images(artist, parse_art_tab(tab))
+        assert artist.eras[0].art_url == "https://cdn/cw-v1-inline.jpg"
+        assert artist.eras[1].art_url == "https://cdn/cw-v2.jpg"
+
+    def test_the_alias_is_still_a_last_resort_for_an_era_with_no_art(self):
+        """Wrong-but-present beats a blank card when there is nothing else."""
+        from src.models import Artist, Era
+        from src.parser import apply_art_tab_images, parse_art_tab
+        tab = """
+        <html><body><table>
+        <tr><td>Era</td><td>Name</td><td>Project Type</td><td>Image</td></tr>
+        <tr><td>Cruel Winter [V2]</td><td>Champions</td><td>Front Cover</td>
+            <td><img src="https://cdn/cw-v2.jpg"></td></tr>
+        </table></body></html>
+        """
+        artist = Artist(name="Ye", slug="ye", eras=[Era(name="Cruel Winter [V1]")])
+        apply_art_tab_images(artist, parse_art_tab(tab))
+        assert artist.eras[0].art_url == "https://cdn/cw-v2.jpg"
+
+    def test_untagged_eras_still_take_the_alias_outright(self):
+        """The case the alias exists for is untouched: no tag, no ambiguity."""
+        from src.models import Artist, Era
+        from src.parser import apply_art_tab_images, parse_art_tab
+        artist = Artist(name="Ye", slug="ye",
+                        eras=[Era(name="Donda", art_url="https://cdn/inline.jpg")])
+        apply_art_tab_images(artist, parse_art_tab(VERSIONED_ART_TAB))
+        assert artist.eras[0].art_url == "https://cdn/v1-cover.jpg"
+
     def test_applied_end_to_end_gives_each_version_its_own_art(self):
         from src.models import Artist, Era
         from src.parser import apply_art_tab_images, parse_art_tab

@@ -14,9 +14,21 @@
   Measured over 400 cached real tabs before the fix: 267 era headers lost
   across 34 tabs.
 
-  This fixture also pins the footer guard: "3 Total Links" is the global
-  tracker footer and must NOT match the bare "Total" alternative, or every
-  sheet grows a phantom era at the bottom.
+  This fixture also pins two footer guards.
+
+  1. "3 Total Links" is the global tracker footer and must NOT match the bare
+     "Total" alternative, or every sheet grows a phantom era at the bottom.
+  2. The WIDE footer row below it — the one real trackers actually write —
+     states its counts across several cells at once: release types in the
+     first, leak status in the third, quality in the fourth, badge totals with
+     emoji in the last. Half of that wording is invisible to both stats
+     patterns, so the "digit-leading first line" rule inside _is_era_header
+     read it as an era name and the footer became an era: 22 of them across the
+     corpus, 15 named "Untitled Era N", the Eminem one claiming 1,352 versions
+     while holding none. The shape test (_is_stats_only_cell) is what rejects
+     it; note the row carries NO footer keyword, so _is_tracker_footer cannot
+     save it — and would not get the chance anyway, since the era-header check
+     runs first.
 
   Hand-computed expectations (pinned in tests/quality/test_era_stats_vocab.py):
     eras=3, songs=5, versions=5
@@ -40,6 +52,7 @@
 <tr><td>1 Full</td><td>Third Rail</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
 <tr><td>Third Rail</td><td>Last Stop</td><td></td><td>3:12</td><td>2022-07-07</td><td>Full</td><td>CD Quality</td><td></td></tr>
 
+<tr><td>5 Total<br>1 Single<br>2 Album Track<br>2 Other</td><td></td><td>5 Total<br>3 Confirmed<br>1 Full<br>1 Snippet</td><td>5 Total<br>2 Not Available<br>1 Low Quality<br>2 High Quality</td><td></td><td></td><td></td><td>&#11088; 2 Best Of<br>&#127942; 1 Grail<br>&#128465; 1 Worst Of</td></tr>
 <tr><td>&#128279; 3 Total Links</td><td></td><td></td><td>3 Total Full</td><td></td><td></td><td></td><td></td></tr>
 </table>
 </body></html>

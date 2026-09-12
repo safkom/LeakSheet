@@ -480,6 +480,197 @@ class TestBracketStyleCredits:
         assert c.producers == "Ging" and c.alt_titles == ["Flavors"]
 
 
+class TestUnclosedCreditBrackets:
+    """A bracket the maintainer opened and never closed is still a credit.
+
+    _CREDIT_GROUP_RE needs the closer, so "(prod.SlimeOnTheTRack" fell through
+    whole and landed in alt_titles, where it reads as an alternative song title
+    and the producer is lost. 1,086 name cells across the captured corpus carry
+    an unclosed credit opener; 608 alt_titles were really credits, 505 of them
+    on one tracker.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_glued_unclosed_producer(self):
+        c = self._c("Fact\n(prod.SlimeOnTheTRack")
+        assert (c.title, c.producers, c.alt_titles) == ("Fact", "SlimeOnTheTRack", [])
+
+    def test_square_bracket_variant(self):
+        c = self._c("Bandz\n[Prod.RuffinUglyAzz")
+        assert (c.producers, c.alt_titles) == ("RuffinUglyAzz", [])
+
+    def test_truncated_list_drops_its_dangling_separator(self):
+        c = self._c("Hurricane\n(prod. BoogzDaBeast, Nascent, MIKE DEAN,")
+        assert c.producers == "BoogzDaBeast, Nascent, MIKE DEAN"
+
+    def test_collaboration_is_allowed_once_a_bracket_opened_it(self):
+        """"with" is ambiguous bare — plenty of songs are titled "With Or
+        Without You" — but not after a bracket."""
+        c = self._c("Song\n(with Go Getters")
+        assert (c.collaboration, c.alt_titles) == ("Go Getters", [])
+
+    def test_a_bare_with_line_is_still_an_alt_title(self):
+        c = self._c("Precious\nWith Child")
+        assert (c.collaboration, c.alt_titles) == (None, ["With Child"])
+
+    def test_an_unclosed_bracket_that_is_not_a_credit_stays_a_title(self):
+        c = self._c("Song\n(Some Alt Title")
+        assert c.alt_titles == ["(Some Alt Title"]
+
+    def test_a_closed_group_is_unaffected(self):
+        c = self._c("Song\n(Alt Title)")
+        assert c.alt_titles == ["Alt Title"]
+
+    def test_dangling_by_is_not_a_producer(self):
+        """"(prod.by" with no name left the filler word standing as the
+        producer — 443 values across the corpus read "by"."""
+        c = self._c("Talkin Shit\n(prod.by")
+        assert c.producers is None
+
+    def test_a_valueless_credit_line_is_still_consumed(self):
+        """It names no producer, but it is not an alternative title either.
+
+        Sending it back to alt_titles also dropped the SONG: a row with no
+        credit and no other data reads as a section label, so 30 real tracks on
+        one tracker were being filed as labels instead of songs.
+        """
+        c = self._c("Talkin Shit\n(prod.by")
+        assert c.alt_titles == []
+
+    def test_by_still_separates_a_real_producer(self):
+        assert self._c("X\n(prod.by RicoFinesse").producers == "RicoFinesse"
+        assert self._c("X (prod. by !llmind)").producers == "!llmind"
+        assert self._c("X (produced by Mike Dean)").producers == "Mike Dean"
+
+    def test_the_trackers_own_unknown_notation_is_kept(self):
+        """"???" is how these sheets write "producer unknown". It is content."""
+        assert self._c("X\n(prod. ???").producers == "???"
+
+
+class TestWrappedCreditLists:
+    """A credit list that wraps immediately after its keyword.
+
+    The group regex allowed a continuation line only after a comma or an
+    ampersand. Sheets wrap right after the keyword just as often —
+    "(prod. \\nLondon On Da Track)" — so the group never matched, the names
+    ended up in alt_titles with a stray ")" attached, and the credit was lost.
+    37 name cells corpus-wide.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_wrap_after_the_keyword(self):
+        c = self._c("T.I. - Whole Lotta Cash\n(feat. London Jae & Young Thug) (prod. \nLondon On Da Track)")
+        assert c.producers == "London On Da Track"
+        assert c.featuring == "London Jae & Young Thug"
+        assert c.alt_titles == []
+
+    def test_wrap_directly_after_the_dot(self):
+        c = self._c("Song (feat.\nDrake &\nFuture)")
+        assert (c.title, c.featuring, c.alt_titles) == ("Song", "Drake & Future", [])
+
+    def test_wrap_inside_the_list_still_works(self):
+        c = self._c("Song (prod. A, \nB & C)")
+        assert c.producers == "A, B & C"
+
+    def test_a_wrapped_group_that_is_not_a_credit_is_left_alone(self):
+        """Widening what the group can MATCH is only safe because take_group
+        hands back a non-credit group verbatim."""
+        c = self._c("Song\n(Some Title.\nMore Title)")
+        assert c.producers is None
+        assert c.alt_titles == ["(Some Title.", "More Title)"]
+
+
+class TestGluedFeatureKeyword:
+    """"feat."/"ft." with no space before the name.
+
+    The featuring keyword required whitespace after the dot while the producers
+    keyword already accepted the glued form, so "(feat.Dc2trill, Draft Day &
+    Lil Yachty)" parsed as part of the title. Giving featuring the same
+    dot-or-space rule also reaches "(Ft.)" — an empty credit the sheets leave
+    behind — which was riding along in 74 song titles.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_glued_feat(self):
+        c = self._c("Name It After Me\n(feat.Dc2trill, Draft Day & Lil Yachty)")
+        assert c.featuring == "Dc2trill, Draft Day & Lil Yachty"
+        assert c.title == "Name It After Me"
+
+    def test_glued_ft(self):
+        assert self._c("Nechie - Savage\n(ft.Young Thug) (prod. MP808)").featuring == "Young Thug"
+
+    def test_inline_glued_feat(self):
+        c = self._c("Girlfriend (feat.black kray)")
+        assert (c.title, c.featuring) == ("Girlfriend", "black kray")
+
+    def test_empty_credit_leaves_the_title(self):
+        assert self._c("Team Toon - Live Dat Life (Ft.)").title == "Team Toon - Live Dat Life"
+
+    @pytest.mark.parametrize("raw", ["Feature Song", "Ftw Anthem", "Fte Records"])
+    def test_a_word_merely_starting_with_the_keyword_is_not_a_credit(self, raw):
+        c = self._c(raw)
+        assert c.title == raw and c.featuring is None
+
+    def test_spelled_out_featuring_still_works(self):
+        assert self._c("Song (featuring Drake)").featuring == "Drake"
+
+    def test_the_spaced_forms_are_unchanged(self):
+        assert self._c("Song (feat. Drake)").featuring == "Drake"
+        assert self._c("Song (ft. A)").featuring == "A"
+
+
+class TestAdditionalAndCoProduction:
+    """"(add. prod. X)" and "(co-prod. Y)" open with neither keyword.
+
+    take_group requires the group's first part to open with a credit keyword,
+    so these were handed back whole and the credit stayed inside the title —
+    145 name cells corpus-wide, A$AP Rocky's entire Purple Swag family among
+    them.
+    """
+
+    def _c(self, raw):
+        from src.models import parse_song_credits
+        return parse_song_credits(raw)
+
+    def test_additional_production_joins_the_producers(self):
+        c = self._c("Purple Swag [V4]\n(feat. ???) (prod. A$AP Ty Beats) (add. prod. A$AP Rocky)")
+        assert c.producers == "A$AP Ty Beats, A$AP Rocky"
+        assert c.title == "Purple Swag [V4]"
+
+    @pytest.mark.parametrize("group,expected", [
+        ("(co-prod. X)", "X"),
+        ("(co prod. X)", "X"),
+        ("(coprod. X)", "X"),
+        ("(add prod. Z)", "Z"),
+        ("(additional production by Y)", "Y"),
+        ("(Co-Produced by Timbaland)", "Timbaland"),
+    ])
+    def test_forms(self, group, expected):
+        assert self._c(f"Song {group}").producers == expected
+
+    @pytest.mark.parametrize("raw", [
+        "Cold Shoulder (prod. Zaytoven)",
+        "Addicted (prod. X)",
+    ])
+    def test_a_title_starting_with_co_or_add_is_untouched(self, raw):
+        # The prefix must be followed by "prod", so these keep their own
+        # producer credit and their own title.
+        assert self._c(raw).title == raw.split(" (")[0]
+
+    def test_a_non_production_add_group_is_left_alone(self):
+        c = self._c("Song (Add. Vocals by X)")
+        assert c.producers is None and c.title == "Song (Add. Vocals by X)"
+
+
 class TestAliasLabelStripping:
     """Some trackers label the alias line rather than just writing it.
 
@@ -1217,18 +1408,162 @@ class TestSweepDrivenColumnWiring:
         assert v.og_filenames == ["glass_house_final", "glass_house_alt"]
 
 
+class TestSweepDrivenAliases2026_08:
+    """Headers the 2026-08-26 corpus sweep found reaching no field."""
+
+    @pytest.mark.parametrize("header,field,value", [
+        ("Alt. Link", "alt_links", "https://mirror.example/x"),
+        ("Download / Link", "links", "https://pillows.su/f/abc"),
+        ("Snippet/Song Link", "links", "https://pillows.su/f/def"),
+        ("Currently Avalible", "available_length", "Full"),
+        ("Previewed", "preview_date", "Jul 4, 2023"),
+        ("Instrumental File", "og_filename_col", "beat_v3"),
+        ("Info / Notes", "notes", "a note"),
+        ("Date Made", "file_date", "2019"),
+    ])
+    def test_header_now_resolves(self, header, field, value):
+        from src.parser import _Cell, detect_columns
+        col_map = detect_columns([_Cell(text="Era"), _Cell(text="Name"), _Cell(text=header)])
+        assert col_map.get(field) == 2, f"{header!r} should map to {field}"
+
+    def test_a_track_number_column_is_still_not_the_title(self):
+        """Binding "#" to `name` is how one tracker came to have 281 songs
+        called "1", "2", "3" — it must stay unmapped."""
+        from src.parser import _Cell, detect_columns
+        col_map = detect_columns([_Cell(text="#"), _Cell(text="Project & Track Title"), _Cell(text="Notes")])
+        assert col_map["name"] == 1
+
+
+class TestBadgeTabVersionTargeting:
+    """A highlight tab names a specific take; the badge must land on it.
+
+    apply_badge_tabs stamped versions[0], but the tab writes "⭐ Gotta Pose
+    [V1]" and _sort_era_versions has already reordered the list by then. 14
+    placements across 6 corpus workbooks were landing on the wrong take.
+    """
+
+    MAIN = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+        "<tr><td>2 Full</td><td>Debut Era</td><td></td><td></td><td></td></tr>"
+        "<tr><td>Debut Era</td><td>Gotta Pose [Demo 1]</td><td></td><td>Low Quality</td>"
+        "<td><a href='https://pillows.su/f/a'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Gotta Pose [V1]</td><td></td><td>Lossless</td>"
+        "<td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "</table>"
+    )
+    BADGE_TAB = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Link(s)</td></tr>"
+        "<tr><td>Debut Era</td><td>\u2b50 Gotta Pose [V1]</td>"
+        "<td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def _apply(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        entries = parse_misc_tab(self.BADGE_TAB, "best_of", [e.name for e in artist.eras])
+        applied = apply_badge_tabs(artist, [("best_of", entries)])
+        return artist, applied
+
+    def test_the_badge_lands_on_the_named_version(self):
+        artist, applied = self._apply()
+        assert applied == 1
+        song = artist.eras[0].songs[0]
+        # _sort_era_versions puts the V-take first, so this is not versions[0]
+        # by accident — assert against the tag, not the index.
+        badged = [v for v in song.versions if v.badge is not None]
+        assert len(badged) == 1
+        assert badged[0].version_tag == "V1"
+
+    def test_an_untagged_row_still_falls_back_to_the_first_version(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        tab = self.BADGE_TAB.replace("Gotta Pose [V1]", "Gotta Pose")
+        entries = parse_misc_tab(tab, "best_of", [e.name for e in artist.eras])
+        assert apply_badge_tabs(artist, [("best_of", entries)]) == 1
+        assert artist.eras[0].songs[0].versions[0].badge is not None
+
+    def test_a_tag_the_song_does_not_have_falls_back(self):
+        from src.parser import apply_badge_tabs, parse_misc_tab, parse_sheet
+        artist = parse_sheet(self.MAIN, "Test")
+        tab = self.BADGE_TAB.replace("Gotta Pose [V1]", "Gotta Pose [V9]")
+        entries = parse_misc_tab(tab, "best_of", [e.name for e in artist.eras])
+        assert apply_badge_tabs(artist, [("best_of", entries)]) == 1
+        assert artist.eras[0].songs[0].versions[0].badge is not None
+
+
+class TestMiscEntryIdentity:
+    """A tab's entries must be distinguishable from each other.
+
+    Content repeats constantly on these tabs — the Ye Stems tab lists ten
+    entries called "Beat 1" in one era with no date — so an identity derived
+    from content alone collides, and SwiftUI's ForEach silently keeps only the
+    first: 458 of 1,721 stem rows never reached the screen while the stats bar
+    above them counted all of them. 527 rows across the Ye tracker's tabs.
+    """
+
+    TAB = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Link(s)</td></tr>"
+        "<tr><td>2 Released</td><td>Debut Era</td><td></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/a'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/b'>l</a></td></tr>"
+        "<tr><td>Debut Era</td><td>Beat 1</td><td><a href='https://pillows.su/f/c'>l</a></td></tr>"
+        "</table>"
+    )
+
+    def test_identical_rows_get_distinct_identities(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert len(entries) == 3
+        keys = {(e.source_tab, e.row_index, e.era_name, e.name) for e in entries}
+        assert len(keys) == 3
+
+    def test_the_index_is_the_row_position_in_the_tab(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert [e.row_index for e in entries] == [0, 1, 2]
+
+    def test_links_still_belong_to_their_own_row(self):
+        from src.parser import parse_misc_tab
+        entries = parse_misc_tab(self.TAB, "stems", ["Debut Era"])
+        assert [e.links[0][-1] for e in entries] == ["a", "b", "c"]
+
+
 class TestDroppedColumns:
     def test_unknown_header_surfaced(self):
         from src.parser import _Cell, detect_dropped_columns
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Bit Rate"), _Cell(text="Quality")]
         col_map = detect_columns(header)
-        dropped = detect_dropped_columns(header, col_map)
-        assert "Bit Rate" in dropped and "Era" not in dropped and "Quality" not in dropped
+        unknown, duplicate = detect_dropped_columns(header, col_map)
+        assert "Bit Rate" in unknown and "Era" not in unknown and "Quality" not in unknown
+        assert duplicate == []
 
     def test_fully_mapped_header_drops_nothing(self):
         from src.parser import _Cell, detect_dropped_columns
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Notes"), _Cell(text="Quality")]
-        assert detect_dropped_columns(header, detect_columns(header)) == []
+        assert detect_dropped_columns(header, detect_columns(header)) == ([], [])
+
+    def test_a_second_column_for_a_claimed_field_is_a_duplicate_not_a_gap(self):
+        """A sheet with two Name columns loses the second one's values, but no
+        alias work can change that — so it must not sit in the gap list."""
+        from src.parser import _Cell, detect_dropped_columns
+        header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Song"), _Cell(text="Bit Rate")]
+        unknown, duplicate = detect_dropped_columns(header, detect_columns(header))
+        assert unknown == ["Bit Rate"]
+        assert duplicate == ["Song"]
+
+    def test_both_lists_reach_parse_metadata(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table><tr><td>Era</td><td>Name</td><td>Song</td><td>Bit Rate</td></tr>"
+            "<tr><td>Era One</td><td>Track</td><td>x</td><td>320</td></tr></table>"
+        )
+        md = parse_sheet(html, "Test").parse_metadata
+        assert md.dropped_columns == ["Bit Rate"]
+        assert md.duplicate_columns == ["Song"]
 
 
 class TestParserRobustness:

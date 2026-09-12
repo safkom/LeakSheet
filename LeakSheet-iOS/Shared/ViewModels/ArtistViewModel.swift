@@ -231,6 +231,13 @@ final class ArtistViewModel {
         (artist.tabs ?? []).filter { !Self.badgeTabKinds.contains($0.kind) }
     }
 
+    /// Display name of the selected content tab, for anything that has to name
+    /// the page — nil on the song tree, or on the legacy flat Misc mode.
+    var selectedTabName: String? {
+        guard let key = selectedTabKey else { return nil }
+        return availableTabs.first { $0.id == key }?.name
+    }
+
     // MARK: - Init
 
     /// The heavy startup pass — era stats + the unfiltered content tree —
@@ -296,6 +303,15 @@ final class ArtistViewModel {
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
                 for song in era.allSongs {
+                    // A placeholder title identifies nothing, so indexing it
+                    // groups every unidentified track in the tracker under one
+                    // key: 319 of them on Ye. The description sheet then
+                    // listed all 319 as "versions" of whichever "???" was
+                    // tapped, with colliding ids, and could re-point itself at
+                    // an unrelated track. The backend says so by sending these
+                    // with an empty songKey; the base-name fallback has to
+                    // honour the same rule.
+                    guard !song.isPlaceholder else { continue }
                     byBaseName[song.baseName, default: []].append(
                         CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
                     )
@@ -361,9 +377,12 @@ final class ArtistViewModel {
             if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
                 return refs
             }
+            guard !payloadSong.isPlaceholder else { return [] }
             return baseNameEras[payloadSong.baseName] ?? []
         }
-        return baseNameEras[payload.version.derivedBaseName] ?? []
+        let derived = payload.version.derivedBaseName
+        guard !Song.isPlaceholderName(derived) else { return [] }
+        return baseNameEras[derived] ?? []
     }
 
     /// How many era covers are warmed before the artist screen is pushed.
@@ -399,9 +418,15 @@ final class ArtistViewModel {
     /// `limit` nil warms every era (the background pass from ArtistView).
     func warmEraArt(limit: Int? = nil) async {
         let eras = limit.map { Array(artist.eras.prefix($0)) } ?? artist.eras
+        // Keyed on the cover, not the era: sibling eras legitimately share one
+        // (a tracker that lists a single cover for "[V1]" and "[V2]"), and
+        // de-duping by era name fetched and colour-extracted it once per era.
+        // The result is applied to every era using that URL below either way.
+        var seenArt = Set<String>()
         let targets: [(artUrl: String, url: URL)] = eras.compactMap { era in
             guard let art = era.artUrl,
                   eraDisplay[era.name] == nil,
+                  seenArt.insert(art).inserted,
                   let url = APIClient.shared.imageProxyURL(for: art, width: 320)
             else { return nil }
             return (art, url)
