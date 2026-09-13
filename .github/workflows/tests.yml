@@ -22,10 +22,47 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --locked
+      - run: uv run ruff check .
       # Bare pytest = the offline gate (addopts excludes live/accuracy/slow).
       # Deterministic, no network, no Trackers/ dumps needed. This gates merges.
       - run: uv run pytest
+
+  ios:
+    name: iOS tests
+    # GitHub-hosted arm64 image with Xcode 27; the app's deployment target is
+    # iOS 27, so no older image can build it.
+    runs-on: xcode-27
+    # Not a gate yet. The image's only Xcode is 27 beta 6 (27A5252f), newer
+    # than the 27A5194q the app is developed on, and a later seed dropped
+    # `toolbarMinimizeBehavior(_:for:)` (ArtistView.swift) that the older SDK
+    # still requires. Make this blocking again once both toolchains agree.
+    continue-on-error: true
+    # The image is a public preview: keep its breakage out of the nightly run,
+    # and don't let a hung simulator hold the runner for the 6 h default.
+    if: github.event_name != 'schedule'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Device names shift between image releases — take an iPhone on the
+      # newest iOS runtime the image ships rather than hardcoding one.
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          version = lambda r: [int(n) for n in r.rsplit(".iOS-", 1)[1].split("-")]
+          runtimes = sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True)
+          print(next(d["udid"] for r in runtimes for d in devices[r] if d["name"].startswith("iPhone")))')
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+      - name: xcodebuild test
+        working-directory: LeakSheet-iOS
+        run: |
+          xcodebuild test \
+            -project LeakSheet.xcodeproj \
+            -scheme LeakSheet \
+            -destination "id=$SIM_UDID" \
+            CODE_SIGNING_ALLOWED=NO
 
   live:
     name: Live invariants (latest data)
@@ -38,7 +75,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --locked
       # The locked public URL set only (excludes the slow full TrackerHub
       # sweep, which is a deliberate local/cron-scale run, not a PR gate).
       - run: uv run pytest -m "live and not slow" -ra

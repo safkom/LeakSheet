@@ -48,7 +48,7 @@ struct FavouritesView: View {
                     )
                 } else {
                     List {
-                        let grouped = favourites.grouped()
+                        let grouped = favourites.groupedByArtist
                         ForEach(grouped, id: \.artistSlug) { artistGroup in
                             SwiftUI.Section {
                                 ForEach(artistGroup.eras, id: \.eraName) { eraGroup in

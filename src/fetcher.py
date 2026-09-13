@@ -30,12 +30,11 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import NoReturn
+from typing import Callable, NoReturn
 from urllib.parse import urlparse, urlencode
 
 import httpx
 
-logger = logging.getLogger(__name__)
 
 from src.config import (
     ARTISTGRID_URL,
@@ -44,7 +43,7 @@ from src.config import (
     sheet_host_allowed,
     tracker_hosts_are_stale,
 )
-from src.models import Artist, Section, TabSection
+from src.models import Artist, Section, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
     apply_art_tab_images,
@@ -58,6 +57,8 @@ from src.parser import (
     _era_match_key,
     _song_match_key,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 #
 # Discovery started every discovered GID at once and _aggregate_hub_workbook
 # fetched *and parsed* every unclassified tab at once, each holding its full
-# response body — the largest export here is 11.85MB, and README.md:147 says
+# response body — the largest export here is 11.85MB, and README.md ("Deployment") says
 # the box cannot fit two concurrent Ye-sized parses. One semaphore inside
 # _fetch_gid_page bounds all three fan-out sites at their single choke point.
 _GID_FETCH_CONCURRENCY = int(
@@ -106,6 +107,11 @@ def _gid_fetch_slot() -> asyncio.Semaphore:
     return _gid_fetch_sem
 
 
+def _megabytes(text: str) -> str:
+    """"12.3 MB" for a fetched page, for progress messages."""
+    return f"{len(text) / 1_048_576:.1f} MB"
+
+
 class PhaseTimer:
     """Collects per-phase wall-clock durations across one request.
 
@@ -114,8 +120,26 @@ class PhaseTimer:
     diagnosed from curl or the app without server log access.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
+        # Receives human-readable progress events for a client that is waiting
+        # on a cold parse (POST /sheet streamed as NDJSON). Rides on the timer
+        # because the timer already reaches every stage of the pipeline.
+        self.on_progress = on_progress
+
+    def report(
+        self, stage: str, message: str, *, done: int | None = None, total: int | None = None
+    ) -> None:
+        """Tell a waiting client what is happening. A no-op with no listener.
+
+        Call only from the event loop: listeners are not thread-safe.
+        """
+        if self.on_progress is None:
+            return
+        event: dict = {"type": "progress", "stage": stage, "message": message}
+        if total:
+            event["done"], event["total"] = done or 0, total
+        self.on_progress(event)
 
     @contextmanager
     def phase(self, name: str):
@@ -173,6 +197,27 @@ async def close_sheets_client() -> None:
     _sheets_client = None
 
 
+async def fetch_artistgrid_entries() -> list[TrackerEntry]:
+    """GET the ArtistGrid registry, parse it, and register its hosts.
+
+    The only path to the feed. /trackers serves the entries and the sheet-host
+    refresh wants only the side effect; they used to be two separate
+    implementations with different clients, status handling and error policy.
+    Raises on any upstream or parse failure, so each caller keeps its own
+    fallback.
+    """
+    resp = await _get_sheets_client().get(
+        ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
+    )
+    if resp.status_code != 200:
+        raise NetworkError(f"ArtistGrid returned {resp.status_code}")
+    entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
+    if not entries:
+        raise ParseError("No tracker rows parsed from ArtistGrid")
+    await asyncio.to_thread(register_tracker_hosts, [e.url for e in entries])
+    return entries
+
+
 async def _refresh_tracker_hosts() -> None:
     """Harvest fetchable hosts from the ArtistGrid feed (best effort).
 
@@ -183,14 +228,8 @@ async def _refresh_tracker_hosts() -> None:
     if not tracker_hosts_are_stale():
         return
     try:
-        client = _get_sheets_client()
-        resp = await client.get(ARTISTGRID_URL, timeout=DEFAULT_TIMEOUT)
-        resp.raise_for_status()
-        entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
-        known = await asyncio.to_thread(
-            register_tracker_hosts, [e.url for e in entries]
-        )
-        logger.info("ArtistGrid host refresh: %d hosts known", known)
+        entries = await fetch_artistgrid_entries()
+        logger.info("ArtistGrid host refresh: %d trackers listed", len(entries))
     except Exception as e:
         # Never let feed trouble turn a valid tracker URL into a hard error
         # any earlier than it already would be.
@@ -715,10 +754,21 @@ def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def compute_content_hash(data: dict) -> str:
-    """Compute a short SHA-256 hash of serialized data as content fingerprint (ETag)."""
-    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+def content_hash(body: bytes) -> str:
+    """ETag for a serialized payload: a short SHA-256 of the exact bytes served.
+
+    This used to hash a SECOND, key-sorted json.dumps of the same data, so a
+    cache miss serialized the whole artist three times — once to cache, once to
+    fingerprint, once to respond. The served bytes are already deterministic
+    (model_dump field order is fixed), so they are the fingerprint.
+    """
+    return hashlib.sha256(body).hexdigest()[:16]
+
+
+def serialize_artist(artist: "Artist") -> tuple[bytes, str]:
+    """The artist as response bytes, with their ETag."""
+    body = json.dumps(artist.model_dump(), ensure_ascii=False).encode()
+    return body, content_hash(body)
 
 
 def _cache_key(url: str) -> str:
@@ -889,7 +939,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 CACHE_COLLAPSE_RATIO = 0.8
 
 
-def _collapse_reason(key: str, data: dict) -> str | None:
+def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
     """Why ``data`` must not overwrite the cached parse, or None if it may.
 
     A partial fetch — some tabs short, or a sibling workbook that failed to
@@ -915,6 +965,10 @@ def _collapse_reason(key: str, data: dict) -> str | None:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
         age = 0.0
+    # Checked before the counts: past this age the old entry is never
+    # preferred, so a legacy entry must not pay the full read below for it.
+    if age > STALE_CACHE_TTL:
+        return None
 
     # The counts live in the small meta sidecar, which is read here anyway.
     # Reading them out of the parse itself meant a full multi-MB json.loads on
@@ -930,13 +984,9 @@ def _collapse_reason(key: str, data: dict) -> str | None:
             return None
         old, old_eras = previous
 
-    new = data.get("total_versions") or 0
     if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
         return None
-    if age > STALE_CACHE_TTL:
-        return None
 
-    new_eras = len(data.get("eras") or [])
     return (
         f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
     )
@@ -954,12 +1004,17 @@ def _legacy_parsed_counts(parsed_file: Path) -> tuple[int, int] | None:
 
 
 def _set_cached_parsed(url: str, artist: Artist) -> None:
-    """Write parsed Artist JSON to cache, with content hash in metadata."""
+    """Write parsed Artist JSON to cache, with content hash in metadata.
+
+    On success the written bytes and ETag are left on ``artist._wire``, so the
+    request that produced this parse can respond without serializing again.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
     try:
-        data = artist.model_dump()
-        reason = _collapse_reason(key, data)
+        # The collapse check needs two counts, not the whole dump — so it runs
+        # before any serialization, and a refused parse costs none.
+        reason = _collapse_reason(key, artist.total_versions, len(artist.eras))
         if reason is not None:
             # Served to this caller, but not persisted: the good copy stays,
             # and the next request is not poisoned by a transient failure.
@@ -967,10 +1022,8 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
                 "Refusing to cache a collapsed parse for %s (%s)", url[:80], reason
             )
             return
-        _atomic_write_text(
-            CACHE_DIR / f"{key}.parsed.json",
-            json.dumps(data, ensure_ascii=False),
-        )
+        body, etag = serialize_artist(artist)
+        _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
         # parsed_timestamp, not timestamp: the parse's freshness is its own
         # signal. Under force_refresh the caller skips _set_cache entirely
         # while still writing the parse, so without a write here a
@@ -978,13 +1031,14 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         # considered stale immediately — or, on a first-ever fetch, wrote a
         # parsed cache that could never be read.
         _write_meta(key, {
-            "content_hash": compute_content_hash(data),
+            "content_hash": etag,
             "parsed_timestamp": time.time(),
             # Read back by _collapse_reason, so the collapse check costs a
             # small sidecar read instead of re-parsing the whole entry.
-            "total_versions": data.get("total_versions") or 0,
-            "era_count": len(data.get("eras") or []),
+            "total_versions": artist.total_versions,
+            "era_count": len(artist.eras),
         })
+        artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -1309,35 +1363,20 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # ---------------------------------------------------------------------------
 
 async def _fetch_base_html(
-    client: httpx.AsyncClient,
-    url_norm: str,
-    *,
-    timeout: float,
-    cache_ttl: float,
-    use_cache: bool,
+    client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
-    """Base page HTML + title, served from the HTML cache when it is fresh.
+    """Base page HTML + title, always from the network.
 
-    async_fetch_sheet_html reads this cache before going to the network; the
-    two base-page fetches inside async_fetch_and_parse did not, so a cold
-    request re-downloaded the page even with a fresh copy already on disk.
-
-    Only a page that actually carries tables is written, which is the rule
-    async_fetch_sheet_html already follows for this key: its cached read
-    returns immediately without re-checking, so a table-less page stored here
-    would later be handed back as the sheet and skip GID discovery entirely.
+    Deliberately not read from the HTML cache: the entry under ``url_norm``
+    holds the winning TAB's page, written after a successful parse, not the
+    base page. Served back as the base page it has no tab switcher, so a
+    re-parse dropped the Art and content tabs and cached the result.
     """
-    if use_cache and cache_ttl > 0:
-        cached = await _async_get_cached(url_norm, cache_ttl)
-        if cached is not None:
-            return cached
     r = await client.get(url_norm, timeout=timeout)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
     title = title_match.group(1) if title_match else ""
-    if use_cache and "<table" in html.lower():
-        await _async_set_cache(url_norm, html, title)
     return html, title
 
 
@@ -1484,6 +1523,15 @@ async def _load_secondary_tabs(
     if not art_gid and not content_tabs:
         return
 
+    total = len(content_tabs) + (1 if art_gid else 0)
+    done = 0
+    t.report("tabs", f"Reading {total} extra tabs", done=0, total=total)
+
+    def _finished(name: str) -> None:
+        nonlocal done
+        done += 1
+        t.report("tabs", f"Read {name}", done=done, total=total)
+
     async def _fetch(gid_val: str) -> tuple[str, str] | None:
         return await _fetch_gid_page(
             url_norm, gid_val, title,
@@ -1505,10 +1553,11 @@ async def _load_secondary_tabs(
             # Art tab optional — keep existing art_url on failure. WARNING so
             # a systematically broken tab is visible at default log level.
             logger.warning("Art tab load failed for %s: %s", url_norm[:80], e)
+        _finished("Art")
 
     tab_results: dict[str, list] = {}
 
-    async def _load_tab(gid_val: str, kind: str) -> None:
+    async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
         try:
             with t.phase("misc_fetch"):
                 result = await _fetch(gid_val)
@@ -1522,8 +1571,9 @@ async def _load_secondary_tabs(
         except Exception as e:
             # Content tabs optional; WARNING keeps systematic failures visible.
             logger.warning("Content tab %s load failed: %s", gid_val, e)
+        _finished(display_name)
 
-    secondary = [_load_tab(g, k) for g, k, _n in content_tabs]
+    secondary = [_load_tab(g, k, n) for g, k, n in content_tabs]
     if art_gid:
         secondary.append(_load_art())
     if secondary:
@@ -1666,6 +1716,7 @@ async def _aggregate_hub_workbook(
     """
     if not candidates:
         return 0
+    t.report("tabs", f"Merging {len(candidates)} catalogue tabs")
 
     # A SECOND, smaller bound around fetch+parse together. The gid-fetch
     # semaphore is released once the body is in hand, so without this every
@@ -1755,6 +1806,7 @@ async def async_fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
     await _assert_sheet_host_allowed(url_norm)
+    t.report("fetching", "Opening the tracker")
 
     # Check parsed result cache first (skip entire parse pipeline)
     if use_cache and cache_ttl > 0:
@@ -1778,10 +1830,7 @@ async def async_fetch_and_parse(
             base_page_paths: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
-                    base_html, _ = await _fetch_base_html(
-                        client, url_norm, timeout=timeout,
-                        cache_ttl=cache_ttl, use_cache=use_cache,
-                    )
+                    base_html, _ = await _fetch_base_html(client, url_norm, timeout=timeout)
                 named_tabs = _discover_named_tabs(base_html)
                 base_page_paths = _page_path_map(base_html)
             except httpx.HTTPError:
@@ -1789,6 +1838,7 @@ async def async_fetch_and_parse(
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
             if not gid_is_misc_tab:
                 name = _resolve_artist_name(title, artist_name)
+                t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
                 with t.phase("parse"):
                     artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
                 # Eras alone aren't enough — a hub tab parses to eras with no
@@ -1834,14 +1884,12 @@ async def async_fetch_and_parse(
     # Discover all GIDs and try them
     try:
         with t.phase("base_fetch"):
-            base_html, title = await _fetch_base_html(
-                client, url_norm, timeout=timeout,
-                cache_ttl=cache_ttl, use_cache=use_cache,
-            )
+            base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
 
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():
             name = _resolve_artist_name(title, artist_name)
+            t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
@@ -1862,6 +1910,12 @@ async def async_fetch_and_parse(
         gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
             base_html, gids
         )
+        first_tab = named_tabs.get(gids[0]) if gids else None
+        t.report(
+            "fetching",
+            f"Found {len(named_tabs)} tabs — downloading {first_tab}"
+            if named_tabs and first_tab else "Downloading the tracker",
+        )
 
         # --- Fetch all GID pages concurrently, then parse to pick best ---
         async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
@@ -1873,7 +1927,12 @@ async def async_fetch_and_parse(
 
         # Priority-ordered concurrent fetch with cancellation — see
         # docs/decisions.md::fetcher.py::gid-fetch-priority
-        fetch_tasks = [asyncio.create_task(_fetch_gid(g)) for g in gids]
+        fetch_tasks: list[asyncio.Task] = []
+
+        def _start(gid_list: list[str]) -> list[asyncio.Task]:
+            started = [asyncio.create_task(_fetch_gid(g)) for g in gid_list]
+            fetch_tasks.extend(started)
+            return started
 
         best_artist: Artist | None = None
         # Rank tuple order — see docs/decisions.md::fetcher.py::gid-fetch-priority
@@ -1882,57 +1941,86 @@ async def async_fetch_and_parse(
         hub_gid: str | None = None
         best_html = ""
 
+        async def _consider(task: asyncio.Task) -> bool:
+            """Parse one fetched tab and fold it into the ranking. True = stop."""
+            nonlocal best_artist, best_score, best_gid, hub_gid, best_html
+            result = await task
+            if result is None:
+                return False
+            result_gid, sheet_html = result
+            try:
+                name = _resolve_artist_name(title, artist_name)
+                t.report(
+                    "parsing",
+                    f"Parsing {named_tabs.get(result_gid, 'a tab')} ({_megabytes(sheet_html)})",
+                )
+                with t.phase("parse"):
+                    candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
+                n_eras = len(candidate.eras)
+                n_songs = sum(
+                    len(s.songs)
+                    for era in candidate.eras
+                    for s in era.sections
+                )
+
+                logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
+                if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
+                    hub_gid = result_gid
+                # Songs outrank eras. Era count used to come first, as a
+                # proxy for "properly structured tab", but it stopped being
+                # one once flat-era tabs (no header rows, era implied by the
+                # Era column) started yielding real era counts: a 5-era,
+                # 7-song badge sub-tab then outranked the 3-era, 474-song
+                # main tab on the MIKE tracker, and 43 flat eras beat 26 real
+                # ones on Dr. Dre — costing 668 songs and every era cover.
+                # The payload is songs; rank on it.
+                score = (1 if n_songs else 0, n_songs, n_eras)
+                if score > best_score:
+                    best_score = score
+                    best_artist = candidate
+                    best_gid = result_gid
+                    best_html = sheet_html
+
+                if n_songs == 0:
+                    return False  # never short-circuit on a song-less tab
+                # Unreleased tab wins as long as it has at least 1 era —
+                # prevents Recents/landing tabs from outcompeting it on era count.
+                if result_gid == unreleased_gid:
+                    logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+                    return True
+                if n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
+                    # Only stop early on a tab that is actually leading.
+                    # This stop abandons every gid still in flight, so a
+                    # small tab that merely clears the era floor must not
+                    # trigger it — that is how a 7-song sub-tab pre-empted
+                    # a 474-song main tab.
+                    return True
+            except (ValueError, KeyError):
+                pass
+            return False
+
+        # A tab NAMED Unreleased decides the result by itself whenever it has
+        # songs — _consider stops on it before looking at anything else. So
+        # fetch it alone first, and fan out to the other candidates only if it
+        # comes back empty or missing. Starting them all at once meant the
+        # smaller tabs finished downloading while the (largest) Unreleased tab
+        # was still arriving, and were then thrown away: ~10.8 MB of Ye's
+        # Recent, Tracklists, Album Copies and friends on every cold parse.
+        if unreleased_gid and gids and gids[0] == unreleased_gid:
+            first_wave, second_wave = gids[:1], gids[1:]
+        else:
+            first_wave, second_wave = gids, []
+
         try:
-            for task in fetch_tasks:
-                result = await task
-                if result is None:
-                    continue
-                result_gid, sheet_html = result
-                try:
-                    name = _resolve_artist_name(title, artist_name)
-                    with t.phase("parse"):
-                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
-                    n_eras = len(candidate.eras)
-                    n_songs = sum(
-                        len(s.songs)
-                        for era in candidate.eras
-                        for s in era.sections
-                    )
-
-                    logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                    if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
-                        hub_gid = result_gid
-                    # Songs outrank eras. Era count used to come first, as a
-                    # proxy for "properly structured tab", but it stopped being
-                    # one once flat-era tabs (no header rows, era implied by the
-                    # Era column) started yielding real era counts: a 5-era,
-                    # 7-song badge sub-tab then outranked the 3-era, 474-song
-                    # main tab on the MIKE tracker, and 43 flat eras beat 26 real
-                    # ones on Dr. Dre — costing 668 songs and every era cover.
-                    # The payload is songs; rank on it.
-                    score = (1 if n_songs else 0, n_songs, n_eras)
-                    if score > best_score:
-                        best_score = score
-                        best_artist = candidate
-                        best_gid = result_gid
-                        best_html = sheet_html
-
-                    if n_songs == 0:
-                        continue  # never short-circuit on a song-less tab
-                    # Unreleased tab wins as long as it has at least 1 era —
-                    # prevents Recents/landing tabs from outcompeting it on era count.
-                    if result_gid == unreleased_gid:
-                        logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+            stopped = False
+            for task in _start(first_wave):
+                if await _consider(task):
+                    stopped = True
+                    break
+            if not stopped and second_wave:
+                for task in _start(second_wave):
+                    if await _consider(task):
                         break
-                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
-                        # Only stop early on a tab that is actually leading.
-                        # This break abandons every gid still in flight, so a
-                        # small tab that merely clears the era floor must not
-                        # trigger it — that is how a 7-song sub-tab pre-empted
-                        # a 474-song main tab.
-                        break
-                except (ValueError, KeyError):
-                    continue
         finally:
             for task in fetch_tasks:
                 task.cancel()
@@ -1940,6 +2028,10 @@ async def async_fetch_and_parse(
 
         if best_artist and best_score[1] > 0:
             best_artist.source_url = url
+            t.report(
+                "parsing",
+                f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
+            )
 
             # Hub workbook: the main tab held no songs, so the catalogue is
             # spread across unclassified sibling tabs. Gated on that, so a
@@ -1973,6 +2065,8 @@ async def async_fetch_and_parse(
             # Idempotent: names already unique are returned untouched.
             best_artist.eras = _disambiguate_era_names(best_artist.eras)
 
+            if write_cache:
+                t.report("saving", "Saving")
             with t.phase("cache_write"):
                 if write_cache and best_html:
                     await _async_set_cache(url_norm, best_html, title)

@@ -14,7 +14,7 @@ LeakSheet is split into three pieces:
 
 | Piece | Path | Stack |
 |---|---|---|
-| **Backend / parser** | `src/` | Python 3.10+, FastAPI, httpx, lxml |
+| **Backend / parser** | `src/` | Python 3.11+, FastAPI, httpx, lxml |
 | **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) · **unmaintained** |
 | **Apple apps** | `LeakSheet-iOS/` | SwiftUI (iOS 27 / macOS 27 / tvOS 27), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
@@ -78,7 +78,7 @@ committed — on a clean checkout those tests skip themselves and the command is
 Dependencies live in `pyproject.toml` and are pinned in `uv.lock`; `uv run` syncs the
 environment before it runs anything. To change one, edit `pyproject.toml` then `uv lock`.
 
-The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|live|accuracy`) with one
+The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|quality|live`) with one
 shared health definition in `tests/_health.py`. CI runs the offline gate on every push and a
 soft live job daily (`.github/workflows/tests.yml`).
 
@@ -113,7 +113,8 @@ The backend proxies audio so clients can play it without CORS pain.
 ## API
 
 ```
-POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate)
+POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate;
+                               Accept: application/x-ndjson streams progress lines on a cold parse)
 GET  /api/trackers           → ArtistGrid discovery list (name, url, best, up-to-date flags)
 GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
 GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)
@@ -126,13 +127,16 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | Var | Default | Purpose |
 |---|---|---|
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
-| `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/image-proxy`, `/metadata`. `/cache/clear` carries its own fixed cap of 10/min that applies whether or not this is set |
+| `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/metadata`; `/image-proxy` gets 10× this, since one screen loads dozens of covers. `/cache/clear` carries its own fixed cap of 10/min that applies whether or not this is set |
 | `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
-| `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed |
+| `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed. `/image-proxy` trusts only the seed plus this list — never the feed — so a feed-only tracker with self-hosted covers must be added here for its art to load |
 | `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
 | `LEAKSHEET_PREWARM_INTERVAL` | `3600` | Seconds between prewarm passes |
 | `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
+| `LEAKSHEET_GID_FETCH_CONCURRENCY` | `6` | Concurrent tab-page fetches across all requests. Each holds a full response body in memory |
+| `LEAKSHEET_HUB_LOAD_CONCURRENCY` | `3` | Concurrent hub-workbook tab loads — fetched *and* parsed, so tighter than the above |
+| `LEAKSHEET_IMAGE_RESIZE_CONCURRENCY` | `3` | Concurrent Pillow decodes in `/image-proxy`; each can hold a 15 MB input plus a 20 MP decode |
 
 > The backend fetches URLs server-side, so every outbound path is guarded. `/sheet` only
 > fetches allowlisted tracker hosts (built-in seed + the ArtistGrid feed +
@@ -180,10 +184,11 @@ src/
   fetcher.py    — URL fetching + disk cache
   streaming.py  — Audio stream resolution + proxying
   api.py        — FastAPI HTTP layer
-  config.py     — Column aliases, paths
+  config.py     — Column aliases, host allowlists, paths
+  tracker_seed.py — Built-in tracker list served when ArtistGrid is unreachable
 ```
 
-For deeper architecture notes, parsing strategy, and design decisions, see [agents.md](agents.md).
+For why the non-obvious code looks the way it does, see [docs/decisions.md](docs/decisions.md) (backend) and [LeakSheet-iOS/DECISIONS.md](LeakSheet-iOS/DECISIONS.md) (Apple apps).
 
 ---
 
@@ -197,15 +202,12 @@ the census harness stays importable under `tests/tools/`):
 | `tests/tools/census.py` | Per-tracker content census + gzipped live snapshots (accuracy baselines) |
 | `scripts/tools/trackerhub_sweep.py` | Sweep every up-to-date ArtistGrid tracker: health, columns, tabs, date formats |
 | `scripts/tools/verify_live.py` | Parse a live tracker and print a health summary |
-| `scripts/tools/quick_inspect.py` | Quick parse output for the known local trackers |
 | `scripts/tools/dump_raw_table.py` | Dump raw HTML table rows |
 | `scripts/tools/inspect_eras.py` | Show eras with song/version counts |
 | `scripts/tools/inspect_songs.py` | Inspect parsed songs with filters |
 | `scripts/tools/diff_trackers.py` | Compare column layouts across trackers |
-| `scripts/tools/analyze_structure.py` | Dump era-stats / global-stats / image structure of a live tracker |
-| `scripts/tools/debug_zero_eras.py` / `deep_investigate.py` / `investigate_mismatch.py` | Row-level drill-downs for era-routing regressions |
 
 ```bash
-python3 -m tests.tools.census --fixtures          # offline census of local dumps
-python3 scripts/tools/trackerhub_sweep.py --limit 20
+uv run python -m tests.tools.census --fixtures    # offline census of local dumps
+uv run python scripts/tools/trackerhub_sweep.py --limit 20
 ```

@@ -1,6 +1,6 @@
 """Draft a ground-truth label file for one tracker, for a human to verify.
 
-    python3 -m tests.quality.make_label osamason --family flat-era
+    uv run python -m tests.quality.make_label osamason --family flat-era
 
 Writes tests/quality/labels/<slug>.json from current parser output.
 

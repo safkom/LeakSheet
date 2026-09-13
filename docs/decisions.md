@@ -68,7 +68,7 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
-## parser.py::parse_song_credits — credit delimiters
+## models.py::parse_song_credits — credit delimiters
 
 Trackers write credits in either style — `(prod. X)` (Ye, Kendrick) or `[prod. X]`
 (Travis) — and hand-typed sheets mix the two by accident (`[prod. Travis Scott)`
@@ -80,6 +80,29 @@ cannot swallow a version tag like `[V1]` or `[Demo 8]`.
 next line (`[prod. A,\nB]`) remains an alt title: letting the pattern span newlines
 would let an unclosed `(prod. ` swallow real alt-title lines, and it buys exactly
 one row across the whole corpus.
+
+## parser.py::_reconcile_title_misreads — song identity from titles and alt titles
+
+Decided with the user, 2026-09-13, after the iOS version picker showed split songs.
+
+- **Versions group by `song_key`, not the exact title.** Trackers change case and
+  punctuation between rows of one song ("Touch The Sky" / "Touch the Sky", 21 songs of
+  VULTURES 1 in capitals and in title case). Grouping by the exact string produced Ye
+  alone 40 extra songs, while cross-era linking already used the key. The label
+  baselines were re-pinned for exactly these merges; version counts did not move.
+- **Alt titles link songs; they never merge them.** Trackers cross-list distinct
+  released songs as each other's alt titles (Ye's "Self Conscious" and "All Falls
+  Down"), so a merge would fuse different songs. Clients link one hop — a song whose
+  title matches one of this song's names — for the version picker and search.
+- **Slash titles are names, not groups.** "Stay On Em / Precious" is one song with two
+  names; "LOVE ME / TOO EASY" is two songs in one file. Each part is a linkable name and
+  the row stays its own song.
+- **Two misreads are undone using the tracker's own names**, since a single cell cannot
+  tell them apart. "(With Child, Stay On Em)" matches the "(with X)" credit form even
+  capitalised, and "(With Eminem)" really is one, so it becomes alt titles only when
+  every name matches a title or alt title in the same song family (3 cells across 415
+  cached trackers). "(Bitch, Don't Kill My Vibe)" is split by the alias-list rule, so
+  consecutive aliases are rejoined when the joined text is a song title in the tracker.
 
 ## parser.py::apply_badge_tabs — emoji stripping and per-row badges
 
@@ -171,12 +194,6 @@ Buckets bound the disk-cache cardinality; clients snap up to the next one. `1600
 was added 2026-07-17 because the old `1280` top bucket sat below iPhone full-screen
 width (~1290 px), so Now Playing art was being upscaled on device.
 
-## api.py — CORS is registered last
-
-`add_middleware` makes the **last-added** middleware outermost. CORS must wrap the
-rate limiter, or a 429 carries no `Access-Control-Allow-Origin` and the browser
-reports an opaque network error instead of a clean 429.
-
 ## api.py::_client_ip — X-Forwarded-For is trusted by count only
 
 In production the app sits behind a platform router, so `scope["client"]` is that
@@ -189,11 +206,44 @@ in it is trusted.
 
 ## config.py — the /sheet host allowlist
 
-`POST /sheet` fetches a caller-supplied URL. See
-[`docs/reviews/2026-07-27-security-review.md`](reviews/2026-07-27-security-review.md)
-for the full finding; in short, without a host check the backend reaches cloud
-metadata and RFC1918, and returns any internal page containing a `<table>` as parsed
-data.
+`POST /sheet` fetches a caller-supplied URL. Without a host check the backend reaches
+cloud metadata and RFC1918, returns any internal page containing a `<table>` as
+parsed data, and its distinct 400/404/502 mappings make it an internal port scanner.
+
+The check covers every tab of a workbook, not just the URL it was handed: a sheet's
+page-switcher JavaScript can name absolute tab URLs, which are honoured only for an
+allowlisted host or the sheet's own site (`fetcher._build_sheet_html_url`).
+
+## config.py::curated_host_allowed — the image proxy does not trust the feed
+
+`/sheet` auto-accepts every host the ArtistGrid CSV lists, so a tracker added to the
+community feed works without a redeploy. `/image-proxy` deliberately does not: the
+feed is third-party, and that endpoint returns bytes to any origin
+(`Access-Control-Allow-Origin: *`). It trusts Google's image CDNs, the built-in seed
+and `LEAKSHEET_EXTRA_SHEET_HOSTS` only. Cost: a feed-only tracker whose covers are
+self-hosted (`/assets/<sha>.jpg`) shows no art until its host is added to the seed —
+which is why `tylertracker.net`, 40 era covers, is in it. Decided 2026-09-13.
+
+## fetcher.py::_get_sheets_client — redirects are not re-checked against the allowlist
+
+`/sheet` checks the allowlist on the URL it is handed and on every tab URL
+(`_build_sheet_html_url`), but the client follows redirects without re-checking the
+host. The image proxy does re-check. The difference is deliberate:
+
+- A redirect only happens if an allowlisted host sends one. A tracker host that is
+  compromised can already serve whatever content it likes under its own URL, so a
+  redirect gives it nothing extra.
+- `PublicOnlyAsyncTransport` still rejects non-public addresses on every hop, so a
+  redirect cannot reach internal services.
+- A strict per-hop check would also reject redirects real trackers rely on (`x.net` to
+  `www.x.net`, Google sending a private sheet to `accounts.google.com`). Each one would
+  need seeding, and nothing short of a live sweep of every tracker would catch the ones
+  that were missed.
+
+The remaining gap is an open redirect on an allowlisted host, which would make the
+backend fetch a public URL someone else chose. Only the parsed tracker is returned,
+never the raw body. Revisit if the image proxy's per-hop check is ever moved into the
+transport and can be shared. Decided 2026-09-13, after the branch review.
 
 ## models.py — fields kept on the wire with no client reader
 
@@ -228,12 +278,38 @@ etc. all appear with no following digits. So a token is *letters + optional digi
 not *one of {s,w,h} + required digits* — `_GOOGLE_SIZE_SUFFIX_RE` has to match the
 looser grammar or it silently stops resizing.
 
+## api.py::_warm_era_art — covers are downloaded at parse time
+
+Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
+is minted on every page fetch, and it stops working: one fetched directly from Google
+still loaded after 28 minutes, and every page served 42 or more minutes after Google
+rendered it had dead tokens. A parse, though, is served for 1–24 hours and clients keep
+it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
+production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
+Keem were fine.
+
+After every server-side parse (cold miss, stream, background revalidation, prewarm), each
+era cover is downloaded while its token still works and stored in the image cache under
+the exact URL the payload carries (width 0). `/image-proxy` reads that copy before going
+upstream, so a cover keeps loading for the image cache's 7-day life.
+
+yetracker.net is a Cloudflare proxy of the Google page with `max-age=3600`, and it
+ignores query strings and `Accept-Encoding` when choosing a cached copy. Its tokens are
+often dead before we ever parse: a 208-second-old copy worked, a 19-minute-old one did
+not. So a cover that fails to download gets the era's last good copy, remembered in a
+small index per tracker (`eraart_<tracker hash>.json`, never shared between trackers).
+Ye's covers fill in once any parse lands on a young Cloudflare copy, and stay.
+
 ## api.py::image-proxy-etag — ETag is scoped to the disk cache
 
 Only width-bounded image-proxy requests are disk-cached, so only they get an ETag —
 and it has to reflect a real, still-live cache entry rather than a pure hash of the
 request. Otherwise an expired or `/cache/clear`'d entry (or an unsized request, which
 is never cached) would revalidate as unchanged forever.
+
+The tag is the cache key plus a digest of the stored bytes, written into the entry's
+meta. A tag built from write time instead let a same-second rewrite with different
+bytes keep its tag, so a client holding the old image got a 304.
 
 ## api.py::video-codec-regex — codec is the strongest audio/video signal
 
@@ -305,12 +381,13 @@ real main tab and skip parsing it as misc entries entirely. When the GID turns o
 be the Misc/Music-Videos tab itself, the code falls through to full discovery, which
 finds the real main tab and parses this one correctly via `parse_misc_tab`.
 
-## fetcher.py::gid-fetch-priority — concurrent fetch, priority-ordered consumption
+## fetcher.py::gid-fetch-priority — Unreleased first, the rest only if needed
 
-Every GID fetch starts concurrently, but results are consumed in priority order:
-each is parsed as it lands and the rest are cancelled once a winner is found. Large
-trackers expose 15+ tabs; the prioritized (unreleased) tab is almost always index 0,
-so eagerly completing every fetch would download megabytes that are thrown away.
+A tab named Unreleased is fetched and parsed on its own first. The remaining GIDs
+start concurrently only if it is missing or yields no songs, and are then consumed
+in priority order, the rest cancelled once a winner is found. Large trackers expose
+15+ tabs; starting them all alongside Unreleased downloaded megabytes that were
+thrown away (Ye: 20 requests / 31.8 MB before, 11 / 21.2 MB after, same output).
 
 Winner ranking is the tuple `(songs-or-not, era count, song count)`: a tab with eras
 but no songs is a hub/landing page (Avicii's "Main" is a list of category
@@ -648,3 +725,20 @@ They stay on the wire regardless — `Era.dict` already documents why: the
 `/sheet` warm path serves the parsed-cache bytes as the response, so excluding
 a field from the response also strips it from the cache round-trip and blinds
 the starved-era health check.
+
+## Backend language — staying on Python
+
+Assessed 2026-07 against Rust and Bun. The numbers that decided it: a Ye-sized parse
+(11.7 MB HTML) takes about 0.9 s through lxml, whose table extraction is already C; a
+warm cache hit is about 2 ms; and a cold request is dominated by downloading Google's
+HTML, which no runtime shortens. A rewrite would trade a network-bound problem for the
+loss of a mature parser and its ~800-test suite. Revisit only if parse time, not fetch
+time, becomes the measured bottleneck.
+
+Re-assessed 2026-09-13 against production: a cold Ye request took 15.3 s, of which about
+5.4 s was CPU (parse, merge, three serializations) and the rest was downloading tabs. The
+fix was in the request plan, not the language — fetching the Unreleased tab first and
+skipping tabs it already covers took Ye from 20 requests (31.8 MB) to 11 (21.2 MB) with
+byte-identical output, and serializing once per miss removed two of the three
+serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
+NDJSON progress lines to clients that ask for `application/x-ndjson`.

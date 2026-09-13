@@ -172,7 +172,7 @@ extension CharacterSet {
     /// RFC 3986 unreserved characters. Anything else is escaped, which is what
     /// a URL nested inside another URL's query value requires — `.urlQueryAllowed`
     /// keeps sub-delimiters like `&` and `=` and would split the value in two.
-    nonisolated(unsafe) static let leakSheetURLValue = CharacterSet(
+    nonisolated static let leakSheetURLValue = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
 }

@@ -10,7 +10,6 @@ import sys
 sys.path.insert(0, ".")
 
 from src.fetcher import fetch_and_parse
-from src.models import EraStats
 
 
 def verify_tracker(url, name):
@@ -24,7 +23,7 @@ def verify_tracker(url, name):
     print(f"Eras: {len(artist.eras)}, Songs: {artist.total_songs}, Versions: {artist.total_versions}")
 
     # Check era stats
-    print(f"\n--- ERA STATS VERIFICATION ---")
+    print("\n--- ERA STATS VERIFICATION ---")
     stats_match = 0
     stats_mismatch = 0
     eras_with_art = 0
@@ -48,7 +47,7 @@ def verify_tracker(url, name):
     print(f"\n  Summary: {stats_match} match, {stats_mismatch} mismatch, {eras_with_art}/{len(artist.eras)} eras with art")
 
     # Check global stats
-    print(f"\n--- GLOBAL TRACKER STATS ---")
+    print("\n--- GLOBAL TRACKER STATS ---")
     if artist.tracker_stats:
         ts = artist.tracker_stats
         print(f"  Links:   total={ts.total_links}, missing={ts.missing_links}, needed={ts.sources_needed}, n/a={ts.not_available_links}")
@@ -60,7 +59,7 @@ def verify_tracker(url, name):
         era_total_og = sum(e.stats.og_files for e in artist.eras if e.stats)
         era_total_full = sum(e.stats.full for e in artist.eras if e.stats)
         era_total_unavail = sum(e.stats.unavailable for e in artist.eras if e.stats)
-        print(f"\n  Cross-check (sum of era stats):")
+        print("\n  Cross-check (sum of era stats):")
         print(f"    OG Files: era_sum={era_total_og} vs global={ts.og_files}")
         print(f"    Full:     era_sum={era_total_full} vs global={ts.full}")
         print(f"    Unavail:  era_sum={era_total_unavail} vs global={ts.unavailable}")
@@ -68,7 +67,7 @@ def verify_tracker(url, name):
         print("  ❌ No global stats found!")
 
     # Show a few example art URLs
-    print(f"\n--- ERA ART SAMPLES ---")
+    print("\n--- ERA ART SAMPLES ---")
     for era in artist.eras[:3]:
         art = era.art_url[:80] + "..." if era.art_url and len(era.art_url) > 80 else era.art_url
         print(f"  {era.name[:40]:40s} → {art}")

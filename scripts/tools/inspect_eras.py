@@ -2,12 +2,12 @@
 """Inspect detected eras and their song counts from parsed tracker data.
 
 Usage:
-    python3 scripts/tools/inspect_eras.py [--tracker NAME] [--verbose]
+    uv run python scripts/tools/inspect_eras.py [--tracker NAME] [--verbose]
 
 Examples:
-    python3 scripts/tools/inspect_eras.py
-    python3 scripts/tools/inspect_eras.py --tracker "Kendrick"
-    python3 scripts/tools/inspect_eras.py --tracker "Carti" --verbose
+    uv run python scripts/tools/inspect_eras.py
+    uv run python scripts/tools/inspect_eras.py --tracker "Kendrick"
+    uv run python scripts/tools/inspect_eras.py --tracker "Carti" --verbose
 """
 
 import argparse

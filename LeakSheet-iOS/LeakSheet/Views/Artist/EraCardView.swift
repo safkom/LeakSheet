@@ -111,8 +111,13 @@ struct EraCardView: View {
         Group {
             if let artUrl = era.artUrl,
                let url = APIClient.shared.imageProxyURL(for: artUrl, width: 320) {
-                CachedEraImage(url: url, cacheKey: artUrl) { color in
-                    onColorExtracted?(color)
+                CachedImage(url: url, maxPixelSize: 320) { image in
+                    // Keyed on the raw art URL — unique per image, unlike era name.
+                    if let color = await EraColorExtractor.shared.extractColor(fromImage: image, cacheKey: artUrl) {
+                        onColorExtracted?(color)
+                    }
+                } placeholder: {
+                    ArtworkPlaceholder(cornerRadius: 0)
                 }
             } else {
                 ArtworkPlaceholder(cornerRadius: 0)
@@ -236,49 +241,5 @@ private struct EraCardBorder: Shape {
         }
 
         return path
-    }
-}
-
-// MARK: - Cached era image
-
-/// Displays an era image from ImageCache (instant if prefetched), falls back to network load.
-/// Triggers color extraction once the image is available.
-private struct CachedEraImage: View {
-    let url: URL
-    /// The era's raw (unproxied) art URL — unique per image, unlike era name.
-    let cacheKey: String
-    var onColorExtracted: (Color) -> Void
-
-    @State private var image: CGImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                ArtworkPlaceholder(cornerRadius: 0)
-            }
-        }
-        .task(id: url) {
-            if let cached = await ImageCache.shared.cachedImage(for: url, maxPixelSize: 320) {
-                image = cached
-                extractColor(from: cached)
-                return
-            }
-            if let loaded = await ImageCache.shared.loadImage(from: url, maxPixelSize: 320) {
-                image = loaded
-                extractColor(from: loaded)
-            }
-        }
-    }
-
-    private func extractColor(from img: CGImage) {
-        Task {
-            if let color = await EraColorExtractor.shared.extractColor(fromImage: img, cacheKey: cacheKey) {
-                await MainActor.run { onColorExtracted(color) }
-            }
-        }
     }
 }

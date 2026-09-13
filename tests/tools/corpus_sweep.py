@@ -12,9 +12,9 @@ meaningful without anyone hand-verifying hundreds of numbers.
 The corpus is captured tracker HTML, which is never committed (DMCA — see
 .gitignore). Point ``--corpus`` at a local ``.cache`` directory.
 
-    python3 -m tests.tools.corpus_sweep --report
-    python3 -m tests.tools.corpus_sweep --out before.json
-    python3 -m tests.tools.corpus_sweep --baseline before.json
+    uv run python -m tests.tools.corpus_sweep --report
+    uv run python -m tests.tools.corpus_sweep --out before.json
+    uv run python -m tests.tools.corpus_sweep --baseline before.json
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.parser import (  # noqa: E402
+from src.parser import (
     _FOOTER_KEYWORDS_RE,
     era_stats_match,
     extract_table,

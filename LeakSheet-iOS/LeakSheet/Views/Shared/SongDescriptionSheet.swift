@@ -85,6 +85,19 @@ struct SongDescriptionSheet: View {
         }
     }
 
+    /// Versions of songs linked to this one by name — its alt titles, the parts
+    /// of a slash title, or another song naming this one (see
+    /// ArtistViewModel.linkedRefs). Shown as their own row, apart from this
+    /// song's versions, because a link is not a claim that they are one song.
+    private var linkedVersions: [ArtistViewModel.CrossEraVersion] {
+        guard let vm = artistVM else { return [] }
+        return vm.linkedRefs(for: payload).flatMap { ref in
+            ref.song.allVersions.map {
+                .init(version: $0, song: ref.song, eraName: ref.eraName, eraArt: ref.eraArt)
+            }
+        }
+    }
+
     private var badgeInfo: (emoji: String, label: String)? {
         guard let b = active.version.badge, let badge = Badge(rawValue: b) else { return nil }
         return (badge.emoji, badge.label)
@@ -255,9 +268,7 @@ struct SongDescriptionSheet: View {
                         // Version picker — every version of this song, across
                         // every era it appears in (fallback: just this era's
                         // versions when the song has no cross-era duplicates).
-                        if pickerVersions.count > 1 {
-                            versionPicker
-                        }
+                        versionPicker
 
                         // Detail grid (2-column)
                         detailGrid
@@ -454,7 +465,10 @@ struct SongDescriptionSheet: View {
 
     @ToolbarContentBuilder
     private var chromeToolbar: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
+        // The menu sat in .cancellationAction, the leading slot every other
+        // sheet in the app uses to close — reaching for "back out" opened a
+        // menu instead. Actions go trailing; Done is the confirmation.
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 overflowItems
             } label: {
@@ -462,7 +476,7 @@ struct SongDescriptionSheet: View {
             }
             .accessibilityLabel("More options")
         }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: .confirmationAction) {
             Button("Done") { dismiss() }
         }
     }
@@ -529,24 +543,62 @@ struct SongDescriptionSheet: View {
     /// from other eras when the song has one (see `pickerVersions`). Tapping a
     /// chip re-points the whole sheet at that version via `active`, the same
     /// way tvOS's version picker drives its detail screen.
+    ///
+    /// `pickerVersions` is read exactly once here. The visibility check used to
+    /// sit at the call site, so every body pass ran the cross-era lookup and
+    /// its `flatMap` over every matching era twice — the pattern
+    /// MacArtistView.swift already records fixing.
+    @ViewBuilder
     private var versionPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Versions")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(pickerVersions) { entry in
-                        versionChip(entry)
-                    }
+        let versions = pickerVersions
+        let linked = linkedVersions
+        if versions.count > 1 || !linked.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                if versions.count > 1 {
+                    chipRow(title: "Versions", entries: versions, showsTitle: false)
                 }
-                .padding(.vertical, 2)
+                if !linked.isEmpty {
+                    chipRow(title: "Also Known As", entries: linked, showsTitle: true)
+                }
             }
         }
     }
 
-    private func versionChip(_ entry: ArtistViewModel.CrossEraVersion) -> some View {
-        let isSelected = entry.version.id == active.version.id && entry.eraName == active.eraName
+    /// Opens scrolled to the version the sheet was opened for. It always
+    /// started at the first chip, so opening a Best Of or playing version deep
+    /// in a 30-version song showed chips for other versions and hid the
+    /// selected one off-screen.
+    private func chipRow(
+        title: String, entries: [ArtistViewModel.CrossEraVersion], showsTitle: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(entries) { entry in
+                            versionChip(entry, showsTitle: showsTitle)
+                                .id(entry.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onAppear {
+                    guard let selected = entries.first(where: isActive) else { return }
+                    proxy.scrollTo(selected.id, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func isActive(_ entry: ArtistViewModel.CrossEraVersion) -> Bool {
+        entry.version.id == active.version.id && entry.eraName == active.eraName
+    }
+
+    private func versionChip(_ entry: ArtistViewModel.CrossEraVersion, showsTitle: Bool) -> some View {
+        let isSelected = isActive(entry)
         return Button {
             Haptics.light()
             active = ActiveVersion(
@@ -556,7 +608,9 @@ struct SongDescriptionSheet: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
-                    Text(entry.version.versionTag ?? entry.version.name)
+                    // A linked song's chip leads with its own title — the tag
+                    // alone ("V2") would not say which song it is.
+                    Text(showsTitle ? entry.version.name : (entry.version.versionTag ?? entry.version.name))
                         .font(.caption.weight(.bold))
                         .lineLimit(1)
                     // The chip's own badge, same as VersionRowView: without it

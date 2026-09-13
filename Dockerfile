@@ -6,10 +6,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Dependencies in their own layer, before the source: editing src/ then rebuilds
-# without re-resolving. --frozen fails rather than silently relocking if
-# uv.lock and pyproject.toml have drifted apart.
+# without re-resolving. --locked fails the build if uv.lock and pyproject.toml
+# have drifted apart (--frozen would install the stale lock without checking).
+# --no-cache keeps uv's download cache out of the image layer.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --locked --no-dev --no-cache
 
 COPY src ./src
 

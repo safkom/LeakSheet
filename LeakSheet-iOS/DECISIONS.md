@@ -458,3 +458,59 @@ The inspector sits OUTSIDE the detail column's navigation container, so
 `navigationTitle`/`toolbar` there do not label the panel — they overwrite the
 window's own title and drop Clear into the main toolbar. The embedded path
 renders its count and Clear as an inline header instead.
+
+## PlayerViewModel.swift::facade-kept — the wrapper over AudioEngine stays
+
+Removing it was assessed on 2026-09-13 and rejected. Apple's model-data guidance asks
+for one source of truth, held in `@Observable` types and shared through the
+environment. The facade holds no copies: its properties are computed forwards, so
+Observation tracks the engine's stored properties straight through them. It also does
+real work the engine should not own — `isNowPlaying(_:inEra:)` row identity, and the
+scrub state (`seeking`, `seekValue`, `scrubPosition`) that the mini player and Now
+Playing share. Deleting it would touch 29 files across three platforms and change
+nothing a user can see.
+
+## ScrubberSlider.swift::isolated-time-reads — per-tick reads live in leaf views
+
+`AudioEngine` writes `currentTime` about ten times a second. Any body that reads
+`player.displayTime` re-runs at that rate, so the reads sit in `ScrubberSlider` and
+`PlaybackElapsedText` rather than in `MiniPlayerBar` or `NowPlayingView`. Inline, the
+whole Now Playing screen re-evaluated per tick, including a WCAG contrast search for
+its era tint. Keep new per-tick reads inside leaf views.
+
+The slider's VoiceOver adjustment seeks directly. Slider's built-in adjustment writes
+only the binding, which sets the scrub target without calling `onEditingChanged`, so a
+swipe moved nothing.
+
+## ArtistContentLists.swift::recents-pagination — onAppear re-firing is harmless
+
+`LazyVStack` re-fires `onAppear` when a row scrolls back into view, which reads like
+over-eager paging. It is not: the check compares the row's index against the LIVE
+`vm.visibleRecents.count`, so once a page lands, rows that were near the old end no
+longer qualify. A row triggers a load only while it really is among the last eight.
+
+## AudioEngine.swift::category-set-twice — the second set is not the slow case
+
+`LeakSheetApp` sets the `.playback` category at launch, and `activateAudioSession()`
+sets it again before the first playback. The warning about slow category changes
+applies to an ACTIVE session; at that point the session has not been activated yet,
+because activation follows the category set. Left as is.
+
+## AppAppearance.swift — dark by default, light and system on request
+
+The iOS app was locked to dark by `INFOPLIST_KEY_UIUserInterfaceStyle = Dark`, while a
+full light palette — tuned tones, contrast-tested in both appearances — existed and only
+the Mac could reach. Settings now offers Dark, Light and System, applied with
+`preferredColorScheme` at every scene root. iOS defaults to Dark, the look the app was
+drawn for; the Mac defaults to System, which is what it already did. Decided 2026-09-13.
+
+The Info.plist key had to go: it overrides `preferredColorScheme`, so System could never
+follow the device. `SettingsView` also applies the preference to its own sheet, because a
+sheet already on screen is a separate presentation and did not follow a change made
+inside it until it was closed.
+
+The launch screen can't read the setting — it is drawn before any code runs — and without
+the key it follows the device, so a Light-mode phone flashed white before Dark took over.
+`UILaunchScreen.UIColorName` points at `LaunchBackground`, black in both appearances, to
+match the default. Someone who picks Light gets a black launch instead; that is the rarer
+choice.

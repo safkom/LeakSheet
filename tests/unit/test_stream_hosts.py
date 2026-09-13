@@ -14,12 +14,12 @@ from __future__ import annotations
 import pytest
 
 from src.api import (
-    _STREAM_ALLOWED_DOMAINS,
     _is_allowed_domain,
     _media_kind_from_mime,
     _parse_pixeldrain_metadata,
 )
 from src.streaming import (
+    ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
     _is_audio_content_type,
     build_gdrive_confirm_url,
@@ -32,6 +32,65 @@ from src.streaming import (
 # ---------------------------------------------------------------------------
 # pixeldrain.com — resolve_stream_url
 # ---------------------------------------------------------------------------
+
+
+class TestPillowsStreamResolution:
+    """pillows.su is the host the app leans on hardest, and its resolver had no
+    test while pixeldrain, gdrive and imgur each had a class."""
+
+    @pytest.mark.parametrize("link", [
+        "https://pillows.su/f/abc123",
+        "https://www.pillows.su/f/abc123",
+        "https://pillowcase.su/f/abc123",
+        "http://pillows.su/f/abc123",
+    ])
+    def test_both_domains_resolve_to_the_api_host(self, link):
+        assert resolve_stream_url(link) == "https://api.pillows.su/api/get/abc123"
+
+    def test_id_keeps_dashes_and_underscores(self):
+        assert resolve_stream_url("https://pillows.su/f/a-b_C9") == (
+            "https://api.pillows.su/api/get/a-b_C9"
+        )
+
+    def test_trailing_path_does_not_leak_into_the_id(self):
+        assert resolve_stream_url("https://pillows.su/f/abc123/extra") == (
+            "https://api.pillows.su/api/get/abc123"
+        )
+
+    @pytest.mark.parametrize("link", [
+        "https://pillows.su/",
+        "https://pillows.su/f/",
+        "https://pillows.su.evil.com/f/abc123",
+        "https://evil.com/pillows.su/f/abc123",
+    ])
+    def test_non_file_and_lookalike_links_are_not_resolved(self, link):
+        assert resolve_stream_url(link) is None
+
+    def test_resolved_host_passes_the_stream_allowlist(self):
+        resolved = resolve_stream_url("https://pillows.su/f/abc123")
+        assert _is_allowed_domain(resolved, ALLOWED_STREAM_HOSTS)
+
+
+class TestFrosteStreamResolution:
+    def test_song_page_resolves_to_its_file(self):
+        assert resolve_stream_url("https://music.froste.lol/song/deadbeef01") == (
+            "https://music.froste.lol/song/deadbeef01/file"
+        )
+
+    @pytest.mark.parametrize("link", [
+        "https://music.froste.lol/",
+        "https://music.froste.lol/song/",
+        # The hash is lowercase hex; anything else is not a song id.
+        "https://music.froste.lol/song/NOTHEX",
+        "https://froste.lol/song/deadbeef01",
+        "https://music.froste.lol.evil.com/song/deadbeef01",
+    ])
+    def test_non_song_and_lookalike_links_are_not_resolved(self, link):
+        assert resolve_stream_url(link) is None
+
+    def test_resolved_host_passes_the_stream_allowlist(self):
+        resolved = resolve_stream_url("https://music.froste.lol/song/deadbeef01")
+        assert _is_allowed_domain(resolved, ALLOWED_STREAM_HOSTS)
 
 
 class TestPixeldrainStreamResolution:
@@ -190,7 +249,7 @@ class TestImgurResolution:
         # The resolver and the proxy allowlist must not drift: a resolved
         # URL the proxy then rejects is a silent 403 on every playback.
         resolved = resolve_stream_url("https://imgur.gg/f/002XdG5")
-        assert _is_allowed_domain(resolved, _STREAM_ALLOWED_DOMAINS) is True
+        assert _is_allowed_domain(resolved, ALLOWED_STREAM_HOSTS) is True
 
     def test_mp4_container_is_playable(self):
         # imgur.gg serves audio inside an mp4 container and labels it
@@ -207,7 +266,7 @@ class TestStreamAllowlist:
     def test_allowlist_is_exactly_the_resolver_output_hosts(self):
         # Single source of truth (2026-07-24): the proxy allowlist IS the set
         # of hosts resolve_stream_url can emit — nothing more, nothing less.
-        assert _STREAM_ALLOWED_DOMAINS == {
+        assert ALLOWED_STREAM_HOSTS == {
             "api.pillows.su",
             # Both imgur hosts: resolve_stream_url emits imgur.gg and
             # resolve_imgur_cdn_url falls back to temp.imgur.gg.
@@ -219,24 +278,24 @@ class TestStreamAllowlist:
             "drive.google.com",
         }
 
-    @pytest.mark.parametrize("host", sorted(_STREAM_ALLOWED_DOMAINS))
+    @pytest.mark.parametrize("host", sorted(ALLOWED_STREAM_HOSTS))
     def test_allowed_hosts_pass(self, host):
-        assert _is_allowed_domain(f"https://{host}/some/path", _STREAM_ALLOWED_DOMAINS) is True
+        assert _is_allowed_domain(f"https://{host}/some/path", ALLOWED_STREAM_HOSTS) is True
 
     def test_evil_domain_rejected(self):
-        assert _is_allowed_domain("https://evil.com/x", _STREAM_ALLOWED_DOMAINS) is False
+        assert _is_allowed_domain("https://evil.com/x", ALLOWED_STREAM_HOSTS) is False
 
     def test_pixeldrain_lookalike_subdomain_rejected(self):
         # A naive substring/suffix check could be fooled by an attacker
         # registering pixeldrain.com.evil.com; exact-hostname matching must
         # reject it.
         assert _is_allowed_domain(
-            "https://pixeldrain.com.evil.com/u/x", _STREAM_ALLOWED_DOMAINS
+            "https://pixeldrain.com.evil.com/u/x", ALLOWED_STREAM_HOSTS
         ) is False
 
     def test_gdrive_lookalike_subdomain_rejected(self):
         assert _is_allowed_domain(
-            "https://drive.google.com.evil.com/uc", _STREAM_ALLOWED_DOMAINS
+            "https://drive.google.com.evil.com/uc", ALLOWED_STREAM_HOSTS
         ) is False
 
 

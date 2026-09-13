@@ -8,7 +8,6 @@ dumps live in tests/quality/ behind the ``accuracy`` marker.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

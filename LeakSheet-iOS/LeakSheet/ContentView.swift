@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showBrowse = false
     @State private var pendingBrowse: PendingBrowse?
+    @Environment(\.colorScheme) private var colorScheme
     /// View model built while the landing screen still shows its loading
     /// state, handed to the pushed screen so the app has ONE loading state
     /// per tracker instead of "Loading…" followed by "Preparing…".
@@ -75,7 +76,7 @@ struct ContentView: View {
                 .environment(vmForCurrentPlayback)
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
+            SettingsView(presenterScheme: colorScheme)
         }
         .sheet(isPresented: $showBrowse) {
             BrowseArtistsView { pickedUrl, pickedName in

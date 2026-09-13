@@ -2,7 +2,7 @@
 """Compare column layouts across all tracker files.
 
 Usage:
-    python3 scripts/tools/diff_trackers.py
+    uv run python scripts/tools/diff_trackers.py
 
 Shows the detected column mappings and highlights differences between trackers.
 """
@@ -47,7 +47,7 @@ def main() -> None:
             print(f"    [{i}] {h}")
 
     # Print detected mappings
-    print(f"\n\nDETECTED COLUMN MAPPINGS")
+    print("\n\nDETECTED COLUMN MAPPINGS")
     print("=" * 80)
 
     # Collect all canonical fields
@@ -87,7 +87,7 @@ def main() -> None:
             print(f"  {'  ⚠️  DIFFERS':<22}")
 
     # Summary
-    print(f"\n\nSUMMARY")
+    print("\n\nSUMMARY")
     print("=" * 80)
     for name in artist_names:
         fields = all_columns[name]

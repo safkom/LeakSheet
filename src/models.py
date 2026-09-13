@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from typing import NamedTuple
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
 class Badge(str, Enum):
@@ -514,6 +514,13 @@ class Notice(BaseModel):
 
 class Artist(BaseModel):
     """Top-level artist with all parsed tracker data."""
+
+    # The exact (JSON bytes, ETag) this artist was written to the parse cache
+    # as. Set by fetcher._set_cached_parsed so the API can serve those bytes
+    # instead of serializing the whole artist a second time. Private: never on
+    # the wire, and model_copy carries it — a caller that changes the artist
+    # after caching must not reuse it (the API's rename path does not).
+    _wire: tuple[bytes, str] | None = PrivateAttr(default=None)
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
     source_url: str | None = Field(None, description="Original Google Sheets URL")
@@ -783,7 +790,13 @@ def parse_tracker_stats(
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&.][^\S\n]*\n[^\S\n]*)*)[\)\]]")
+# A wrapped line counts as part of a group only right after a separator. The
+# spaces around that line break are stripped before matching (see
+# parse_song_credits), so each character has exactly one way to match. The
+# earlier form allowed spaces on both sides of the newline inside the repeat,
+# and backtracked exponentially on an unclosed "(" followed by many
+# ", <newline>" lines — 2,000 characters did not finish in 15 s (S5852).
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*)[\)\]]")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.
@@ -994,6 +1007,9 @@ def parse_song_credits(raw_name: str) -> SongCredits:
                 collected.setdefault(keyword.lastgroup, []).append(value)
         return ""
 
+    # Linear, and equivalent for everything below: every line is stripped
+    # again before it is used, and group values collapse their whitespace.
+    raw_name = "\n".join(line.strip() for line in raw_name.split("\n"))
     cleaned = _CREDIT_GROUP_RE.sub(take_group, raw_name)
     # A removed group leaves a double space behind ("Title (feat. A) Remix").
     cleaned = _INNER_SPACE_RE.sub(" ", cleaned)

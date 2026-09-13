@@ -155,13 +155,19 @@ struct FilterChip: View {
     var tintColor: Color = .lsAccent
     var onTap: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: onTap) {
             Label(label, systemImage: icon)
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .foregroundStyle(isActive ? AnyShapeStyle(Color.preferredText(on: tintColor)) : AnyShapeStyle(.secondary))
+                // Judged in the CURRENT appearance: a `Color.tone` tint resolves
+                // to a darker mid-tone in light mode than in dark, so against
+                // the default `.dark` the label picked the wrong colour outright.
+                // Every other preferredText call site already passed the scheme.
+                .foregroundStyle(isActive ? AnyShapeStyle(Color.preferredText(on: tintColor, in: colorScheme)) : AnyShapeStyle(.secondary))
                 // Tint via opacity — see DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity
                 .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
         }

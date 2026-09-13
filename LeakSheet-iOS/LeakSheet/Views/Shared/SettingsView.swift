@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("leaksheet_streaming_mode") private var useOriginalQuality: Bool = false
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
+    @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault
     @Environment(\.dismiss) private var dismiss
 
     /// Set when hosted as a sidebar destination rather than presented as a
@@ -12,9 +13,16 @@ struct SettingsView: View {
     /// NavigationStack and the Done button.
     var embedded = false
 
+    /// The presenter's colour scheme, which follows the device once the root
+    /// drops its override. Needed because `.preferredColorScheme(nil)` on a
+    /// sheet does not release an override the sheet already applied: choosing
+    /// System left this sheet dark on a light phone until it was closed.
+    var presenterScheme: ColorScheme? = nil
+
     @State private var cacheSizeBytes: Int64 = 0
     @State private var imageCacheBytes: Int64 = 0
     @State private var clearingCache = false
+    @State private var confirmingClearCache = false
 
     /// Shown so a sideloaded build can be identified. Without it there was no
     /// way to say which version you were running.
@@ -37,33 +45,48 @@ struct SettingsView: View {
         } else {
             NavigationStack { settingsList }
                 .presentationBackground(.ultraThinMaterial)
+                // The app root applies the appearance to the window, and sheets
+                // opened afterwards inherit it — but this sheet is already on
+                // screen when the choice changes here, and a presented sheet is
+                // its own presentation. Without this it stayed in the old
+                // appearance until closed.
+                .preferredColorScheme(appearance.colorScheme ?? presenterScheme)
         }
     }
 
     private var settingsList: some View {
             List {
                 SwiftUI.Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        qualityOption(
-                            title: "Streaming",
-                            subtitle: "Uses provider's streaming API — can use compression on some formats",
-                            isSelected: !useOriginalQuality
-                        ) {
-                            useOriginalQuality = false
-                        }
-
-                        Divider()
-                            .overlay(Color.lsBorder)
-
-                        qualityOption(
-                            title: "Original",
-                            subtitle: "Uses the provider's original file - may use more data for Lossless files",
-                            isSelected: useOriginalQuality
-                        ) {
-                            useOriginalQuality = true
+                    Picker("Appearance", selection: $appearance) {
+                        ForEach(AppAppearance.allCases) { option in
+                            Text(option.label).tag(option)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                } header: {
+                    Text("Appearance")
+                }
+
+                SwiftUI.Section {
+                    // The stock inline picker: a checkmark row per option, with
+                    // selection announced by VoiceOver for free. This used to be
+                    // a hand-rolled pair of buttons drawing checkmark/circle
+                    // glyphs and adding .isSelected traits by hand.
+                    Picker("Playback Quality", selection: $useOriginalQuality) {
+                        qualityLabel(
+                            title: "Streaming",
+                            subtitle: "Uses provider's streaming API — can use compression on some formats"
+                        )
+                        .tag(false)
+                        qualityLabel(
+                            title: "Original",
+                            subtitle: "Uses the provider's original file - may use more data for Lossless files"
+                        )
+                        .tag(true)
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } header: {
                     Text("Playback Quality")
                 }
@@ -101,14 +124,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Button(role: .destructive) {
-                        clearingCache = true
-                        Task {
-                            await CacheService.shared.clearCache()
-                            await ImageCache.shared.clearAll()
-                            cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
-                            imageCacheBytes = await ImageCache.shared.diskUsageBytes()
-                            clearingCache = false
-                        }
+                        confirmingClearCache = true
                     } label: {
                         if clearingCache {
                             ProgressView()
@@ -119,6 +135,15 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(clearingCache)
+                    .confirmationDialog(
+                        "Clear cached trackers and images?",
+                        isPresented: $confirmingClearCache,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear Cache", role: .destructive, action: clearCache)
+                    } message: {
+                        Text("Frees \((cacheSizeBytes + imageCacheBytes).formatted(.byteCount(style: .file))). Trackers re-download the next time you open them.")
+                    }
                 } header: {
                     Text("Storage")
                 } footer: {
@@ -137,7 +162,7 @@ struct SettingsView: View {
                         Text("Invalid URL — the default server will be used.")
                             .foregroundStyle(.orange)
                     } else {
-                        Text("Leave empty to use the default server.")
+                        Text("Leave empty to use the default server. For a local backend, enter its full address — for example http://192.168.1.20:8000.")
                     }
                 }
 
@@ -173,35 +198,24 @@ struct SettingsView: View {
             }
     }
 
-    private func qualityOption(title: String, subtitle: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.lsAccent)
-                        .font(.body)
-                        .accessibilityHidden(true)
-                } else {
-                    Image(systemName: "circle")
-                        .foregroundStyle(.tertiary)
-                        .font(.body)
-                        .accessibilityHidden(true)
-                }
-            }
-            .contentShape(Rectangle())
+    private func qualityLabel(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
-        // Selection was conveyed only by a checkmark-vs-circle glyph.
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func clearCache() {
+        clearingCache = true
+        Task {
+            await CacheService.shared.clearCache()
+            await ImageCache.shared.clearAll()
+            cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
+            imageCacheBytes = await ImageCache.shared.diskUsageBytes()
+            clearingCache = false
+        }
     }
 }

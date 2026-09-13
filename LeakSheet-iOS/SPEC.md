@@ -80,7 +80,7 @@ LeakSheet/
 │   ├── APIClient.swift             # HTTP client actor (sheet, image-proxy, metadata, trackers)
 │   ├── AudioEngine.swift           # @MainActor: AVPlayer + MPNowPlayingInfoCenter + video + queue
 │   ├── CacheService.swift          # Disk cache actor with ETag validation (v2, SHA-256 keys)
-│   ├── ImageCache.swift            # Actor: NSCache + URLCache + ImageIO downsample + prefetch
+│   ├── ImageCache.swift            # Actor: NSCache + URLCache + ImageIO downsample
 │   └── PlaybackQueueLogic.swift    # Pure value type: queue / era-rollover / list auto-advance
 ├── ViewModels/
 │   ├── ArtistViewModel.swift       # MainActor state: chips, debounce, era rows, colors

@@ -26,3 +26,9 @@ skills
 current_task.md
 docs/reviews/
 docs/superpowers/
+
+# SonarQube credentials (local only)
+sonarqube-setup.txt
+.scannerwork/
+coverage.xml
+.coverage

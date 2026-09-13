@@ -160,6 +160,7 @@ struct DesignTokensColorTests {
         (.badgeConfirmed, "badgeConfirmed"), (.badgeBeatOnly, "badgeBeatOnly"),
         (.badgeStem, "badgeStem"), (.badgeUnavailable, "badgeUnavailable"),
         (.badgeRumored, "badgeRumored"), (.badgeConflicting, "badgeConflicting"),
+        (.badgeEntryType, "badgeEntryType"),
         (.lsAccent, "lsAccent"),
     ]
 
@@ -205,3 +206,34 @@ struct EraDisplayColorsContrastTests {
         }
     }
 }
+
+#if canImport(UIKit)
+@Suite("Adaptive colour isolation")
+struct AdaptiveColorIsolationTests {
+    /// SwiftUI's async renderer resolves dynamic colours off the main thread.
+    /// Under MainActor default isolation `Color.adaptive`'s provider closure was
+    /// inferred `@MainActor`, so that resolution trapped (SIGTRAP) — the app
+    /// crashed when a version chip was tapped in the description sheet. Before
+    /// the fix this test takes the whole test process down with it.
+    @Test func `an adaptive colour resolves off the main actor`() async {
+        let color = Color.adaptive(light: .white, dark: .black)
+        // A plain dispatch thread, not a Task: the renderer thread that crashed
+        // runs no Swift task, which is the case where the runtime asserts the
+        // main queue outright. A detached Task did not reproduce the trap.
+        let (dark, light) = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let ui = UIColor(color)
+                continuation.resume(returning: (
+                    ui.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)),
+                    ui.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+                ))
+            }
+        }
+        var darkWhite: CGFloat = 0, lightWhite: CGFloat = 0, alpha: CGFloat = 0
+        dark.getWhite(&darkWhite, alpha: &alpha)
+        light.getWhite(&lightWhite, alpha: &alpha)
+        #expect(darkWhite < 0.1)
+        #expect(lightWhite > 0.9)
+    }
+}
+#endif

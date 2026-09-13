@@ -5,6 +5,15 @@
 	<!-- Audio only. "fetch" and "processing" were declared but unused: the
 	     app registers no BGTaskScheduler identifiers and runs no background
 	     work, so they were entitlements we never exercised. -->
+	<!-- The generated launch screen paints the system background, which follows
+	     the device appearance — so a Light-mode phone flashed white before the
+	     app's default Dark took over. Black in both appearances matches that
+	     default; see DECISIONS.md::AppAppearance.swift. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

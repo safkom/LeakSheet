@@ -143,7 +143,7 @@ struct SearchResultsListView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 4)
 
-            ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
+            ForEach(results.enumerated(), id: \.element.id) { idx, result in
                 SongRowView(
                     song: result.song,
                     version: result.version,
@@ -404,7 +404,7 @@ struct MiscListView: View {
                 .padding(.top, 8)
 
                 if isExpanded(group.eraName, groupCount: groups.count) {
-                    ForEach(Array(group.entries.enumerated()), id: \.element.id) { idx, entry in
+                    ForEach(group.entries.enumerated(), id: \.element.id) { idx, entry in
                         MiscEntryRowView(
                             entry: entry,
                             artistName: artistName,
@@ -502,7 +502,7 @@ struct RecentsListView: View {
                 .padding(.top, 40)
             }
         } else {
-            ForEach(Array(visible.enumerated()), id: \.element.id) { idx, result in
+            ForEach(visible.enumerated(), id: \.element.id) { idx, result in
               // Single root: LazyVStack can only template row identity from
               // the ForEach ids when the body is unary — the eras branch was
               // restructured for exactly this (see ArtistRowViews.swift), and

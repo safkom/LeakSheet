@@ -20,21 +20,10 @@ struct MiniPlayerBar: View {
             VStack(spacing: 0) {
                 // Progress slider
                 if player.duration > 0 {
-                    @Bindable var player = player
-                    Slider(
-                        value: $player.scrubPosition,
-                        in: 0...(player.duration > 0 ? player.duration : 1),
-                        onEditingChanged: { editing in
-                            player.seeking = editing
-                            if !editing {
-                                player.seekTo(player.seekValue)
-                            }
-                        }
-                    )
-                    .tint(Color.lsAccent)
-                    .frame(height: 16)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
+                    ScrubberSlider()
+                        .frame(height: 16)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
                 }
 
                 HStack(spacing: 10) {
@@ -71,9 +60,7 @@ struct MiniPlayerBar: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                     if player.duration > 0 {
-                                        Text(Format.time(player.displayTime))
-                                            .font(.caption2.monospacedDigit())
-                                            .foregroundStyle(.secondary)
+                                        PlaybackElapsedText()
                                     }
                                 }
                             }

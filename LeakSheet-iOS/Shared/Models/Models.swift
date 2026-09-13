@@ -248,6 +248,60 @@ extension Song {
     }
 }
 
+// MARK: - Song names
+
+extension Song {
+    /// A title's identity for linking and search: case, diacritics and
+    /// punctuation don't count, so "Stay On 'Em", "stay on em" and "Stay On Em"
+    /// are one name. A name that is nothing but punctuation ("???") keeps its
+    /// lowercased text, so it can still be searched for.
+    /// See docs/decisions.md::parser.py::_reconcile_title_misreads.
+    nonisolated static func nameKey(_ name: String) -> String {
+        let folded = name.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+        var key = ""
+        var pendingSpace = false
+        for character in folded {
+            if "'\u{2018}\u{2019}".contains(character) { continue }  // "Don't" matches "Dont"
+            if character.isWhitespace || ",.:;!?\"\u{201C}\u{201D}".contains(character) {
+                pendingSpace = !key.isEmpty
+                continue
+            }
+            if pendingSpace { key.append(" ") }
+            pendingSpace = false
+            key.append(character)
+        }
+        return key.isEmpty ? name.lowercased().trimmingCharacters(in: .whitespaces) : key
+    }
+
+    /// The keys a title stands for: the whole title plus each part of a slash
+    /// title, since "Stay On Em / Precious" is both songs' name.
+    nonisolated static func nameKeys(ofTitle title: String) -> Set<String> {
+        var keys: Set<String> = [nameKey(title)]
+        let parts = title.components(separatedBy: " / ")
+        if parts.count > 1 {
+            keys.formUnion(parts.map(nameKey))
+        }
+        keys.remove("")
+        return keys
+    }
+
+    /// This song's own title keys. A placeholder title identifies nothing.
+    nonisolated var titleKeys: Set<String> {
+        isPlaceholder ? [] : Self.nameKeys(ofTitle: baseName)
+    }
+
+    /// Keys of every alt title any version lists.
+    nonisolated var altTitleKeys: Set<String> {
+        var keys: Set<String> = []
+        for version in allVersions {
+            for alt in version.altTitles ?? [] {
+                keys.formUnion(Self.nameKeys(ofTitle: alt))
+            }
+        }
+        return keys
+    }
+}
+
 // MARK: - SongVersion
 
 /// A labeled evidence link from a tracker's Sources column — provenance for

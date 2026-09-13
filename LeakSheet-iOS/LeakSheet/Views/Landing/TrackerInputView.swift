@@ -80,14 +80,18 @@ struct TrackerInputView: View {
             }
 
             if url.trimmingCharacters(in: .whitespaces).isEmpty {
-                Button {
-                    pasteFromClipboard()
-                } label: {
-                    Label("Paste", systemImage: "doc.on.clipboard")
-                        .font(.subheadline)
+                // The system PasteButton, not a Button reading the pasteboard.
+                // A programmatic read raised the "Allow Paste?" prompt on every
+                // tap; PasteButton is the user's explicit consent, so it never
+                // asks.
+                PasteButton(payloadType: String.self) { strings in
+                    if let text = strings.first {
+                        url = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
                 }
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
                 .disabled(loading)
-                .foregroundStyle(.secondary)
             } else {
                 Button {
                     normalizeIfConcatenated()
@@ -119,9 +123,21 @@ struct TrackerInputView: View {
                     .controlSize(.mini)
                 Text("Checking local copy…")
             case .connecting:
+                // Only until the server's first message — or for the whole
+                // wait on a server that does not stream progress.
                 ProgressView()
                     .controlSize(.mini)
                 Text(Self.connectingLabel(elapsed: phaseElapsed))
+            case .server(let message, let done, let total):
+                if let total, total > 0 {
+                    ProgressView(value: Double(done ?? 0), total: Double(total))
+                        .frame(maxWidth: 120)
+                } else {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Text(message)
+                    .contentTransition(.opacity)
             case .downloading(let received, let expected):
                 if let expected, expected > 0 {
                     ProgressView(value: Double(received), total: Double(expected))
@@ -158,12 +174,6 @@ struct TrackerInputView: View {
         case ..<1.5: "Contacting server…"
         case ..<5: "Fetching tracker…"
         default: "Parsing a large tracker…"
-        }
-    }
-
-    private func pasteFromClipboard() {
-        if let text = Pasteboard.string {
-            url = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 

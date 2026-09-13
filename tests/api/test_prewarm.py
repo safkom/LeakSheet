@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import time
 
-import pytest
 
 import src.api as api
 import src.fetcher as fetcher
@@ -65,7 +64,7 @@ class TestRefreshStaleOnce:
         _seed_entry("https://docs.google.com/spreadsheets/d/STALE2/htmlview", age_s=2 * 3600)
         calls: list[str] = []
 
-        async def fake_revalidate(url, artist_name):
+        async def fake_revalidate(url):
             calls.append(url)
 
         monkeypatch.setattr(api, "_background_revalidate", fake_revalidate)
@@ -74,7 +73,7 @@ class TestRefreshStaleOnce:
         assert len(calls) == 1 and "STALE2" in calls[0]
 
     async def test_noop_with_empty_cache(self, monkeypatch):
-        async def boom(url, artist_name):
+        async def boom(url):
             raise AssertionError("must not revalidate anything")
 
         monkeypatch.setattr(api, "_background_revalidate", boom)

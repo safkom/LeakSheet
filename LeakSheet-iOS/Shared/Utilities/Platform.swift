@@ -73,24 +73,31 @@ extension View {
     }
 
     /// Pointer hover highlight. Only macOS has a persistent cursor.
+    ///
+    /// A no-op elsewhere, and not a modifier there at all: the modifier's
+    /// `@State` sat outside the platform check, so every row on iOS and tvOS
+    /// allocated hover storage nothing ever read.
+    @ViewBuilder
     func rowHoverHighlight() -> some View {
+        #if os(macOS)
         modifier(RowHoverHighlight())
+        #else
+        self
+        #endif
     }
 }
 
+#if os(macOS)
 private struct RowHoverHighlight: ViewModifier {
     @State private var hovering = false
 
     func body(content: Content) -> some View {
-        #if os(macOS)
         content
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.white.opacity(hovering ? 0.05 : 0))
             )
             .onHover { hovering = $0 }
-        #else
-        content
-        #endif
     }
 }
+#endif
