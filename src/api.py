@@ -48,6 +48,7 @@ from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
     _atomic_write_bytes,
+    _normalize_url,
     async_fetch_and_parse,
     async_get_cached_age,
     async_get_cached_etag,
@@ -553,9 +554,10 @@ async def _background_revalidate(url: str) -> None:
         return
     _revalidating.add(url_key)
     try:
-        await async_fetch_and_parse(
+        artist = await async_fetch_and_parse(
             url, artist_name=None, cache_ttl=0, use_cache=True
         )
+        await _warm_era_art(artist, url)
         logger.info("Background revalidation complete: %s", url[:80])
     except Exception as e:
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
@@ -742,6 +744,9 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         write_cache=req.use_cache,
         timer=timer,
     )
+    # Detached: covers download while this response is already on its way.
+    # See _warm_era_art for why they must be fetched now rather than on demand.
+    _spawn_detached(_warm_era_art(artist, req.url))
 
     # The cache write already serialized this artist; serve those bytes. Doing
     # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
@@ -1119,6 +1124,104 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
     return buf.getvalue(), "image/jpeg"
 
 
+def _image_request_headers(url: str) -> dict[str, str]:
+    # Matched on the parsed hostname, not as a substring of the whole URL:
+    # "https://attacker.tld/?x=google.com" contains the string and was being
+    # handed a docs.google.com Referer. _is_allowed_domain is the check this
+    # file already uses correctly everywhere else.
+    if _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS):
+        return {"Referer": "https://docs.google.com/"}
+    return {}
+
+
+_ERA_ART_WARM_CONCURRENCY = 3
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_detached(coro) -> None:
+    """Run *coro* past the request that started it, keeping a reference so
+    the task is not garbage-collected mid-flight."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _era_art_index_path(tracker_url: str):
+    digest = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()
+    return CACHE_DIR / f"eraart_{digest}.json"
+
+
+def _read_era_art_index(tracker_url: str) -> dict[str, str]:
+    try:
+        index = json.loads(_era_art_index_path(tracker_url).read_text())
+        return index if isinstance(index, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_era_art_index(tracker_url: str, index: dict[str, str]) -> None:
+    try:
+        CACHE_DIR.mkdir(exist_ok=True)
+        _atomic_write_bytes(_era_art_index_path(tracker_url), json.dumps(index).encode())
+    except OSError as e:
+        logger.warning("era art index write failed: %s", e)
+
+
+async def _warm_era_art(artist, tracker_url: str) -> None:
+    """Download each era cover now, while its URL still works, and keep it.
+
+    See docs/decisions.md::api.py::_warm_era_art. Google's
+    `sheets-images-rt` cover URLs carry a token that expires within minutes to
+    tens of minutes, but a parse is served for hours and clients keep it for
+    days — so covers loaded only while the parse was young. The original is
+    stored in the image cache under the exact URL the payload carries (width
+    0), which /image-proxy reads before going upstream.
+
+    A URL that is already dead here (yetracker.net serves Cloudflare copies up
+    to an hour old) gets the era's last good cover instead, remembered per
+    tracker in a small index. Never another tracker's: the index is keyed by
+    tracker URL.
+    """
+    covers: dict[str, str] = {}
+    for era in artist.eras:
+        url = era.art_url or ""
+        if url.startswith("//"):
+            url = "https:" + url
+        if url.startswith(("http://", "https://")) and _image_host_allowed(url):
+            covers[era.name] = url
+    if not covers:
+        return
+
+    index = await asyncio.to_thread(_read_era_art_index, tracker_url)
+    slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+
+    async def warm(era_name: str, url: str) -> None:
+        key = _image_cache_key(url, None)
+        if await asyncio.to_thread(_read_image_cache, key) is not None:
+            index[era_name] = url
+            return
+        data, content_type = b"", ""
+        async with slots:
+            try:
+                resp, data = await _get_image_capped(url, _image_request_headers(url))
+                content_type = resp.headers.get("content-type", "")
+            except (httpx.HTTPError, HTTPException) as exc:
+                logger.info("era art warm: %s failed: %s", url[:80], exc)
+        if not data:
+            previous = index.get(era_name)
+            stored = previous and await asyncio.to_thread(
+                _read_image_cache, _image_cache_key(previous, None)
+            )
+            if not stored:
+                return
+            data, content_type = stored[0], stored[1]
+        if await asyncio.to_thread(_write_image_cache, key, data, content_type):
+            index[era_name] = url
+
+    await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
+    await asyncio.to_thread(_write_era_art_index, tracker_url, index)
+
+
 @app.get("/image-proxy")
 async def proxy_image(
     request: Request,
@@ -1166,15 +1269,10 @@ async def proxy_image(
             if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
 
-    # Conditional headers — send browser-like headers for Google domains.
-    # Matched on the parsed hostname, not as a substring of the whole URL:
-    # "https://attacker.tld/?x=google.com" contains the string and was being
-    # handed a docs.google.com Referer. _is_allowed_domain is the check this
-    # file already uses correctly everywhere else.
-    is_google = _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS)
-    headers = {}
-    if is_google:
-        headers["Referer"] = "https://docs.google.com/"
+    headers = _image_request_headers(url)
+    # A cover downloaded by _warm_era_art while its token still worked. Read
+    # before any upstream request: the URL itself may have expired since.
+    stored = await asyncio.to_thread(_read_image_cache, _image_cache_key(url, None))
 
     try:
         if width is not None:
@@ -1188,7 +1286,7 @@ async def proxy_image(
             # Prefer Google-side resizing — no local decode, no disk cache
             # needed (the CDN did the work).
             google_url = _rewrite_google_size(url, width)
-            if google_url is not None:
+            if google_url is not None and stored is None:
                 try:
                     # Capped, like the fallback path below. A plain .get() here
                     # buffered the whole body before the content-type check —
@@ -1213,9 +1311,14 @@ async def proxy_image(
         # allowlist admits any *.google.com host, including
         # drive.usercontent.google.com, so an arbitrarily large user-uploaded
         # file was enough to OOM the worker and drop every in-flight request.
-        resp, data = await _get_image_capped(url, headers)
-        ct = resp.headers.get("content-type", "")
-        if resp.status_code == 200 and ct.startswith("image/"):
+        if stored is not None:
+            data, ct = stored[0], stored[1]
+            upstream_status = 200
+        else:
+            resp, data = await _get_image_capped(url, headers)
+            ct = resp.headers.get("content-type", "")
+            upstream_status = resp.status_code
+        if upstream_status == 200 and ct.startswith("image/"):
             if width is not None:
                 original_len = len(data)
                 async with _resize_slot():
@@ -1249,7 +1352,7 @@ async def proxy_image(
         # stored that as the image. 502 says "upstream gave us something we
         # can't serve", which is what happened.
         raise HTTPException(
-            status_code=502 if resp.status_code == 200 else resp.status_code,
+            status_code=502 if upstream_status == 200 else upstream_status,
             detail="Upstream image fetch failed",
         )
     except HTTPException:

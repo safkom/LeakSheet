@@ -278,6 +278,28 @@ etc. all appear with no following digits. So a token is *letters + optional digi
 not *one of {s,w,h} + required digits* — `_GOOGLE_SIZE_SUFFIX_RE` has to match the
 looser grammar or it silently stops resizing.
 
+## api.py::_warm_era_art — covers are downloaded at parse time
+
+Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
+is minted on every page fetch, and it stops working: one fetched directly from Google
+still loaded after 28 minutes, and every page served 42 or more minutes after Google
+rendered it had dead tokens. A parse, though, is served for 1–24 hours and clients keep
+it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
+production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
+Keem were fine.
+
+After every server-side parse (cold miss, stream, background revalidation, prewarm), each
+era cover is downloaded while its token still works and stored in the image cache under
+the exact URL the payload carries (width 0). `/image-proxy` reads that copy before going
+upstream, so a cover keeps loading for the image cache's 7-day life.
+
+yetracker.net is a Cloudflare proxy of the Google page with `max-age=3600`, and it
+ignores query strings and `Accept-Encoding` when choosing a cached copy. Its tokens are
+often dead before we ever parse: a 208-second-old copy worked, a 19-minute-old one did
+not. So a cover that fails to download gets the era's last good copy, remembered in a
+small index per tracker (`eraart_<tracker hash>.json`, never shared between trackers).
+Ye's covers fill in once any parse lands on a young Cloudflare copy, and stay.
+
 ## api.py::image-proxy-etag — ETag is scoped to the disk cache
 
 Only width-bounded image-proxy requests are disk-cached, so only they get an ETag —
