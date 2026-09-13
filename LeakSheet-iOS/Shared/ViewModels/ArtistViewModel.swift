@@ -411,9 +411,9 @@ final class ArtistViewModel {
 
     /// Load era covers into the image cache and derive their display colours.
     ///
-    /// `ImageCache.prefetch` alone is not enough: it warms bytes but never
-    /// extracts colour, so cards still arrived grey and re-tinted a frame
-    /// later. Extraction is cheap once the image is decoded and cached.
+    /// Warming bytes alone is not enough: without colour extraction, cards
+    /// still arrived grey and re-tinted a frame later. Extraction is cheap once
+    /// the image is decoded and cached.
     ///
     /// `limit` nil warms every era (the background pass from ArtistView).
     func warmEraArt(limit: Int? = nil) async {
@@ -434,8 +434,8 @@ final class ArtistViewModel {
         guard !targets.isEmpty else { return }
 
         await withTaskGroup(of: (String, Color)?.self) { group in
-            // Same ceiling as ImageCache.prefetch — enough to saturate the
-            // link without starving the cover the user is looking at.
+            // Enough to saturate the link without starving the cover the user
+            // is looking at.
             let slots = 4
             var next = 0
             var inFlight = 0

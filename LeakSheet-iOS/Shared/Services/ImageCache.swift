@@ -15,12 +15,6 @@ import ImageIO
 actor ImageCache {
     static let shared = ImageCache()
 
-    /// Decode-size buckets. Keeping the set small means a URL is decoded at
-    /// most a few times; callers snap their point size to a bucket.
-    // 1600 added 2026-07-17 — matches the backend buckets; full-screen
-    // Now Playing art was upscaled from 1280 on ~1290px displays.
-    static let sizeBuckets = [128, 320, 640, 1280, 1600]
-
     private let memCache = NSCache<NSString, CGImage>()
     private let session: URLSession
     /// Must be retained — a DispatchSource is cancelled when its last reference
@@ -81,46 +75,6 @@ actor ImageCache {
         memCache.object(forKey: Self.cacheKey(url, maxPixelSize))
     }
 
-    /// Warm the cache for images the user is about to scroll past.
-    ///
-    /// Without this, every cover only starts loading when its row appears, so
-    /// a first pass down a 40-era tracker is a sequence of pop-ins even though
-    /// the cache is working — the cache was simply never given the URLs ahead
-    /// of time. Already-cached URLs cost nothing (loadImage returns the memory
-    /// hit immediately), and the disk URLCache means a later launch skips the
-    /// network entirely. Concurrency is bounded so prefetching never starves
-    /// the image the user is actually looking at.
-    ///
-    /// Cancellable: the caller's `.task` cancels this when the screen goes
-    /// away, so a discarded tracker stops fetching.
-    func prefetch(_ urls: [URL], maxPixelSize: Int, concurrency: Int = 4) async {
-        // Reversed because the loop below pops from the END: without this the
-        // last era warmed first, i.e. the exact opposite of scroll order, so
-        // the covers the user was looking at were the last to arrive.
-        var pending = urls
-            .filter { memCache.object(forKey: Self.cacheKey($0, maxPixelSize)) == nil }
-            .reversed()
-            .map { $0 }
-        guard !pending.isEmpty else { return }
-        await withTaskGroup(of: Void.self) { group in
-            var inFlight = 0
-            while !pending.isEmpty || inFlight > 0 {
-                if Task.isCancelled { break }
-                while inFlight < concurrency, let next = pending.popLast() {
-                    inFlight += 1
-                    group.addTask { [weak self] in
-                        _ = await self?.loadImage(from: next, maxPixelSize: maxPixelSize)
-                    }
-                }
-                if inFlight > 0 {
-                    await group.next()
-                    inFlight -= 1
-                }
-            }
-            group.cancelAll()
-        }
-    }
-
     /// Loads an image, using memory cache → disk/network, decoded at most
     /// `maxPixelSize` on its longest side.
     ///
@@ -166,7 +120,7 @@ actor ImageCache {
     /// `downsampled` is `nonisolated`, but that only removes the *requirement*
     /// for isolation — called from an actor-isolated method it still runs on
     /// this actor's serial executor. So every ImageIO decode blocked the
-    /// cache: `prefetch(concurrency: 4)` got four parallel downloads and zero
+    /// cache: `warmEraArt`'s four slots got four parallel downloads and zero
     /// parallel decodes, and each visible row's `cachedImage(for:)` queued
     /// behind them. That is the scroll freeze-then-catch-up.
     private nonisolated static func downsampledOffActor(
