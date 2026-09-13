@@ -29,10 +29,15 @@ jobs:
       - run: uv run pytest
 
   ios:
-    name: iOS tests (gate)
+    name: iOS tests
     # GitHub-hosted arm64 image with Xcode 27; the app's deployment target is
     # iOS 27, so no older image can build it.
     runs-on: xcode-27
+    # Not a gate yet. The image's only Xcode is 27 beta 6 (27A5252f), newer
+    # than the 27A5194q the app is developed on, and a later seed dropped
+    # `toolbarMinimizeBehavior(_:for:)` (ArtistView.swift) that the older SDK
+    # still requires. Make this blocking again once both toolchains agree.
+    continue-on-error: true
     # The image is a public preview: keep its breakage out of the nightly run,
     # and don't let a hung simulator hold the runner for the 6 h default.
     if: github.event_name != 'schedule'
