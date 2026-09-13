@@ -113,7 +113,8 @@ The backend proxies audio so clients can play it without CORS pain.
 ## API
 
 ```
-POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate)
+POST /api/sheet              → Parse tracker URL → Artist JSON (ETag / stale-while-revalidate;
+                               Accept: application/x-ndjson streams progress lines on a cold parse)
 GET  /api/trackers           → ArtistGrid discovery list (name, url, best, up-to-date flags)
 GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
 GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)

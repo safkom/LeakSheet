@@ -667,3 +667,11 @@ warm cache hit is about 2 ms; and a cold request is dominated by downloading Goo
 HTML, which no runtime shortens. A rewrite would trade a network-bound problem for the
 loss of a mature parser and its ~800-test suite. Revisit only if parse time, not fetch
 time, becomes the measured bottleneck.
+
+Re-assessed 2026-09-13 against production: a cold Ye request took 15.3 s, of which about
+5.4 s was CPU (parse, merge, three serializations) and the rest was downloading tabs. The
+fix was in the request plan, not the language — fetching the Unreleased tab first and
+skipping tabs it already covers took Ye from 20 requests (31.8 MB) to 11 (21.2 MB) with
+byte-identical output, and serializing once per miss removed two of the three
+serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
+NDJSON progress lines to clients that ask for `application/x-ndjson`.
