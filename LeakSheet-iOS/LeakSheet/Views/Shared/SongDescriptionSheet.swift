@@ -543,20 +543,35 @@ struct SongDescriptionSheet: View {
                 Text("Versions")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(versions) { entry in
-                            versionChip(entry)
+                // Opens scrolled to the version the sheet was opened for. It
+                // always started at the first chip, so opening a Best Of or
+                // playing version deep in a 30-version song showed chips for
+                // other versions and hid the selected one off-screen.
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(versions) { entry in
+                                versionChip(entry)
+                                    .id(entry.id)
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
+                    .onAppear {
+                        guard let selected = versions.first(where: isActive) else { return }
+                        proxy.scrollTo(selected.id, anchor: .center)
+                    }
                 }
             }
         }
     }
 
+    private func isActive(_ entry: ArtistViewModel.CrossEraVersion) -> Bool {
+        entry.version.id == active.version.id && entry.eraName == active.eraName
+    }
+
     private func versionChip(_ entry: ArtistViewModel.CrossEraVersion) -> some View {
-        let isSelected = entry.version.id == active.version.id && entry.eraName == active.eraName
+        let isSelected = isActive(entry)
         return Button {
             Haptics.light()
             active = ActiveVersion(
