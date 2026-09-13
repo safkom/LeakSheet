@@ -187,3 +187,56 @@ class TestSSRFGuard:
         monkeypatch.setattr(fetcher, "_get_sheets_client", _boom)
         r = api_client.post("/sheet", json={"url": "http://169.254.169.254/"})
         assert r.status_code == 400
+
+
+class TestSerializeOnce:
+    """A cold miss used to serialize the whole artist three times: to cache it,
+    to hash a key-sorted copy for the ETag, and to respond. The cache write now
+    leaves its bytes on the artist and the response serves them."""
+
+    def _fake_fetch_that_caches(self, artist):
+        async def fake_fetch(url, **kwargs):
+            _set_cached_parsed(_normalize_url(url), artist)
+            return artist
+        return fake_fetch
+
+    def test_miss_serves_the_cached_bytes_and_etag(self, api_client, artist, monkeypatch):
+        monkeypatch.setattr(api, "async_fetch_and_parse", self._fake_fetch_that_caches(artist))
+        calls = []
+        real = api.serialize_artist
+        monkeypatch.setattr(api, "serialize_artist", lambda a: calls.append(1) or real(a))
+
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 200
+        assert calls == [], "the miss path serialized again instead of reusing the cache write"
+
+        cached = (api.CACHE_DIR / f"{_cache_key(_normalize_url(URL))}.parsed.json").read_bytes()
+        assert r.content == cached
+        from src.fetcher import get_cached_etag
+        assert r.headers["ETag"] == f'"{get_cached_etag(URL)}"'
+
+    def test_a_later_hit_carries_the_same_etag(self, api_client, artist, monkeypatch):
+        monkeypatch.setattr(api, "async_fetch_and_parse", self._fake_fetch_that_caches(artist))
+        miss = api_client.post("/sheet", json={"url": URL})
+        hit = api_client.post("/sheet", json={"url": URL})
+        assert hit.headers["X-Cache-Status"] == "hit"
+        assert hit.headers["ETag"] == miss.headers["ETag"]
+
+    def test_a_rename_does_not_reuse_the_shared_bytes(self, api_client, artist, monkeypatch):
+        monkeypatch.setattr(api, "async_fetch_and_parse", self._fake_fetch_that_caches(artist))
+        r = api_client.post("/sheet", json={"url": URL, "artist_name": "Renamed"})
+        assert r.json()["name"] == "Renamed"
+        cached = json.loads(
+            (api.CACHE_DIR / f"{_cache_key(_normalize_url(URL))}.parsed.json").read_text()
+        )
+        assert cached["name"] != "Renamed"
+
+    def test_a_refused_cache_write_still_serializes(self, api_client, artist, monkeypatch):
+        """No wire bytes when the write did not happen — the response must still
+        carry the artist, not an empty or stale body."""
+        async def fake_fetch(url, **kwargs):
+            return artist  # never cached, so no _wire
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 200
+        assert r.json()["name"] == artist.name

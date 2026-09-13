@@ -55,7 +55,8 @@ from src.fetcher import (
     clear_cache,
     close_sheets_client,
     fetch_artistgrid_entries,
-    compute_content_hash,
+    serialize_artist,
+    content_hash,
     DEFAULT_CACHE_TTL,
     InvalidURLError,
     NetworkError,
@@ -670,16 +671,10 @@ async def parse_sheet(
         if cached is not None:
             raw, etag, age = cached
             if not etag:
-                # Legacy cache entry without a stored hash — compute once.
-                # Off the loop: `raw` is the whole parsed artist (6.5 MB for
-                # Ye), so json.loads plus a sorted re-dump and a SHA-256 stalls
-                # every other request for as long as it runs. The miss path
-                # below was moved to a thread for exactly this reason and this
-                # branch was missed.
+                # Legacy cache entry without a stored hash. The ETag is a hash
+                # of the served bytes, so this is one SHA-256 — no parse.
                 with timer.phase("etag"):
-                    etag = await asyncio.to_thread(
-                        lambda: compute_content_hash(json.loads(raw))
-                    )
+                    etag = content_hash(raw)
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
@@ -749,30 +744,28 @@ async def parse_sheet(
         logger.exception("Unhandled error during sheet parse: %s", e)
         raise HTTPException(status_code=500, detail="Internal error")
 
-    # Serialize + hash cost ~600ms on a Ye-sized artist — run off the event
-    # loop so concurrent requests aren't stalled during a cold miss.
+    # The cache write already serialized this artist; serve those bytes. Doing
+    # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
     #
-    # Encode to bytes HERE, in the same thread, and return a Response. Handing
-    # FastAPI a plain dict undid the whole point of this: with no
-    # response_model and no response_class it ran jsonable_encoder (a full
-    # recursive walk of the 6.5MB structure) and then json.dumps AGAIN, both on
-    # the event loop. Three serializations, two of them exactly where this
-    # comment says they must not be — and the largest loop stall on the box.
-    # Display-only override, applied after the shared cache has been written
-    # with the page-inferred name. A later cache hit therefore serves the
-    # inferred name to everyone, and only the caller that asked for a rename
-    # sees it.
-    if req.artist_name:
-        artist = artist.model_copy(
-            update={"name": req.artist_name, "slug": slugify(req.artist_name)}
-        )
-
-    def _serialize_and_hash() -> tuple[bytes, str]:
-        d = artist.model_dump()
-        return json.dumps(d, ensure_ascii=False).encode(), compute_content_hash(d)
-
-    with timer.phase("serialize"):
-        body, etag = await asyncio.to_thread(_serialize_and_hash)
+    # Serialize here only when there are no such bytes: the write was skipped
+    # (use_cache false, or the collapse guard refused it) or the caller asked
+    # for a display rename. That rename is applied after the shared cache was
+    # written with the page-inferred name, so a later cache hit serves the
+    # inferred name to everyone and only this caller sees the override.
+    #
+    # When serializing, encode to bytes off the event loop and return a
+    # Response. Handing FastAPI a plain dict ran jsonable_encoder (a full
+    # recursive walk of the payload) and then json.dumps again, both on the loop.
+    wire = None if req.artist_name else artist._wire
+    if wire is not None:
+        body, etag = wire
+    else:
+        if req.artist_name:
+            artist = artist.model_copy(
+                update={"name": req.artist_name, "slug": slugify(req.artist_name)}
+            )
+        with timer.phase("serialize"):
+            body, etag = await asyncio.to_thread(serialize_artist, artist)
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
     return Response(
         content=body,

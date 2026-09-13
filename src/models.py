@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from typing import NamedTuple
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
 class Badge(str, Enum):
@@ -514,6 +514,13 @@ class Notice(BaseModel):
 
 class Artist(BaseModel):
     """Top-level artist with all parsed tracker data."""
+
+    # The exact (JSON bytes, ETag) this artist was written to the parse cache
+    # as. Set by fetcher._set_cached_parsed so the API can serve those bytes
+    # instead of serializing the whole artist a second time. Private: never on
+    # the wire, and model_copy carries it — a caller that changes the artist
+    # after caching must not reuse it (the API's rename path does not).
+    _wire: tuple[bytes, str] | None = PrivateAttr(default=None)
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
     source_url: str | None = Field(None, description="Original Google Sheets URL")

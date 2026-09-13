@@ -731,10 +731,21 @@ def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def compute_content_hash(data: dict) -> str:
-    """Compute a short SHA-256 hash of serialized data as content fingerprint (ETag)."""
-    raw = json.dumps(data, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+def content_hash(body: bytes) -> str:
+    """ETag for a serialized payload: a short SHA-256 of the exact bytes served.
+
+    This used to hash a SECOND, key-sorted json.dumps of the same data, so a
+    cache miss serialized the whole artist three times — once to cache, once to
+    fingerprint, once to respond. The served bytes are already deterministic
+    (model_dump field order is fixed), so they are the fingerprint.
+    """
+    return hashlib.sha256(body).hexdigest()[:16]
+
+
+def serialize_artist(artist: "Artist") -> tuple[bytes, str]:
+    """The artist as response bytes, with their ETag."""
+    body = json.dumps(artist.model_dump(), ensure_ascii=False).encode()
+    return body, content_hash(body)
 
 
 def _cache_key(url: str) -> str:
@@ -905,7 +916,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 CACHE_COLLAPSE_RATIO = 0.8
 
 
-def _collapse_reason(key: str, data: dict) -> str | None:
+def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
     """Why ``data`` must not overwrite the cached parse, or None if it may.
 
     A partial fetch — some tabs short, or a sibling workbook that failed to
@@ -946,13 +957,11 @@ def _collapse_reason(key: str, data: dict) -> str | None:
             return None
         old, old_eras = previous
 
-    new = data.get("total_versions") or 0
     if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
         return None
     if age > STALE_CACHE_TTL:
         return None
 
-    new_eras = len(data.get("eras") or [])
     return (
         f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
     )
@@ -970,12 +979,17 @@ def _legacy_parsed_counts(parsed_file: Path) -> tuple[int, int] | None:
 
 
 def _set_cached_parsed(url: str, artist: Artist) -> None:
-    """Write parsed Artist JSON to cache, with content hash in metadata."""
+    """Write parsed Artist JSON to cache, with content hash in metadata.
+
+    On success the written bytes and ETag are left on ``artist._wire``, so the
+    request that produced this parse can respond without serializing again.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
     try:
-        data = artist.model_dump()
-        reason = _collapse_reason(key, data)
+        # The collapse check needs two counts, not the whole dump — so it runs
+        # before any serialization, and a refused parse costs none.
+        reason = _collapse_reason(key, artist.total_versions, len(artist.eras))
         if reason is not None:
             # Served to this caller, but not persisted: the good copy stays,
             # and the next request is not poisoned by a transient failure.
@@ -983,10 +997,8 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
                 "Refusing to cache a collapsed parse for %s (%s)", url[:80], reason
             )
             return
-        _atomic_write_text(
-            CACHE_DIR / f"{key}.parsed.json",
-            json.dumps(data, ensure_ascii=False),
-        )
+        body, etag = serialize_artist(artist)
+        _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
         # parsed_timestamp, not timestamp: the parse's freshness is its own
         # signal. Under force_refresh the caller skips _set_cache entirely
         # while still writing the parse, so without a write here a
@@ -994,13 +1006,14 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
         # considered stale immediately — or, on a first-ever fetch, wrote a
         # parsed cache that could never be read.
         _write_meta(key, {
-            "content_hash": compute_content_hash(data),
+            "content_hash": etag,
             "parsed_timestamp": time.time(),
             # Read back by _collapse_reason, so the collapse check costs a
             # small sidecar read instead of re-parsing the whole entry.
-            "total_versions": data.get("total_versions") or 0,
-            "era_count": len(data.get("eras") or []),
+            "total_versions": artist.total_versions,
+            "era_count": len(artist.eras),
         })
+        artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
         logger.warning("Failed to cache parsed result: %s", e)
@@ -1889,7 +1902,12 @@ async def async_fetch_and_parse(
 
         # Priority-ordered concurrent fetch with cancellation — see
         # docs/decisions.md::fetcher.py::gid-fetch-priority
-        fetch_tasks = [asyncio.create_task(_fetch_gid(g)) for g in gids]
+        fetch_tasks: list[asyncio.Task] = []
+
+        def _start(gid_list: list[str]) -> list[asyncio.Task]:
+            started = [asyncio.create_task(_fetch_gid(g)) for g in gid_list]
+            fetch_tasks.extend(started)
+            return started
 
         best_artist: Artist | None = None
         # Rank tuple order — see docs/decisions.md::fetcher.py::gid-fetch-priority
@@ -1898,57 +1916,82 @@ async def async_fetch_and_parse(
         hub_gid: str | None = None
         best_html = ""
 
+        async def _consider(task: asyncio.Task) -> bool:
+            """Parse one fetched tab and fold it into the ranking. True = stop."""
+            nonlocal best_artist, best_score, best_gid, hub_gid, best_html
+            result = await task
+            if result is None:
+                return False
+            result_gid, sheet_html = result
+            try:
+                name = _resolve_artist_name(title, artist_name)
+                with t.phase("parse"):
+                    candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
+                n_eras = len(candidate.eras)
+                n_songs = sum(
+                    len(s.songs)
+                    for era in candidate.eras
+                    for s in era.sections
+                )
+
+                logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
+                if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
+                    hub_gid = result_gid
+                # Songs outrank eras. Era count used to come first, as a
+                # proxy for "properly structured tab", but it stopped being
+                # one once flat-era tabs (no header rows, era implied by the
+                # Era column) started yielding real era counts: a 5-era,
+                # 7-song badge sub-tab then outranked the 3-era, 474-song
+                # main tab on the MIKE tracker, and 43 flat eras beat 26 real
+                # ones on Dr. Dre — costing 668 songs and every era cover.
+                # The payload is songs; rank on it.
+                score = (1 if n_songs else 0, n_songs, n_eras)
+                if score > best_score:
+                    best_score = score
+                    best_artist = candidate
+                    best_gid = result_gid
+                    best_html = sheet_html
+
+                if n_songs == 0:
+                    return False  # never short-circuit on a song-less tab
+                # Unreleased tab wins as long as it has at least 1 era —
+                # prevents Recents/landing tabs from outcompeting it on era count.
+                if result_gid == unreleased_gid:
+                    logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+                    return True
+                if n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
+                    # Only stop early on a tab that is actually leading.
+                    # This stop abandons every gid still in flight, so a
+                    # small tab that merely clears the era floor must not
+                    # trigger it — that is how a 7-song sub-tab pre-empted
+                    # a 474-song main tab.
+                    return True
+            except (ValueError, KeyError):
+                pass
+            return False
+
+        # A tab NAMED Unreleased decides the result by itself whenever it has
+        # songs — _consider stops on it before looking at anything else. So
+        # fetch it alone first, and fan out to the other candidates only if it
+        # comes back empty or missing. Starting them all at once meant the
+        # smaller tabs finished downloading while the (largest) Unreleased tab
+        # was still arriving, and were then thrown away: ~10.8 MB of Ye's
+        # Recent, Tracklists, Album Copies and friends on every cold parse.
+        if unreleased_gid and gids and gids[0] == unreleased_gid:
+            first_wave, second_wave = gids[:1], gids[1:]
+        else:
+            first_wave, second_wave = gids, []
+
         try:
-            for task in fetch_tasks:
-                result = await task
-                if result is None:
-                    continue
-                result_gid, sheet_html = result
-                try:
-                    name = _resolve_artist_name(title, artist_name)
-                    with t.phase("parse"):
-                        candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
-                    n_eras = len(candidate.eras)
-                    n_songs = sum(
-                        len(s.songs)
-                        for era in candidate.eras
-                        for s in era.sections
-                    )
-
-                    logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                    if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
-                        hub_gid = result_gid
-                    # Songs outrank eras. Era count used to come first, as a
-                    # proxy for "properly structured tab", but it stopped being
-                    # one once flat-era tabs (no header rows, era implied by the
-                    # Era column) started yielding real era counts: a 5-era,
-                    # 7-song badge sub-tab then outranked the 3-era, 474-song
-                    # main tab on the MIKE tracker, and 43 flat eras beat 26 real
-                    # ones on Dr. Dre — costing 668 songs and every era cover.
-                    # The payload is songs; rank on it.
-                    score = (1 if n_songs else 0, n_songs, n_eras)
-                    if score > best_score:
-                        best_score = score
-                        best_artist = candidate
-                        best_gid = result_gid
-                        best_html = sheet_html
-
-                    if n_songs == 0:
-                        continue  # never short-circuit on a song-less tab
-                    # Unreleased tab wins as long as it has at least 1 era —
-                    # prevents Recents/landing tabs from outcompeting it on era count.
-                    if result_gid == unreleased_gid:
-                        logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+            stopped = False
+            for task in _start(first_wave):
+                if await _consider(task):
+                    stopped = True
+                    break
+            if not stopped and second_wave:
+                for task in _start(second_wave):
+                    if await _consider(task):
                         break
-                    elif n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
-                        # Only stop early on a tab that is actually leading.
-                        # This break abandons every gid still in flight, so a
-                        # small tab that merely clears the era floor must not
-                        # trigger it — that is how a 7-song sub-tab pre-empted
-                        # a 474-song main tab.
-                        break
-                except (ValueError, KeyError):
-                    continue
         finally:
             for task in fetch_tasks:
                 task.cancel()
