@@ -965,6 +965,10 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
         age = 0.0
+    # Checked before the counts: past this age the old entry is never
+    # preferred, so a legacy entry must not pay the full read below for it.
+    if age > STALE_CACHE_TTL:
+        return None
 
     # The counts live in the small meta sidecar, which is read here anyway.
     # Reading them out of the parse itself meant a full multi-MB json.loads on
@@ -981,8 +985,6 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         old, old_eras = previous
 
     if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
-        return None
-    if age > STALE_CACHE_TTL:
         return None
 
     return (
@@ -1361,35 +1363,20 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # ---------------------------------------------------------------------------
 
 async def _fetch_base_html(
-    client: httpx.AsyncClient,
-    url_norm: str,
-    *,
-    timeout: float,
-    cache_ttl: float,
-    use_cache: bool,
+    client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
-    """Base page HTML + title, served from the HTML cache when it is fresh.
+    """Base page HTML + title, always from the network.
 
-    async_fetch_sheet_html reads this cache before going to the network; the
-    two base-page fetches inside async_fetch_and_parse did not, so a cold
-    request re-downloaded the page even with a fresh copy already on disk.
-
-    Only a page that actually carries tables is written, which is the rule
-    async_fetch_sheet_html already follows for this key: its cached read
-    returns immediately without re-checking, so a table-less page stored here
-    would later be handed back as the sheet and skip GID discovery entirely.
+    Deliberately not read from the HTML cache: the entry under ``url_norm``
+    holds the winning TAB's page, written after a successful parse, not the
+    base page. Served back as the base page it has no tab switcher, so a
+    re-parse dropped the Art and content tabs and cached the result.
     """
-    if use_cache and cache_ttl > 0:
-        cached = await _async_get_cached(url_norm, cache_ttl)
-        if cached is not None:
-            return cached
     r = await client.get(url_norm, timeout=timeout)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
     title = title_match.group(1) if title_match else ""
-    if use_cache and "<table" in html.lower():
-        await _async_set_cache(url_norm, html, title)
     return html, title
 
 
@@ -1843,10 +1830,7 @@ async def async_fetch_and_parse(
             base_page_paths: dict[str, str] = {}
             try:
                 with t.phase("base_fetch"):
-                    base_html, _ = await _fetch_base_html(
-                        client, url_norm, timeout=timeout,
-                        cache_ttl=cache_ttl, use_cache=use_cache,
-                    )
+                    base_html, _ = await _fetch_base_html(client, url_norm, timeout=timeout)
                 named_tabs = _discover_named_tabs(base_html)
                 base_page_paths = _page_path_map(base_html)
             except httpx.HTTPError:
@@ -1900,10 +1884,7 @@ async def async_fetch_and_parse(
     # Discover all GIDs and try them
     try:
         with t.phase("base_fetch"):
-            base_html, title = await _fetch_base_html(
-                client, url_norm, timeout=timeout,
-                cache_ttl=cache_ttl, use_cache=use_cache,
-            )
+            base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
 
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():

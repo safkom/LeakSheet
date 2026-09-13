@@ -109,6 +109,27 @@ class TestCacheHitAndValidation:
         # TestClient runs background tasks after the response — revalidation fired.
         assert calls == [URL]
 
+    def test_stale_revalidation_never_writes_the_callers_name(self, api_client, artist, monkeypatch):
+        """The revalidated parse is written to the cache every client shares, so
+        a request body's artist_name must not reach it — the same rule the miss
+        path follows."""
+        names: list[str | None] = []
+
+        async def fake_fetch(url, **kwargs):
+            names.append(kwargs.get("artist_name"))
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        _populate_cache(URL, artist, age_seconds=2 * 3600)
+        r = api_client.post("/sheet", json={"url": URL, "artist_name": "pwned"})
+        assert r.headers["X-Cache-Status"] == "stale"
+        etag = r.headers["ETag"]
+        r = api_client.post(
+            "/sheet", json={"url": URL, "artist_name": "pwned"}, headers={"If-None-Match": etag}
+        )
+        assert r.status_code == 304
+        assert names == [None, None]
+
 
 class TestForceRefresh:
     def test_force_refresh_bypasses_fresh_cache(self, api_client, artist, monkeypatch):

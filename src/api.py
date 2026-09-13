@@ -52,7 +52,6 @@ from src.fetcher import (
     async_get_cached_age,
     async_get_cached_etag,
     async_get_cached_parsed_bytes,
-    get_cached_parsed_bytes,
     clear_cache,
     close_sheets_client,
     fetch_artistgrid_entries,
@@ -541,15 +540,21 @@ app.add_middleware(
 _revalidating: set[str] = set()
 
 
-async def _background_revalidate(url: str, artist_name: str | None) -> None:
-    """Re-fetch and re-parse a tracker URL in the background to refresh cache."""
+async def _background_revalidate(url: str) -> None:
+    """Re-fetch and re-parse a tracker URL in the background to refresh cache.
+
+    Takes no artist name, for the reason ``_parse_for_response`` gives: the
+    result lands in the URL-keyed cache every client shares. Stale hits used
+    to pass the request body's ``artist_name`` here, so one request could
+    rename a tracker (and its slug, iOS favourites key material) for everyone.
+    """
     url_key = url.strip().lower()
     if url_key in _revalidating:
         return
     _revalidating.add(url_key)
     try:
         await async_fetch_and_parse(
-            url, artist_name=artist_name, cache_ttl=0, use_cache=True
+            url, artist_name=None, cache_ttl=0, use_cache=True
         )
         logger.info("Background revalidation complete: %s", url[:80])
     except Exception as e:
@@ -573,22 +578,8 @@ async def _refresh_stale_once(limit: int = _PREWARM_BATCH) -> int:
     """
     urls = await asyncio.to_thread(stale_parsed_cache_urls, limit)
     for url in urls:
-        # artist_name=None re-infers from the page title, silently overwriting
-        # whatever override a client had populated the entry with.
-        await _background_revalidate(url, await asyncio.to_thread(_cached_artist_name, url))
+        await _background_revalidate(url)
     return len(urls)
-
-
-def _cached_artist_name(url: str) -> str | None:
-    """The artist name already on the cached parse, so a prewarm preserves a
-    client-supplied override instead of re-inferring from the page title."""
-    cached = get_cached_parsed_bytes(url, max_age=STALE_CACHE_TTL)
-    if cached is None:
-        return None
-    try:
-        return json.loads(cached[0]).get("name") or None
-    except (ValueError, AttributeError):
-        return None
 
 
 async def _prewarm_loop() -> None:
@@ -654,7 +645,7 @@ async def parse_sheet(
                 age = await async_get_cached_age(req.url)
                 if age is not None and age < STALE_CACHE_TTL:
                     if age > DEFAULT_CACHE_TTL:
-                        bg.add_task(_background_revalidate, req.url, req.artist_name)
+                        bg.add_task(_background_revalidate, req.url)
                     return Response(
                         status_code=304,
                         headers={
@@ -679,7 +670,7 @@ async def parse_sheet(
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
-                bg.add_task(_background_revalidate, req.url, req.artist_name)
+                bg.add_task(_background_revalidate, req.url)
 
             return Response(
                 content=raw,
@@ -847,7 +838,9 @@ def _stream_sheet(req: SheetRequest, request: Request) -> StreamingResponse:
                 "bytes": len(body),
                 "timing": timer.server_timing_header(),
             })
-            queue.put_nowait(body + b"\n")
+            # Separately: `body + b"\n"` copied the whole multi-MB payload.
+            queue.put_nowait(body)
+            queue.put_nowait(b"\n")
             logger.info("sheet_timing url=%s status=miss stream %s", req.url[:80], timer.log_line())
         except Exception as e:
             err = _sheet_http_error(req, e)

@@ -201,6 +201,27 @@ and `LEAKSHEET_EXTRA_SHEET_HOSTS` only. Cost: a feed-only tracker whose covers a
 self-hosted (`/assets/<sha>.jpg`) shows no art until its host is added to the seed —
 which is why `tylertracker.net`, 40 era covers, is in it. Decided 2026-09-13.
 
+## fetcher.py::_get_sheets_client — redirects are not re-checked against the allowlist
+
+`/sheet` checks the allowlist on the URL it is handed and on every tab URL
+(`_build_sheet_html_url`), but the client follows redirects without re-checking the
+host. The image proxy does re-check. The difference is deliberate:
+
+- A redirect only happens if an allowlisted host sends one. A tracker host that is
+  compromised can already serve whatever content it likes under its own URL, so a
+  redirect gives it nothing extra.
+- `PublicOnlyAsyncTransport` still rejects non-public addresses on every hop, so a
+  redirect cannot reach internal services.
+- A strict per-hop check would also reject redirects real trackers rely on (`x.net` to
+  `www.x.net`, Google sending a private sheet to `accounts.google.com`). Each one would
+  need seeding, and nothing short of a live sweep of every tracker would catch the ones
+  that were missed.
+
+The remaining gap is an open redirect on an allowlisted host, which would make the
+backend fetch a public URL someone else chose. Only the parsed tracker is returned,
+never the raw body. Revisit if the image proxy's per-hop check is ever moved into the
+transport and can be shared. Decided 2026-09-13, after the branch review.
+
 ## models.py — fields kept on the wire with no client reader
 
 `stats` / `stats_raw` / `highlighted_producers` stay in the payload even though no

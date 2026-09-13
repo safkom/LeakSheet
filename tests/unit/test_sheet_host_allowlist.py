@@ -178,12 +178,34 @@ class TestSubPageGuard:
         assert "gid=42" in url
 
     def test_allowlisted_absolute_tab_url_is_used(self):
-        register_tracker_hosts(["https://yetracker.net/"])
+        # Not a seed host, so this proves registration is what admits it.
+        register_tracker_hosts(["https://feedonly-tracker.example/"])
         url = fetcher._build_sheet_html_url(
-            self.BASE, "42", {"42": "https://yetracker.net/7.html"}
+            self.BASE, "42", {"42": "https://feedonly-tracker.example/7.html"}
         )
-        assert url == "https://yetracker.net/7.html"
+        assert url == "https://feedonly-tracker.example/7.html"
 
     def test_relative_tab_url_stays_on_the_base_host(self):
         url = fetcher._build_sheet_html_url(self.BASE, "42", {"42": "/7.html"})
         assert url == "https://docs.google.com/7.html"
+
+
+class TestSameSite:
+    @pytest.mark.parametrize("host, base", [
+        ("x.net", "x.net"),
+        ("cdn.x.net", "x.net"),
+        ("x.net", "www.x.net"),
+        ("CDN.X.NET", "x.net"),
+    ])
+    def test_same_site(self, host, base):
+        assert fetcher._same_site(host, base)
+
+    @pytest.mark.parametrize("host, base", [
+        ("evilx.net", "x.net"),        # suffix without a dot boundary
+        ("x.net.evil.example", "x.net"),
+        ("evil.example", "x.net"),
+        (None, "x.net"),
+        ("x.net", None),
+    ])
+    def test_not_same_site(self, host, base):
+        assert not fetcher._same_site(host, base)

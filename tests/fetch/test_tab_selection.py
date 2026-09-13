@@ -355,3 +355,49 @@ class TestProgressEvents:
 
         tab_events = [e for e in events if e["stage"] == "tabs" and "total" in e]
         assert tab_events[-1]["done"] == tab_events[-1]["total"]
+
+
+class TestBaseHtmlCacheIsNotTheBasePage:
+    """The HTML cache entry under the workbook URL holds the WINNING TAB's page,
+    not the base page — a Google base page carries no ``<table``. Reading it
+    back as the base page found no tab switcher, so a re-parse while that entry
+    was still fresh dropped the Art and Misc tabs and cached the damaged result
+    (same song count, so the collapse guard let it through).
+    """
+
+    async def test_reparse_with_fresh_html_entry_keeps_secondary_tabs(
+        self, workbook_client, patch_sheets_client
+    ):
+        import src.fetcher as fetcher
+
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        first = await async_fetch_and_parse(URL, use_cache=True, write_cache=True)
+        assert len(first.misc_entries) == 2
+
+        # The parse entry is gone (or stale); the HTML entry is still fresh.
+        key = fetcher._cache_key(fetcher._normalize_url(URL))
+        (fetcher.CACHE_DIR / f"{key}.parsed.json").unlink()
+
+        second = await async_fetch_and_parse(URL, use_cache=True, write_cache=True)
+        assert [m.name for m in second.misc_entries] == [m.name for m in first.misc_entries]
+        assert second.eras[0].art_url == first.eras[0].art_url
+
+
+class TestUnreleasedFirstSkipsOtherCatalogueTabs:
+    """A tab named Unreleased that yields songs wins without the other
+    catalogue candidates being downloaded. Starting them all in parallel took
+    Ye from 11 requests to 20 for byte-identical output."""
+
+    async def test_recent_tab_is_never_fetched(self, workbook_client, patch_sheets_client):
+        client = workbook_client(WORKBOOK, tab_names=TAB_NAMES)
+        requested: list[str] = []
+
+        async def record(request):
+            requested.append(str(request.url))
+
+        client.event_hooks = {"request": [record], "response": []}
+        artist = await _fetch(client, patch_sheets_client)
+
+        assert artist.total_songs == 4
+        assert any("100" in u for u in requested)
+        assert not any("gid=400" in u or "/400" in u for u in requested), requested
