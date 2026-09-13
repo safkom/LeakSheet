@@ -129,7 +129,9 @@ class TestResizeImageBytes:
 
 class TestImageCacheKey:
     def test_stable(self):
-        assert _image_cache_key("https://x/y", 320) == _image_cache_key("https://x/y", 320)
+        first = _image_cache_key("https://x/y", 320)
+        second = _image_cache_key("https://x/y", 320)
+        assert first == second
 
     def test_width_sensitive(self):
         assert _image_cache_key("https://x/y", 320) != _image_cache_key("https://x/y", 640)

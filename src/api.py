@@ -26,7 +26,7 @@ import os
 import re
 import time
 import zlib
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 import httpx
@@ -378,10 +378,10 @@ async def lifespan(app: FastAPI):
     # Shutdown: stop background work and close all three shared HTTP clients.
     if prewarm_task is not None:
         prewarm_task.cancel()
-        try:
+        # Awaiting our own cancelled task: its CancelledError is the expected
+        # result, not a cancellation of this shutdown.
+        with suppress(asyncio.CancelledError):
             await prewarm_task
-        except asyncio.CancelledError:
-            pass
     if _proxy_client is not None:
         await _proxy_client.aclose()
     await close_shared_client()
