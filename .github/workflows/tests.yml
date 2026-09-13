@@ -23,9 +23,40 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv run ruff check .
       # Bare pytest = the offline gate (addopts excludes live/accuracy/slow).
       # Deterministic, no network, no Trackers/ dumps needed. This gates merges.
       - run: uv run pytest
+
+  ios:
+    name: iOS tests (gate)
+    # GitHub-hosted arm64 image with Xcode 27; the app's deployment target is
+    # iOS 27, so no older image can build it.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      # Device names shift between image releases — take whichever iPhone
+      # simulator the image ships rather than hardcoding one.
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime, ds in devices.items() if "iOS" in runtime
+                     for d in ds if d["name"].startswith("iPhone")))')
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+      - name: xcodebuild test
+        working-directory: LeakSheet-iOS
+        # `shell: bash` adds pipefail, so a failing test run still fails the
+        # step through the `tail`.
+        shell: bash
+        run: |
+          xcodebuild test \
+            -project LeakSheet.xcodeproj \
+            -scheme LeakSheet \
+            -destination "id=$SIM_UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -n 40
 
   live:
     name: Live invariants (latest data)
