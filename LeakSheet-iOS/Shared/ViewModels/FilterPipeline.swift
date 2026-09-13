@@ -153,8 +153,10 @@ extension ArtistViewModel {
     private nonisolated static func computeSearchResults(
         artist: Artist, state: FilterState, searchIndex: [[SongSearchFields]]
     ) -> [SearchResult] {
-        let q = state.query
-        guard !q.isEmpty else { return [] }
+        // Punctuation-insensitive, like the fields it is compared with:
+        // "stay on em" finds "Stay On 'Em".
+        guard !state.query.isEmpty else { return [] }
+        let q = Song.nameKey(state.query)
         // Use the prebuilt haystack when its shape matches; otherwise fall back
         // to inline scoring so correctness never depends on the index.
         let useIndex = searchIndex.count == artist.eras.count
@@ -426,12 +428,12 @@ extension ArtistViewModel {
         let versionNames: [String]
 
         init(song: Song) {
-            baseName = song.baseName.lowercased()
+            baseName = Song.nameKey(song.baseName)
             var alts: [String] = []
             var names: [String] = []
             for v in song.versions {
-                if let a = v.altTitles { alts.append(contentsOf: a.map { $0.lowercased() }) }
-                names.append(v.name.lowercased())
+                if let a = v.altTitles { alts.append(contentsOf: a.map(Song.nameKey)) }
+                names.append(Song.nameKey(v.name))
             }
             altTitles = alts
             versionNames = names
@@ -452,11 +454,11 @@ extension ArtistViewModel {
     }
 
     private nonisolated static func scoreSong(_ song: Song, query: String) -> Int {
-        let bn = song.baseName.lowercased()
+        let bn = Song.nameKey(song.baseName)
         var alts: [String] = []
         for v in song.versions {
             if let altTitles = v.altTitles {
-                alts.append(contentsOf: altTitles.map { $0.lowercased() })
+                alts.append(contentsOf: altTitles.map(Song.nameKey))
             }
         }
         if bn == query { return 100 }
@@ -465,7 +467,7 @@ extension ArtistViewModel {
         if alts.contains(where: { $0.hasPrefix(query) }) { return 60 }
         if bn.contains(query) { return 40 }
         for v in song.versions {
-            if v.name.lowercased().contains(query) { return 20 }
+            if Song.nameKey(v.name).contains(query) { return 20 }
         }
         if alts.contains(where: { $0.contains(query) }) { return 20 }
         return 0

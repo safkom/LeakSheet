@@ -189,6 +189,11 @@ final class ArtistViewModel {
     private let songKeyEras: [String: [CrossEraRef]]
     /// baseName → every era containing it (see Precomputed.baseNameEras).
     private let baseNameEras: [String: [CrossEraRef]]
+    /// Name key → songs carrying it as a title / as an alt title (see
+    /// Precomputed.titleKeySongs), and each era's position for ordering.
+    private let titleKeySongs: [String: [CrossEraRef]]
+    private let altTitleKeySongs: [String: [CrossEraRef]]
+    private let eraOrder: [String: Int]
 
     /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
     private let searchIndex: [[SongSearchFields]]
@@ -275,6 +280,12 @@ final class ArtistViewModel {
         /// both `resolvedSong` and `crossEraRefs`, so neither has to rescan
         /// the tracker (Era.allSongs rebuilds its array on each access).
         let baseNameEras: [String: [CrossEraRef]]
+        /// Name key (Song.nameKey) → every song with that title, or that name
+        /// as one part of a slash title; and → every song listing it as an alt
+        /// title. Back `linkedRefs`, the picker's "Also Known As" row.
+        let titleKeySongs: [String: [CrossEraRef]]
+        let altTitleKeySongs: [String: [CrossEraRef]]
+        let eraOrder: [String: Int]
         /// Per-era, per-song lowercased search haystack, built once off-main so
         /// each keystroke's scoring is comparison-only (no re-lowercasing every
         /// song name / alt title / version name across the whole tracker).
@@ -294,6 +305,8 @@ final class ArtistViewModel {
             var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
             var keyEras: [String: [CrossEraRef]] = [:]
             var byBaseName: [String: [CrossEraRef]] = [:]
+            var byTitleKey: [String: [CrossEraRef]] = [:]
+            var byAltTitleKey: [String: [CrossEraRef]] = [:]
             for era in artist.eras {
                 let s = ArtistViewModel.computeEraStats(era)
                 statsByName[era.name] = s
@@ -303,6 +316,13 @@ final class ArtistViewModel {
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
                 for song in era.allSongs {
+                    // Before the placeholder guard: a "???" row's alt title is
+                    // its only identity, and it should still link to the named
+                    // song. Its title keys are empty, so it is never linked BY
+                    // that placeholder title.
+                    let linkRef = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
+                    for key in song.titleKeys { byTitleKey[key, default: []].append(linkRef) }
+                    for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(linkRef) }
                     // A placeholder title identifies nothing, so indexing it
                     // groups every unidentified track in the tracker under one
                     // key: 319 of them on Ye. The description sheet then
@@ -340,6 +360,11 @@ final class ArtistViewModel {
             // Only keys that actually span content are worth keeping
             self.songKeyEras = keyEras.filter { $0.value.count > 1 }
             self.baseNameEras = byBaseName
+            self.titleKeySongs = byTitleKey
+            self.altTitleKeySongs = byAltTitleKey
+            self.eraOrder = Dictionary(
+                artist.eras.enumerated().map { ($1.name, $0) }, uniquingKeysWith: { first, _ in first }
+            )
             self.searchIndex = artist.eras.map { $0.allSongs.map(SongSearchFields.init(song:)) }
             self.eraPlaybackContexts = artist.eras.map { era in
                 EraSongContext(
@@ -384,6 +409,67 @@ final class ArtistViewModel {
         guard !Song.isPlaceholderName(derived) else { return [] }
         return baseNameEras[derived] ?? []
     }
+
+    /// Songs linked to this payload's song by name, one hop: a song whose title
+    /// is one of this song's names (its title, a slash-title part, or an alt
+    /// title), or a song that lists this song's title as an alt title.
+    ///
+    /// Linked, never merged — trackers cross-list distinct songs as each
+    /// other's alt titles, and one hop keeps "All Falls Down" from dragging in
+    /// everything "Self Conscious" names. Excludes the song's own eras (the
+    /// Versions row already has those). See
+    /// docs/decisions.md::parser.py::_reconcile_title_misreads.
+    func linkedRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
+        let family = crossEraRefs(for: payload)
+        let ownSongs = family.isEmpty ? payload.song.map { [$0] } ?? [] : family.map(\.song)
+        var titles: Set<String> = []
+        var names: Set<String> = []
+        if ownSongs.isEmpty {
+            // A bare version (Now Playing, Favourites): its own name and aliases.
+            if !Song.isPlaceholderName(payload.version.derivedBaseName) {
+                titles = Song.nameKeys(ofTitle: payload.version.derivedBaseName)
+            }
+            names = titles
+            for alt in payload.version.altTitles ?? [] {
+                names.formUnion(Song.nameKeys(ofTitle: alt))
+            }
+        } else {
+            for song in ownSongs {
+                titles.formUnion(song.titleKeys)
+                names.formUnion(song.titleKeys)
+                names.formUnion(song.altTitleKeys)
+            }
+        }
+
+        func identity(_ ref: CrossEraRef) -> String {
+            "\(ref.eraName)::\(ref.song.baseName)::\(ref.song.allVersions.first?.id ?? "")"
+        }
+        var seen = Set(family.map(identity))
+        if let own = payload.song {
+            seen.insert(identity(CrossEraRef(eraName: payload.eraName, eraArt: payload.eraArt, song: own)))
+        }
+        var linked: [CrossEraRef] = []
+        for key in names {
+            for ref in titleKeySongs[key] ?? [] where seen.insert(identity(ref)).inserted {
+                linked.append(ref)
+            }
+        }
+        for key in titles {
+            for ref in altTitleKeySongs[key] ?? [] where seen.insert(identity(ref)).inserted {
+                linked.append(ref)
+            }
+        }
+        // Set iteration order is random; era order, then title, is stable.
+        linked.sort {
+            let (a, b) = (eraOrder[$0.eraName] ?? .max, eraOrder[$1.eraName] ?? .max)
+            return a != b ? a < b : $0.song.baseName < $1.song.baseName
+        }
+        // ponytail: a generic alias ("Freestyle", "Intro") can name dozens of
+        // songs; cap the row rather than rank them. Rank if users ask why one is missing.
+        return Array(linked.prefix(Self.maxLinkedSongs))
+    }
+
+    nonisolated static let maxLinkedSongs = 24
 
     /// How many era covers are warmed before the artist screen is pushed.
     /// Roughly two screenfuls of collapsed cards — enough that the first thing
@@ -483,6 +569,9 @@ final class ArtistViewModel {
         self.content = precomputed.content
         self.songKeyEras = precomputed.songKeyEras
         self.baseNameEras = precomputed.baseNameEras
+        self.titleKeySongs = precomputed.titleKeySongs
+        self.altTitleKeySongs = precomputed.altTitleKeySongs
+        self.eraOrder = precomputed.eraOrder
         self.searchIndex = precomputed.searchIndex
         self.eraPlaybackContexts = precomputed.eraPlaybackContexts
 
