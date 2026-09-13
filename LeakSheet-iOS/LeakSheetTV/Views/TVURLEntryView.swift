@@ -60,6 +60,7 @@ struct TVURLEntryView: View {
         switch loader.loadPhase {
         case .readingCache: "Checking local copy…"
         case .connecting, nil: "Contacting server…"
+        case .server(let message, _, _): message
         case .downloading: "Downloading…"
         case .preparing: "Preparing…"
         }

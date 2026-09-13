@@ -123,9 +123,21 @@ struct TrackerInputView: View {
                     .controlSize(.mini)
                 Text("Checking local copy…")
             case .connecting:
+                // Only until the server's first message — or for the whole
+                // wait on a server that does not stream progress.
                 ProgressView()
                     .controlSize(.mini)
                 Text(Self.connectingLabel(elapsed: phaseElapsed))
+            case .server(let message, let done, let total):
+                if let total, total > 0 {
+                    ProgressView(value: Double(done ?? 0), total: Double(total))
+                        .frame(maxWidth: 120)
+                } else {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Text(message)
+                    .contentTransition(.opacity)
             case .downloading(let received, let expected):
                 if let expected, expected > 0 {
                     ProgressView(value: Double(received), total: Double(expected))

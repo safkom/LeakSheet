@@ -145,6 +145,9 @@ actor APIClient {
         /// sidecar, but the 304 replay still decodes a multi-MB payload here.
         case readingCache
         case connecting
+        /// What the server says it is doing during a cold parse, when it streams
+        /// progress. `done`/`total` count the extra tabs being read.
+        case server(message: String, done: Int?, total: Int?)
         case downloading(receivedBytes: Int64, expectedBytes: Int64?)
         /// Decoding the payload and building the artist view model. Used to be
         /// silent, which is most of why "Contacting server…" appeared to cover
@@ -162,6 +165,10 @@ actor APIClient {
     ) async throws -> ParseResult {
         var request = URLRequest(url: Self.sheetEndpoint)
         request.httpMethod = "POST"
+        // A cold parse can take many seconds; ask the server to narrate it.
+        // Hits and 304s still come back as plain JSON, and a server that
+        // predates the stream ignores this and sends JSON too.
+        request.setValue("application/x-ndjson, application/json", forHTTPHeaderField: "Accept")
 
         if let etag = cachedEtag, !forceRefresh {
             request.setValue("\"\(etag)\"", forHTTPHeaderField: "If-None-Match")
@@ -178,9 +185,9 @@ actor APIClient {
         onProgress?(.connecting)
         // Chunked delegate download — see DECISIONS.md::APIClient.swift::chunked-download
         let downloadTask = session.dataTask(with: request)
-        let (data, response) = try await withTaskCancellationHandler {
+        let (data, response, stream) = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+                (continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>) in
                 downloadTask.delegate = ChunkedDownloadDelegate(
                     onProgress: onProgress, continuation: continuation
                 )
@@ -193,7 +200,21 @@ actor APIClient {
             throw APIError.httpError(status: 0, message: "Unexpected response type")
         }
 
-        let etag = Self.normalizeETag(httpResponse.value(forHTTPHeaderField: "ETag"))
+        var etag = Self.normalizeETag(httpResponse.value(forHTTPHeaderField: "ETag"))
+
+        // A streamed cold parse reports its outcome in the body, not the
+        // status line: the 200 was sent before the parse had finished.
+        if let stream {
+            if let failure = stream.failure {
+                throw APIError.httpError(status: failure.status, message: failure.detail)
+            }
+            guard let streamedEtag = stream.etag else {
+                throw APIError.httpError(
+                    status: 0, message: "The server stopped before sending the tracker."
+                )
+            }
+            etag = Self.normalizeETag(streamedEtag)
+        }
 
         if httpResponse.statusCode == 304 {
             // 304 Not Modified — caller should use cached data
@@ -213,21 +234,34 @@ actor APIClient {
         return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
     }
 
+    /// How a streamed (NDJSON) cold parse ended.
+    nonisolated struct StreamOutcome: Sendable {
+        var etag: String?
+        var failure: (status: Int, detail: String)?
+    }
+
     /// Accumulates a response body from delegate chunk callbacks and reports
     /// throttled LoadPhase progress. URLSession serializes delegate calls,
     /// so the mutable state needs no locking (@unchecked Sendable).
+    ///
+    /// For a streamed cold parse it also splits the body: progress lines
+    /// become `.server` phases until the artist header, and everything after
+    /// that is the payload. A delegate rather than `data(for:)`, because the
+    /// lines have to be acted on as they arrive.
     private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let onProgress: (@Sendable (LoadPhase) -> Void)?
-        private let continuation: CheckedContinuation<(Data, URLResponse), Error>
+        private let continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
         private var data = Data()
         private var response: URLResponse?
         private var expected: Int64?
         private var lastReport = 0
         private var finished = false
+        private var reader: ProgressStreamReader?
+        private var outcome = StreamOutcome()
 
         init(
             onProgress: (@Sendable (LoadPhase) -> Void)?,
-            continuation: CheckedContinuation<(Data, URLResponse), Error>
+            continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
         ) {
             self.onProgress = onProgress
             self.continuation = continuation
@@ -240,21 +274,48 @@ actor APIClient {
             completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
         ) {
             self.response = response
-            let length = response.expectedContentLength
-            expected = length > 0 ? length : nil
-            if let expected { data.reserveCapacity(Int(expected)) }
+            if response.mimeType == ProgressStreamReader.mimeType {
+                // The wire length (if any) covers progress lines too; the real
+                // payload size arrives in the artist header.
+                reader = ProgressStreamReader()
+            } else {
+                let length = response.expectedContentLength
+                expected = length > 0 ? length : nil
+                if let expected { data.reserveCapacity(Int(expected)) }
+            }
             completionHandler(.allow)
         }
 
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
-            data.append(chunk)
+            if reader != nil {
+                let (events, payload) = reader!.feed(chunk)
+                for event in events { handle(event) }
+                guard !payload.isEmpty else { return }
+                data.append(payload)
+            } else {
+                data.append(chunk)
+            }
             // gzip bodies decompress past the wire Content-Length — drop the
             // total rather than showing a >100% bar; the UI falls back to a
-            // byte counter.
+            // byte counter. (A stream's total is exact, so this never trips.)
             if let total = expected, Int64(data.count) > total { expected = nil }
             if data.count - lastReport >= 262_144 {
                 lastReport = data.count
                 onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
+            }
+        }
+
+        private func handle(_ event: ProgressStreamReader.Event) {
+            switch event {
+            case .progress(let message, let done, let total):
+                onProgress?(.server(message: message, done: done, total: total))
+            case .artist(let etag, let bytes):
+                outcome.etag = etag
+                expected = bytes
+                if let bytes { data.reserveCapacity(Int(bytes)) }
+                onProgress?(.downloading(receivedBytes: 0, expectedBytes: bytes))
+            case .failure(let status, let detail):
+                outcome.failure = (status, detail)
             }
         }
 
@@ -264,8 +325,11 @@ actor APIClient {
             if let error {
                 continuation.resume(throwing: error)
             } else if let response {
+                if reader != nil, data.last == 0x0A {
+                    data.removeLast()  // the payload line's terminator
+                }
                 onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
-                continuation.resume(returning: (data, response))
+                continuation.resume(returning: (data, response, reader == nil ? nil : outcome))
             } else {
                 continuation.resume(throwing: URLError(.badServerResponse))
             }

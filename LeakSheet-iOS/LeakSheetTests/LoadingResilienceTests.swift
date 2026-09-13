@@ -63,6 +63,7 @@ struct LoadingResilienceTests {
             nil,
             .readingCache,
             .connecting,
+            .server(message: "Parsing Unreleased (11.8 MB)", done: nil, total: nil),
             .downloading(receivedBytes: 0, expectedBytes: nil),
             .preparing,
         ]

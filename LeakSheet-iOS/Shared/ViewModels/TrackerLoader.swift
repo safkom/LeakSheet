@@ -139,8 +139,11 @@ final class TrackerLoader {
         case nil: return -1
         case .readingCache: return 0
         case .connecting: return 1
-        case .downloading: return 2
-        case .preparing: return 3
+        // Every server message shares one rank, so a later message replaces an
+        // earlier one but can never follow the download.
+        case .server: return 2
+        case .downloading: return 3
+        case .preparing: return 4
         }
     }
 
