@@ -296,10 +296,9 @@ class TestImageProxyEndpoint:
         r = client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
         old_etag = r.headers["ETag"]
 
-        # Rewrite the same key with new content, as a post-TTL refetch does.
-        import time as _time
+        # Rewrite the same key with new content, as a post-TTL refetch does —
+        # within the same second, which a tag built from write time missed.
         key = _image_cache_key(NON_GOOGLE_URL, 320)
-        _time.sleep(1.1)  # the tag carries whole-second write time
         _write_image_cache(key, b"different bytes entirely", "image/jpeg")
 
         r2 = client.get(

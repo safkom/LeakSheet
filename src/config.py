@@ -24,13 +24,14 @@ TRACKERS_DIR = ROOT_DIR / "Trackers"
 ARTISTGRID_URL = "https://artists.artistgrid.cx/artists.csv"
 
 # Sheet-fetch host allowlist — SSRF guard for POST /sheet.
-# Rationale, threat model: docs/reviews/2026-07-27-security-review.md
+# Rationale, threat model: docs/decisions.md::config.py — the /sheet host allowlist
 _SHEET_HOST_SEED = frozenset({
     "docs.google.com",
     "drive.google.com",
     "yetracker.net",          # README's CLI example
     "deftonestracker.net",    # only non-Google host in the 2026-07-20 sweep
     "franktracker.net",       # non-Google host in the built-in seed (src/tracker_seed.py)
+    "tylertracker.net",       # self-hosted covers; the image proxy trusts only this seed
 })
 
 # Hosts harvested from the ArtistGrid feed, and when that last happened.
@@ -64,6 +65,19 @@ def register_tracker_hosts(urls: Iterable[str]) -> int:
 def tracker_hosts_are_stale() -> bool:
     """True when a miss is worth one ArtistGrid refresh."""
     return time.time() - _tracker_hosts_at > TRACKER_HOST_REFRESH_INTERVAL
+
+
+def curated_host_allowed(host: str | None) -> bool:
+    """True if *host* is in the built-in seed or LEAKSHEET_EXTRA_SHEET_HOSTS.
+
+    Unlike sheet_host_allowed this ignores hosts harvested from the ArtistGrid
+    feed — a third party can add a host to that feed, and the image proxy
+    returns bytes to any caller with Access-Control-Allow-Origin: *.
+    """
+    if not host:
+        return False
+    host = host.lower()
+    return host in _SHEET_HOST_SEED or host in _env_sheet_hosts()
 
 
 def sheet_host_allowed(host: str | None) -> bool:

@@ -35,7 +35,6 @@ from urllib.parse import urlparse, urlencode
 
 import httpx
 
-logger = logging.getLogger(__name__)
 
 from src.config import (
     ARTISTGRID_URL,
@@ -44,7 +43,7 @@ from src.config import (
     sheet_host_allowed,
     tracker_hosts_are_stale,
 )
-from src.models import Artist, Section, TabSection
+from src.models import Artist, Section, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
     apply_art_tab_images,
@@ -58,6 +57,8 @@ from src.parser import (
     _era_match_key,
     _song_match_key,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 #
 # Discovery started every discovered GID at once and _aggregate_hub_workbook
 # fetched *and parsed* every unclassified tab at once, each holding its full
-# response body — the largest export here is 11.85MB, and README.md:147 says
+# response body — the largest export here is 11.85MB, and README.md ("Deployment") says
 # the box cannot fit two concurrent Ye-sized parses. One semaphore inside
 # _fetch_gid_page bounds all three fan-out sites at their single choke point.
 _GID_FETCH_CONCURRENCY = int(
@@ -173,6 +174,27 @@ async def close_sheets_client() -> None:
     _sheets_client = None
 
 
+async def fetch_artistgrid_entries() -> list[TrackerEntry]:
+    """GET the ArtistGrid registry, parse it, and register its hosts.
+
+    The only path to the feed. /trackers serves the entries and the sheet-host
+    refresh wants only the side effect; they used to be two separate
+    implementations with different clients, status handling and error policy.
+    Raises on any upstream or parse failure, so each caller keeps its own
+    fallback.
+    """
+    resp = await _get_sheets_client().get(
+        ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
+    )
+    if resp.status_code != 200:
+        raise NetworkError(f"ArtistGrid returned {resp.status_code}")
+    entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
+    if not entries:
+        raise ParseError("No tracker rows parsed from ArtistGrid")
+    await asyncio.to_thread(register_tracker_hosts, [e.url for e in entries])
+    return entries
+
+
 async def _refresh_tracker_hosts() -> None:
     """Harvest fetchable hosts from the ArtistGrid feed (best effort).
 
@@ -183,14 +205,8 @@ async def _refresh_tracker_hosts() -> None:
     if not tracker_hosts_are_stale():
         return
     try:
-        client = _get_sheets_client()
-        resp = await client.get(ARTISTGRID_URL, timeout=DEFAULT_TIMEOUT)
-        resp.raise_for_status()
-        entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
-        known = await asyncio.to_thread(
-            register_tracker_hosts, [e.url for e in entries]
-        )
-        logger.info("ArtistGrid host refresh: %d hosts known", known)
+        entries = await fetch_artistgrid_entries()
+        logger.info("ArtistGrid host refresh: %d trackers listed", len(entries))
     except Exception as e:
         # Never let feed trouble turn a valid tracker URL into a hard error
         # any earlier than it already would be.

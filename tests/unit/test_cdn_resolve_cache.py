@@ -89,7 +89,7 @@ class TestImgurResolveCache:
     @pytest.mark.asyncio
     async def test_failures_are_not_cached(self, monkeypatch):
         # A 404 on both hosts must not poison the entry — the next play retries.
-        client = _install(monkeypatch, _FakeClient({}))
+        _install(monkeypatch, _FakeClient({}))
         with pytest.raises(ValueError):
             await streaming.resolve_imgur_cdn_url(API)
         assert streaming._cdn_url_cache.get(API) is None

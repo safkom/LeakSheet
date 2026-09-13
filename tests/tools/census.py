@@ -52,15 +52,29 @@ from src.parser import _PLACEHOLDER_BASE_NAMES, parse_file
 from src.streaming import resolve_stream_url
 
 # The locked live set for the 2026-07-06 deep review (user-verified fresh).
-LIVE_TRACKERS: list[tuple[str, str]] = [
-    ("yetracker", "https://yetracker.net/"),
-    ("tracker-1gJq", "https://docs.google.com/spreadsheets/d/1gJqbQrb3dIWF-PLMsKkNUrftpQb8zxsZFDAIpSvT5Fo/htmlview#gid=1807066929"),
-    ("tracker-1i4O", "https://docs.google.com/spreadsheets/d/1i4OQglDHiiqMDthqfUFPutGmpZzK7n63LaoWApqhQXI/htmlview"),
-    ("tracker-1v55", "https://docs.google.com/spreadsheets/d/1v55XAPLzw1iuWxH1OQKajCIYPhW2BXcLoV4mXDZ55DI/htmlview"),
-    ("tracker-1_SN", "https://docs.google.com/spreadsheets/d/1_SNZQS-AAXVleukgKlraegaozkLOu8WMHbUwmPm61hc/htmlview"),
-    ("tracker-1zqq", "https://docs.google.com/spreadsheets/d/1zqqdIds1iwnx4lh29iF1IlraeuqfGhxH9qLNlWOnryo/htmlview"),
-    ("tracker-1Irt", "https://docs.google.com/spreadsheets/d/1Irtfvymu26CShYowLMMfD-rM0o9CJqE6-BBSlYsAaF4/htmlview"),
-]
+def _live_trackers() -> list[tuple[str, str]]:
+    """(slug, url) for the locked live set, read from tests/live_trackers.txt.
+
+    That file is the one list the `-m live` suite and CI already use. This
+    module kept its own copy, and nothing kept the two from drifting apart.
+    """
+    from urllib.parse import urlparse
+
+    out: list[tuple[str, str]] = []
+    for line in (ROOT / "tests" / "live_trackers.txt").read_text().splitlines():
+        url = line.strip()
+        if not url or url.startswith("#"):
+            continue
+        parts = urlparse(url)
+        if "/spreadsheets/d/" in parts.path:
+            slug = "tracker-" + parts.path.split("/spreadsheets/d/")[1][:4]
+        else:
+            slug = (parts.hostname or url).split(".")[0]
+        out.append((slug, url))
+    return out
+
+
+LIVE_TRACKERS: list[tuple[str, str]] = _live_trackers()
 
 SNAPSHOT_DIR_DEFAULT = ROOT / "tests" / "fixtures" / "snapshots"
 OUT_DIR_DEFAULT = ROOT / "tests" / "results" / "census"

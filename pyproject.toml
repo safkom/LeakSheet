@@ -43,6 +43,24 @@ dev = [
 # publish a distribution whose top-level package is literally named `src`.
 package = false
 
+[tool.ruff]
+target-version = "py311"
+extend-exclude = [".cache", "Trackers", "web", "LeakSheet-iOS"]
+
+[tool.ruff.lint]
+# Correctness only: pyflakes (unused/undefined names, dead f-strings) plus the
+# pycodestyle error classes that are bugs rather than style. Explicit because
+# ruff's own defaults have grown to include style rules this repo never adopted,
+# and CI gates on this — a lint job should fail on bugs, not taste.
+select = ["E4", "E7", "E9", "F"]
+# E741 ("l" as a name) is taste, not a bug.
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Dev scripts put the repo root on sys.path before importing src.
+"scripts/**" = ["E402"]
+"tests/tools/**" = ["E402"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]

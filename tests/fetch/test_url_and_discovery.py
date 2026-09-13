@@ -6,7 +6,6 @@ becomes the main tracker. The end-to-end wiring is covered in test_tab_selection
 
 from __future__ import annotations
 
-import pytest
 
 from src.fetcher import (
     _build_sheet_html_url,

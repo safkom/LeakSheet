@@ -16,7 +16,6 @@ import pytest
 
 from src.models import parse_era_stats
 from src.parser import (
-    ERA_STATS_PATTERN,
     _is_era_header,
     _is_stats_only_cell,
     era_stats_match,

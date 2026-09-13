@@ -4,7 +4,8 @@ Self-hosted trackers serve covers from their own origin as "/assets/<sha>.jpg".
 Those relative paths reached clients verbatim and could be fetched by nothing —
 268 eras across the captured corpus. Two halves to the fix, and both are
 needed: resolve the URL against the tab it came from, and let the image proxy
-fetch from a host the backend already downloads sheet HTML from.
+fetch from that tracker's host — which it does only for curated hosts, never for
+ones harvested from the third-party ArtistGrid feed.
 """
 
 from __future__ import annotations
@@ -64,15 +65,24 @@ class TestImageProxyHosts:
     def test_unknown_host_still_rejected(self):
         assert not _image_host_allowed("https://evil.example.com/a.jpg")
 
-    def test_tracker_host_allowed_once_registered(self, monkeypatch):
-        # The registry is module-global and this is a trust boundary, so the
-        # host must not survive into the SSRF tests.
+    def test_feed_registered_host_is_not_enough(self, monkeypatch):
+        """The ArtistGrid feed is third-party. It may widen what /sheet fetches,
+        but not what this endpoint — which answers any origin — hands back."""
         import src.config as config
         monkeypatch.setattr(config, "_tracker_hosts", set())
+        monkeypatch.delenv("LEAKSHEET_EXTRA_SHEET_HOSTS", raising=False)
         url = "https://selfhosttracker.net/assets/deadbeef.jpg"
-        assert not _image_host_allowed(url)
         config.register_tracker_hosts(["https://selfhosttracker.net/"])
-        assert _image_host_allowed(url)
+        assert config.sheet_host_allowed("selfhosttracker.net")
+        assert not _image_host_allowed(url)
+
+    def test_seeded_self_hosted_tracker_is_allowed(self):
+        # tylertracker.net serves 40 era covers from its own origin.
+        assert _image_host_allowed("https://tylertracker.net/assets/deadbeef.jpg")
+
+    def test_env_listed_host_is_allowed(self, monkeypatch):
+        monkeypatch.setenv("LEAKSHEET_EXTRA_SHEET_HOSTS", "selfhosttracker.net")
+        assert _image_host_allowed("https://selfhosttracker.net/assets/deadbeef.jpg")
 
 
 class TestArtTabRelativeArt:

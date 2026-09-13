@@ -8,7 +8,6 @@ ignored, 416 relay, magic-byte MIME correction, and the download disposition.
 
 from __future__ import annotations
 
-import pytest
 
 import src.api as api
 

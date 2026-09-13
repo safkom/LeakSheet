@@ -5,7 +5,12 @@ Covers ETag parsing per RFC 7232 §2.3 (strong and weak forms).
 
 import pytest
 
-from src.api import _parse_if_none_match, _plan_synthesized_range, _RangePlan
+from src.api import (
+    _parse_if_none_match,
+    _plan_synthesized_range,
+    _RangePlan,
+    _slice_byte_stream,
+)
 
 
 @pytest.mark.parametrize(
@@ -125,8 +130,6 @@ def test_parse_if_none_match_weak_strong_compare() -> None:
 # ---------------------------------------------------------------------------
 # Range slicing for synthesised 206 responses
 # ---------------------------------------------------------------------------
-
-from src.api import _slice_byte_stream
 
 
 async def _chunks(*parts: bytes):

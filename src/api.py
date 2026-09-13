@@ -26,6 +26,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -36,9 +37,11 @@ from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
-from src.config import USER_AGENT, register_tracker_hosts, sheet_host_allowed
+from src.config import (
+    USER_AGENT,
+    curated_host_allowed,
+)
 from src.models import TrackerEntry, slugify
-from src.parser import parse_artistgrid_csv
 from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
     AccessDeniedError,
@@ -51,6 +54,7 @@ from src.fetcher import (
     get_cached_parsed_bytes,
     clear_cache,
     close_sheets_client,
+    fetch_artistgrid_entries,
     compute_content_hash,
     DEFAULT_CACHE_TTL,
     InvalidURLError,
@@ -154,7 +158,6 @@ _MIME_TO_EXT: dict[str, str] = {
     "audio/wav": ".wav",
     "audio/flac": ".flac",
     "audio/aac": ".aac",
-    "audio/x-m4a": ".m4a",
 }
 
 
@@ -210,7 +213,6 @@ def _fix_audio_mime(
 
         # 2. URL path extension (works when upstream redirects to CDN URL)
         if url:
-            from urllib.parse import urlparse
             from posixpath import splitext
             path = urlparse(url).path
             ext = splitext(path)[1].lower()
@@ -262,7 +264,6 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 }
 
 # Single source of truth: the hosts resolve_stream_url can emit.
-_STREAM_ALLOWED_DOMAINS = ALLOWED_STREAM_HOSTS
 
 
 # Google image CDNs, for the Referer decision below. Parent domains: a
@@ -275,24 +276,19 @@ _GOOGLE_IMAGE_DOMAINS = {
 def _image_host_allowed(url: str) -> bool:
     """Hosts the image proxy may fetch from.
 
-    The static lists cover Google's image CDNs. Self-hosted trackers
-    (tylertracker.net, franktracker.net, deftonestracker.net, and whatever the
-    ArtistGrid feed lists next) serve era covers from their own origin as
-    "/assets/<sha>.jpg", so hardcoding them here would go stale the same way it
-    already did — 268 eras in the captured corpus carried a cover URL nothing
-    could fetch.
+    Google's image CDNs, plus the curated tracker seed and
+    LEAKSHEET_EXTRA_SHEET_HOSTS. Self-hosted trackers serve era covers from
+    their own origin as "/assets/<sha>.jpg", so their hosts have to be here.
 
-    Reusing config.sheet_host_allowed instead is a strictly smaller capability
-    than that host already has: the backend downloads and parses full HTML from
-    it, so fetching one image from the same origin adds no reach. The SSRF
-    guard (PublicOnlyAsyncTransport), the 25 MB download cap and the 20 MP
-    decode cap all still apply, and a host only joins that list by appearing in
-    the tracker registry.
+    Deliberately NOT the ArtistGrid-harvested hosts that /sheet accepts. That
+    feed is third-party: anyone who lands a row in it would otherwise add a host
+    to an endpoint that returns bytes to any origin. /sheet still auto-accepts
+    feed trackers; a feed-only tracker whose covers are self-hosted needs its
+    host added to the seed in src/config.py (or the env var) for art to load.
     """
     if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
         return True
-    from urllib.parse import urlparse
-    return sheet_host_allowed(urlparse(url).hostname)
+    return curated_host_allowed(urlparse(url).hostname)
 
 
 def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
@@ -301,7 +297,6 @@ def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | N
     Exact match first. If parent_domains is provided, also accepts any hostname
     that is a direct or nested subdomain of one of those parent domains.
     """
-    from urllib.parse import urlparse
     try:
         hostname = urlparse(url).hostname
         if not hostname:
@@ -456,7 +451,7 @@ class _RateLimitMiddleware:
 
     Off by default — set ``LEAKSHEET_RATE_LIMIT_PER_MIN`` to a positive integer
     to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
-    (see Procfile), so in-process counters are authoritative. The limit is read
+    (see Dockerfile), so in-process counters are authoritative. The limit is read
     per request so it can be tuned without a redeploy.
 
     Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
@@ -880,7 +875,6 @@ def _rewrite_google_size(url: str, w: int) -> str | None:
     the host doesn't support arbitrary sizing. Never changes host or path,
     so the SSRF allowlist verdict on the original URL still holds.
     """
-    from urllib.parse import urlparse
     hostname = urlparse(url).hostname or ""
     if not _GOOGLE_RESIZABLE_HOST_RE.match(hostname):
         return None
@@ -898,17 +892,16 @@ def _image_cache_paths(key: str):
 def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
     """Blocking read of a cached resized image — call via asyncio.to_thread.
 
-    Returns (bytes, content_type, etag). The ETag mixes the entry's write time
-    into the key: the key alone is a hash of the REQUEST, so after the 7-day
-    TTL expired and the URL was refetched with different content, a client
-    holding the old bytes got a 304 telling it its stale copy was current.
+    Returns (bytes, content_type, etag). The ETag is the one _write_image_cache
+    stored. Entries written before it stored one fall back to the old
+    key-plus-write-second form, which is what those clients were handed.
     """
     bin_path, meta_path = _image_cache_paths(key)
     try:
         meta = json.loads(meta_path.read_text())
         if time.time() - meta["timestamp"] > _IMAGE_CACHE_TTL:
             return None
-        etag = f"{key}-{int(meta['timestamp'])}"
+        etag = meta.get("etag") or f"{key}-{int(meta['timestamp'])}"
         return bin_path.read_bytes(), meta["content_type"], etag
     except (OSError, ValueError, KeyError):
         return None
@@ -917,22 +910,29 @@ def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
 def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
     """Blocking write + size-cap eviction — call via asyncio.to_thread.
 
-    Returns the entry's ETag (key + write time), so the response that just
-    populated the cache advertises the SAME tag a later cache hit will —
-    otherwise the first request's tag never matched and never 304'd.
+    Returns the entry's ETag, so the response that just populated the cache
+    advertises the SAME tag a later cache hit will — otherwise the first
+    request's tag never matched and never 304'd.
+
+    The tag is the key plus a digest of the bytes. The key alone is a hash of
+    the REQUEST, so a post-TTL refetch with different content kept the same tag
+    and a client holding the old bytes was told its copy was current. Mixing in
+    the whole-second write time fixed that except within a second, and made the
+    test for it sleep; the bytes themselves are what the tag must identify.
     """
     try:
         CACHE_DIR.mkdir(exist_ok=True)
         bin_path, meta_path = _image_cache_paths(key)
-        written_at = time.time()
+        etag = f"{key}-{hashlib.sha256(data).hexdigest()[:16]}"
         meta_bytes = json.dumps({
             "content_type": content_type,
-            "timestamp": written_at,
+            "timestamp": time.time(),
+            "etag": etag,
         }).encode()
         _atomic_write_bytes(bin_path, data)
         _atomic_write_bytes(meta_path, meta_bytes)
         _maybe_evict_image_cache()
-        return f"{key}-{int(written_at)}"
+        return etag
     except OSError as e:
         logger.warning("Image cache write failed: %s", e)
         return None
@@ -1564,21 +1564,10 @@ async def list_trackers():
             },
         )
 
-    from src.config import ARTISTGRID_URL
     try:
-        resp = await _get_proxy_client().get(
-            ARTISTGRID_URL, headers={"Accept": "text/csv"}
-        )
-        if resp.status_code != 200:
-            raise NetworkError(f"ArtistGrid returned {resp.status_code}")
-        entries = await asyncio.to_thread(parse_artistgrid_csv, resp.text)
-        if not entries:
-            raise ParseError("No tracker rows parsed from ArtistGrid")
-        # Every listed tracker becomes fetchable by /sheet — this is the warm
-        # path for the host allowlist (see config.sheet_host_allowed).
-        await asyncio.to_thread(
-            register_tracker_hosts, [e.url for e in entries]
-        )
+        # Also registers every listed tracker's host — this is the warm path
+        # for the /sheet allowlist (see config.sheet_host_allowed).
+        entries = await fetch_artistgrid_entries()
         payload = json.dumps([e.model_dump() for e in entries])
         _trackers_cache.set("trackers", payload)
         _trackers_stale = payload
@@ -1760,7 +1749,7 @@ async def proxy_stream(
     if stream_url is None:
         raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
 
-    if not _is_allowed_domain(stream_url, _STREAM_ALLOWED_DOMAINS):
+    if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
 
     # Forward Range header from client if present. Malformed or multi-part

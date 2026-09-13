@@ -129,29 +129,31 @@ class TestSheetsClientTransport:
 
 
 class TestHostHarvesting:
-    """Hosts come from the parsed feed rows, not from every href on the page.
+    """Hosts come from the parsed feed rows, not from anything else on the page.
 
-    A regex over hrefs also swept up discord.gg, reddit.com and gstatic.com
-    from the TrackerHub page furniture, quietly widening what the backend
-    would fetch.
+    A regex over hrefs once swept discord.gg, reddit.com and gstatic.com out of
+    the old TrackerHub page furniture, quietly widening what the backend would
+    fetch. The ArtistGrid CSV has no furniture, but the same rule holds: only a
+    row's url field contributes, and a bare sheet id maps to docs.google.com
+    rather than being read as a host.
     """
 
     FEED = (
-        "<table>"
-        '<tr><td><a href="https://www.google.com/url?q=https://newone.net/x&amp;sa=D">'
-        "⭐ New One</a></td><td>by someone</td><td>Yes</td><td>Yes</td></tr>"
-        '<tr><td><a href="https://discord.gg/invite">Join our Discord</a></td>'
-        "<td></td><td></td><td></td></tr>"
-        "</table>"
+        "name,url,credit,links_work,updated,best\n"
+        "New One,newone.net,someone,1,1,true\n"
+        "Sheet Artist,1AbCdEfGhIjK,crew,1,1,false\n"
+        ",nameless.net,ghost,1,1,false\n"
     )
 
     def test_only_real_tracker_rows_contribute_hosts(self):
-        from src.parser import parse_trackerhub
+        from src.parser import parse_artistgrid_csv
 
-        register_tracker_hosts([e.url for e in parse_trackerhub(self.FEED)])
+        register_tracker_hosts([e.url for e in parse_artistgrid_csv(self.FEED)])
         assert sheet_host_allowed("newone.net")
-        # Banner row — a link, but no credits and no status flags.
-        assert not sheet_host_allowed("discord.gg")
+        assert sheet_host_allowed("docs.google.com")
+        assert not sheet_host_allowed("1abcdefghijk")
+        # A row with no name is dropped, so its host never registers.
+        assert not sheet_host_allowed("nameless.net")
 
 
 class TestSubPageGuard:
