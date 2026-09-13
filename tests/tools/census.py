@@ -19,10 +19,10 @@ under tests/fixtures/snapshots/ so accuracy baselines can be pinned on the
 exact bytes this census saw.
 
 Usage:
-    python3 -m tests.tools.census --fixtures            # offline, 4 fixtures
-    python3 -m tests.tools.census --live --fresh        # 7 locked live URLs
-    python3 -m tests.tools.census --all
-    python3 -m tests.tools.census --live --only yetracker
+    uv run python -m tests.tools.census --fixtures            # offline, 4 fixtures
+    uv run python -m tests.tools.census --live --fresh        # 7 locked live URLs
+    uv run python -m tests.tools.census --all
+    uv run python -m tests.tools.census --live --only yetracker
 """
 
 from __future__ import annotations

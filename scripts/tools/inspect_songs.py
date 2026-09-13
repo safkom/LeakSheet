@@ -2,13 +2,13 @@
 """Inspect parsed songs for a specific artist/era.
 
 Usage:
-    python3 scripts/tools/inspect_songs.py --tracker NAME [--era ERA] [--limit N] [--badges-only]
+    uv run python scripts/tools/inspect_songs.py --tracker NAME [--era ERA] [--limit N] [--badges-only]
 
 Examples:
-    python3 scripts/tools/inspect_songs.py --tracker "Baby Keem"
-    python3 scripts/tools/inspect_songs.py --tracker "Ye" --era "Before The College Dropout"
-    python3 scripts/tools/inspect_songs.py --tracker "Kendrick" --badges-only
-    python3 scripts/tools/inspect_songs.py --tracker "Carti" --limit 20
+    uv run python scripts/tools/inspect_songs.py --tracker "Baby Keem"
+    uv run python scripts/tools/inspect_songs.py --tracker "Ye" --era "Before The College Dropout"
+    uv run python scripts/tools/inspect_songs.py --tracker "Kendrick" --badges-only
+    uv run python scripts/tools/inspect_songs.py --tracker "Carti" --limit 20
 """
 
 import argparse

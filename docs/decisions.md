@@ -315,12 +315,13 @@ real main tab and skip parsing it as misc entries entirely. When the GID turns o
 be the Misc/Music-Videos tab itself, the code falls through to full discovery, which
 finds the real main tab and parses this one correctly via `parse_misc_tab`.
 
-## fetcher.py::gid-fetch-priority — concurrent fetch, priority-ordered consumption
+## fetcher.py::gid-fetch-priority — Unreleased first, the rest only if needed
 
-Every GID fetch starts concurrently, but results are consumed in priority order:
-each is parsed as it lands and the rest are cancelled once a winner is found. Large
-trackers expose 15+ tabs; the prioritized (unreleased) tab is almost always index 0,
-so eagerly completing every fetch would download megabytes that are thrown away.
+A tab named Unreleased is fetched and parsed on its own first. The remaining GIDs
+start concurrently only if it is missing or yields no songs, and are then consumed
+in priority order, the rest cancelled once a winner is found. Large trackers expose
+15+ tabs; starting them all alongside Unreleased downloaded megabytes that were
+thrown away (Ye: 20 requests / 31.8 MB before, 11 / 21.2 MB after, same output).
 
 Winner ranking is the tuple `(songs-or-not, era count, song count)`: a tab with eras
 but no songs is a hub/landing page (Avicii's "Main" is a list of category

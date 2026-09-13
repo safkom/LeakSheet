@@ -2,7 +2,7 @@
 """Compare column layouts across all tracker files.
 
 Usage:
-    python3 scripts/tools/diff_trackers.py
+    uv run python scripts/tools/diff_trackers.py
 
 Shows the detected column mappings and highlights differences between trackers.
 """

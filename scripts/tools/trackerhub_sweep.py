@@ -21,7 +21,7 @@ Artifacts: tests/results/sweep-<date>/<slug>.json per tracker plus
 _aggregate.json (cross-tracker gap lists). tests/results/ is gitignored.
 
 Usage:
-    python3 scripts/tools/trackerhub_sweep.py [--limit N] [--only substr]
+    uv run python scripts/tools/trackerhub_sweep.py [--limit N] [--only substr]
             [--concurrency 5] [--include-stale]
 """
 

@@ -11,7 +11,7 @@ itself is never committed (DMCA — see .gitignore); each label records the
 sha256 of the tab it was read from, and the test hydrates that tab out of the
 local cache. Absent cache means skip, never silent pass.
 
-To add a tracker: `python3 -m tests.quality.make_label <url-substring>` writes
+To add a tracker: `uv run python -m tests.quality.make_label <url-substring>` writes
 a draft from current parser output, then VERIFY EVERY VALUE against the real
 sheet before committing it. A draft accepted unread is just another
 self-referential baseline, which is the exact failure this suite replaces.
