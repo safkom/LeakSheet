@@ -11,15 +11,25 @@ extension Color {
     /// lives here once and every token below is built from it. Asset-catalog
     /// colour sets would work too, but 30 of them is a lot of JSON to keep in
     /// step with the HSB literals the badge palette is actually derived from.
-    static func adaptive(light: Color, dark: Color) -> Color {
+    ///
+    /// `nonisolated`, with both platform colours built BEFORE the provider:
+    /// the provider runs on whatever thread resolves the colour, and SwiftUI's
+    /// async renderer does that off the main thread. Under this target's
+    /// MainActor default isolation the closure was inferred `@MainActor`, so
+    /// that resolution tripped Swift's executor check and the app crashed with
+    /// SIGTRAP — reproduced by tapping a version chip in the description sheet.
+    nonisolated static func adaptive(light: Color, dark: Color) -> Color {
         #if canImport(AppKit)
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? NSColor(dark) : NSColor(light)
+        let lightColor = NSColor(light)
+        let darkColor = NSColor(dark)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? darkColor : lightColor
         })
         #else
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        let lightColor = UIColor(light)
+        let darkColor = UIColor(dark)
+        return Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? darkColor : lightColor
         })
         #endif
     }
