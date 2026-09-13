@@ -754,7 +754,9 @@ final class AudioEngine {
         }
         // iOS 27 asynchronous activation — synchronous setActive(true) on the
         // main thread triggers a UI-unresponsiveness runtime warning.
-        session.activate(options: []) { activated, error in
+        // @Sendable for the reason given at setupRemoteCommands: the completion
+        // block is not annotated, and it may run off the main thread.
+        session.activate(options: []) { @Sendable activated, error in
             if let error {
                 Self.log.warning("Audio session activation failed (activated=\(activated)): \(error)")
             }
@@ -804,27 +806,31 @@ final class AudioEngine {
 
     // NOTE: Remote command handlers fire on arbitrary system threads.
     // Dispatch to MainActor via Task to avoid Swift 6 actor-isolation violations.
+    // The handlers are explicitly @Sendable: the SDK's block parameter is not
+    // annotated, so a closure written in this MainActor method would otherwise
+    // be inferred MainActor-isolated and trap on its isolation check when
+    // called off-main — the same crash as DesignTokens.swift::adaptive.
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
 
-        commandCenter.playCommand.addTarget { [weak self] _ in
+        commandCenter.playCommand.addTarget { @Sendable [weak self] _ in
             // resumePlayback, not togglePlay — a discrete Play must never pause.
             Task { @MainActor in self?.resumePlayback() }
             return .success
         }
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
+        commandCenter.pauseCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.player?.pause() }
             return .success
         }
-        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+        commandCenter.nextTrackCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.playNext() }
             return .success
         }
-        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+        commandCenter.previousTrackCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.playPrevious() }
             return .success
         }
-        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+        commandCenter.changePlaybackPositionCommand.addTarget { @Sendable [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             let position = event.positionTime
             Task { @MainActor in self?.seekTo(position) }
@@ -870,7 +876,7 @@ final class AudioEngine {
             let shouldResume = context?.recommendation == .shouldResume
             MainActor.assumeIsolated {
                 guard let self, shouldResume else { return }
-                AVAudioSession.sharedInstance().activate(options: []) { _, _ in }
+                AVAudioSession.sharedInstance().activate(options: []) { @Sendable _, _ in }
                 self.player?.play()
             }
         }
