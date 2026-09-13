@@ -68,7 +68,7 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
-## parser.py::parse_song_credits — credit delimiters
+## models.py::parse_song_credits — credit delimiters
 
 Trackers write credits in either style — `(prod. X)` (Ye, Kendrick) or `[prod. X]`
 (Travis) — and hand-typed sheets mix the two by accident (`[prod. Travis Scott)`
@@ -171,12 +171,6 @@ Buckets bound the disk-cache cardinality; clients snap up to the next one. `1600
 was added 2026-07-17 because the old `1280` top bucket sat below iPhone full-screen
 width (~1290 px), so Now Playing art was being upscaled on device.
 
-## api.py — CORS is registered last
-
-`add_middleware` makes the **last-added** middleware outermost. CORS must wrap the
-rate limiter, or a 429 carries no `Access-Control-Allow-Origin` and the browser
-reports an opaque network error instead of a clean 429.
-
 ## api.py::_client_ip — X-Forwarded-For is trusted by count only
 
 In production the app sits behind a platform router, so `scope["client"]` is that
@@ -189,11 +183,23 @@ in it is trusted.
 
 ## config.py — the /sheet host allowlist
 
-`POST /sheet` fetches a caller-supplied URL. See
-[`docs/reviews/2026-07-27-security-review.md`](reviews/2026-07-27-security-review.md)
-for the full finding; in short, without a host check the backend reaches cloud
-metadata and RFC1918, and returns any internal page containing a `<table>` as parsed
-data.
+`POST /sheet` fetches a caller-supplied URL. Without a host check the backend reaches
+cloud metadata and RFC1918, returns any internal page containing a `<table>` as
+parsed data, and its distinct 400/404/502 mappings make it an internal port scanner.
+
+The check covers every tab of a workbook, not just the URL it was handed: a sheet's
+page-switcher JavaScript can name absolute tab URLs, which are honoured only for an
+allowlisted host or the sheet's own site (`fetcher._build_sheet_html_url`).
+
+## config.py::curated_host_allowed — the image proxy does not trust the feed
+
+`/sheet` auto-accepts every host the ArtistGrid CSV lists, so a tracker added to the
+community feed works without a redeploy. `/image-proxy` deliberately does not: the
+feed is third-party, and that endpoint returns bytes to any origin
+(`Access-Control-Allow-Origin: *`). It trusts Google's image CDNs, the built-in seed
+and `LEAKSHEET_EXTRA_SHEET_HOSTS` only. Cost: a feed-only tracker whose covers are
+self-hosted (`/assets/<sha>.jpg`) shows no art until its host is added to the seed —
+which is why `tylertracker.net`, 40 era covers, is in it. Decided 2026-09-13.
 
 ## models.py — fields kept on the wire with no client reader
 
@@ -234,6 +240,10 @@ Only width-bounded image-proxy requests are disk-cached, so only they get an ETa
 and it has to reflect a real, still-live cache entry rather than a pure hash of the
 request. Otherwise an expired or `/cache/clear`'d entry (or an unsized request, which
 is never cached) would revalidate as unchanged forever.
+
+The tag is the cache key plus a digest of the stored bytes, written into the entry's
+meta. A tag built from write time instead let a same-second rewrite with different
+bytes keep its tag, so a client holding the old image got a 304.
 
 ## api.py::video-codec-regex — codec is the strongest audio/video signal
 
@@ -648,3 +658,12 @@ They stay on the wire regardless — `Era.dict` already documents why: the
 `/sheet` warm path serves the parsed-cache bytes as the response, so excluding
 a field from the response also strips it from the cache round-trip and blinds
 the starved-era health check.
+
+## Backend language — staying on Python
+
+Assessed 2026-07 against Rust and Bun. The numbers that decided it: a Ye-sized parse
+(11.7 MB HTML) takes about 0.9 s through lxml, whose table extraction is already C; a
+warm cache hit is about 2 ms; and a cold request is dominated by downloading Google's
+HTML, which no runtime shortens. A rewrite would trade a network-bound problem for the
+loss of a mature parser and its ~800-test suite. Revisit only if parse time, not fetch
+time, becomes the measured bottleneck.
