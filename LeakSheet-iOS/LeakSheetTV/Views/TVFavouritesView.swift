@@ -21,7 +21,7 @@ struct TVFavouritesView: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 28) {
-                            ForEach(favourites.grouped(), id: \.artistSlug) { artistGroup in
+                            ForEach(favourites.groupedByArtist, id: \.artistSlug) { artistGroup in
                                 VStack(alignment: .leading, spacing: 14) {
                                     Text(artistGroup.artistName)
                                         .font(.title3.weight(.semibold))

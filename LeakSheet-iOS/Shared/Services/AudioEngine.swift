@@ -70,6 +70,7 @@ final class AudioEngine {
     private var interruptionObserver: (any NSObjectProtocol)?
     private var resumptionObserver: (any NSObjectProtocol)?
     private var loadingTimeoutTask: Task<Void, Never>?
+    private var videoHintTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
     private var seekInFlight = false
     /// Bumped per seek so a superseded seek's completion can't clear
@@ -170,8 +171,12 @@ final class AudioEngine {
         startLoadingTimeout()
 
         // Early video hint — see DECISIONS.md::AudioEngine.swift::early-video-hint
+        // Held and cancelled, not fired and forgotten: skipping through ten
+        // tracks otherwise left ten /metadata requests running to completion
+        // only for the track guard below to discard nine of them.
         let trackKey = version.id
-        Task { [weak self] in
+        videoHintTask?.cancel()
+        videoHintTask = Task { [weak self] in
             guard let meta = try? await APIClient.shared.fetchMetadata(for: link),
                   meta.mediaKind == "video" else { return }
             guard let self, self.currentTrack?.id == trackKey else { return }
@@ -260,11 +265,18 @@ final class AudioEngine {
         cancelPendingSeek()
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = nil
+        videoHintTask?.cancel()
+        videoHintTask = nil
         observations.forEach { $0.invalidate() }
         observations = []
         if let observer = timeObserver {
             player?.removeTimeObserver(observer)
             timeObserver = nil
+        }
+        // Mirrors setupPlayer, which removes it before adding a new one.
+        if let observer = endOfTrackObserver {
+            NotificationCenter.default.removeObserver(observer)
+            endOfTrackObserver = nil
         }
         player?.pause()
         // Cancel any in-flight asset loading so the underlying socket is torn down

@@ -103,23 +103,10 @@ struct NowPlayingView: View {
 
                 // Progress bar
                 VStack(spacing: 4) {
-                    @Bindable var player = player
-                    Slider(
-                        value: $player.scrubPosition,
-                        in: 0...(player.duration > 0 ? player.duration : 1),
-                        onEditingChanged: { editing in
-                            player.seeking = editing
-                            if !editing {
-                                player.seekTo(player.seekValue)
-                            }
-                        }
-                    )
-                    .tint(readableAccent ?? Color.lsAccent)
+                    ScrubberSlider(tint: readableAccent ?? Color.lsAccent)
 
                     HStack {
-                        Text(Format.time(player.displayTime))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                        PlaybackElapsedText()
                         Spacer()
                         Text(player.duration > 0 ? Format.time(player.duration) : (player.currentTrack?.trackLength ?? "--:--"))
                             .font(.caption2.monospacedDigit())

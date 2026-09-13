@@ -13,7 +13,12 @@ final class FavouritesManager {
     private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Favourites")
 
     var entries: [FavouriteEntry] = [] {
-        didSet { keyIndex = Set(entries.map(\.key)) }
+        didSet {
+            keyIndex = Set(entries.map(\.key))
+            // Here rather than at each mutation: five call sites cleared it
+            // by hand, and the three writes in load() did not.
+            _groupedCache = nil
+        }
     }
 
     /// `entries` keys, for O(1) `isFavourited` during scroll.
@@ -175,11 +180,6 @@ final class FavouritesManager {
         )
     }
 
-    /// Group by artist → era, for global favourites panel. Use `groupedByArtist` for the cached version.
-    func grouped() -> [(artistName: String, artistSlug: String, sourceUrl: String?, eras: [(eraName: String, eraArt: String?, entries: [FavouriteEntry])])] {
-        groupedByArtist
-    }
-
     // MARK: - Mutations
 
     @discardableResult
@@ -190,7 +190,6 @@ final class FavouritesManager {
         )
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
-            _groupedCache = nil
             save()
             return false
         } else {
@@ -217,7 +216,6 @@ final class FavouritesManager {
                 leakDate: nil
             )
             entries.insert(entry, at: 0)
-            _groupedCache = nil
             save()
             return true
         }
@@ -234,7 +232,6 @@ final class FavouritesManager {
         )
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
-            _groupedCache = nil
             save()
             return false
         } else {
@@ -260,7 +257,6 @@ final class FavouritesManager {
                 leakDate: nil
             )
             entries.insert(entry, at: 0)
-            _groupedCache = nil
             save()
             return true
         }
@@ -268,13 +264,11 @@ final class FavouritesManager {
 
     func remove(key: String) {
         entries.removeAll { $0.key == key }
-        _groupedCache = nil
         save()
     }
 
     func clearAll() {
         entries.removeAll()
-        _groupedCache = nil
         save()
     }
 
@@ -285,8 +279,14 @@ final class FavouritesManager {
     @ObservationIgnored private var _groupedCache: [GroupedArtist]?
 
     var groupedByArtist: [GroupedArtist] {
+        // Read `entries` before the cache check. The cache is
+        // @ObservationIgnored, so a hit that never touched `entries` left the
+        // reading view subscribed to nothing, and a favourite changed elsewhere
+        // would not refresh it. Both current callers happen to read
+        // entries.count too; this must not depend on that.
+        let current = entries
         if let cached = _groupedCache { return cached }
-        let result = Self.grouped(from: entries)
+        let result = Self.grouped(from: current)
         _groupedCache = result
         return result
     }

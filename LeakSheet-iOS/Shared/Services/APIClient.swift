@@ -19,7 +19,7 @@ actor APIClient {
     ///
     /// The cache invalidates itself. Both Settings screens bind the key with
     /// `@AppStorage`, which writes UserDefaults directly and calls nothing —
-    /// so an explicit `invalidateBaseURL()` was never reached and a new server
+    /// so an explicit invalidation call was never reached and a new server
     /// only took effect after a relaunch. Observing the store's own change
     /// notification is the version that cannot be forgotten at a call site.
     /// Read from `body` on the MainActor and from inside this actor, so the
@@ -29,29 +29,50 @@ actor APIClient {
         _cacheLock.lock()
         defer { _cacheLock.unlock() }
         if let cached = _cachedBaseURL { return cached }
-        let resolved = resolveBaseURL()
+        let raw = UserDefaults.standard.string(forKey: baseURLDefaultsKey)
+        let resolved = resolveBaseURL(raw)
         _cachedBaseURL = resolved
+        _cachedRaw = .some(raw)
         return resolved
     }
 
     private nonisolated(unsafe) static var _cachedBaseURL: String?
+    /// The raw defaults value `_cachedBaseURL` was resolved from. Outer nil:
+    /// nothing resolved yet. Inner nil: the key was unset.
+    private nonisolated(unsafe) static var _cachedRaw: String??
     private static let _cacheLock = NSLock()
 
-    /// Drop the memoised value. Armed by `startObservingBaseURL()`; also safe
-    /// to call directly.
-    static func invalidateBaseURL() {
+    /// Drop the memo only if the base-URL key itself changed.
+    ///
+    /// `didChangeNotification` fires for ANY key. EraColorExtractor flushes its
+    /// colour cache to defaults two seconds after every extraction burst —
+    /// i.e. while the user scrolls, exactly when this memo is meant to spare a
+    /// resolve per visible row — so invalidating on every notification threw
+    /// it away at the worst moment.
+    private static func invalidateIfBaseURLChanged() {
+        let raw = UserDefaults.standard.string(forKey: baseURLDefaultsKey)
         _cacheLock.lock()
-        _cachedBaseURL = nil
+        if baseURLKeyChanged(cachedRaw: _cachedRaw, current: raw) {
+            _cachedBaseURL = nil
+            _cachedRaw = nil
+        }
         _cacheLock.unlock()
+    }
+
+    /// Whether a defaults change touched the base-URL key. Nothing memoised yet
+    /// (outer nil) means there is nothing to drop.
+    static func baseURLKeyChanged(cachedRaw: String??, current: String?) -> Bool {
+        guard let cachedRaw else { return false }
+        return cachedRaw != current
     }
 
     private nonisolated(unsafe) static var _observer: NSObjectProtocol?
 
-    /// Invalidate whenever the defaults store changes. Called once at launch.
+    /// Watch the defaults store for base-URL changes. Called once at launch.
     ///
     /// Both Settings screens bind the key with `@AppStorage`, which writes
     /// UserDefaults directly and calls nothing — so an explicit
-    /// `invalidateBaseURL()` at the write site was never reached, and a new
+    /// invalidation call at the write site was never reached, and a new
     /// custom server only took effect after a relaunch. Observing the store
     /// is the version that cannot be forgotten at a call site.
     @MainActor
@@ -61,12 +82,11 @@ actor APIClient {
             forName: UserDefaults.didChangeNotification,
             object: UserDefaults.standard,
             queue: nil
-        ) { _ in invalidateBaseURL() }
+        ) { _ in invalidateIfBaseURLChanged() }
     }
 
-    private static func resolveBaseURL() -> String {
-        let custom = UserDefaults.standard.string(forKey: baseURLDefaultsKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private static func resolveBaseURL(_ raw: String?) -> String {
+        let custom = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !custom.isEmpty, custom.lowercased().hasPrefix("http"), URL(string: custom) != nil else {
             return defaultBaseURL
         }

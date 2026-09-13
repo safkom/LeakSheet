@@ -255,9 +255,7 @@ struct SongDescriptionSheet: View {
                         // Version picker — every version of this song, across
                         // every era it appears in (fallback: just this era's
                         // versions when the song has no cross-era duplicates).
-                        if pickerVersions.count > 1 {
-                            versionPicker
-                        }
+                        versionPicker
 
                         // Detail grid (2-column)
                         detailGrid
@@ -529,18 +527,27 @@ struct SongDescriptionSheet: View {
     /// from other eras when the song has one (see `pickerVersions`). Tapping a
     /// chip re-points the whole sheet at that version via `active`, the same
     /// way tvOS's version picker drives its detail screen.
+    ///
+    /// `pickerVersions` is read exactly once here. The visibility check used to
+    /// sit at the call site, so every body pass ran the cross-era lookup and
+    /// its `flatMap` over every matching era twice — the pattern
+    /// MacArtistView.swift already records fixing.
+    @ViewBuilder
     private var versionPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Versions")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(pickerVersions) { entry in
-                        versionChip(entry)
+        let versions = pickerVersions
+        if versions.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Versions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(versions) { entry in
+                            versionChip(entry)
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
             }
         }
     }
