@@ -790,7 +790,13 @@ def parse_tracker_stats(
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[^)\]\n]|[,&.][^\S\n]*\n[^\S\n]*)*)[\)\]]")
+# Possessive, wrapped-line branch first. Both branches can consume a separator
+# and the spaces around a newline, so the plain `*` backtracked exponentially on
+# an unclosed "(" followed by many ", <newline>" lines — 2,000 characters did
+# not finish in 15 s (SonarQube S5852). `*+` never revisits its choices, and
+# trying the newline branch first means it is never needed to: a newline can
+# only be consumed by that branch, at the separator before it.
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.][^\S\n]*\n[^\S\n]*|[^)\]\n])*+)[\)\]]")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.

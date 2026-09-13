@@ -80,3 +80,28 @@ class TestCommaTitleSplitIntoAliases:
         aliases = SongVersion(name="Track", alt_titles=["Mollyworld", "Balaclava Era", "Other"])
         _reconcile_title_misreads([_era(Song(base_name="Track", song_key="track", versions=[aliases]))])
         assert aliases.alt_titles == ["Mollyworld", "Balaclava Era", "Other"]
+
+
+class TestCreditGroupRegexIsLinear:
+    """SonarQube S5852, confirmed: a name cell with an unclosed "(" followed by
+    repeated ", <newline>" lines made _CREDIT_GROUP_RE backtrack exponentially —
+    2,000 characters did not finish in 15 s. Tracker cells are third-party and
+    `re` holds the GIL, so one such cell stalled the whole worker."""
+
+    def test_unclosed_wrapped_list_returns_quickly(self):
+        import time
+
+        from src.models import parse_song_credits
+
+        raw = "Title\n(prod. A" + ",  \n  B" * 3000
+        start = time.perf_counter()
+        parse_song_credits(raw)
+        assert time.perf_counter() - start < 1.0
+
+    def test_wrapped_credit_lists_still_parse(self):
+        from src.models import parse_song_credits
+
+        # Wrapped after a separator: one group, as before the possessive rewrite.
+        assert parse_song_credits("Song\n(prod. \nLondon On Da Track)").producers == "London On Da Track"
+        wrapped = parse_song_credits("Song\n(prod. BoogzDaBeast,\nNascent)")
+        assert wrapped.producers == "BoogzDaBeast, Nascent"
