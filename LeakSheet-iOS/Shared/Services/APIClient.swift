@@ -214,6 +214,14 @@ actor APIClient {
                 )
             }
             etag = Self.normalizeETag(streamedEtag)
+            // A proxy that closes the connection cleanly mid-payload ends the
+            // task without an error; without this it surfaced as a JSON
+            // decoding failure.
+            if let bytes = stream.bytes, Int64(data.count) != bytes {
+                throw APIError.httpError(
+                    status: 0, message: "The download was cut off before the tracker finished. Try again."
+                )
+            }
         }
 
         if httpResponse.statusCode == 304 {
@@ -237,6 +245,8 @@ actor APIClient {
     /// How a streamed (NDJSON) cold parse ended.
     nonisolated struct StreamOutcome: Sendable {
         var etag: String?
+        /// The payload size the header promised, to catch a truncated body.
+        var bytes: Int64?
         var failure: (status: Int, detail: String)?
     }
 
@@ -297,8 +307,9 @@ actor APIClient {
             }
             // gzip bodies decompress past the wire Content-Length — drop the
             // total rather than showing a >100% bar; the UI falls back to a
-            // byte counter. (A stream's total is exact, so this never trips.)
-            if let total = expected, Int64(data.count) > total { expected = nil }
+            // byte counter. A stream's total is exact (its payload's trailing
+            // newline is the one extra byte), so it is left alone.
+            if reader == nil, let total = expected, Int64(data.count) > total { expected = nil }
             if data.count - lastReport >= 262_144 {
                 lastReport = data.count
                 onProgress?(.downloading(receivedBytes: Int64(data.count), expectedBytes: expected))
@@ -311,8 +322,11 @@ actor APIClient {
                 onProgress?(.server(message: message, done: done, total: total))
             case .artist(let etag, let bytes):
                 outcome.etag = etag
+                outcome.bytes = bytes
                 expected = bytes
-                if let bytes { data.reserveCapacity(Int(bytes)) }
+                // +1 for the payload line's newline, or the last append
+                // reallocates the whole multi-MB buffer.
+                if let bytes { data.reserveCapacity(Int(bytes) + 1) }
                 onProgress?(.downloading(receivedBytes: 0, expectedBytes: bytes))
             case .failure(let status, let detail):
                 outcome.failure = (status, detail)

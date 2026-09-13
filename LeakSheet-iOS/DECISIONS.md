@@ -508,3 +508,9 @@ The Info.plist key had to go: it overrides `preferredColorScheme`, so System cou
 follow the device. `SettingsView` also applies the preference to its own sheet, because a
 sheet already on screen is a separate presentation and did not follow a change made
 inside it until it was closed.
+
+The launch screen can't read the setting — it is drawn before any code runs — and without
+the key it follows the device, so a Light-mode phone flashed white before Dark took over.
+`UILaunchScreen.UIColorName` points at `LaunchBackground`, black in both appearances, to
+match the default. Someone who picks Light gets a black launch instead; that is the rarer
+choice.

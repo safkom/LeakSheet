@@ -8,7 +8,8 @@ import SwiftUI
 struct CachedImage<Placeholder: View>: View {
     let url: URL?
     var maxPixelSize: Int = 1280
-    /// Runs once the bitmap is on screen — era cards extract their colour here.
+    /// Runs each time a bitmap is shown, cached or loaded — era cards extract
+    /// their colour here (the extractor caches, so repeats are cheap).
     var onLoad: ((CGImage) async -> Void)? = nil
     @ViewBuilder var placeholder: () -> Placeholder
 

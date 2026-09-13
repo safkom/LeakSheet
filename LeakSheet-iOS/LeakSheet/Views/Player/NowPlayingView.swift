@@ -370,7 +370,8 @@ struct NowPlayingView: View {
             // for 1600 while CachedImage capped the decode at its 1280 default
             // downloaded bytes that were then thrown away. 1280 covers the
             // artwork's 340pt cap at 3x; 640 did only while the frame was 280pt.
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1280), maxPixelSize: 1280) {
+            // 1600, the size the lock-screen artwork loads, so both share one download and cache entry.
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600), maxPixelSize: 1600) {
                 artPlaceholder
             }
             .modifier(ArtworkSquare())

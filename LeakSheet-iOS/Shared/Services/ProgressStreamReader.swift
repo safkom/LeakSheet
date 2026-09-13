@@ -17,13 +17,19 @@ nonisolated struct ProgressStreamReader {
         case failure(status: Int, detail: String)
     }
 
+    /// Longer than any progress or header line. A buffer past this without a
+    /// newline is the payload behind a header this client could not read.
+    static let maxLineBytes = 64 * 1024
+
     private var buffer = Data()
     private(set) var inPayload = false
+    private var failed = false
 
     /// Consume one network chunk. Returns the events completed by it, and any
     /// payload bytes it carried.
     mutating func feed(_ chunk: Data) -> (events: [Event], payload: Data) {
         if inPayload { return ([], chunk) }
+        if failed { return ([], Data()) }
         buffer.append(chunk)
         var events: [Event] = []
         while let newline = buffer.firstIndex(of: 0x0A) {
@@ -39,6 +45,16 @@ nonisolated struct ProgressStreamReader {
                 }
             }
             buffer = Data(rest)
+        }
+        if buffer.count > Self.maxLineBytes {
+            // Without this the megabytes of payload were rescanned for a
+            // newline on every chunk and then decoded as one progress line.
+            // ponytail: the rest of the body still downloads and is dropped.
+            buffer = Data()
+            failed = true
+            events.append(.failure(
+                status: 0, detail: "The server sent a response this version of the app can't read."
+            ))
         }
         return (events, Data())
     }

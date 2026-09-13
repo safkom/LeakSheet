@@ -22,8 +22,8 @@ struct MiniPlayerBar: View {
                 if player.duration > 0 {
                     ScrubberSlider()
                         .frame(height: 16)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
                 }
 
                 HStack(spacing: 10) {

@@ -191,8 +191,9 @@ struct BrowseArtistsView: View {
                     if a.best != true && b.best == true { return false }
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
-        } catch is CancellationError {
+        } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
             // The refresh gesture was released or the view went away.
+            // URLSession reports cancellation as URLError, not CancellationError.
         } catch {
             // A failed refresh keeps the list already on screen; the error
             // view replaces it only when there was nothing to show.

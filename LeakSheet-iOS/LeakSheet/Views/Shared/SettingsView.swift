@@ -13,6 +13,12 @@ struct SettingsView: View {
     /// NavigationStack and the Done button.
     var embedded = false
 
+    /// The presenter's colour scheme, which follows the device once the root
+    /// drops its override. Needed because `.preferredColorScheme(nil)` on a
+    /// sheet does not release an override the sheet already applied: choosing
+    /// System left this sheet dark on a light phone until it was closed.
+    var presenterScheme: ColorScheme? = nil
+
     @State private var cacheSizeBytes: Int64 = 0
     @State private var imageCacheBytes: Int64 = 0
     @State private var clearingCache = false
@@ -44,7 +50,7 @@ struct SettingsView: View {
                 // screen when the choice changes here, and a presented sheet is
                 // its own presentation. Without this it stayed in the old
                 // appearance until closed.
-                .preferredColorScheme(appearance.colorScheme)
+                .preferredColorScheme(appearance.colorScheme ?? presenterScheme)
         }
     }
 

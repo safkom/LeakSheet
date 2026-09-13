@@ -64,7 +64,7 @@ struct QueueSheet: View {
             isPresented: $confirmingClear,
             titleVisibility: .visible
         ) {
-            Button("Clear \(player.queue.count) Tracks", role: .destructive) {
+            Button("Clear ^[\(player.queue.count) Track](inflect: true)", role: .destructive) {
                 player.clearQueue()
             }
         } message: {
@@ -176,6 +176,10 @@ struct QueueSheet: View {
                 if let index = index(of: item) { player.removeFromQueue(at: index) }
             }
         }
+        // Dragging is the only visible way to reorder, which VoiceOver and
+        // Switch Control can't do.
+        .accessibilityAction(named: "Move Up") { move(item, by: -1) }
+        .accessibilityAction(named: "Move Down") { move(item, by: 1) }
     }
 
     /// The item's CURRENT position. Resolved at tap time rather than captured
@@ -184,6 +188,15 @@ struct QueueSheet: View {
     /// track.
     private func index(of item: QueueItem) -> Int? {
         player.queue.firstIndex { $0.id == item.id }
+    }
+
+    /// `moveInQueue` takes a destination in the pre-move queue, so moving down
+    /// one lands two past the source.
+    private func move(_ item: QueueItem, by offset: Int) {
+        guard let index = index(of: item) else { return }
+        let target = index + offset
+        guard player.queue.indices.contains(target) else { return }
+        player.moveInQueue(from: IndexSet(integer: index), to: offset > 0 ? target + 1 : target)
     }
 
     /// Translate SwiftUI's reorder description into `moveInQueue`, which has
@@ -210,8 +223,10 @@ struct QueueSheet: View {
         // every other sheet in the app puts Cancel or Close — so reaching for
         // "back out" wiped the queue. .destructiveAction is the placement meant
         // for it; it also asks before clearing.
-        ToolbarItem(placement: .destructiveAction) {
-            if !player.queue.isEmpty {
+        // The condition sits outside the item: an item with no content can
+        // still leave an empty glass capsule beside Done.
+        if !player.queue.isEmpty {
+            ToolbarItem(placement: .destructiveAction) {
                 // role alone renders neutral text in the glass toolbar.
                 Button("Clear", role: .destructive) { confirmingClear = true }
                     .foregroundStyle(Color.lsError)

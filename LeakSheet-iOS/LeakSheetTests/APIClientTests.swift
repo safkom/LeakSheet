@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import LeakSheet
@@ -94,11 +95,9 @@ struct APIClientTests {
         let recorder = ProgressRecorder()
         _ = try await makeClient().parseSheet(
             url: "https://docs.google.com/spreadsheets/d/x",
-            onProgress: { phase in Task { await recorder.record(phase) } }
+            onProgress: { recorder.record($0) }
         )
-        // Give the detached recorder tasks a beat to land.
-        try await Task.sleep(for: .milliseconds(50))
-        let phases = await recorder.phases
+        let phases = recorder.phases
         #expect(phases.contains { if case .downloading = $0 { return true }; return false })
         #expect(phases.last == .preparing)
     }
@@ -126,10 +125,9 @@ extension APIClientTests {
         let recorder = ProgressRecorder()
         let result = try await makeClient().parseSheet(
             url: "https://docs.google.com/spreadsheets/d/x",
-            onProgress: { phase in Task { await recorder.record(phase) } }
+            onProgress: { recorder.record($0) }
         )
-        try await Task.sleep(for: .milliseconds(50))
-        let phases = await recorder.phases
+        let phases = recorder.phases
 
         #expect(accept?.contains("application/x-ndjson") == true)
         #expect(result.artist.slug == "test")
@@ -158,6 +156,22 @@ extension APIClientTests {
         }
     }
 
+    @Test func `a stream cut off mid-payload says so instead of failing to decode`() async throws {
+        let truncated = Self.artistBody.prefix(Self.artistBody.count - 5)
+        let body = Self.ndjson([
+            #"{"type":"artist","etag":"8c6f587cdeec162e","bytes":\#(Self.artistBody.count)}"#,
+        ]) + truncated
+        StubProtocol.handler = { req in
+            (Self.response(200, headers: ["Content-Type": "application/x-ndjson"], url: req.url!), body)
+        }
+        do {
+            _ = try await makeClient().parseSheet(url: "https://docs.google.com/spreadsheets/d/x")
+            Issue.record("expected a truncated stream to throw")
+        } catch let APIError.httpError(_, message) {
+            #expect(message.contains("cut off"))
+        }
+    }
+
     @Test func `a stream that ends before the artist is an error, not an empty tracker`() async throws {
         let body = Self.ndjson([#"{"type":"progress","stage":"fetching","message":"Opening the tracker"}"#])
         StubProtocol.handler = { req in
@@ -169,9 +183,13 @@ extension APIClientTests {
     }
 }
 
-private actor ProgressRecorder {
-    var phases: [APIClient.LoadPhase] = []
-    func record(_ phase: APIClient.LoadPhase) { phases.append(phase) }
+/// Records synchronously in the callback. The old actor recorder hopped
+/// through unstructured Tasks and a 50 ms sleep, which a loaded CI machine
+/// could outrun.
+private nonisolated final class ProgressRecorder: Sendable {
+    private let storage = Mutex<[APIClient.LoadPhase]>([])
+    var phases: [APIClient.LoadPhase] { storage.withLock { $0 } }
+    func record(_ phase: APIClient.LoadPhase) { storage.withLock { $0.append(phase) } }
 }
 
 struct BaseURLMemoTests {

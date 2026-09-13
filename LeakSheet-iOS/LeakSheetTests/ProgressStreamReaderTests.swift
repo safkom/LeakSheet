@@ -14,7 +14,7 @@ struct ProgressStreamReaderTests {
         d.append(0x0A)
         d.append(Data(#"{"type":"progress","stage":"tabs","message":"Read Misc","done":2,"total":9}"#.utf8))
         d.append(0x0A)
-        d.append(Data(#"{"type":"artist","etag":"8c6f587cdeec162e","bytes":40}"#.utf8))
+        d.append(Data(#"{"type":"artist","etag":"8c6f587cdeec162e","bytes":39}"#.utf8))
         d.append(0x0A)
         d.append(payload)
         d.append(0x0A)
@@ -24,7 +24,7 @@ struct ProgressStreamReaderTests {
     private static let expectedEvents: [ProgressStreamReader.Event] = [
         .progress(message: "Found 19 tabs — downloading Unreleased", done: nil, total: nil),
         .progress(message: "Read Misc", done: 2, total: 9),
-        .artist(etag: "8c6f587cdeec162e", bytes: 40),
+        .artist(etag: "8c6f587cdeec162e", bytes: 39),
     ]
 
     private static func read(_ chunks: [Data]) -> ([ProgressStreamReader.Event], Data) {
@@ -67,6 +67,18 @@ struct ProgressStreamReaderTests {
         let line = Data(#"{"type":"error","status":403,"detail":"This tracker is private or has been taken down."}"#.utf8) + Data([0x0A])
         let (events, payload) = Self.read([line])
         #expect(events == [.failure(status: 403, detail: "This tracker is private or has been taken down.")])
+        #expect(payload.isEmpty)
+    }
+
+    /// A header this client can't decode is skipped like any unknown line, so
+    /// the payload behind it has no newline for megabytes. That must end as a
+    /// failure, not an ever-growing buffer rescanned on every chunk.
+    @Test func `a payload behind an unreadable header fails instead of buffering`() {
+        let header = Data(#"{"type":"artist","bytes":200000}"#.utf8) + Data([0x0A])
+        let body = Data(repeating: UInt8(ascii: "a"), count: ProgressStreamReader.maxLineBytes + 1)
+        let (events, payload) = Self.read([header, body, body])
+        #expect(events.count == 1)
+        guard case .failure = events.first else { Issue.record("expected a failure, got \(events)"); return }
         #expect(payload.isEmpty)
     }
 
