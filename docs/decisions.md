@@ -81,6 +81,29 @@ next line (`[prod. A,\nB]`) remains an alt title: letting the pattern span newli
 would let an unclosed `(prod. ` swallow real alt-title lines, and it buys exactly
 one row across the whole corpus.
 
+## parser.py::_reconcile_title_misreads — song identity from titles and alt titles
+
+Decided with the user, 2026-09-13, after the iOS version picker showed split songs.
+
+- **Versions group by `song_key`, not the exact title.** Trackers change case and
+  punctuation between rows of one song ("Touch The Sky" / "Touch the Sky", 21 songs of
+  VULTURES 1 in capitals and in title case). Grouping by the exact string produced Ye
+  alone 40 extra songs, while cross-era linking already used the key. The label
+  baselines were re-pinned for exactly these merges; version counts did not move.
+- **Alt titles link songs; they never merge them.** Trackers cross-list distinct
+  released songs as each other's alt titles (Ye's "Self Conscious" and "All Falls
+  Down"), so a merge would fuse different songs. Clients link one hop — a song whose
+  title matches one of this song's names — for the version picker and search.
+- **Slash titles are names, not groups.** "Stay On Em / Precious" is one song with two
+  names; "LOVE ME / TOO EASY" is two songs in one file. Each part is a linkable name and
+  the row stays its own song.
+- **Two misreads are undone using the tracker's own names**, since a single cell cannot
+  tell them apart. "(With Child, Stay On Em)" matches the "(with X)" credit form even
+  capitalised, and "(With Eminem)" really is one, so it becomes alt titles only when
+  every name matches a title or alt title in the same song family (3 cells across 415
+  cached trackers). "(Bitch, Don't Kill My Vibe)" is split by the alias-list rule, so
+  consecutive aliases are rejoined when the joined text is a song title in the tracker.
+
 ## parser.py::apply_badge_tabs — emoji stripping and per-row badges
 
 Highlight tabs routinely prefix **every row** with the badge emoji

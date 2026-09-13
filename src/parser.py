@@ -2092,6 +2092,7 @@ def parse_sheet(
     for era in eras:
         _consolidate_group_labels(era)
         _sort_era_versions(era)
+    _reconcile_title_misreads(eras)
 
     # Step 4: build parse metadata
     unknown_columns, duplicate_columns = detect_dropped_columns(
@@ -2135,6 +2136,75 @@ def parse_sheet(
         parse_metadata=metadata,
         notices=notices,
     )
+
+
+def _reconcile_title_misreads(eras: list[Era]) -> None:
+    """Undo two name-cell misreads by checking them against the tracker's own names.
+
+    See docs/decisions.md::parser.py::_reconcile_title_misreads. A single cell
+    cannot tell these apart; the rest of the tracker can.
+
+    - An alias line "(With Child, Stay On Em)" matches the "(with X)" credit
+      form, so the version got a collaboration "Child, Stay On Em" and lost both
+      alt titles. Undone only when every name matches a title or alt title
+      elsewhere in the same song family — real collabs ("(With Eminem)") never
+      do.
+    - An alias line "(Bitch, Don't Kill My Vibe)" is split on its comma into
+      "Bitch" and "Don't Kill My Vibe". Rejoined when the joined text is a song
+      title somewhere in the tracker.
+    """
+    songs = [song for era in eras for section in era.sections for song in section.songs]
+    titles: set[str] = set()
+    family_names: dict[str, set[str]] = {}
+    for song in songs:
+        title_key = _song_match_key(song.base_name)
+        titles.add(title_key)
+        names = family_names.setdefault(song.song_key or title_key, set())
+        names.add(title_key)
+        for version in song.versions:
+            names.update(_song_match_key(alt) for alt in version.alt_titles)
+    titles.discard("")
+
+    for song in songs:
+        names = family_names.get(song.song_key or _song_match_key(song.base_name), set())
+        names.discard("")
+        for version in song.versions:
+            if len(version.alt_titles) > 1:
+                version.alt_titles = _rejoin_split_aliases(version.alt_titles, titles)
+            collab = version.collaboration
+            if not collab:
+                continue
+            parts = [p.strip() for p in collab.split(", ") if p.strip()]
+            if (
+                parts
+                and _song_match_key(f"With {parts[0]}") in names
+                and all(
+                    _song_match_key(p) in names or _song_match_key(f"With {p}") in names
+                    for p in parts[1:]
+                )
+            ):
+                restored = [f"With {parts[0]}", *parts[1:]]
+                version.alt_titles = version.alt_titles + [
+                    alt for alt in restored if alt not in version.alt_titles
+                ]
+                version.collaboration = None
+
+
+def _rejoin_split_aliases(alts: list[str], titles: set[str]) -> list[str]:
+    """Rejoin consecutive aliases whose comma-joined text is a known song title."""
+    out: list[str] = []
+    i = 0
+    while i < len(alts):
+        for j in range(len(alts), i + 1, -1):
+            joined = ", ".join(alts[i:j])
+            if _song_match_key(joined) in titles:
+                out.append(joined)
+                i = j
+                break
+        else:
+            out.append(alts[i])
+            i += 1
+    return out
 
 
 def _disambiguate_era_names(eras: list[Era]) -> list[Era]:
@@ -2430,8 +2500,13 @@ def _add_version_to_era(
     """Add a version to the appropriate Song in the era, creating it if needed.
 
     Songs with the same base name (ignoring version tags [V1], [V2], etc.) are
-    grouped together — even across sections. New songs are added to the last
-    (current) section. ``song_index`` maps (id(era), base_name) → Song so the
+    grouped together — even across sections. "The same" means the same
+    ``song_key``, so rows differing only in case or punctuation join one song:
+    the tracker writes "Touch The Sky" on one row and "Touch the Sky" on the
+    next, and grouping by the exact string split Ye alone into 40 extra songs,
+    each with its own version picker, while cross-era linking (which already
+    used the key) treated them as one. New songs are added to the last
+    (current) section. ``song_index`` maps (id(era), key) → Song so the
     grouping lookup is O(1) instead of scanning every song in the era.
 
     Placeholder names ("???", "Unknown", …) mark songs the fanbase can't
@@ -2471,7 +2546,10 @@ def _add_version_to_era(
             song_index.setdefault(k, song)
         return
 
-    key = (id(era), base_key)
+    song_key = _song_match_key(base_key)
+    # A name of pure punctuation has an empty key; fall back to the exact text
+    # rather than lumping every such row into one song.
+    key = (id(era), song_key or base_key)
     song = song_index.get(key)
     if song is not None:
         song.versions.append(version)
@@ -2480,7 +2558,7 @@ def _add_version_to_era(
     # Create new song in the last (current) section
     song = Song(
         base_name=base_key,
-        song_key=_song_match_key(base_key),
+        song_key=song_key,
         versions=[version],
     )
     era.sections[-1].songs.append(song)
