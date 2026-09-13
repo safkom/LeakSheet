@@ -160,6 +160,7 @@ struct DesignTokensColorTests {
         (.badgeConfirmed, "badgeConfirmed"), (.badgeBeatOnly, "badgeBeatOnly"),
         (.badgeStem, "badgeStem"), (.badgeUnavailable, "badgeUnavailable"),
         (.badgeRumored, "badgeRumored"), (.badgeConflicting, "badgeConflicting"),
+        (.badgeEntryType, "badgeEntryType"),
         (.lsAccent, "lsAccent"),
     ]
 

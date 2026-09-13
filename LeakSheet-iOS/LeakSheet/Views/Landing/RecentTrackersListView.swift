@@ -19,7 +19,9 @@ struct RecentTrackersListView: View {
                             .font(.headline)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Clear", role: .destructive) {
+                        // No destructive role here: this only opens the
+                        // confirmation, whose button is the destructive one.
+                        Button("Clear") {
                             showClearConfirm = true
                         }
                         .font(.caption)

@@ -140,6 +140,10 @@ struct BrowseArtistsView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    // .task below is a one-shot for the process lifetime, so
+                    // without this the list never picked up a tracker added to
+                    // the feed, or an "outdated"/"dead links" flag clearing.
+                    .refreshable { await loadArtists(force: true) }
                     // Same placement as the artist screen (ArtistView.swift).
                     // Passing no placement gets `.automatic`, which puts the
                     // field in the bottom slot on iPhone — so opening a
@@ -171,8 +175,9 @@ struct BrowseArtistsView: View {
             .onAppear { loadingUrl = "" }
     }
 
-    private func loadArtists() async {
-        guard artists.isEmpty else { return }
+    /// `force` is pull-to-refresh: refetch even though a list is showing.
+    private func loadArtists(force: Bool = false) async {
+        guard force || artists.isEmpty else { return }
         loading = true
         error = nil
         defer { loading = false }
@@ -186,8 +191,14 @@ struct BrowseArtistsView: View {
                     if a.best != true && b.best == true { return false }
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
+        } catch is CancellationError {
+            // The refresh gesture was released or the view went away.
         } catch {
-            self.error = error.localizedDescription
+            // A failed refresh keeps the list already on screen; the error
+            // view replaces it only when there was nothing to show.
+            if artists.isEmpty {
+                self.error = error.localizedDescription
+            }
         }
     }
 

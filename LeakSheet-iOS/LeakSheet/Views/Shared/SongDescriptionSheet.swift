@@ -452,7 +452,10 @@ struct SongDescriptionSheet: View {
 
     @ToolbarContentBuilder
     private var chromeToolbar: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
+        // The menu sat in .cancellationAction, the leading slot every other
+        // sheet in the app uses to close — reaching for "back out" opened a
+        // menu instead. Actions go trailing; Done is the confirmation.
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 overflowItems
             } label: {
@@ -460,7 +463,7 @@ struct SongDescriptionSheet: View {
             }
             .accessibilityLabel("More options")
         }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: .confirmationAction) {
             Button("Done") { dismiss() }
         }
     }

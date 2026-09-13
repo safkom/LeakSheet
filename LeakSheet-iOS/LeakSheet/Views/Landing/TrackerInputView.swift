@@ -80,14 +80,18 @@ struct TrackerInputView: View {
             }
 
             if url.trimmingCharacters(in: .whitespaces).isEmpty {
-                Button {
-                    pasteFromClipboard()
-                } label: {
-                    Label("Paste", systemImage: "doc.on.clipboard")
-                        .font(.subheadline)
+                // The system PasteButton, not a Button reading the pasteboard.
+                // A programmatic read raised the "Allow Paste?" prompt on every
+                // tap; PasteButton is the user's explicit consent, so it never
+                // asks.
+                PasteButton(payloadType: String.self) { strings in
+                    if let text = strings.first {
+                        url = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
                 }
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
                 .disabled(loading)
-                .foregroundStyle(.secondary)
             } else {
                 Button {
                     normalizeIfConcatenated()
@@ -158,12 +162,6 @@ struct TrackerInputView: View {
         case ..<1.5: "Contacting server…"
         case ..<5: "Fetching tracker…"
         default: "Parsing a large tracker…"
-        }
-    }
-
-    private func pasteFromClipboard() {
-        if let text = Pasteboard.string {
-            url = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 

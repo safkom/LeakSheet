@@ -133,7 +133,10 @@ extension Color {
     // type pill used lsAccent — the same blue as badgeFull — so "PRODUCTION"
     // read as an availability badge. Type is what KIND of entry this is, not
     // its status, so it recedes and leaves colour to carry status.
-    static let badgeEntryType = Color(hue: 0/360, saturation: 0.0, brightness: 0.72)
+    //
+    // A tone like every other pill colour. As a static 0.72 grey it read at
+    // 1.8:1 on the light background — the one pill the light palette missed.
+    static let badgeEntryType = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.72, lightBrightness: 0.40)
 
     // MARK: - Hex Initializer
 

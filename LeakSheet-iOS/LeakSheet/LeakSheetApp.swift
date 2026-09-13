@@ -5,6 +5,9 @@ import OSLog
 @main
 struct LeakSheetApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    /// Settings → Appearance. Applied to each scene's root; sheets and
+    /// windows opened from it inherit the scheme.
+    @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault
 
     private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
@@ -31,6 +34,7 @@ struct LeakSheetApp: App {
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
                 .environment(RecentTrackersManager.shared)
+                .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 1180, height: 800)
         .windowResizability(.contentMinSize)
@@ -45,6 +49,7 @@ struct LeakSheetApp: App {
             NowPlayingView()
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
+                .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 460, height: 700)
         .windowResizability(.contentMinSize)
@@ -55,10 +60,12 @@ struct LeakSheetApp: App {
         Settings {
             SettingsView(embedded: true)
                 .frame(width: 460, height: 520)
+                .preferredColorScheme(appearance.colorScheme)
         }
         #else
         WindowGroup {
             ContentView()
+                .preferredColorScheme(appearance.colorScheme)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

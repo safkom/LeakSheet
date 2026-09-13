@@ -368,9 +368,9 @@ struct NowPlayingView: View {
         } else if !player.artUrl.isEmpty {
             // Width matches maxPixelSize, as every other call site does: asking
             // for 1600 while CachedImage capped the decode at its 1280 default
-            // downloaded bytes that were then thrown away, and 640 already
-            // covers the 280pt frame at 2x.
-            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 640), maxPixelSize: 640) {
+            // downloaded bytes that were then thrown away. 1280 covers the
+            // artwork's 340pt cap at 3x; 640 did only while the frame was 280pt.
+            CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1280), maxPixelSize: 1280) {
                 artPlaceholder
             }
             .modifier(ArtworkSquare())
@@ -386,9 +386,13 @@ struct NowPlayingView: View {
     }
 }
 
-/// Square artwork frame. Fixed on iPhone (one screen size class per device);
-/// window-relative on the Mac, where the Now Playing window is resizable and a
-/// hard 280pt square left the rest of it empty.
+/// Square artwork frame, sized to the space it gets.
+///
+/// On iOS it was a fixed 280pt square: three quarters of an iPhone SE's width,
+/// and incompressible, so at accessibility text sizes the controls below it had
+/// nowhere to go. It now fills the width up to a cap and, being aspect-fit,
+/// gives way vertically when the controls need the room. On the Mac it tracks
+/// the resizable window, where a hard square left the rest of it empty.
 private struct ArtworkSquare: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -401,7 +405,14 @@ private struct ArtworkSquare: ViewModifier {
         .aspectRatio(1, contentMode: .fit)
         .layoutPriority(1)
         #else
-        content.frame(width: 280, height: 280)
+        // A clear square the artwork fills, rather than aspect-fitting the
+        // artwork itself: covers are not always square, and the frame is.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { content }
+            .clipped()
+            .frame(maxWidth: 340)
+            .padding(.horizontal, 32)
         #endif
     }
 }

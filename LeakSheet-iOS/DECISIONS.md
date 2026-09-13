@@ -495,3 +495,16 @@ longer qualify. A row triggers a load only while it really is among the last eig
 sets it again before the first playback. The warning about slow category changes
 applies to an ACTIVE session; at that point the session has not been activated yet,
 because activation follows the category set. Left as is.
+
+## AppAppearance.swift — dark by default, light and system on request
+
+The iOS app was locked to dark by `INFOPLIST_KEY_UIUserInterfaceStyle = Dark`, while a
+full light palette — tuned tones, contrast-tested in both appearances — existed and only
+the Mac could reach. Settings now offers Dark, Light and System, applied with
+`preferredColorScheme` at every scene root. iOS defaults to Dark, the look the app was
+drawn for; the Mac defaults to System, which is what it already did. Decided 2026-09-13.
+
+The Info.plist key had to go: it overrides `preferredColorScheme`, so System could never
+follow the device. `SettingsView` also applies the preference to its own sheet, because a
+sheet already on screen is a separate presentation and did not follow a change made
+inside it until it was closed.
