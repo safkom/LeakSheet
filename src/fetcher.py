@@ -30,7 +30,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import NoReturn
+from typing import Callable, NoReturn
 from urllib.parse import urlparse, urlencode
 
 import httpx
@@ -107,6 +107,11 @@ def _gid_fetch_slot() -> asyncio.Semaphore:
     return _gid_fetch_sem
 
 
+def _megabytes(text: str) -> str:
+    """"12.3 MB" for a fetched page, for progress messages."""
+    return f"{len(text) / 1_048_576:.1f} MB"
+
+
 class PhaseTimer:
     """Collects per-phase wall-clock durations across one request.
 
@@ -115,8 +120,26 @@ class PhaseTimer:
     diagnosed from curl or the app without server log access.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
+        # Receives human-readable progress events for a client that is waiting
+        # on a cold parse (POST /sheet streamed as NDJSON). Rides on the timer
+        # because the timer already reaches every stage of the pipeline.
+        self.on_progress = on_progress
+
+    def report(
+        self, stage: str, message: str, *, done: int | None = None, total: int | None = None
+    ) -> None:
+        """Tell a waiting client what is happening. A no-op with no listener.
+
+        Call only from the event loop: listeners are not thread-safe.
+        """
+        if self.on_progress is None:
+            return
+        event: dict = {"type": "progress", "stage": stage, "message": message}
+        if total:
+            event["done"], event["total"] = done or 0, total
+        self.on_progress(event)
 
     @contextmanager
     def phase(self, name: str):
@@ -1513,6 +1536,15 @@ async def _load_secondary_tabs(
     if not art_gid and not content_tabs:
         return
 
+    total = len(content_tabs) + (1 if art_gid else 0)
+    done = 0
+    t.report("tabs", f"Reading {total} extra tabs", done=0, total=total)
+
+    def _finished(name: str) -> None:
+        nonlocal done
+        done += 1
+        t.report("tabs", f"Read {name}", done=done, total=total)
+
     async def _fetch(gid_val: str) -> tuple[str, str] | None:
         return await _fetch_gid_page(
             url_norm, gid_val, title,
@@ -1534,10 +1566,11 @@ async def _load_secondary_tabs(
             # Art tab optional — keep existing art_url on failure. WARNING so
             # a systematically broken tab is visible at default log level.
             logger.warning("Art tab load failed for %s: %s", url_norm[:80], e)
+        _finished("Art")
 
     tab_results: dict[str, list] = {}
 
-    async def _load_tab(gid_val: str, kind: str) -> None:
+    async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
         try:
             with t.phase("misc_fetch"):
                 result = await _fetch(gid_val)
@@ -1551,8 +1584,9 @@ async def _load_secondary_tabs(
         except Exception as e:
             # Content tabs optional; WARNING keeps systematic failures visible.
             logger.warning("Content tab %s load failed: %s", gid_val, e)
+        _finished(display_name)
 
-    secondary = [_load_tab(g, k) for g, k, _n in content_tabs]
+    secondary = [_load_tab(g, k, n) for g, k, n in content_tabs]
     if art_gid:
         secondary.append(_load_art())
     if secondary:
@@ -1695,6 +1729,7 @@ async def _aggregate_hub_workbook(
     """
     if not candidates:
         return 0
+    t.report("tabs", f"Merging {len(candidates)} catalogue tabs")
 
     # A SECOND, smaller bound around fetch+parse together. The gid-fetch
     # semaphore is released once the body is in hand, so without this every
@@ -1784,6 +1819,7 @@ async def async_fetch_and_parse(
         gid = _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
     await _assert_sheet_host_allowed(url_norm)
+    t.report("fetching", "Opening the tracker")
 
     # Check parsed result cache first (skip entire parse pipeline)
     if use_cache and cache_ttl > 0:
@@ -1818,6 +1854,7 @@ async def async_fetch_and_parse(
             gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
             if not gid_is_misc_tab:
                 name = _resolve_artist_name(title, artist_name)
+                t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
                 with t.phase("parse"):
                     artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
                 # Eras alone aren't enough — a hub tab parses to eras with no
@@ -1871,6 +1908,7 @@ async def async_fetch_and_parse(
         # If base page has tables, try parsing directly
         if "<table" in base_html.lower():
             name = _resolve_artist_name(title, artist_name)
+            t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
@@ -1890,6 +1928,12 @@ async def async_fetch_and_parse(
         # Prioritize the "Unreleased" tab; identify Art and content-tab GIDs
         gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
             base_html, gids
+        )
+        first_tab = named_tabs.get(gids[0]) if gids else None
+        t.report(
+            "fetching",
+            f"Found {len(named_tabs)} tabs — downloading {first_tab}"
+            if named_tabs and first_tab else "Downloading the tracker",
         )
 
         # --- Fetch all GID pages concurrently, then parse to pick best ---
@@ -1925,6 +1969,10 @@ async def async_fetch_and_parse(
             result_gid, sheet_html = result
             try:
                 name = _resolve_artist_name(title, artist_name)
+                t.report(
+                    "parsing",
+                    f"Parsing {named_tabs.get(result_gid, 'a tab')} ({_megabytes(sheet_html)})",
+                )
                 with t.phase("parse"):
                     candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
                 n_eras = len(candidate.eras)
@@ -1999,6 +2047,10 @@ async def async_fetch_and_parse(
 
         if best_artist and best_score[1] > 0:
             best_artist.source_url = url
+            t.report(
+                "parsing",
+                f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
+            )
 
             # Hub workbook: the main tab held no songs, so the catalogue is
             # spread across unclassified sibling tabs. Gated on that, so a
@@ -2032,6 +2084,8 @@ async def async_fetch_and_parse(
             # Idempotent: names already unique are returned untouched.
             best_artist.eras = _disambiguate_era_names(best_artist.eras)
 
+            if write_cache:
+                t.report("saving", "Saving")
             with t.phase("cache_write"):
                 if write_cache and best_html:
                     await _async_set_cache(url_norm, best_html, title)

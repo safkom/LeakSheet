@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import time
+import zlib
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -692,80 +693,18 @@ async def parse_sheet(
             )
 
     # --- Cache miss: full fetch + parse ---
+    # A client that sends Accept: application/x-ndjson gets the cold path as a
+    # stream of real progress events followed by the artist. Hits, stale hits
+    # and 304s above stay plain JSON for everyone: they are instant, and it
+    # keeps ETag and cache semantics exactly as they were.
+    if _NDJSON in request.headers.get("accept", ""):
+        return _stream_sheet(req, request)
+
     timer = PhaseTimer()
     try:
-        artist = await async_fetch_and_parse(
-            req.url,
-            # NEVER the caller's name: the parse this produces is written to a
-            # cache keyed by URL alone and shared with every other client, so a
-            # request-body field reaching it let anyone rename any tracker —
-            # and its slug, which is iOS favourites key material — for
-            # everyone, permanently. The override is re-applied to THIS
-            # response below, after the shared entry has been written.
-            artist_name=None,
-            cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
-            use_cache=use_cache,
-            # A force-refresh skips cache reads but must still repopulate it,
-            # otherwise the next normal request pays another full cold fetch.
-            write_cache=req.use_cache,
-            timer=timer,
-        )
-    except InvalidURLError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid URL: {e}")
-    except AccessDeniedError:
-        # The provider's own wording ("401 Unauthorized", "410 Gone") means
-        # nothing to a user staring at a tracker that used to work.
-        logger.info("sheet access denied for %s", req.url[:120])
-        raise HTTPException(
-            status_code=403,
-            detail="This tracker is private or has been taken down.",
-        )
-    except NetworkError as e:
-        # NEVER interpolate: NetworkError wraps the SSRF guard's message,
-        # which names the resolved address ("blocked non-public address
-        # 10.0.0.5 for host …"). Same rule /stream and /image-proxy follow.
-        logger.warning("sheet network error for %s: %s", req.url[:120], e)
-        raise HTTPException(
-            status_code=502, detail="Could not reach the tracker source."
-        )
-    except NoTablesError as e:
-        # Carries the full GID list it tried — internal detail, not the user's.
-        logger.warning("sheet has no table data at %s: %s", req.url[:120], e)
-        raise HTTPException(
-            status_code=404, detail="No table data found at that URL."
-        )
-    except ParseError as e:
-        logger.warning("sheet parse error for %s: %s", req.url[:120], e)
-        raise HTTPException(status_code=422, detail="Could not parse this tracker.")
-    except ValueError as e:
-        logger.warning("sheet value error for %s: %s", req.url[:120], e)
-        raise HTTPException(status_code=422, detail="Could not parse this tracker.")
+        body, etag = await _parse_for_response(req, timer)
     except Exception as e:
-        logger.exception("Unhandled error during sheet parse: %s", e)
-        raise HTTPException(status_code=500, detail="Internal error")
-
-    # The cache write already serialized this artist; serve those bytes. Doing
-    # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
-    #
-    # Serialize here only when there are no such bytes: the write was skipped
-    # (use_cache false, or the collapse guard refused it) or the caller asked
-    # for a display rename. That rename is applied after the shared cache was
-    # written with the page-inferred name, so a later cache hit serves the
-    # inferred name to everyone and only this caller sees the override.
-    #
-    # When serializing, encode to bytes off the event loop and return a
-    # Response. Handing FastAPI a plain dict ran jsonable_encoder (a full
-    # recursive walk of the payload) and then json.dumps again, both on the loop.
-    wire = None if req.artist_name else artist._wire
-    if wire is not None:
-        body, etag = wire
-    else:
-        if req.artist_name:
-            artist = artist.model_copy(
-                update={"name": req.artist_name, "slug": slugify(req.artist_name)}
-            )
-        with timer.phase("serialize"):
-            body, etag = await asyncio.to_thread(serialize_artist, artist)
+        raise _sheet_http_error(req, e) from e
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
     return Response(
         content=body,
@@ -777,6 +716,179 @@ async def parse_sheet(
             "Server-Timing": timer.server_timing_header(),
         },
     )
+
+
+_NDJSON = "application/x-ndjson"
+
+# Streams whose parse outlives a disconnected client. Held so the task is not
+# garbage-collected mid-parse: it runs to completion and fills the cache, so a
+# retry is a warm hit rather than a second cold parse.
+_detached_parses: set[asyncio.Task] = set()
+
+# Chunks larger than this are compressed off the event loop.
+_STREAM_OFFLOAD_BYTES = 64_000
+
+
+async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[bytes, str]:
+    """Cold-path parse for POST /sheet, as (response body, ETag).
+
+    Shared by the JSON and NDJSON responses so the two cannot drift.
+    """
+    use_cache = req.use_cache and not req.force_refresh
+    artist = await async_fetch_and_parse(
+        req.url,
+        # NEVER the caller's name: the parse this produces is written to a
+        # cache keyed by URL alone and shared with every other client, so a
+        # request-body field reaching it let anyone rename any tracker —
+        # and its slug, which is iOS favourites key material — for
+        # everyone, permanently. The override is re-applied to THIS
+        # response below, after the shared entry has been written.
+        artist_name=None,
+        cache_ttl=0 if req.force_refresh else DEFAULT_CACHE_TTL,
+        use_cache=use_cache,
+        # A force-refresh skips cache reads but must still repopulate it,
+        # otherwise the next normal request pays another full cold fetch.
+        write_cache=req.use_cache,
+        timer=timer,
+    )
+
+    # The cache write already serialized this artist; serve those bytes. Doing
+    # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
+    #
+    # Serialize here only when there are no such bytes: the write was skipped
+    # (use_cache false, or the collapse guard refused it) or the caller asked
+    # for a display rename. That rename is applied after the shared cache was
+    # written with the page-inferred name, so a later cache hit serves the
+    # inferred name to everyone and only this caller sees the override.
+    #
+    # When serializing, encode to bytes off the event loop. Handing FastAPI a
+    # plain dict ran jsonable_encoder (a full recursive walk of the payload)
+    # and then json.dumps again, both on the loop.
+    wire = None if req.artist_name else artist._wire
+    if wire is not None:
+        return wire
+    if req.artist_name:
+        artist = artist.model_copy(
+            update={"name": req.artist_name, "slug": slugify(req.artist_name)}
+        )
+    with timer.phase("serialize"):
+        return await asyncio.to_thread(serialize_artist, artist)
+
+
+def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
+    """Map a cold-path failure to the status and message a client sees.
+
+    Messages are deliberately generic: several of these exceptions carry
+    internal detail (resolved addresses, tried GIDs) that must stay in the log.
+    """
+    if isinstance(e, HTTPException):
+        return e
+    if isinstance(e, InvalidURLError):
+        return HTTPException(status_code=400, detail=f"Invalid URL: {e}")
+    if isinstance(e, AccessDeniedError):
+        # The provider's own wording ("401 Unauthorized", "410 Gone") means
+        # nothing to a user staring at a tracker that used to work.
+        logger.info("sheet access denied for %s", req.url[:120])
+        return HTTPException(
+            status_code=403,
+            detail="This tracker is private or has been taken down.",
+        )
+    if isinstance(e, NetworkError):
+        # NEVER interpolate: NetworkError wraps the SSRF guard's message,
+        # which names the resolved address ("blocked non-public address
+        # 10.0.0.5 for host …"). Same rule /stream and /image-proxy follow.
+        logger.warning("sheet network error for %s: %s", req.url[:120], e)
+        return HTTPException(status_code=502, detail="Could not reach the tracker source.")
+    if isinstance(e, NoTablesError):
+        # Carries the full GID list it tried — internal detail, not the user's.
+        logger.warning("sheet has no table data at %s: %s", req.url[:120], e)
+        return HTTPException(status_code=404, detail="No table data found at that URL.")
+    if isinstance(e, (ParseError, ValueError)):
+        logger.warning("sheet parse error for %s: %s", req.url[:120], e)
+        return HTTPException(status_code=422, detail="Could not parse this tracker.")
+    logger.error("Unhandled error during sheet parse: %s", e, exc_info=e)
+    return HTTPException(status_code=500, detail="Internal error")
+
+
+def _stream_sheet(req: SheetRequest, request: Request) -> StreamingResponse:
+    """The cold path as NDJSON: progress lines, then the artist.
+
+    Every line is a JSON object except the last on success:
+
+        {"type": "progress", "stage": "fetching", "message": "Found 19 tabs — downloading Unreleased"}
+        {"type": "progress", "stage": "tabs", "message": "Read Misc", "done": 4, "total": 10}
+        {"type": "artist", "etag": "…", "bytes": 11333206, "timing": "…"}
+        <the artist JSON, exactly as POST /sheet returns it, on one line>
+
+    or, on failure, a final {"type": "error", "status": 403, "detail": "…"}
+    carrying the same status and message the JSON response would have. The
+    artist follows its header as raw bytes rather than nested inside it, so an
+    11 MB payload is never re-escaped; json.dumps never emits a literal
+    newline, so it is exactly one line.
+
+    Compressed here with a sync flush after every line — GZipMiddleware would
+    buffer the small progress lines until enough output accumulated, and the
+    whole point is that they arrive as they happen. A response that already
+    carries Content-Encoding is passed through by the middleware untouched.
+    """
+    queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def emit(event: dict) -> None:
+        queue.put_nowait(json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode() + b"\n")
+
+    timer = PhaseTimer(on_progress=emit)
+
+    async def run() -> None:
+        try:
+            body, etag = await _parse_for_response(req, timer)
+            emit({
+                "type": "artist",
+                "etag": etag,
+                "bytes": len(body),
+                "timing": timer.server_timing_header(),
+            })
+            queue.put_nowait(body + b"\n")
+            logger.info("sheet_timing url=%s status=miss stream %s", req.url[:80], timer.log_line())
+        except Exception as e:
+            err = _sheet_http_error(req, e)
+            emit({"type": "error", "status": err.status_code, "detail": err.detail})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(run())
+    _detached_parses.add(task)
+    task.add_done_callback(_detached_parses.discard)
+
+    gzip = "gzip" in request.headers.get("accept-encoding", "").lower()
+
+    async def body_iter():
+        compressor = zlib.compressobj(6, zlib.DEFLATED, 31) if gzip else None
+        while (item := await queue.get()) is not None:
+            if compressor is None:
+                yield item
+                continue
+
+            def squeeze(chunk: bytes = item) -> bytes:
+                return compressor.compress(chunk) + compressor.flush(zlib.Z_SYNC_FLUSH)
+
+            # The artist line is megabytes; compressing it on the loop would
+            # stall every other request for as long as it took.
+            out = await asyncio.to_thread(squeeze) if len(item) > _STREAM_OFFLOAD_BYTES else squeeze()
+            if out:
+                yield out
+        if compressor is not None:
+            yield compressor.flush()
+
+    headers = {
+        "X-Cache-Status": "miss",
+        "Cache-Control": "no-store",
+        # nginx buffers upstream responses by default, which would hold every
+        # progress line until the buffer filled.
+        "X-Accel-Buffering": "no",
+    }
+    if gzip:
+        headers["Content-Encoding"] = "gzip"
+    return StreamingResponse(body_iter(), media_type=_NDJSON, headers=headers)
 
 
 # ---------------------------------------------------------------------------

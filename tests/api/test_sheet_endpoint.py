@@ -240,3 +240,82 @@ class TestSerializeOnce:
         r = api_client.post("/sheet", json={"url": URL})
         assert r.status_code == 200
         assert r.json()["name"] == artist.name
+
+
+class TestProgressStream:
+    """POST /sheet with Accept: application/x-ndjson streams a cold parse as
+    progress lines, an artist header and the artist itself. Everything that is
+    not a cold parse stays plain JSON."""
+
+    NDJSON = {"Accept": "application/x-ndjson, application/json"}
+
+    @staticmethod
+    def _lines(response) -> list[bytes]:
+        return [line for line in response.content.split(b"\n") if line]
+
+    def test_cold_parse_streams_progress_then_the_artist(self, api_client, artist, monkeypatch):
+        async def fake_fetch(url, *, timer, **kwargs):
+            timer.report("fetching", "Found 3 tabs — downloading Unreleased")
+            timer.report("tabs", "Read Misc", done=1, total=2)
+            _set_cached_parsed(_normalize_url(url), artist)
+            return artist
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+        r = api_client.post("/sheet", json={"url": URL}, headers=self.NDJSON)
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/x-ndjson")
+        assert r.headers["x-accel-buffering"] == "no"
+
+        *events, payload = self._lines(r)
+        events = [json.loads(e) for e in events]
+        assert events[0] == {"type": "progress", "stage": "fetching",
+                             "message": "Found 3 tabs — downloading Unreleased"}
+        assert events[1]["done"] == 1 and events[1]["total"] == 2
+        header = events[-1]
+        assert header["type"] == "artist"
+        assert header["bytes"] == len(payload)
+
+        # The payload is exactly what the JSON response and the cache carry.
+        cached = (api.CACHE_DIR / f"{_cache_key(_normalize_url(URL))}.parsed.json").read_bytes()
+        assert payload == cached
+        from src.fetcher import get_cached_etag
+        assert header["etag"] == get_cached_etag(URL)
+
+    def test_failure_ends_the_stream_with_the_json_status_and_message(self, api_client, monkeypatch):
+        async def fake_fetch(url, **kwargs):
+            raise AccessDeniedError("403 from provider, internal detail")
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+        streamed = api_client.post("/sheet", json={"url": URL}, headers=self.NDJSON)
+        plain = api_client.post("/sheet", json={"url": URL})
+        last = json.loads(self._lines(streamed)[-1])
+        assert last == {"type": "error", "status": plain.status_code,
+                        "detail": plain.json()["detail"]}
+        assert "internal detail" not in streamed.text
+
+    def test_a_cache_hit_stays_plain_json_even_when_a_stream_was_asked_for(
+        self, api_client, artist, monkeypatch
+    ):
+        _populate_cache(URL, artist)
+        r = api_client.post("/sheet", json={"url": URL}, headers=self.NDJSON)
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.headers["X-Cache-Status"] == "hit"
+
+    def test_a_client_that_does_not_ask_gets_plain_json(self, api_client, artist, monkeypatch):
+        async def fake_fetch(url, **kwargs):
+            return artist
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.headers["content-type"].startswith("application/json")
+
+    def test_gzip_is_applied_by_the_stream_itself(self, api_client, artist, monkeypatch):
+        async def fake_fetch(url, **kwargs):
+            return artist
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        r = api_client.post(
+            "/sheet", json={"url": URL},
+            headers={**self.NDJSON, "Accept-Encoding": "gzip"},
+        )
+        assert r.headers.get("content-encoding") == "gzip"
+        # httpx decodes it; what matters is that it decodes to a valid stream.
+        assert json.loads(self._lines(r)[-2])["type"] == "artist"

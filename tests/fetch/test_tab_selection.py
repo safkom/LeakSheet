@@ -326,3 +326,32 @@ class TestPrivateSheetPropagates:
             await async_fetch_and_parse(
                 f"{URL}#gid=100", use_cache=False, write_cache=False
             )
+
+
+class TestProgressEvents:
+    """The real pipeline reports what it is doing, in order, with real names."""
+
+    async def test_a_discovery_parse_reports_each_stage(
+        self, workbook_client, patch_sheets_client
+    ):
+        from src.fetcher import PhaseTimer
+
+        events: list[dict] = []
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        await async_fetch_and_parse(
+            URL, use_cache=False, write_cache=True,
+            timer=PhaseTimer(on_progress=events.append),
+        )
+
+        stages = [e["stage"] for e in events]
+        # Each stage appears, and they never go backwards.
+        order = ["fetching", "parsing", "tabs", "saving"]
+        assert [s for s in order if s in stages] == order
+        assert [order.index(s) for s in stages] == sorted(order.index(s) for s in stages)
+
+        messages = [e["message"] for e in events]
+        assert any("Unreleased" in m for m in messages), messages
+        assert any(m.startswith("Found 4 songs") for m in messages), messages
+
+        tab_events = [e for e in events if e["stage"] == "tabs" and "total" in e]
+        assert tab_events[-1]["done"] == tab_events[-1]["total"]
