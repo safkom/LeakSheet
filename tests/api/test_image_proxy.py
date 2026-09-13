@@ -174,11 +174,16 @@ class TestImageCacheWrite:
 
 
 class FakeResponse:
-    def __init__(self, content: bytes, content_type: str = "image/png", status_code: int = 200):
+    # `url` is the FINAL url after redirects, which is what the proxy's
+    # post-redirect host check reads. Defaulting it to the requested url models
+    # the no-redirect case; a test that wants a redirect sets it to the target.
+    def __init__(self, content: bytes, content_type: str = "image/png",
+                 status_code: int = 200, url: str = "https://ggpht.com/some/image"):
         self.content = content
         self.status_code = status_code
         self.headers = {"content-type": content_type}
         self.closed = False
+        self.url = url
 
     async def aiter_bytes(self):
         # Two chunks, so a test that caps mid-body sees a partial read the
@@ -204,17 +209,22 @@ class FakeClient:
         self._content_type = content_type
         self.requested: list[str] = []
         self.responses: list[FakeResponse] = []
+        # Set to pretend every response landed here after a redirect.
+        self.final_url: str | None = None
 
     async def get(self, url, headers=None):
         self.requested.append(url)
-        return FakeResponse(self._content, self._content_type)
+        return FakeResponse(self._content, self._content_type, url=str(url))
 
     def build_request(self, method, url, headers=None):
         return SimpleNamespace(method=method, url=url, headers=headers)
 
     async def send(self, request, stream=False):
         self.requested.append(request.url)
-        resp = FakeResponse(self._content, self._content_type)
+        resp = FakeResponse(
+            self._content, self._content_type,
+            url=self.final_url or str(request.url),
+        )
         self.responses.append(resp)
         return resp
 
@@ -347,3 +357,44 @@ class TestImageProxyEndpoint:
         # The streamed response is closed even on the reject path, so the
         # upstream connection is returned to the pool rather than leaked.
         assert fake.responses and fake.responses[-1].closed
+
+    def test_redirect_off_the_allowlist_is_refused(self, monkeypatch, tmp_path):
+        """The allowlist has to hold for the url we LAND on, not just the one
+        we were handed.
+
+        follow_redirects=True means an allow-listed image host can 30x
+        anywhere. The transport refuses private targets at connect time, but
+        nothing re-checked the allowlist, so any public host's bytes came back
+        through this endpoint — which also sets Access-Control-Allow-Origin: *.
+        """
+        fake = FakeClient(make_png(8, 8))
+        fake.final_url = "https://evil.example/payload.png"
+        monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
+        monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
+
+        r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
+        assert r.status_code == 502
+        # Rejected before the body is read, and the connection is not leaked.
+        assert fake.responses and fake.responses[-1].closed
+
+    def test_redirect_within_the_allowlist_is_followed(self, monkeypatch, tmp_path):
+        fake = FakeClient(make_png(8, 8))
+        fake.final_url = "https://lh3.googleusercontent.com/elsewhere"
+        monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
+        monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
+
+        r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
+        assert r.status_code == 200
+
+    def test_referer_decision_uses_the_hostname_not_a_substring(self):
+        """The Google Referer went out to anything whose URL merely CONTAINED
+        a Google domain, because the check was `h in url` over the whole URL."""
+        from src.api import _GOOGLE_IMAGE_DOMAINS, _is_allowed_domain
+
+        def is_google(u):
+            return _is_allowed_domain(u, set(), _GOOGLE_IMAGE_DOMAINS)
+
+        assert is_google("https://lh3.googleusercontent.com/abc")
+        assert is_google("https://google.com/x")
+        assert not is_google("https://attacker.tld/?x=google.com")
+        assert not is_google("https://google.com.attacker.tld/x")

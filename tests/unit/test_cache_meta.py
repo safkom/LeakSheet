@@ -179,3 +179,18 @@ class TestCollapseGuard:
 
         _set_cached_parsed(URL, self._artist_with(40))
         assert self._cached_versions(tmp_path) == 40
+
+    def test_entries_written_before_the_counts_existed_still_guard(self, tmp_path):
+        """The counts moved into the meta sidecar so the check stops re-parsing
+        the whole entry. Cache entries already on disk have no counts in their
+        meta, and must still be protected — read back out of the parse once."""
+        _set_cached_parsed(URL, self._artist_with(100))
+        key = _cache_key(URL)
+        meta_file = tmp_path / f"{key}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta.pop("total_versions", None)
+        meta.pop("era_count", None)
+        meta_file.write_text(json.dumps(meta))
+
+        _set_cached_parsed(URL, self._artist_with(40))
+        assert self._cached_versions(tmp_path) == 100

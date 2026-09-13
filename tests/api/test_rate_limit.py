@@ -146,3 +146,37 @@ class TestClientIPResolution:
     def test_garbage_hop_count_is_ignored(self, monkeypatch):
         monkeypatch.setenv("LEAKSHEET_TRUSTED_PROXY_HOPS", "not-a-number")
         assert api._client_ip(self._scope("10.0.0.1", "1.2.3.4")) == "10.0.0.1"
+
+
+class TestAdminRateLimit:
+    """POST /cache/clear is the one privileged endpoint and was throttled by
+    nothing: _RATE_LIMIT_PATHS did not name it, and the limiter it would have
+    used is opt-in and off by default, so token guessing was unbounded. Its
+    ceiling is therefore fixed rather than derived from the env var.
+    """
+
+    def test_limited_even_with_the_env_var_unset(self, api_client, monkeypatch):
+        monkeypatch.delenv("LEAKSHEET_RATE_LIMIT_PER_MIN", raising=False)
+        api._rate_hits.clear()
+        api._rate_hits["testclient|admin"] = (
+            [time.monotonic()] * api._ADMIN_RATE_LIMIT_PER_MIN
+        )
+        try:
+            r = api_client.post("/cache/clear")
+            assert r.status_code == 429
+        finally:
+            api._rate_hits.clear()
+
+    def test_uses_its_own_bucket(self, api_client, monkeypatch):
+        """A busy /sheet client must not exhaust the admin budget, or vice
+        versa — otherwise ordinary traffic locks the operator out."""
+        monkeypatch.delenv("LEAKSHEET_RATE_LIMIT_PER_MIN", raising=False)
+        api._rate_hits.clear()
+        api._rate_hits["testclient"] = [time.monotonic()] * 500
+        try:
+            r = api_client.post("/cache/clear")
+            # Not 429: the shared bucket is full, the admin one is empty.
+            # 403 is the unset-token fail-closed path, which is the point here.
+            assert r.status_code != 429
+        finally:
+            api._rate_hits.clear()

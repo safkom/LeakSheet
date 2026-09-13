@@ -50,6 +50,7 @@ from src.fetcher import (
     async_get_cached_parsed_bytes,
     get_cached_parsed_bytes,
     clear_cache,
+    close_sheets_client,
     compute_content_hash,
     DEFAULT_CACHE_TTL,
     InvalidURLError,
@@ -65,6 +66,7 @@ from src.streaming import (
     GdriveInterstitialError,
     PublicOnlyAsyncTransport,
     TTLCache,
+    UpstreamStatusError,
     close_shared_client,
     resolve_metadata_url,
     resolve_stream_url,
@@ -263,6 +265,13 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 _STREAM_ALLOWED_DOMAINS = ALLOWED_STREAM_HOSTS
 
 
+# Google image CDNs, for the Referer decision below. Parent domains: a
+# subdomain of any of these counts.
+_GOOGLE_IMAGE_DOMAINS = {
+    "googleusercontent.com", "ggpht.com", "google.com", "gstatic.com",
+}
+
+
 def _image_host_allowed(url: str) -> bool:
     """Hosts the image proxy may fetch from.
 
@@ -369,7 +378,7 @@ async def lifespan(app: FastAPI):
     if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
         prewarm_task = asyncio.create_task(_prewarm_loop())
     yield
-    # Shutdown: stop background work and close both shared HTTP clients.
+    # Shutdown: stop background work and close all three shared HTTP clients.
     if prewarm_task is not None:
         prewarm_task.cancel()
         try:
@@ -379,6 +388,7 @@ async def lifespan(app: FastAPI):
     if _proxy_client is not None:
         await _proxy_client.aclose()
     await close_shared_client()
+    await close_sheets_client()
 
 
 app = FastAPI(
@@ -403,6 +413,12 @@ _RATE_LIMIT_PATHS = ("/sheet", "/stream", "/metadata")
 # the least abusable of the four — disk-cached, 25MB download cap, 20MP decode
 # cap, SSRF allowlist.
 _IMAGE_RATE_LIMIT_MULTIPLIER = 10
+# POST /cache/clear is the one privileged endpoint, and it was throttled by
+# nothing: the guard above is opt-in via LEAKSHEET_RATE_LIMIT_PER_MIN, which is
+# off by default, so token guessing was unbounded. This ceiling is fixed rather
+# than derived from that variable — an operator flushing the cache does not
+# approach it, and brute force must not depend on an optional setting.
+_ADMIN_RATE_LIMIT_PER_MIN = 10
 _RATE_LIMIT_WINDOW_S = 60.0
 _rate_hits: dict[str, list[float]] = {}
 _rate_last_prune = 0.0
@@ -462,13 +478,17 @@ class _RateLimitMiddleware:
         await self.app(scope, receive, send)
 
     def _should_limit(self, scope) -> bool:
+        path = scope.get("path", "").rstrip("/")
+        # Checked before the opt-in limit below, so the admin endpoint is
+        # throttled even with LEAKSHEET_RATE_LIMIT_PER_MIN unset.
+        if path.endswith("/cache/clear"):
+            return self._over("|admin", _ADMIN_RATE_LIMIT_PER_MIN, scope)
         try:
             limit = int(os.environ.get("LEAKSHEET_RATE_LIMIT_PER_MIN", "0") or 0)
         except ValueError:
             limit = 0
         if limit <= 0:
             return False
-        path = scope.get("path", "").rstrip("/")
         # Separate bucket + ceiling for image-proxy; see the constants above.
         if path.endswith("/image-proxy"):
             key_suffix, limit = "|img", limit * _IMAGE_RATE_LIMIT_MULTIPLIER
@@ -476,6 +496,9 @@ class _RateLimitMiddleware:
             key_suffix = ""
         else:
             return False
+        return self._over(key_suffix, limit, scope)
+
+    def _over(self, key_suffix: str, limit: int, scope) -> bool:
         key = _client_ip(scope) + key_suffix
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_S
@@ -653,8 +676,15 @@ async def parse_sheet(
             raw, etag, age = cached
             if not etag:
                 # Legacy cache entry without a stored hash — compute once.
+                # Off the loop: `raw` is the whole parsed artist (6.5 MB for
+                # Ye), so json.loads plus a sorted re-dump and a SHA-256 stalls
+                # every other request for as long as it runs. The miss path
+                # below was moved to a thread for exactly this reason and this
+                # branch was missed.
                 with timer.phase("etag"):
-                    etag = compute_content_hash(json.loads(raw))
+                    etag = await asyncio.to_thread(
+                        lambda: compute_content_hash(json.loads(raw))
+                    )
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
@@ -1016,6 +1046,13 @@ async def proxy_image(
     width = _snap_image_width(w) if w else None
     base_headers = {
         "Cache-Control": _CC_IMAGE,
+        # Deliberately wider than the app-wide CORS allowlist. Era colours are
+        # extracted by reading proxied covers through a canvas, so the clients
+        # request them with crossorigin="anonymous" (web/src/App.vue,
+        # EraCard.vue) — and in local dev that request carries a localhost
+        # Origin the allowlist does not name. What this can serve is bounded by
+        # _image_host_allowed, re-checked after redirects, so the reach is
+        # public tracker art and nothing else.
         "Access-Control-Allow-Origin": "*",
     }
 
@@ -1031,10 +1068,12 @@ async def proxy_image(
             if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
 
-    # Conditional headers — send browser-like headers for Google domains
-    is_google = any(h in url for h in (
-        'googleusercontent.com', 'ggpht.com', 'google.com', 'gstatic.com',
-    ))
+    # Conditional headers — send browser-like headers for Google domains.
+    # Matched on the parsed hostname, not as a substring of the whole URL:
+    # "https://attacker.tld/?x=google.com" contains the string and was being
+    # handed a docs.google.com Referer. _is_allowed_domain is the check this
+    # file already uses correctly everywhere else.
+    is_google = _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS)
     headers = {}
     if is_google:
         headers["Referer"] = "https://docs.google.com/"
@@ -1053,11 +1092,16 @@ async def proxy_image(
             google_url = _rewrite_google_size(url, width)
             if google_url is not None:
                 try:
-                    resp = await _get_proxy_client().get(google_url, headers=headers)
+                    # Capped, like the fallback path below. A plain .get() here
+                    # buffered the whole body before the content-type check —
+                    # the same shape that was "enough to OOM the worker" and
+                    # prompted _get_image_capped, which was then only wired
+                    # into the other branch.
+                    resp, gdata = await _get_image_capped(google_url, headers)
                     ct = resp.headers.get("content-type", "")
                     if resp.status_code == 200 and ct.startswith("image/"):
                         return Response(
-                            content=resp.content, media_type=ct,
+                            content=gdata, media_type=ct,
                             headers={**base_headers, "X-Cache-Status": "origin"},
                         )
                 except httpx.HTTPError as exc:
@@ -1117,6 +1161,30 @@ async def proxy_image(
         raise HTTPException(status_code=502, detail="Image proxy error")
 
 
+def _parse_content_length(raw: str | None) -> int | None:
+    """Upstream Content-Length as an int, or None when absent or unusable.
+
+    This used to be a bare int() sitting outside the try that guards the rest
+    of proxy_stream, so a malformed header raised ValueError, returned 500, and
+    leaked the streamed response — every other early exit in that handler
+    aclose()s it. A length we cannot read is not a fatal condition: it only
+    means the client gets no Content-Length.
+
+    httpx joins repeated headers with ", ", so a duplicated Content-Length
+    arrives as "123, 123". Identical values still describe one length;
+    conflicting ones do not.
+    """
+    if not raw:
+        return None
+    parts = {p.strip() for p in raw.split(",") if p.strip()}
+    if len(parts) != 1:
+        return None
+    try:
+        return int(parts.pop())
+    except ValueError:
+        return None
+
+
 async def _get_image_capped(
     url: str, headers: dict[str, str]
 ) -> tuple[httpx.Response, bytes]:
@@ -1129,6 +1197,21 @@ async def _get_image_capped(
     """
     req = _get_proxy_client().build_request("GET", url, headers=headers)
     resp = await _get_proxy_client().send(req, stream=True)
+
+    # The allowlist was checked on the URL we were GIVEN. follow_redirects=True
+    # means an allow-listed host can still 30x anywhere, so re-check the url we
+    # LANDED on. PublicOnlyAsyncTransport already refuses private targets at
+    # connect time, which is why this is an allowlist check and not
+    # assert_public_redirect_target: that one re-resolves the host over DNS to
+    # redo work the transport has done, and the image proxy serves dozens of
+    # thumbnails per screen.
+    #
+    # Runs before any body byte is read, so nothing off-host is ever relayed.
+    final_url = str(resp.url)
+    if final_url != url and not _image_host_allowed(final_url):
+        await resp.aclose()
+        logger.warning("image proxy: redirect off allowlist -> %s", final_url[:120])
+        raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
         if resp.status_code != 200 or not ct.startswith("image/"):
@@ -1703,6 +1786,20 @@ async def proxy_stream(
         # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
+    except UpstreamStatusError as e:
+        # Relay what upstream actually said, so a client can tell "this file is
+        # gone" from "the host is throttling us". Everything else stays 502.
+        # Only the status code crosses over — see UpstreamStatusError.
+        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        if e.status_code in (404, 410):
+            raise HTTPException(status_code=404, detail="Upstream file not found")
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Upstream rate limited",
+                headers={"Retry-After": "30"},
+            )
+        raise HTTPException(status_code=502, detail="Upstream error")
     except ValueError as e:
         # The message names internal hosts and SSRF-check internals (a DNS
         # failure surfaced as "imgur.gg cdnUrl host does not resolve:
@@ -1732,7 +1829,7 @@ async def proxy_stream(
     raw_ct = resp.headers.get("content-type")
     raw_cd = resp.headers.get("content-disposition")
     ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
-    total_size = int(resp.headers["content-length"]) if "content-length" in resp.headers else None
+    total_size = _parse_content_length(resp.headers.get("content-length"))
 
     # MIME sniffing on first chunk — see docs/decisions.md::api.py::mime-sniffing
     _stream_iter = resp.aiter_bytes(chunk_size=65536)

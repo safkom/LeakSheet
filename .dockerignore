@@ -1,0 +1,18 @@
+# The build context is the repo root, which holds ~1 GB of local-only data.
+# Only pyproject.toml, uv.lock and src/ are ever COPYed; everything else here
+# is belt and braces against a future COPY widening by accident.
+.cache/
+Trackers/
+.git/
+.github/
+.venv/
+web/
+LeakSheet-iOS/
+tests/
+scripts/
+docs/
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+**/*.pyc
+.DS_Store

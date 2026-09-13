@@ -1,8 +1,47 @@
-# Tool configuration for LeakSheet.
+# Project and tool configuration for LeakSheet.
 #
-# Only tool sections are declared here (no [build-system]) — the project is run
-# from source, not packaged. This file is the single source of pytest config so
-# the suite behaves identically for every developer and in CI.
+# Dependencies live here and are locked in uv.lock, so a clean checkout, CI and
+# the production image install byte-identical trees. Before the lock, every
+# requirement was an open `>=` range and the environments had already drifted
+# apart. Add or bump a dependency here, then `uv lock`.
+#
+# This file is also the single source of pytest config, so the suite behaves
+# identically for every developer and in CI.
+
+[project]
+name = "leaksheet"
+version = "0.1.0"
+description = "Parses Google Sheets leak trackers into a structured API."
+# 3.11, not the 3.10 the README used to claim: api.py's range parsing relies on
+# the 4300-digit str->int cap that 3.11 introduced. Docker and CI were already
+# on 3.11; only local envs lagged.
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "gunicorn>=21.2.0",
+    "pydantic>=2.0",
+    "httpx>=0.27.0",
+    "lxml>=5.0.0",
+    "Pillow>=10.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    # 0.23 is the first release whose asyncio_mode="auto" is stable under
+    # pytest 8/9. The repo declared this before and local envs still ran 0.18,
+    # which is the drift uv.lock exists to stop.
+    "pytest-asyncio>=0.23",
+    "coverage[toml]>=7.0",
+    "ruff>=0.14",
+]
+
+[tool.uv]
+# The app runs from source and is never installed: every import is `from src.x`,
+# resolved by the pythonpath setting below. Declaring a build backend would
+# publish a distribution whose top-level package is literally named `src`.
+package = false
 
 [tool.pytest.ini_options]
 minversion = "7.0"
