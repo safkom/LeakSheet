@@ -586,7 +586,11 @@ _DISCOGRAPHY_STATS_PATTERN = re.compile(
 )
 
 # Any "<int> <word>" pair, used only to count how many counts a cell states.
-_STAT_PAIR_RE = re.compile(r"\d+\s+[A-Za-z]")
+# The lookbehind starts each attempt at the first digit of a run. Without it a
+# long digit run was retried from every position inside it: 32 KB of digits
+# took 3 s (S8786). Same matches: a later start in the run fails too, and the
+# possessive quantifiers give up nothing the next token could have used.
+_STAT_PAIR_RE = re.compile(r"(?<!\d)\d++\s++[A-Za-z]")
 _MIN_DISCOGRAPHY_PAIRS = 2
 
 
@@ -2277,13 +2281,18 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 
 # Compound availability grammar (Travis Scott tracker — no Quality column):
 # '<avail> - HQ', 'Unconfirmed (Snippet - LQ)', 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
-_COMPOUND_QUALITY_PATTERN = re.compile(r"\s*-\s*(~?)(HQ|LQ|CDQ)\b")
+# No leading \s*: search() retried it from every position of a whitespace run,
+# quadratic (32 KB took 4 s, S8786). The caller strips that whitespace instead.
+_COMPOUND_QUALITY_PATTERN = re.compile(r"-\s*(~?)(HQ|LQ|CDQ)\b")
 # Stars may be separated by whitespace, including newlines — a sheet that puts
 # each star on its own line renders as "⭐\n⭐\n⭐\n⭐". A bare `[⭐★]+` run stops
 # at the first separator, so it stripped one star and left the rest glued to
 # the availability value. The rating is the count of star glyphs in the run.
-_STAR_RATING_PATTERN = re.compile(r"\s*([⭐★][\s⭐★☆]*)\s*$")
-_STAR_GLYPH_RE = re.compile(r"[⭐★]")
+# Scanned from the end in _trailing_star_rating rather than matched with an
+# end-anchored regex, which search() retried from every star: 16 KB of "⭐ "
+# took 2.7 s (S8786).
+_STAR_CHARS = "⭐★"
+_STAR_RUN_CHARS = "⭐★☆"
 _COMPOUND_QUALITY_NAMES = {
     "HQ": "High Quality", "LQ": "Low Quality", "CDQ": "CD Quality",
 }
@@ -2296,6 +2305,22 @@ _COMPOUND_QUALITY_NAMES = {
 _VARIATION_SELECTORS = str.maketrans("", "", "️︎")
 
 
+def _trailing_star_rating(text: str) -> tuple[str, int | None]:
+    """Split a trailing star run off *text*: ("Full - HQ", 4) for "Full - HQ ⭐⭐⭐⭐☆".
+
+    The run is the trailing stretch of stars and whitespace; it counts only if
+    it holds a filled star, and the rating is the number of filled stars.
+    """
+    run_start = len(text)
+    while run_start and (text[run_start - 1].isspace() or text[run_start - 1] in _STAR_RUN_CHARS):
+        run_start -= 1
+    first = next((i for i in range(run_start, len(text)) if text[i] in _STAR_CHARS), None)
+    if first is None:
+        return text, None
+    stars = sum(1 for c in text[first:] if c in _STAR_CHARS)
+    return text[:first].rstrip(), min(stars, 5)
+
+
 def _split_compound_availability(text: str) -> tuple[str, str | None, int | None]:
     """Split a compound availability value into (availability, quality, rating).
 
@@ -2303,17 +2328,16 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     input unchanged (with None quality/rating) when no marker is present.
     """
     text = text.translate(_VARIATION_SELECTORS)
-    rating = None
-    m = _STAR_RATING_PATTERN.search(text)
-    if m:
-        rating = min(len(_STAR_GLYPH_RE.findall(m.group(1))), 5)
-        text = text[: m.start()].rstrip()
+    text, rating = _trailing_star_rating(text)
 
     quality = None
     qm = _COMPOUND_QUALITY_PATTERN.search(text)
     if qm:
         quality = _COMPOUND_QUALITY_NAMES[qm.group(2)]
-        text = (text[: qm.start()] + text[qm.end():])
+        start = qm.start()
+        while start and text[start - 1].isspace():
+            start -= 1
+        text = (text[:start] + text[qm.end():])
         # Collapse artifacts left by the removal: '()' and stray whitespace
         text = re.sub(r"\(\s*\)", "", text)
         text = re.sub(r"[ \t]+", " ", text.replace("\n", " ")).strip()

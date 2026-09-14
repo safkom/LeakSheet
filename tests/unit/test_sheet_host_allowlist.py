@@ -114,18 +114,15 @@ class TestFetcherGuard:
 
 
 class TestSheetsClientTransport:
-    def test_sheets_client_uses_the_public_only_transport(self):
+    def test_sheets_client_uses_the_public_only_transport(self, monkeypatch):
         from src.streaming import PublicOnlyAsyncTransport
 
-        fetcher._sheets_client = None
+        monkeypatch.setattr(fetcher, "_sheets_client", None)
         client = fetcher._get_sheets_client()
-        try:
-            # An allowlisted host must not be able to 30x the fetch into
-            # RFC1918 — the guard runs per hop, at connect.
-            assert isinstance(client._transport, PublicOnlyAsyncTransport)
-            assert client.follow_redirects
-        finally:
-            fetcher._sheets_client = None
+        # An allowlisted host must not be able to 30x the fetch into
+        # RFC1918 — the guard runs per hop, at connect.
+        assert isinstance(client._transport, PublicOnlyAsyncTransport)
+        assert client.follow_redirects
 
 
 class TestHostHarvesting:

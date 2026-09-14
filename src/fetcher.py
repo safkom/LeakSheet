@@ -606,7 +606,7 @@ def _decode_js_string(s: str) -> str:
 
     def _sub(m: re.Match) -> str:
         esc = m.group(0)
-        if esc.startswith("\\u") or esc.startswith("\\x"):
+        if esc.startswith(("\\u", "\\x")):
             return chr(int(esc[2:], 16))
         return esc[1]  # \/ \u2192 /, \\ \u2192 \, \" \u2192 "
 

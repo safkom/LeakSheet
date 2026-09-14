@@ -123,7 +123,8 @@ class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
         try:
-            is_literal = ipaddress.ip_address(host) is not None
+            ipaddress.ip_address(host)
+            is_literal = True
         except ValueError:
             is_literal = False
         try:
