@@ -28,6 +28,6 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 # --workers 1: load-bearing, not a default worth inheriting. README.md
 #   documents that the box cannot fit two concurrent Ye-sized cold parses.
 CMD ["gunicorn", "src.api:app", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--worker-class", "uvicorn_worker.UvicornWorker", \
      "--workers", "1", "--timeout", "120", "--graceful-timeout", "30", \
      "--bind", "0.0.0.0:8080"]
