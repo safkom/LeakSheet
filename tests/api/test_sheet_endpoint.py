@@ -153,7 +153,7 @@ class TestErrorMapping:
         [
             (InvalidURLError("bad"), 400),
             (AccessDeniedError("nope"), 403),
-            (NetworkError("down"), 502),
+            (NetworkError("down"), 503),
             (NoTablesError("empty"), 404),
             (ValueError("garbage"), 422),
         ],
@@ -329,7 +329,7 @@ class TestProgressStream:
         r = api_client.post("/sheet", json={"url": URL})
         assert r.headers["content-type"].startswith("application/json")
 
-    def test_gzip_is_applied_by_the_stream_itself(self, api_client, artist, monkeypatch):
+    def test_the_stream_is_gzipped_and_still_decodes(self, api_client, artist, monkeypatch):
         async def fake_fetch(url, **kwargs):
             return artist
         monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
@@ -340,3 +340,90 @@ class TestProgressStream:
         assert r.headers.get("content-encoding") == "gzip"
         # httpx decodes it; what matters is that it decodes to a valid stream.
         assert json.loads(self._lines(r)[-2])["type"] == "artist"
+
+    def test_every_sheet_response_varies_on_accept(self, api_client, artist, monkeypatch):
+        """JSON or NDJSON is chosen by Accept, so a cache must key on it."""
+        async def fake_fetch(url, **kwargs):
+            return artist
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        streamed = api_client.post("/sheet", json={"url": URL, "use_cache": False}, headers=self.NDJSON)
+        plain_miss = api_client.post("/sheet", json={"url": URL, "use_cache": False})
+        _populate_cache(URL, artist)
+        hit = api_client.post("/sheet", json={"url": URL})
+        for r in (streamed, plain_miss, hit):
+            assert "accept" in [v.strip().lower() for v in r.headers["vary"].split(",")]
+
+
+class TestOneParsePerTracker:
+    """A cold parse is shared, not repeated: the box cannot fit two Ye-sized
+    parses at once, and a client retrying a stream it lost, a second device and
+    the prewarm loop all used to start their own."""
+
+    def test_concurrent_callers_share_one_fetch(self, artist, monkeypatch):
+        import asyncio
+
+        calls: list[str] = []
+        release = asyncio.Event()
+
+        async def fake_fetch(url, *, timer, **kwargs):
+            calls.append(url)
+            timer.report("fetching", "Opening the tracker")
+            await release.wait()
+            return artist
+
+        async def fake_warm(artist, url):
+            return None
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        monkeypatch.setattr(api, "_warm_era_art", fake_warm)
+
+        async def scenario():
+            first_events: list[dict] = []
+            second_events: list[dict] = []
+            first = asyncio.create_task(api._parse_once(
+                URL, cache_ttl=3600, use_cache=True, write_cache=True,
+                timer=api.PhaseTimer(on_progress=first_events.append),
+            ))
+            await asyncio.sleep(0)
+            # A joiner that gives up must not cancel the parse the first awaits.
+            quitter = asyncio.create_task(api._parse_once(
+                URL + "?gid=0", cache_ttl=0, use_cache=False, write_cache=False,
+            ))
+            second = asyncio.create_task(api._parse_once(
+                URL, cache_ttl=0, use_cache=False, write_cache=True,
+                timer=api.PhaseTimer(on_progress=second_events.append),
+            ))
+            await asyncio.sleep(0)
+            quitter.cancel()
+            release.set()
+            (a1, _), (a2, _) = await asyncio.gather(first, second)
+            return a1, a2, first_events
+
+        a1, a2, first_events = asyncio.run(scenario())
+        assert calls == [URL]
+        assert a1 is a2 is artist
+        assert first_events == [{"type": "progress", "stage": "fetching", "message": "Opening the tracker"}]
+        assert api._parses == {}
+
+    def test_a_finished_parse_is_not_reused(self, artist, monkeypatch):
+        import asyncio
+
+        calls: list[str] = []
+
+        async def fake_fetch(url, **kwargs):
+            calls.append(url)
+            return artist
+
+        async def fake_warm(artist, url):
+            return None
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        monkeypatch.setattr(api, "_warm_era_art", fake_warm)
+
+        async def twice():
+            await api._parse_once(URL, cache_ttl=0, use_cache=False, write_cache=False)
+            await asyncio.sleep(0)
+            await api._parse_once(URL, cache_ttl=0, use_cache=False, write_cache=False)
+
+        asyncio.run(twice())
+        assert calls == [URL, URL]

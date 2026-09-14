@@ -33,6 +33,9 @@ struct ScrubberSlider: View {
         // scrub target without ever calling onEditingChanged — so a VoiceOver
         // swipe moved nothing. Seek directly instead.
         .accessibilityAdjustableAction { direction in
+            // No known length yet (loading, or a live stream): clamping to a
+            // duration of 0 sent every swipe back to the start.
+            guard player.duration > 0 else { return }
             let step = direction == .increment ? Self.accessibilityStep : -Self.accessibilityStep
             player.seekTo(min(max(player.currentTime + step, 0), player.duration))
         }

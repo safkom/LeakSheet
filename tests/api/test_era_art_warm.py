@@ -122,6 +122,49 @@ class TestWarmEraArt:
         r = TestClient(app).get("/image-proxy", params={"url": stale})
         assert r.status_code == 403
 
+    def test_a_rewarm_marks_the_current_cover_recently_used(self, google):
+        """Eviction drops the oldest mtime first; a cover the live parse still
+        points at must not be dated to its first download."""
+        import os
+
+        url = _cover("stable")
+        google.alive.add(url)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        bin_path, _meta = api._image_cache_paths(api._image_cache_key(url, None))
+        os.utime(bin_path, (1, 1))
+
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        assert bin_path.stat().st_mtime > 1
+
+    def test_overlapping_warms_keep_each_others_last_good_covers(self, google):
+        donda, yandhi = _cover("donda"), _cover("yandhi")
+        google.alive.update({donda, yandhi})
+
+        async def both():
+            await asyncio.gather(
+                api._warm_era_art(_artist(("Donda", donda)), TRACKER),
+                api._warm_era_art(_artist(("Yandhi", yandhi)), TRACKER),
+            )
+
+        asyncio.run(both())
+        assert api._read_era_art_index(TRACKER) == {"Donda": donda, "Yandhi": yandhi}
+
+
+class TestImageProxyReads:
+    def test_a_thumbnail_hit_never_reads_the_original(self, google, monkeypatch):
+        url = _cover("thumb")
+        google.alive.add(url)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        api._write_image_cache(api._image_cache_key(url, 320), _png(320, 320), "image/png")
+        client = TestClient(app)
+
+        reads: list[str] = []
+        real_read = api._read_image_cache
+        monkeypatch.setattr(api, "_read_image_cache", lambda key: reads.append(key) or real_read(key))
+        r = client.get("/image-proxy", params={"url": url, "w": 320})
+        assert r.headers["x-cache-status"] == "hit"
+        assert reads == [api._image_cache_key(url, 320)]
+
 
 class TestWarmRunsAfterEveryServerParse:
     def _record(self, monkeypatch) -> list[str]:

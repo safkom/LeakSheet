@@ -81,10 +81,6 @@ final class PlayerViewModel {
         engine.seekTo(time)
     }
 
-    func stopTrack() {
-        engine.stopTrack()
-    }
-
     func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
         engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
     }
