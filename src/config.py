@@ -32,6 +32,7 @@ _SHEET_HOST_SEED = frozenset({
     "deftonestracker.net",    # only non-Google host in the 2026-07-20 sweep
     "franktracker.net",       # non-Google host in the built-in seed (src/tracker_seed.py)
     "tylertracker.net",       # self-hosted covers; the image proxy trusts only this seed
+    "asaprockytracker.net",   # self-hosted covers (45 eras); feed-listed, so art 403'd without it
 })
 
 # Hosts harvested from the ArtistGrid feed, and when that last happened.
