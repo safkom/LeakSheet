@@ -187,9 +187,18 @@ final class TrackerLoader {
     /// Maps a backend HTTP failure to a plain, actionable message. Big trackers
     /// (e.g. Ye) can exceed the gateway timeout on a cold parse and return 5xx —
     /// a raw "HTTP 504" means nothing to a user, so say what to do instead.
-    static func friendlyLoadError(status: Int, fallback: String) -> String {
+    ///
+    /// A 502/503 that carries the server's own message shows that message: the
+    /// backend answers 503 "Could not reach the tracker source." when Google or
+    /// the tracker host is down, which is not a timeout. `fallback` is
+    /// `APIClient.bareStatusMessage` when the body had no message (a gateway's
+    /// error page).
+    nonisolated static func friendlyLoadError(status: Int, fallback: String) -> String {
+        if status == 502 || status == 503, fallback != APIClient.bareStatusMessage(status) {
+            return fallback
+        }
         switch status {
-        case 502, 503, 504:
+        case 502, 503, 504, 524:  // 524: Cloudflare's origin timeout
             return "This tracker is large and the server timed out. Please try again."
         case 500:
             return "The server couldn't parse this tracker. Please try again."

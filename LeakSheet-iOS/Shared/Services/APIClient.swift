@@ -105,7 +105,6 @@ actor APIClient {
     }
 
     private let session: URLSession
-    private let decoder: JSONDecoder
 
     /// Pass a session (e.g. URLProtocol-stubbed) for tests; nil builds the
     /// production configuration.
@@ -121,8 +120,6 @@ actor APIClient {
             ]
             self.session = URLSession(configuration: config)
         }
-
-        self.decoder = JSONDecoder()
     }
 
     // MARK: - Parse Sheet
@@ -133,7 +130,6 @@ actor APIClient {
         /// matches the server payload (no re-encode pass).
         let rawData: Data
         let etag: String?
-        let unchanged: Bool
     }
 
     /// Cold-load progress for the landing screen. `expectedBytes` is the
@@ -233,13 +229,13 @@ actor APIClient {
             let detail = Self.decodeErrorResponse(from: data)
             throw APIError.httpError(
                 status: httpResponse.statusCode,
-                message: detail?.detail ?? "HTTP \(httpResponse.statusCode)"
+                message: detail?.detail ?? Self.bareStatusMessage(httpResponse.statusCode)
             )
         }
 
         onProgress?(.preparing)
         let artist = try Self.decodeArtist(from: data)
-        return ParseResult(artist: artist, rawData: data, etag: etag, unchanged: false)
+        return ParseResult(artist: artist, rawData: data, etag: etag)
     }
 
     /// How a streamed (NDJSON) cold parse ended.
@@ -431,6 +427,11 @@ actor APIClient {
 
     private nonisolated static func decodeArtist(from data: Data) throws -> Artist {
         try JSONDecoder().decode(Artist.self, from: data)
+    }
+
+    /// The message for a failure whose body carried no `detail`.
+    nonisolated static func bareStatusMessage(_ status: Int) -> String {
+        "HTTP \(status)"
     }
 
     private nonisolated static func decodeErrorResponse(from data: Data) -> ErrorResponse? {

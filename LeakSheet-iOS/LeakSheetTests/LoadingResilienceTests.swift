@@ -100,4 +100,22 @@ struct LoadingResilienceTests {
         }
         #expect(seen == ["Contacting server…", "Fetching tracker…", "Parsing a large tracker…"])
     }
+
+    // MARK: - Load error wording
+    //
+    // Every 502/503 read "This tracker is large and the server timed out",
+    // including the backend's 503 "Could not reach the tracker source." when
+    // Google or the tracker host was down.
+
+    @Test(arguments: [502, 503])
+    func `a gateway error with the server's own message shows that message`(status: Int) {
+        let message = "Could not reach the tracker source."
+        #expect(TrackerLoader.friendlyLoadError(status: status, fallback: message) == message)
+    }
+
+    @Test(arguments: [502, 503, 504, 524])
+    func `a bare gateway error reads as a timeout`(status: Int) {
+        let shown = TrackerLoader.friendlyLoadError(status: status, fallback: APIClient.bareStatusMessage(status))
+        #expect(shown.contains("timed out"))
+    }
 }
