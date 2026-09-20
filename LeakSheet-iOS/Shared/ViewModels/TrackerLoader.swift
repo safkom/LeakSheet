@@ -83,16 +83,41 @@ final class TrackerLoader {
             case .notModified:
                 return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
             case .httpError(let status, let msg):
+                if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+                    return cached
+                }
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
             case .invalidURL:
                 withAnimation { error = "Invalid URL" }
             }
         } catch let urlError as URLError where urlError.code == .timedOut {
+            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+                return cached
+            }
             withAnimation { error = "This tracker is taking a while to load. Please try again." }
         } catch {
+            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+                return cached
+            }
             withAnimation { self.error = error.localizedDescription }
         }
         return nil
+    }
+
+    /// A previously-cached tracker stays usable when the network is down —
+    /// only a *hard* failure needs this; the 304 path (`replayFromCache`)
+    /// already gets a fresh-enough cache hit for free. Same name-match rule:
+    /// a copy cached under a different name carries a different slug (see
+    /// `replayFromCache`), so it's not returned as this load's result.
+    private func cachedFallback(
+        _ trimmed: String,
+        artistName: String?,
+        recents: RecentTrackersManager
+    ) async -> Artist? {
+        guard let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed),
+              artistName == nil || artistName == cachedArtist.name else { return nil }
+        recents.saveTracker(artist: cachedArtist)
+        return cachedArtist
     }
 
     /// Hold the loading state up while the caller finishes the job — building
@@ -165,9 +190,7 @@ final class TrackerLoader {
         // DIFFERENT name carries a different slug too, and favourites are keyed
         // on that slug — so drop it and refetch under the resolved name rather
         // than handing back a second identity for the same tracker.
-        if let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed),
-           artistName == nil || artistName == cachedArtist.name {
-            recents.saveTracker(artist: cachedArtist)
+        if let cachedArtist = await cachedFallback(trimmed, artistName: artistName, recents: recents) {
             return cachedArtist
         }
         await CacheService.shared.removeTracker(for: trimmed)
