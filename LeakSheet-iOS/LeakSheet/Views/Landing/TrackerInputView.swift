@@ -101,8 +101,13 @@ struct TrackerInputView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
+                        // One line at any text size: unpinned, the field's
+                        // greedy width squeezed this into a letter-per-line
+                        // column at accessibility sizes.
                         Text("Parse")
                             .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 .disabled(loading || url.trimmingCharacters(in: .whitespaces).isEmpty)

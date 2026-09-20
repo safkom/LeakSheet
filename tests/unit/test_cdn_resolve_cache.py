@@ -15,6 +15,8 @@ Nothing here touches the network — the shared httpx client is monkeypatched.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -135,6 +137,44 @@ class TestImgurFallback:
         )
         with pytest.raises(ValueError):
             await streaming.resolve_imgur_cdn_url(API)
+
+
+class TestSingleFlight:
+    """Two *simultaneous* cold requests for the same key resolve once, not twice."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_imgur_resolves_hit_the_api_once(self, monkeypatch):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class _SlowClient:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            async def get(self, url, headers=None):
+                self.calls.append(url)
+                started.set()
+                await release.wait()
+                return httpx.Response(200, json={"cdnUrl": CDN}, request=httpx.Request("GET", url))
+
+        client = _install(monkeypatch, _SlowClient())
+
+        first = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        await started.wait()
+        second = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        release.set()
+
+        assert await first == CDN
+        assert await second == CDN
+        assert client.calls == [API]  # not [API, API]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_resolve_is_not_left_in_flight(self, monkeypatch):
+        # A cold resolve that fails must not wedge later callers forever.
+        _install(monkeypatch, _FakeClient({}))
+        with pytest.raises(ValueError):
+            await streaming.resolve_imgur_cdn_url(API)
+        assert API not in streaming._inflight_resolves
 
 
 class TestKrakenResolveCache:

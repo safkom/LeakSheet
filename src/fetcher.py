@@ -533,7 +533,11 @@ def _infer_artist_name(title: str) -> str:
 
     # Step 2: Strip trailing parenthetical/bracketed metadata like
     # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
-    paren_match = re.search(r"\s*[\(\[][^)\]]*[\)\]]\s*$", name)
+    #
+    # The inner class excludes '(' and '[' too (S8786): without that, a name
+    # with several opening brackets and no close retries the scan-to-end from
+    # every one of them — 6s on a 32 KB cell.
+    paren_match = re.search(r"\s*[\(\[][^()\[\]]*[\)\]]\s*$", name)
     if paren_match:
         stripped = name[: paren_match.start()].strip()
         # Re-apply suffix stripping on the cleaned name
@@ -671,7 +675,9 @@ def _clean_tab_name(name: str) -> str:
     user sees; this one lowercases.
     """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
-    clean = re.sub(r"[\(\[][^)\]]*[\)\]]\s*$", "", clean).strip()
+    # Same S8786 fix as _infer_artist_name's paren strip: exclude '(' and '['
+    # from the inner class so the scan can't retry from every open bracket.
+    clean = re.sub(r"[\(\[][^()\[\]]*[\)\]]\s*$", "", clean).strip()
     clean = re.sub(r"\s*/\s*", " / ", clean)
     return re.sub(r"\s+", " ", clean).strip()
 
@@ -1266,20 +1272,6 @@ def _run_sync(coro_factory):
         finally:
             await close_sheets_client()
     return asyncio.run(_runner())
-
-
-def fetch_sheet_html(
-    url: str,
-    *,
-    gid: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT,
-    cache_ttl: float = DEFAULT_CACHE_TTL,
-    use_cache: bool = True,
-) -> tuple[str, str]:
-    """Synchronous wrapper around :func:`async_fetch_sheet_html` (CLI scripts)."""
-    return _run_sync(lambda: async_fetch_sheet_html(
-        url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-    ))
 
 
 def fetch_and_parse(

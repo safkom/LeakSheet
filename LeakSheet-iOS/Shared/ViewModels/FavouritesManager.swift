@@ -61,29 +61,12 @@ final class FavouritesManager {
                 name: name,
                 versionTag: primaryVersionTag,
                 badge: badge,
-                featuring: nil,
-                producers: nil,
-                collaboration: nil,
-                refs: nil,
-                director: nil,
-                creditedArtists: nil,
-                altTitles: nil,
                 notes: notes,
-                ogFilename: nil,
-                ogFilenames: nil,
-                samples: nil,
                 trackLength: trackLength,
-                fileDate: nil,
                 leakDate: leakDate,
-                previewDate: nil,
                 availableLength: availableLength,
                 quality: quality,
-                streaming: nil,
-                links: links,
-                dateOfRecording: nil,
-                type: nil,
-                sources: nil,
-                rating: nil
+                links: links
             )
         }
 
@@ -184,52 +167,39 @@ final class FavouritesManager {
 
     @discardableResult
     func toggle(song: Song, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
-        let k = Self.key(
-            artistSlug: artistSlug, eraName: eraName, baseName: song.baseName,
-            discriminator: Self.discriminator(for: song.primary)
+        toggleEntry(
+            baseName: song.baseName,
+            discriminator: Self.discriminator(for: song.primary),
+            versionCount: song.versions.count,
+            badge: song.computedBadge?.rawValue,
+            primaryVersion: song.primary,
+            artistSlug: artistSlug, artistName: artistName, sourceUrl: sourceUrl,
+            eraName: eraName, eraArt: eraArt
         )
-        if let idx = entries.firstIndex(where: { $0.key == k }) {
-            entries.remove(at: idx)
-            save()
-            return false
-        } else {
-            let primary = song.primary
-            let entry = FavouriteEntry(
-                key: k,
-                artistSlug: artistSlug,
-                artistName: artistName,
-                sourceUrl: sourceUrl,
-                eraName: eraName,
-                eraArt: eraArt,
-                songBaseName: song.baseName,
-                songVersionCount: song.versions.count,
-                badge: song.computedBadge?.rawValue,
-                addedAt: Date(),
-                primaryVersion: primary,
-                primaryVersionName: nil,
-                primaryVersionTag: nil,
-                links: nil,
-                quality: nil,
-                availableLength: nil,
-                notes: nil,
-                trackLength: nil,
-                leakDate: nil
-            )
-            entries.insert(entry, at: 0)
-            save()
-            return true
-        }
     }
 
     /// Toggle favourite from a single version (e.g. from description sheet or now playing).
     /// Derives `baseName` by stripping the version tag suffix from the version name.
     @discardableResult
     func toggleFromVersion(version: SongVersion, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
-        let baseName = version.derivedBaseName
-        let k = Self.key(
-            artistSlug: artistSlug, eraName: eraName, baseName: baseName,
-            discriminator: Self.discriminator(for: version)
+        toggleEntry(
+            baseName: version.derivedBaseName,
+            discriminator: Self.discriminator(for: version),
+            versionCount: 1,
+            badge: version.badge,
+            primaryVersion: version,
+            artistSlug: artistSlug, artistName: artistName, sourceUrl: sourceUrl,
+            eraName: eraName, eraArt: eraArt
         )
+    }
+
+    @discardableResult
+    private func toggleEntry(
+        baseName: String, discriminator: String?, versionCount: Int, badge: String?,
+        primaryVersion: SongVersion?, artistSlug: String, artistName: String,
+        sourceUrl: String?, eraName: String, eraArt: String?
+    ) -> Bool {
+        let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName, discriminator: discriminator)
         if let idx = entries.firstIndex(where: { $0.key == k }) {
             entries.remove(at: idx)
             save()
@@ -243,10 +213,10 @@ final class FavouritesManager {
                 eraName: eraName,
                 eraArt: eraArt,
                 songBaseName: baseName,
-                songVersionCount: 1,
-                badge: version.badge,
+                songVersionCount: versionCount,
+                badge: badge,
                 addedAt: Date(),
-                primaryVersion: version,
+                primaryVersion: primaryVersion,
                 primaryVersionName: nil,
                 primaryVersionTag: nil,
                 links: nil,

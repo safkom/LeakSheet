@@ -27,6 +27,7 @@ import re
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
@@ -1869,6 +1870,7 @@ def _trackers_fallback_response() -> Response:
 # GET /api/stream — proxy audio (CORS bypass) with range request support
 # ---------------------------------------------------------------------------
 
+@dataclass(slots=True)
 class _RangePlan:
     """Decision for serving a client Range when upstream ignored it.
 
@@ -1878,18 +1880,9 @@ class _RangePlan:
       'unsatisfiable' — HTTP 416 with Content-Range: bytes */total
     """
 
-    __slots__ = ("kind", "start", "end")
-
-    def __init__(self, kind: str, start: int = 0, end: int | None = None):
-        self.kind = kind
-        self.start = start
-        self.end = end
-
-    def __eq__(self, other):
-        return (self.kind, self.start, self.end) == (other.kind, other.start, other.end)
-
-    def __repr__(self):
-        return f"_RangePlan({self.kind!r}, {self.start}, {self.end})"
+    kind: str
+    start: int = 0
+    end: int | None = None
 
 
 # Digit runs are BOUNDED. Python >= 3.11 (the production image) caps

@@ -349,6 +349,64 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     /// Fan star rating 1-5 extracted from the availability cell.
     let rating: Int?
 
+    /// Memberwise init with every field but `name` defaulted to nil — most
+    /// callers (favourites, misc entries) only ever populate a handful.
+    init(
+        name: String,
+        versionTag: String? = nil,
+        badge: String? = nil,
+        featuring: String? = nil,
+        producers: String? = nil,
+        collaboration: String? = nil,
+        refs: String? = nil,
+        director: String? = nil,
+        creditedArtists: String? = nil,
+        altTitles: [String]? = nil,
+        notes: String? = nil,
+        ogFilename: String? = nil,
+        ogFilenames: [String]? = nil,
+        samples: [String]? = nil,
+        trackLength: String? = nil,
+        fileDate: String? = nil,
+        leakDate: String? = nil,
+        previewDate: String? = nil,
+        availableLength: String? = nil,
+        quality: String? = nil,
+        streaming: Bool? = nil,
+        links: [String]? = nil,
+        dateOfRecording: String? = nil,
+        type: String? = nil,
+        sources: [SourceRef]? = nil,
+        rating: Int? = nil
+    ) {
+        self.name = name
+        self.versionTag = versionTag
+        self.badge = badge
+        self.featuring = featuring
+        self.producers = producers
+        self.collaboration = collaboration
+        self.refs = refs
+        self.director = director
+        self.creditedArtists = creditedArtists
+        self.altTitles = altTitles
+        self.notes = notes
+        self.ogFilename = ogFilename
+        self.ogFilenames = ogFilenames
+        self.samples = samples
+        self.trackLength = trackLength
+        self.fileDate = fileDate
+        self.leakDate = leakDate
+        self.previewDate = previewDate
+        self.availableLength = availableLength
+        self.quality = quality
+        self.streaming = streaming
+        self.links = links
+        self.dateOfRecording = dateOfRecording
+        self.type = type
+        self.sources = sources
+        self.rating = rating
+    }
+
     var id: String { "\(name)::\(versionTag ?? "")" }
 
     /// File extensions that identify the linked file as NOT a playable audio stream.
@@ -484,31 +542,14 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     var asSongVersion: SongVersion {
         SongVersion(
             name: name,
-            versionTag: nil,
-            badge: nil,
-            featuring: nil,
-            producers: nil,
-            collaboration: nil,
-            refs: nil,
-            director: nil,
-            creditedArtists: nil,
-            altTitles: nil,
             notes: notes,
-            ogFilename: nil,
-            ogFilenames: nil,
-            samples: nil,
             trackLength: length,
-            fileDate: nil,
             leakDate: date,
-            previewDate: nil,
             availableLength: available,
             quality: quality,
             streaming: streaming,
             links: links,
-            dateOfRecording: nil,
-            type: entryType,
-            sources: nil,
-            rating: nil
+            type: entryType
         )
     }
 

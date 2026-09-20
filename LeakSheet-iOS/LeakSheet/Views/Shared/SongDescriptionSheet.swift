@@ -395,26 +395,7 @@ struct SongDescriptionSheet: View {
                     // Favourite button — always available
                     Button {
                         Haptics.light()
-                        if let song = active.song, let slug = payload.artistSlug {
-                            favourites.toggle(
-                                song: song,
-                                artistSlug: slug,
-                                artistName: payload.artistName,
-                                sourceUrl: nil,
-                                eraName: active.eraName,
-                                eraArt: active.eraArt
-                            )
-                        } else {
-                            let slug = payload.artistSlug ?? payload.artistName.slugified
-                            favourites.toggleFromVersion(
-                                version: active.version,
-                                artistSlug: slug,
-                                artistName: payload.artistName,
-                                sourceUrl: nil,
-                                eraName: active.eraName,
-                                eraArt: active.eraArt
-                            )
-                        }
+                        toggleFavourite()
                     } label: {
                         let slug = payload.artistSlug ?? payload.artistName.slugified
                         let isFav = favourites.isFavouritedByVersion(active.version, artistSlug: slug, eraName: active.eraName)
@@ -498,35 +479,11 @@ struct SongDescriptionSheet: View {
                 Label("Add to Queue", systemImage: "text.append")
             }
         }
-        if let song = active.song, let slug = payload.artistSlug {
-            Button {
-                favourites.toggle(
-                    song: song,
-                    artistSlug: slug,
-                    artistName: payload.artistName,
-                    sourceUrl: nil,
-                    eraName: active.eraName,
-                    eraArt: active.eraArt
-                )
-                Haptics.light()
-            } label: {
-                Label("Favourite", systemImage: "heart")
-            }
-        } else {
-            Button {
-                let slug = payload.artistSlug ?? payload.artistName.slugified
-                favourites.toggleFromVersion(
-                    version: active.version,
-                    artistSlug: slug,
-                    artistName: payload.artistName,
-                    sourceUrl: nil,
-                    eraName: active.eraName,
-                    eraArt: active.eraArt
-                )
-                Haptics.light()
-            } label: {
-                Label("Favourite", systemImage: "heart")
-            }
+        Button {
+            toggleFavourite()
+            Haptics.light()
+        } label: {
+            Label("Favourite", systemImage: "heart")
         }
         if let link = active.version.links?.first {
             Button {
@@ -752,4 +709,28 @@ struct SongDescriptionSheet: View {
         }
     }
 
+    /// Favourite the whole song when one's known, else just this version —
+    /// same branch the sticky bottom bar and the overflow menu both need.
+    private func toggleFavourite() {
+        if let song = active.song, let slug = payload.artistSlug {
+            favourites.toggle(
+                song: song,
+                artistSlug: slug,
+                artistName: payload.artistName,
+                sourceUrl: nil,
+                eraName: active.eraName,
+                eraArt: active.eraArt
+            )
+        } else {
+            let slug = payload.artistSlug ?? payload.artistName.slugified
+            favourites.toggleFromVersion(
+                version: active.version,
+                artistSlug: slug,
+                artistName: payload.artistName,
+                sourceUrl: nil,
+                eraName: active.eraName,
+                eraArt: active.eraArt
+            )
+        }
+    }
 }
