@@ -1,8 +1,11 @@
 import Foundation
 
-/// SPEC §12 "Display Logic" — badge dedupe rules shared with the web app
-/// (`useUtils.effectiveBadge` / `getAvailBadge`): one primary pill, plus an
+/// SPEC §12 "Display Logic" — badge dedupe rules: one primary pill, plus an
 /// availability pill only when it adds information beyond the quality.
+///
+/// The web app (`web/`, unmaintained per README.md) had a mirrored
+/// `useUtils.effectiveBadge` / `getAvailBadge`, kept in sync only by
+/// convention; that reference is now frozen, so this is the sole live copy.
 nonisolated enum BadgeLogic {
     struct Pill: Equatable {
         let text: String
@@ -11,7 +14,6 @@ nonisolated enum BadgeLogic {
     }
 
     /// Availability values that add information beyond a shown quality pill.
-    /// Mirrors the web's `_AVAILABILITY_VALUES` gate set.
     static let informativeAvailability: Set<String> = [
         "og file", "og files", "full", "tagged", "stem", "stem bounce",
         "stem bounces", "beat only", "partial", "snippet", "confirmed",

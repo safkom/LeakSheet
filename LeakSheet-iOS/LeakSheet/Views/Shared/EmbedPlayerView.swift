@@ -23,9 +23,7 @@ struct EmbedPlayerView: View {
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle(item.title)
                 #if os(iOS)
-                #if os(iOS)
-            .toolbarTitleDisplayMode(.inline)
-            #endif
+                .toolbarTitleDisplayMode(.inline)
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
