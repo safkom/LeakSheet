@@ -39,6 +39,7 @@ import logging
 import re
 import socket
 import time
+from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -270,12 +271,43 @@ class TTLCache:
 # lookups — the transport's, the SSRF pre-flight's blocking getaddrinfo, and
 # the transport's again for the CDN. On a 164MB lossless file that is the
 # difference between "slow to start" and "starts".
-#
-# ponytail: no single-flight, so two *simultaneous* cold requests for the same
-# file still resolve twice. Add a per-key asyncio lock if that shows up in the
-# logs; the TTL covers every request after the first.
 _CDN_URL_TTL = 1800.0
 _cdn_url_cache = TTLCache(ttl=_CDN_URL_TTL, max_entries=500)
+
+# Coalesces simultaneous cold resolves for the same key into one call — two
+# range requests that both miss the cache for the same file no longer each
+# pay the round-trip; the TTL cache above already covers every request after
+# the first one to actually finish.
+_inflight_resolves: dict[str, asyncio.Future[str]] = {}
+
+
+async def _single_flight_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> str:
+    """Run *resolve* for *key*, or await another caller's in-flight run.
+
+    ponytail: process-local only (a plain dict, no cross-worker coordination)
+    — fine for gunicorn's single async event loop per worker; a multi-worker
+    stampede on the same cold key still resolves once per worker, not once
+    total. Not worth the added complexity unless that shows up in the logs.
+    """
+    existing = _inflight_resolves.get(key)
+    if existing is not None:
+        return await existing
+    future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+    _inflight_resolves[key] = future
+    try:
+        result = await resolve()
+    except BaseException as exc:
+        future.set_exception(exc)
+        # We already have exc directly and re-raise it below — mark the
+        # future's copy retrieved so asyncio doesn't warn "exception was
+        # never retrieved" when no concurrent waiter ever awaits it.
+        future.exception()
+        raise
+    else:
+        future.set_result(result)
+        return result
+    finally:
+        _inflight_resolves.pop(key, None)
 
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {
@@ -474,28 +506,31 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
     if isinstance(cached, str):
         return cached
 
-    client = _get_shared_client()
-    try:
-        status, html = await _get_text_capped(
-            client,
-            view_url,
-            {
-                "User-Agent": _STREAM_USER_AGENT,
-                "Referer": "https://krakenfiles.com/",
-            },
-        )
-        if status != 200:
-            raise ValueError(
-                f"krakenfiles.com returned {status} for {view_url}"
+    async def _do() -> str:
+        client = _get_shared_client()
+        try:
+            status, html = await _get_text_capped(
+                client,
+                view_url,
+                {
+                    "User-Agent": _STREAM_USER_AGENT,
+                    "Referer": "https://krakenfiles.com/",
+                },
             )
-    except httpx.HTTPError as exc:
-        raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
+            if status != 200:
+                raise ValueError(
+                    f"krakenfiles.com returned {status} for {view_url}"
+                )
+        except httpx.HTTPError as exc:
+            raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
 
-    m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
-    if not m:
-        raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
-    _cdn_url_cache.set(view_url, m.group(0))
-    return m.group(0)
+        m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
+        if not m:
+            raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
+        _cdn_url_cache.set(view_url, m.group(0))
+        return m.group(0)
+
+    return await _single_flight_resolve(view_url, _do)
 
 
 # ---------------------------------------------------------------------------
@@ -532,56 +567,59 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
     if isinstance(cached, str):
         return cached
 
-    urls_to_try = [api_url]
-    # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
-    if "://imgur.gg/" in api_url or "://www.imgur.gg/" in api_url:
-        fallback = api_url.replace("://imgur.gg/", "://temp.imgur.gg/").replace(
-            "://www.imgur.gg/", "://temp.imgur.gg/"
-        )
-        urls_to_try.append(fallback)
-
-    last_err: Exception | None = None
-    for url in urls_to_try:
-        try:
-            client = _get_shared_client()
-            resp = await client.get(
-                url, headers={"User-Agent": _STREAM_USER_AGENT}
+    async def _do() -> str:
+        urls_to_try = [api_url]
+        # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
+        if "://imgur.gg/" in api_url or "://www.imgur.gg/" in api_url:
+            fallback = api_url.replace("://imgur.gg/", "://temp.imgur.gg/").replace(
+                "://www.imgur.gg/", "://temp.imgur.gg/"
             )
-            if resp.status_code != 200:
-                last_err = ValueError(
-                    f"imgur.gg API returned {resp.status_code} for {url}"
-                )
-                continue
+            urls_to_try.append(fallback)
+
+        last_err: Exception | None = None
+        for url in urls_to_try:
             try:
-                data = resp.json()
-            except ValueError as exc:
-                logger.warning("imgur API returned non-JSON response (status %s): %s", resp.status_code, exc)
-                last_err = ValueError(f"imgur API non-JSON response: {exc}")
-                continue
-            cdn_url = data.get("cdnUrl")
-            if not cdn_url:
-                last_err = ValueError(
-                    f"imgur.gg API response missing cdnUrl: {url}"
+                client = _get_shared_client()
+                resp = await client.get(
+                    url, headers={"User-Agent": _STREAM_USER_AGENT}
+                )
+                if resp.status_code != 200:
+                    last_err = ValueError(
+                        f"imgur.gg API returned {resp.status_code} for {url}"
+                    )
+                    continue
+                try:
+                    data = resp.json()
+                except ValueError as exc:
+                    logger.warning("imgur API returned non-JSON response (status %s): %s", resp.status_code, exc)
+                    last_err = ValueError(f"imgur API non-JSON response: {exc}")
+                    continue
+                cdn_url = data.get("cdnUrl")
+                if not cdn_url:
+                    last_err = ValueError(
+                        f"imgur.gg API response missing cdnUrl: {url}"
+                    )
+                    continue
+                # The cdnUrl is attacker-influenceable — validate the destination
+                # is a public https host before the caller streams from it (SSRF).
+                await asyncio.to_thread(
+                    _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
+                )
+                _cdn_url_cache.set(api_url, cdn_url)
+                return cdn_url
+            # ValueError too, not just HTTPError: the SSRF pre-flight above raises
+            # ValueError (including for a transient DNS failure), and catching only
+            # HTTPError let it escape the loop — making the temp.imgur.gg fallback
+            # this function exists to provide unreachable for that whole class.
+            except (httpx.HTTPError, ValueError) as exc:
+                last_err = exc if isinstance(exc, ValueError) else ValueError(
+                    f"imgur.gg API request failed: {exc}"
                 )
                 continue
-            # The cdnUrl is attacker-influenceable — validate the destination
-            # is a public https host before the caller streams from it (SSRF).
-            await asyncio.to_thread(
-                _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
-            )
-            _cdn_url_cache.set(api_url, cdn_url)
-            return cdn_url
-        # ValueError too, not just HTTPError: the SSRF pre-flight above raises
-        # ValueError (including for a transient DNS failure), and catching only
-        # HTTPError let it escape the loop — making the temp.imgur.gg fallback
-        # this function exists to provide unreachable for that whole class.
-        except (httpx.HTTPError, ValueError) as exc:
-            last_err = exc if isinstance(exc, ValueError) else ValueError(
-                f"imgur.gg API request failed: {exc}"
-            )
-            continue
 
-    raise last_err  # type: ignore[misc]
+        raise last_err  # type: ignore[misc]
+
+    return await _single_flight_resolve(api_url, _do)
 
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass

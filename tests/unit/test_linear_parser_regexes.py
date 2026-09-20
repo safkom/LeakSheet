@@ -18,6 +18,9 @@ _OLD_STAR = re.compile(r"\s*([⭐★][\s⭐★☆]*)\s*$")
 _OLD_STAR_GLYPH = re.compile(r"[⭐★]")
 _OLD_COMPOUND = re.compile(r"\s*-\s*(~?)(HQ|LQ|CDQ)\b")
 _OLD_PAIR = re.compile(r"\d+\s+[A-Za-z]")
+_OLD_MISC_ERA_STATS = re.compile(
+    r"\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
+)
 
 
 def _old_split(text: str) -> tuple[str, str | None, int | None]:
@@ -73,4 +76,22 @@ def test_availability_split_is_linear_on_hostile_cells(cell):
 def test_stat_pairs_are_linear_on_a_long_digit_run():
     start = time.perf_counter()
     parser._STAT_PAIR_RE.findall("1" * 64_000)
+    assert time.perf_counter() - start < 0.5
+
+
+def test_misc_era_stats_matches_the_old_regex():
+    for cell in [
+        "3 Released 0 Unreleased 0 BTS 0 On Streaming",
+        "no stats here",
+        "12345",
+        *_random_cells(),
+    ]:
+        old = _OLD_MISC_ERA_STATS.search(cell)
+        new = parser._MISC_ERA_STATS_RE.search(cell)
+        assert (old.span() if old else None) == (new.span() if new else None), repr(cell)
+
+
+def test_misc_era_stats_is_linear_on_a_long_digit_run():
+    start = time.perf_counter()
+    parser._MISC_ERA_STATS_RE.search("1" * 32_000 + " " * 32_000)
     assert time.perf_counter() - start < 0.5

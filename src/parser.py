@@ -2752,8 +2752,12 @@ BADGE_SECTION_LABELS = frozenset({
 
 # Era header rows in these tabs carry per-era stats in the era column,
 # e.g. "3 Released 0 Unreleased 0 BTS 0 On Streaming".
+#
+# The lookbehind starts each attempt at the first digit of a run, same fix as
+# _STAT_PAIR_RE (S8786): without it, a long digit run with no match retries
+# from every position inside it — 9s on a 32 KB cell.
 _MISC_ERA_STATS_RE = re.compile(
-    r"\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
+    r"(?<!\d)\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
 )
 
 # Shape-based stats cell match — see docs/decisions.md::parser.py::STATS_LIKE_ERA_RE
