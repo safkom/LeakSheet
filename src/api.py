@@ -1065,6 +1065,51 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
         return None
 
 
+# A cover's Google URL is a one-time token: `sheets-images-rt/<token>` is
+# reminted on every parse, so nothing in it is stable. Keying the image cache
+# on it filed the same bytes under a fresh name every hour and left the LRU to
+# evict the previous name — so a client holding a payload a few hours old asked
+# for an entry that had been evicted, went upstream, and got Google's 403 on
+# the expired token. That was 16% of all /image-proxy traffic on 2026-09-21.
+#
+# (tracker_url, era_name) IS stable, so derive a slot from it, store the bytes
+# under the slot, and leave a tiny alias behind for every URL that has ever
+# pointed at it. Old payloads keep resolving; one entry per era replaces one
+# per era per parse.
+def _era_art_base(tracker_url: str, era_name: str) -> str:
+    """The stable cache identity of one era's cover, as a synthetic URL.
+
+    Shaped like a URL so it drops straight into ``_image_cache_key`` and keeps
+    the width-keyed thumbnail stable too — a resize is done once, not hourly.
+    """
+    tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
+    era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
+    return f"leaksheet:art/{tracker}/{era}"
+
+
+def _image_alias_path(url: str):
+    return CACHE_DIR / f"imgalias_{hashlib.sha256(url.encode()).hexdigest()}.txt"
+
+
+def _read_image_alias(url: str) -> str | None:
+    """The stable base this URL was warmed under, if it was. Blocking."""
+    try:
+        base = _image_alias_path(url).read_text().strip()
+    except OSError:
+        return None
+    # Only ever written by _write_image_alias. Guard anyway: this value becomes
+    # a cache key, and a truncated write must not collide with a real entry.
+    return base if base.startswith("leaksheet:art/") else None
+
+
+def _write_image_alias(url: str, base: str) -> None:
+    try:
+        CACHE_DIR.mkdir(exist_ok=True)
+        _atomic_write_bytes(_image_alias_path(url), base.encode())
+    except OSError as e:
+        logger.warning("image alias write failed: %s", e)
+
+
 def _touch_image_cache(key: str) -> bool:
     """True if *key* has a live entry, which is then marked recently used.
 
@@ -1248,7 +1293,12 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
 
     async def warm(era_name: str, url: str) -> None:
-        key = _image_cache_key(url, None)
+        # Keyed on (tracker, era), NOT on the URL — see _era_art_base. The
+        # alias is what lets /image-proxy find this entry again when the client
+        # asks for it under whatever token URL its own payload happens to hold.
+        base = _era_art_base(tracker_url, era_name)
+        key = _image_cache_key(base, None)
+        await asyncio.to_thread(_write_image_alias, url, base)
         if await asyncio.to_thread(_touch_image_cache, key):
             index[era_name] = url
             return
@@ -1260,17 +1310,13 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
             except (httpx.HTTPError, HTTPException) as exc:
                 logger.info("era art warm: %s failed: %s", url[:80], exc)
         if not data:
-            previous = index.get(era_name)
-            stored = previous and await asyncio.to_thread(
-                _read_image_cache, _image_cache_key(previous, None)
-            )
+            # The URL was already dead when we got here (yetracker.net serves
+            # Cloudflare copies up to an hour old). Anything already under the
+            # slot is this era's last good cover, so keep serving that.
+            stored = await asyncio.to_thread(_read_image_cache, key)
             if not stored:
                 return
             data, content_type = stored[0], stored[1]
-        # ponytail: Google mints a new token URL per page fetch, so each hourly
-        # revalidation stores every cover again under a new key (Ye: ~2 MB a
-        # pass). The 200 MB LRU absorbs it. Store by content hash if the cache
-        # ever evicts covers a current parse still uses.
         if await asyncio.to_thread(_write_image_cache, key, data, content_type):
             index[era_name] = url
 
@@ -1313,11 +1359,17 @@ async def proxy_image(
         "Access-Control-Allow-Origin": "*",
     }
 
+    # The URL the client holds may be an expired cover token; the bytes are
+    # filed under the (tracker, era) slot it was warmed into. Resolve that
+    # first, so both the original and the width-keyed thumbnail are looked up
+    # under a name that survives the next reparse. One small file read.
+    cache_base = await asyncio.to_thread(_read_image_alias, url) or url
+
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
     cached = None
     if width is not None:
-        cache_key = _image_cache_key(url, width)
+        cache_key = _image_cache_key(cache_base, width)
         cached = await asyncio.to_thread(_read_image_cache, cache_key)
         if cached is not None:
             entry_etag = cached[2]
@@ -1338,7 +1390,9 @@ async def proxy_image(
         # A cover downloaded by _warm_era_art while its token still worked.
         # Read before any upstream request (the URL may have expired since),
         # but after the thumbnail hit, which never needs the original.
-        stored = await asyncio.to_thread(_read_image_cache, _image_cache_key(url, None))
+        stored = await asyncio.to_thread(
+            _read_image_cache, _image_cache_key(cache_base, None)
+        )
 
         if width is not None:
 
@@ -1410,8 +1464,13 @@ async def proxy_image(
         # CachedImage saw success and rendered nothing — and heuristic caches
         # stored that as the image. 502 says "upstream gave us something we
         # can't serve", which is what happened.
+        # 403 joins the 200 case rather than being relayed: Google answers 403
+        # to an expired `sheets-images-rt` token, and that is us holding a
+        # stale URL, not the caller being forbidden anything. Relaying it told
+        # every client the cover was off-limits forever. 404 still passes
+        # through — there the image really is gone.
         raise HTTPException(
-            status_code=502 if upstream_status == 200 else upstream_status,
+            status_code=502 if upstream_status in (200, 403) else upstream_status,
             detail="Upstream image fetch failed",
         )
     except HTTPException:
