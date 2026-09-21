@@ -370,11 +370,16 @@ extension ArtistViewModel {
     }
 
     nonisolated static func computeEraStats(_ era: Era) -> Stats {
-        tally(era.allSongs.flatMap(\.versions), available: \.availableLength, quality: \.quality, streamable: \.isStreamable)
+        // .lazy: `allSongs` is itself a flatMap, so an eager one here would
+        // materialise a second full-size array per era just to count it.
+        tally(era.allSongs.lazy.flatMap(\.versions), available: \.availableLength, quality: \.quality, streamable: \.isStreamable)
     }
 
-    private nonisolated static func tally<T>(
-        _ items: [T], available: (T) -> String?, quality: (T) -> String?, streamable: (T) -> Bool
+    private nonisolated static func tally<S: Sequence>(
+        _ items: S,
+        available: (S.Element) -> String?,
+        quality: (S.Element) -> String?,
+        streamable: (S.Element) -> Bool
     ) -> Stats {
         var total = 0, availableCount = 0, snippets = 0, confirmed = 0, fullHQ = 0
         for item in items {
