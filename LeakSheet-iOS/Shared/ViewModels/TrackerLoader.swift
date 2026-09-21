@@ -14,6 +14,11 @@ final class TrackerLoader {
     private(set) var loading = false
     private(set) var loadPhase: APIClient.LoadPhase?
     private(set) var error: String?
+    /// Set when the returned tracker came from the local cache because the
+    /// server was unreachable. Non-blocking — the content IS usable — but a
+    /// silent fall back to cache made a failed pull-to-refresh look like a
+    /// successful one, so the UI has to be able to say so.
+    private(set) var staleNotice: String?
 
     /// Loads and parses a tracker. Returns the parsed artist, or nil if the
     /// load failed (in which case `error` carries a user-facing message).
@@ -43,6 +48,7 @@ final class TrackerLoader {
         // call sites (iOS landing, recents, browse, macOS, tvOS ×2).
         guard !loading else { return nil }
         withAnimation { error = nil }
+        staleNotice = nil
         loading = true
         loadPhase = nil
         defer {
@@ -83,7 +89,12 @@ final class TrackerLoader {
             case .notModified:
                 return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
             case .httpError(let status, let msg):
-                if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+                // 5xx only. A 4xx is the server answering ABOUT this tracker —
+                // 404/410 is the tracker being gone (an untracked sheet, a DMCA
+                // removal), 403 is it being refused — and quietly serving the
+                // cached copy would hide that forever.
+                if status >= 500,
+                   let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                     return cached
                 }
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
@@ -91,17 +102,39 @@ final class TrackerLoader {
                 withAnimation { error = "Invalid URL" }
             }
         } catch let urlError as URLError where urlError.code == .timedOut {
-            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+            if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                 return cached
             }
             withAnimation { error = "This tracker is taking a while to load. Please try again." }
+        } catch is CancellationError {
+            // The user navigated away. Not a failure to recover from — falling
+            // back here would also write a recents entry for a tracker they
+            // abandoned.
+            return nil
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            return nil
         } catch {
-            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+            if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                 return cached
             }
             withAnimation { self.error = error.localizedDescription }
         }
         return nil
+    }
+
+    /// `cachedFallback` for the failure paths: same lookup, but it marks the
+    /// result stale. The 304 path uses the bare lookup instead — there the
+    /// server confirmed the copy is current, so there is nothing to warn about.
+    private func offlineFallback(
+        _ trimmed: String,
+        artistName: String?,
+        recents: RecentTrackersManager
+    ) async -> Artist? {
+        guard let cached = await cachedFallback(trimmed, artistName: artistName, recents: recents) else {
+            return nil
+        }
+        staleNotice = "Couldn't reach the server — showing the last saved copy."
+        return cached
     }
 
     /// A previously-cached tracker stays usable when the network is down —

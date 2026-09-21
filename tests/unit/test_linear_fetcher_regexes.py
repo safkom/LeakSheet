@@ -67,6 +67,25 @@ def test_infer_artist_name_still_strips_trailing_parens():
     assert _infer_artist_name("Playboi Carti Tracker [Official]") == "Playboi Carti"
 
 
+# The oracle test above deliberately never generates a mismatched inner bracket
+# — which is the ONE input shape where the S8786 rewrite and the old pattern
+# disagree, so on its own it proves less than its name suggests. Pin the
+# divergence explicitly, on the NEW expected output, so the behaviour change is
+# a recorded decision rather than a gap. See
+# docs/decisions.md::fetcher.py::paren-strip-s8786.
+@pytest.mark.parametrize(
+    ("name", "old_result", "new_result"),
+    [
+        ("Name (a [b)", "Name", "Name (a"),
+        ("Name [a (b]", "Name", "Name [a"),
+    ],
+)
+def test_mismatched_inner_brackets_strip_the_inner_group_now(name, old_result, new_result):
+    assert _OLD_PAREN_STRIP.search(name)
+    assert name[: _OLD_PAREN_STRIP.search(name).start()].strip() == old_result
+    assert _infer_artist_name(name) == new_result
+
+
 def test_clean_tab_name_matches_the_old_function():
     for name in [
         "🎵 Unreleased (WIP)",

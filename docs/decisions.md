@@ -180,6 +180,23 @@ Tracker page titles carry version and visibility suffixes (`Tracker 2.0`,
 the artist name. yetracker.net titles itself `- Google disk` (sic), which is why the
 suffix list is compared case-insensitively and includes the misspelling.
 
+## fetcher.py::paren-strip-s8786 — the rewrite is not behaviour-preserving
+
+The trailing parenthetical strip in `_infer_artist_name` and `_clean_tab_name` used
+`[\(\[][^)\]]*[\)\]]`. SonarQube flagged it super-linear (S8786): with no closing
+bracket the scan-to-end restarts from every opening one — 6s on a 32 KB cell, and
+tab names come from a sheet whose author is not us. The inner class now excludes
+`(` and `[` as well, which makes each start position stop at the next bracket.
+
+That **changes the match** for one shape: a mismatched inner opener. `Name (a [b)`
+stripped to `Name` before (the old class scanned straight through the stray `[`)
+and strips to `Name (a` now, because the search falls through to the `[b)` group.
+Real names carry sloppy brackets but not usually *mismatched* ones, so the trade is
+worth it — the divergence is pinned in
+`tests/unit/test_linear_fetcher_regexes.py::test_mismatched_inner_brackets_strip_the_inner_group_now`
+rather than left to the oracle test, which generates bracket groups atomically and
+therefore never produces this shape.
+
 ## api.py — prewarm loop
 
 Frequently-updated trackers otherwise always serve stale-first once per TTL window:
@@ -187,6 +204,14 @@ the first request after expiry gets the stale copy and only *then* triggers a
 refresh. The loop revalidates cache entries sitting in the stale-while-revalidate
 gap. It **sleeps before its first pass**, so app startup and `TestClient` contexts
 never fire network work. `LEAKSHEET_PREWARM=0` disables it (2026-07-20 review).
+
+**It is disabled in production** (`docker-compose.yml`, 2026-09-21). The loop is
+started per-process in `lifespan`, and the per-URL guard in `_background_revalidate`
+is in-process too, so once gunicorn runs more than one worker each worker runs its
+own hourly pass over the same trackers — an hourly all-workers stall instead of an
+hourly one-worker one. Request-triggered stale-while-revalidate still covers
+freshness; the loop only front-ran it for the hour's first visitor. Re-enabling it
+needs a single dedicated process, not a flag flip.
 
 ## api.py — image width buckets
 

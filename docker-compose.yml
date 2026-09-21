@@ -5,8 +5,31 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # Required, not optional, now that the Dockerfile runs >1 gunicorn worker.
+      # The prewarm loop is started per-process in api.py's lifespan, and the
+      # per-URL guard in _background_revalidate is in-process too — so N workers
+      # means N independent hourly loops re-fetching the same trackers, turning
+      # an hourly one-worker stall into an hourly all-workers stall.
+      # Freshness is unaffected: /sheet already serves stale-while-revalidate
+      # and queues a background revalidation on a stale hit.
+      LEAKSHEET_PREWARM: "0"
     volumes:
       - cache:/app/.cache
+    # The app's own memory ceilings (_IMAGE_RESIZE_CONCURRENCY, the decode caps)
+    # were calibrated for a 512MB host and this box has 15GB, so they no longer
+    # bound anything. 6g leaves the three workers ~2x headroom while keeping a
+    # runaway parse from taking the host — which also serves the LAN's DNS.
+    mem_limit: 6g
+    pids_limit: 512
+    # Per-service, so /etc/docker/daemon.json (root, affects every unrelated
+    # container on the box) stays untouched. The default json-file driver has no
+    # size bound and this container logs a block per parse.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   web:
     build: ./web
@@ -18,6 +41,12 @@ services:
       # otherwise nginx starts proxying before the API is listening.
       api:
         condition: service_healthy
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   cache:

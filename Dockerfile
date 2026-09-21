@@ -17,17 +17,30 @@ COPY src ./src
 # The venv uv builds, so `gunicorn` and `python` below resolve to it.
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Non-root at runtime: /sheet fetches attacker-influenced URLs and /image-proxy
+# decodes attacker-supplied images with Pillow, so root is the wrong ambient
+# authority. Nothing the app writes lives in the image — only the mounted cache
+# volume, which the deploy chowns to this uid.
+RUN useradd --create-home --uid 1000 app
+USER app
+
 EXPOSE 8080
 # /health, not /docs: probing the docs route rendered the whole Swagger page
 # and silently made the container's liveness depend on docs staying enabled.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3)" || exit 1
-# --timeout 120: the default is 30s, and for UvicornWorker that is a liveness
-#   watchdog on the event loop — a cold Ye-sized parse can block it long
-#   enough to have the worker killed mid-request.
-# --workers 1: load-bearing, not a default worth inheriting. README.md
-#   documents that the box cannot fit two concurrent Ye-sized cold parses.
+# --timeout 90: the default is 30s, and for UvicornWorker this is a liveness
+#   watchdog on the event loop — a cold Ye-sized parse blocks it, so the value
+#   has to clear a real parse. It also has to stay UNDER Cloudflare's ~100s edge
+#   read timeout (not raisable below Enterprise), so a wedged worker is recycled
+#   before the edge gives up and answers 524 on its own.
+# --workers 3: a parse blocks its worker's event loop, so one worker means one
+#   cold parse stalls every other request. Three fit with room to spare (~1.3GB
+#   resident each against the host's 15GB and this container's 6g cap).
+#   Consequence: the rate limiter, _cdn_url_cache and _inflight_resolves are all
+#   in-process and therefore per-worker now — see src/api.py's rate-limit
+#   docstring. LEAKSHEET_PREWARM must stay 0 (docker-compose.yml explains why).
 CMD ["gunicorn", "src.api:app", \
      "--worker-class", "uvicorn_worker.UvicornWorker", \
-     "--workers", "1", "--timeout", "120", "--graceful-timeout", "30", \
+     "--workers", "3", "--timeout", "90", "--graceful-timeout", "30", \
      "--bind", "0.0.0.0:8080"]
