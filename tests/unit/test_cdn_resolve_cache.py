@@ -25,9 +25,13 @@ import src.streaming as streaming
 
 @pytest.fixture(autouse=True)
 def _clear_cdn_cache():
+    # _inflight_resolves too: a resolve deliberately left running by a
+    # cancellation test must not be adopted as a cache hit by the next one.
     streaming._cdn_url_cache._data.clear()
+    streaming._inflight_resolves.clear()
     yield
     streaming._cdn_url_cache._data.clear()
+    streaming._inflight_resolves.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -175,6 +179,65 @@ class TestSingleFlight:
         with pytest.raises(ValueError):
             await streaming.resolve_imgur_cdn_url(API)
         assert API not in streaming._inflight_resolves
+
+    @staticmethod
+    def _slow_client(monkeypatch, started, release):
+        class _SlowClient:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            async def get(self, url, headers=None):
+                self.calls.append(url)
+                started.set()
+                await release.wait()
+                return httpx.Response(
+                    200, json={"cdnUrl": CDN}, request=httpx.Request("GET", url)
+                )
+
+        return _install(monkeypatch, _SlowClient())
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_waiter_does_not_break_the_shared_resolve(
+        self, monkeypatch
+    ):
+        # AVPlayer abandons range requests routinely. A caller that goes away
+        # must not cancel the resolve the remaining callers are waiting on:
+        # awaiting the shared handle unshielded used to cancel it from under
+        # them, and the resolve then died with InvalidStateError.
+        started, release = asyncio.Event(), asyncio.Event()
+        client = self._slow_client(monkeypatch, started, release)
+
+        first = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        await started.wait()
+        second = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        await asyncio.sleep(0)
+        second.cancel()
+        release.set()
+
+        assert await first == CDN
+        assert client.calls == [API]
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_first_caller_does_not_cancel_the_others(
+        self, monkeypatch
+    ):
+        # The mirror case: the caller that happened to start the resolve goes
+        # away. Its CancelledError used to be handed to every other waiter,
+        # unwinding requests that were never cancelled.
+        started, release = asyncio.Event(), asyncio.Event()
+        client = self._slow_client(monkeypatch, started, release)
+
+        first = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        await started.wait()
+        second = asyncio.ensure_future(streaming.resolve_imgur_cdn_url(API))
+        await asyncio.sleep(0)
+        first.cancel()
+        release.set()
+
+        assert await second == CDN
+        assert client.calls == [API]
+        # And the winning value still lands in the cache for the next caller.
+        assert streaming._cdn_url_cache.get(API) == CDN
 
 
 class TestKrakenResolveCache:

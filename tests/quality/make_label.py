@@ -25,12 +25,12 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.models import slugify
 from src.parser import parse_sheet  # noqa: E402
 
 LABELS_DIR = Path(__file__).parent / "labels"
@@ -39,6 +39,19 @@ CORPUS_DIR = os.environ.get("LEAKSHEET_CORPUS", ".cache")
 # Fields worth spot-checking: the ones a mislabelled column corrupts silently.
 SPOT_FIELDS = ("quality", "available_length", "track_length", "leak_date",
                "producers", "featuring", "rating", "og_filename")
+
+
+def _slug(text: str) -> str:
+    """Filename slug for a label file — NOT ``src.models.slugify``.
+
+    They look interchangeable and are not: ``slugify`` deletes non-word
+    characters and keeps non-ASCII letters, so it renames the baseline of any
+    artist with a symbol or an accent (``A$AP Rocky`` a-ap-rocky -> aap-rocky,
+    ``Beyoncé`` beyonc -> beyoncé). That silently writes a second label beside
+    the committed one instead of replacing it, and a label file is a baseline
+    — see the repo's label-vs-truth rule. Keep this ASCII-only mapping stable.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:48]
 
 
 def _candidates(needle: str):
@@ -103,7 +116,7 @@ def main() -> int:
     }
 
     LABELS_DIR.mkdir(parents=True, exist_ok=True)
-    out = LABELS_DIR / f"{slugify(artist.name)[:48]}.json"
+    out = LABELS_DIR / f"{_slug(artist.name)}.json"
     with open(out, "w") as fh:
         json.dump(label, fh, indent=2, ensure_ascii=False)
         fh.write("\n")

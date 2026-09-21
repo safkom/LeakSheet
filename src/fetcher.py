@@ -1380,7 +1380,7 @@ async def async_fetch_sheet_html(
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
 ) -> tuple[str, str]:
-    """Async version of fetch_sheet_html — uses httpx.AsyncClient."""
+    """Fetch a sheet's HTML, with on-disk caching and gid fallback."""
     # Extract GID from original URL BEFORE normalization strips query/fragment
     if not gid:
         gid = _extract_gid_from_url(url)

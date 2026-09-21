@@ -278,36 +278,58 @@ _cdn_url_cache = TTLCache(ttl=_CDN_URL_TTL, max_entries=500)
 # range requests that both miss the cache for the same file no longer each
 # pay the round-trip; the TTL cache above already covers every request after
 # the first one to actually finish.
-_inflight_resolves: dict[str, asyncio.Future[str]] = {}
+_inflight_resolves: dict[str, asyncio.Task[str]] = {}
 
 
-async def _single_flight_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> str:
-    """Run *resolve* for *key*, or await another caller's in-flight run.
+async def _cached_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> str:
+    """Memoized, coalesced resolve: cache hit, else one shared run per key.
 
-    ponytail: process-local only (a plain dict, no cross-worker coordination)
-    — fine for gunicorn's single async event loop per worker; a multi-worker
-    stampede on the same cold key still resolves once per worker, not once
-    total. Not worth the added complexity unless that shows up in the logs.
+    Owns all three steps so a resolver can't get the cache without the
+    coalescing (or the reverse): read the TTL cache, run *resolve* at most once
+    across concurrent callers, store the result.
+
+    The run lives in its own task, and callers await it through
+    ``asyncio.shield``, because both halves of that matter under a client
+    disconnect — the common case here, since AVPlayer abandons range requests
+    routinely:
+
+    * A caller that goes away must not cancel the shared work. Awaiting a bare
+      future propagates the awaiting task's cancellation INTO that future, so
+      one disconnect used to cancel the future out from under the caller doing
+      the actual resolve, whose ``set_result`` then died with InvalidStateError.
+    * A cancelled resolver must not hand its CancelledError to unrelated
+      waiters, who would then unwind as if they had been cancelled themselves.
+
+    Caching in the done-callback, not after the await, keeps the pop and the
+    store in one callback — so there is no window where the key has left
+    ``_inflight_resolves`` but is not yet in the cache for a fresh caller.
+
+    ponytail: process-local only (a plain dict, no cross-worker coordination).
+    With gunicorn running several workers a cold key resolves once per worker
+    rather than once in total; the TTL cache absorbs the rest. Not worth a
+    shared store unless it shows up in the logs.
     """
-    existing = _inflight_resolves.get(key)
-    if existing is not None:
-        return await existing
-    future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    _inflight_resolves[key] = future
-    try:
-        result = await resolve()
-    except BaseException as exc:
-        future.set_exception(exc)
-        # We already have exc directly and re-raise it below — mark the
-        # future's copy retrieved so asyncio doesn't warn "exception was
-        # never retrieved" when no concurrent waiter ever awaits it.
-        future.exception()
-        raise
-    else:
-        future.set_result(result)
-        return result
-    finally:
-        _inflight_resolves.pop(key, None)
+    cached = _cdn_url_cache.get(key)
+    if isinstance(cached, str):
+        return cached
+
+    task = _inflight_resolves.get(key)
+    if task is None:
+        task = asyncio.ensure_future(resolve())
+        _inflight_resolves[key] = task
+
+        def _store(done: asyncio.Task[str]) -> None:
+            _inflight_resolves.pop(key, None)
+            if done.cancelled():
+                return
+            # Also marks the exception retrieved, so a resolve whose every
+            # caller disconnected doesn't warn "exception was never retrieved".
+            if done.exception() is None:
+                _cdn_url_cache.set(key, done.result())
+
+        task.add_done_callback(_store)
+
+    return await asyncio.shield(task)
 
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {
@@ -502,10 +524,6 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
 
     Raises ValueError if the page cannot be fetched or no audio URL is found.
     """
-    cached = _cdn_url_cache.get(view_url)
-    if isinstance(cached, str):
-        return cached
-
     async def _do() -> str:
         client = _get_shared_client()
         try:
@@ -527,10 +545,9 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
         if not m:
             raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
-        _cdn_url_cache.set(view_url, m.group(0))
         return m.group(0)
 
-    return await _single_flight_resolve(view_url, _do)
+    return await _cached_resolve(view_url, _do)
 
 
 # ---------------------------------------------------------------------------
@@ -563,10 +580,6 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
     Raises ValueError on network or API errors.
     """
-    cached = _cdn_url_cache.get(api_url)
-    if isinstance(cached, str):
-        return cached
-
     async def _do() -> str:
         urls_to_try = [api_url]
         # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
@@ -605,7 +618,6 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                 await asyncio.to_thread(
                     _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
                 )
-                _cdn_url_cache.set(api_url, cdn_url)
                 return cdn_url
             # ValueError too, not just HTTPError: the SSRF pre-flight above raises
             # ValueError (including for a transient DNS failure), and catching only
@@ -619,7 +631,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
         raise last_err  # type: ignore[misc]
 
-    return await _single_flight_resolve(api_url, _do)
+    return await _cached_resolve(api_url, _do)
 
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass

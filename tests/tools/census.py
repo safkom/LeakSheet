@@ -47,7 +47,7 @@ from src.fetcher import (
     _normalize_url,
     fetch_and_parse,
 )
-from src.models import Artist, slugify
+from src.models import Artist
 from src.parser import _PLACEHOLDER_BASE_NAMES, parse_file
 from src.streaming import resolve_stream_url
 
@@ -82,6 +82,17 @@ OUT_DIR_DEFAULT = ROOT / "tests" / "results" / "census"
 # Song names that smell like mis-classified era/stat rows.
 _STATS_LIKE = re.compile(r"\b\d+\s+(?:OG\s*File|Track|Song|Snippet|Leak)", re.IGNORECASE)
 _YEAR_RANGE = re.compile(r"\(\s*(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)?\d{2})?\s*\)")
+
+
+def _slugify(text: str) -> str:
+    """Fixture-name slug — NOT ``src.models.slugify``; see make_label._slug.
+
+    ``slugify`` maps ``A$AP Rocky`` to aap-rocky where this maps it to
+    a-ap-rocky, so swapping them renames the committed ``fixture-*`` baselines
+    out from under the fresh-fixture convention.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "unnamed"
 
 
 def _host(url: str) -> str:
@@ -420,7 +431,7 @@ def main() -> int:
 
     if do_fixtures:
         for artist_name, sheet_path in discover_trackers():
-            slug = f"fixture-{slugify(artist_name) or 'unnamed'}"
+            slug = f"fixture-{_slugify(artist_name)}"
             if args.only and args.only.lower() not in slug and args.only.lower() not in artist_name.lower():
                 continue
             t0 = time.time()
