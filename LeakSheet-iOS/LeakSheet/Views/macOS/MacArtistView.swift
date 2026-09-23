@@ -143,7 +143,7 @@ struct MacArtistView: View {
             // were simply invisible.
             FlowLayout(spacing: 8) {
                 MacFilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tint: .filterBestOf) { vm.toggleBestOf() }
-                MacFilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tint: .filterBestOf) { vm.toggleWorstOf() }
+                MacFilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tint: .filterWorstOf) { vm.toggleWorstOf() }
                 MacFilterChip(label: "Grails", icon: "trophy.fill", isActive: vm.grails, tint: .filterGrail) { vm.toggleGrails() }
                 MacFilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tint: .filterRecent) { vm.toggleRecents() }
                 MacFilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tint: .filterNoSnippets) { vm.toggleNoSnippets() }
@@ -446,7 +446,7 @@ struct MacArtistView: View {
                 return nil
             case .groupHeader(let text, _):
                 return .header(text, id: "g:\(text)")
-            case .sectionHeader(let sectionName, _, _):
+            case .sectionHeader(let sectionName, _, _, _):
                 return .header(sectionName, id: "s:\(sectionName)")
             case .song(let song, let eraName, let eraArt, _, _, _, let ordinal):
                 return .song(

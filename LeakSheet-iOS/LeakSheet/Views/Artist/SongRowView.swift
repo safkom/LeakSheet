@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A single song row — shows name, badge, version count, play indicator.
+/// A single song row: play control, title, badges, credits, and actions.
 struct SongRowView: View {
     let song: Song
     let version: SongVersion?
@@ -10,12 +10,13 @@ struct SongRowView: View {
     let eraName: String
     let eraArt: String?
     var showVersionBadge: Bool = false
+    /// Whether this multi-version row's versions are showing below it.
+    var isExpanded: Bool = false
     var onPlay: ((SongVersion) -> Void)? = nil
     var onShowDescription: (DescriptionSheet.Payload) -> Void
 
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool {
         player.isNowPlaying(version, inEra: eraName)
@@ -25,18 +26,26 @@ struct SongRowView: View {
         version?.isStreamable ?? false
     }
 
-    private var hasMultiple: Bool {
-        song.hasMultipleVersions
+    /// Collapsed multi-version row: summarises the song rather than one take.
+    private var isSummary: Bool {
+        song.hasMultipleVersions && !showVersionBadge
     }
 
-    /// The first alternate title that differs from the base name — leaks are
-    /// often known by several names, so a subtle hint aids recognition. It
-    /// sits on its own line under the title: inline it stole width from the
-    /// name on every row, and the repeated "aka" prefix read as noise.
+    /// Recents/search show the version's own badge; the tree shows the song's.
+    private var badge: Badge? {
+        if showVersionBadge {
+            return version?.badge.flatMap(Badge.init(rawValue:))
+        }
+        return song.computedBadge
+    }
+
+    private var isFavourite: Bool {
+        favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
+    }
+
+    /// The first alternate title that differs from the base name. The row's
+    /// own version leads, so a collapsed row never advertises another take's alias.
     private var akaTitle: String? {
-        // The row's own version leads. Scanning every version first meant a
-        // collapsed multi-version row could advertise an alias belonging to a
-        // take it is not representing.
         let ordered = version.map { [$0] + song.versions } ?? song.versions
         for v in ordered {
             if let alt = v.altTitles?.first(where: {
@@ -49,117 +58,91 @@ struct SongRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Play indicator or badge
-            leadingIcon
-                .frame(width: 24)
+        HStack(spacing: 8) {
+            SongPlayControl(
+                isCurrent: isPlaying,
+                isLoading: player.loading,
+                isPlaying: player.isPlaying,
+                canStream: canStream,
+                title: song.baseName,
+                play: play
+            )
 
-            // Song info — title + inline badges on first line, credits on second
             VStack(alignment: .leading, spacing: 3) {
-                // First line: title + version tag when in flat (recents/search) context
-                HStack(spacing: 5) {
-                    Text(song.baseName)
-                        .font(.subheadline)
-                        .foregroundStyle(isPlaying ? Color.lsAccent : .primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if showVersionBadge, let tag = version?.versionTag {
-                        Text("[\(tag)]")
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
+                SongTitleLine(
+                    title: song.baseName,
+                    badge: badge,
+                    versionTag: showVersionBadge ? version?.versionTag : nil,
+                    isPlaying: isPlaying
+                )
                 if let aka = akaTitle {
                     Text(aka)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.tail)
-                        .accessibilityLabel("Also known as \(aka)")
                 }
-
-                // Second line: quality/avail badges (single-version only; multi-version shows on each VersionRowView)
-                if (!hasMultiple || showVersionBadge), let v = version {
-                    BadgeRowView(version: v)
+                // bestPlayableVersion on a summary row: the badges must describe
+                // the version its play button plays.
+                if let shown = isSummary ? song.bestPlayableVersion : version {
+                    BadgeRowView(version: shown, trailing: isSummary ? "\(song.versions.count) versions" : nil)
+                } else if isSummary {
+                    Text("\(song.versions.count) versions")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-
-                // Collapsed multi-version rows: summarize with the BEST
-                // version's badges + a version count, so the song can be
-                // judged at a glance without expanding.
-                if hasMultiple && !showVersionBadge {
-                    // FlowLayout, not HStack: the badge row wraps internally at
-                    // accessibility text sizes while an HStack does not, so the
-                    // version count was drawn across the wrapped pills.
-                    FlowLayout(spacing: 6) {
-                        // bestPlayableVersion, matching what the row's play
-                        // action uses — badges must describe the version a tap
-                        // actually plays, or this is the "Lossless · OG File"
-                        // row that played the Low Quality snippet again.
-                        if let best = song.bestPlayableVersion {
-                            BadgeRowView(version: best)
-                        }
-                        Text("\(song.versions.count) versions")
-                            .font(.caption2)
-                            // Info-bearing text: .secondary clears WCAG AA on
-                            // OLED black where .tertiary (~2.3:1) does not.
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                // Credits
-                if (!hasMultiple || showVersionBadge), let v = version {
-                    CreditTagsView(version: v)
+                if !isSummary, let version {
+                    CreditLineView(version: version)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Chevron for multi-version (not in recents/search flat view)
-            if hasMultiple && !showVersionBadge {
+            if isSummary {
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(.snappy, value: isExpanded)
             }
-
-            // Three-dot menu: single-version songs, or flat version rows in recents/search
-            if !hasMultiple || showVersionBadge {
-                songMenu
+            if let version {
+                ThreeDotMenu(
+                    version: version, song: song,
+                    artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                    eraName: eraName, eraArt: eraArt,
+                    onPlay: onPlay, onShowDescription: onShowDescription
+                )
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .padding(.leading, 4)
+        .padding(.trailing, 2)
         .background(isPlaying ? Color.lsAccent.opacity(0.08) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .rowHoverHighlight()
+        // One VoiceOver stop per song, with its actions named — the pills,
+        // credits, chevron and buttons were 6–10 separate stops per row.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityValue(isPlaying ? "Now playing" : "")
+        .accessibilityHint(isSummary ? (isExpanded ? "Hides versions" : "Shows versions") : "Shows details")
+        .accessibilityActions {
+            if canStream {
+                Button("Play", action: play)
+                Button("Add to Queue", action: queue)
+            }
+            Button(isFavourite ? "Remove from Favourites" : "Add to Favourites", action: toggleFavourite)
+            if let version {
+                Button("Details") { onShowDescription(payload(for: version)) }
+            }
+        }
         .swipeActions(edge: .trailing) {
-            Button {
-                if version != nil {
-                    favourites.toggle(
-                        song: song,
-                        artistSlug: artistSlug,
-                        artistName: artistName,
-                        sourceUrl: sourceUrl,
-                        eraName: eraName,
-                        eraArt: eraArt
-                    )
-                    Haptics.light()
-                }
-            } label: {
-                Image(systemName: favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName) ? "heart.fill" : "heart")
+            Button(action: toggleFavourite) {
+                Image(systemName: isFavourite ? "heart.fill" : "heart")
             }
             .tint(.pink)
-            .accessibilityLabel(
-                favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
-                    ? "Remove \(song.baseName) from favourites"
-                    : "Add \(song.baseName) to favourites"
-            )
+            .accessibilityLabel(isFavourite ? "Remove \(song.baseName) from favourites" : "Add \(song.baseName) to favourites")
 
             if canStream {
-                Button {
-                    if let v = version {
-                        player.addToQueue(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
-                        Haptics.light()
-                    }
-                } label: {
+                Button(action: queue) {
                     Image(systemName: "text.append")
                 }
                 .tint(.lsAccent)
@@ -167,15 +150,8 @@ struct SongRowView: View {
             }
         }
         .swipeActions(edge: .leading) {
-            if canStream, let v = version {
-                Button {
-                    Haptics.light()
-                    if let onPlay {
-                        onPlay(v)
-                    } else {
-                        player.playTrack(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
-                    }
-                } label: {
+            if canStream {
+                Button(action: play) {
                     Image(systemName: "play.fill")
                 }
                 .tint(.green)
@@ -183,68 +159,129 @@ struct SongRowView: View {
             }
         }
         .contextMenu {
-            contextMenuItems
+            if let version {
+                SongContextMenu(
+                    version: version, song: song,
+                    artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                    eraName: eraName, eraArt: eraArt,
+                    onPlay: onPlay, onShowDescription: onShowDescription
+                )
+            }
         }
     }
 
-    // MARK: - Three-dot menu (same as context menu)
+    private var accessibilitySummary: String {
+        var parts: [String] = []
+        if let badge { parts.append(badge.label) }
+        parts.append(song.baseName)
+        if let tag = showVersionBadge ? version?.versionTag : nil { parts.append(tag) }
+        if let aka = akaTitle { parts.append("also known as \(aka)") }
+        let shown = isSummary ? song.bestPlayableVersion : version
+        if let quality = shown?.quality, !quality.isEmpty { parts.append(quality) }
+        if let availability = shown?.availableLength, !availability.isEmpty { parts.append(availability) }
+        if isSummary { parts.append("\(song.versions.count) versions") }
+        return parts.joined(separator: ", ")
+    }
 
-    @ViewBuilder
-    private var songMenu: some View {
-        if let version {
-            ThreeDotMenu(
-                version: version, song: song,
-                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-                eraName: eraName, eraArt: eraArt,
-                onPlay: onPlay, onShowDescription: onShowDescription
-            )
+    private func payload(for version: SongVersion) -> DescriptionSheet.Payload {
+        DescriptionSheet.Payload(
+            song: song, version: version,
+            artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
+        )
+    }
+
+    private func play() {
+        guard canStream, let version else { return }
+        Haptics.light()
+        if let onPlay {
+            onPlay(version)
+        } else {
+            player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
         }
     }
 
-    @ViewBuilder
-    private var contextMenuItems: some View {
-        if let v = version {
-            SongContextMenu(
-                version: v, song: song,
-                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-                eraName: eraName, eraArt: eraArt,
-                onPlay: onPlay, onShowDescription: onShowDescription
-            )
-        }
+    private func queue() {
+        guard canStream, let version else { return }
+        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+        Haptics.light()
     }
 
-    @ViewBuilder
-    private var leadingIcon: some View {
-        if isPlaying {
-            if player.loading {
-                // Untinted, this drew in the era colour on the era-tinted
-                // panel behind it — see the same fix in NowPlayingView.
+    private func toggleFavourite() {
+        guard version != nil else { return }
+        favourites.toggle(
+            song: song, artistSlug: artistSlug, artistName: artistName,
+            sourceUrl: sourceUrl, eraName: eraName, eraArt: eraArt
+        )
+        Haptics.light()
+    }
+}
+
+/// The row's leading control: what is playing, or a play button for anything
+/// streamable. Playback used to be reachable only by swipe, long-press or the
+/// ⋯ menu, with nothing on the row saying a song could be played at all.
+struct SongPlayControl: View {
+    let isCurrent: Bool
+    let isLoading: Bool
+    let isPlaying: Bool
+    let canStream: Bool
+    let title: String
+    let play: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if isCurrent && isLoading {
                 ProgressView()
                     .controlSize(.mini)
                     .tint(Color.lsAccent)
-            } else {
-                Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                    .font(.caption)
+            } else if isCurrent {
+                Image(systemName: isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                    .font(.footnote)
                     .foregroundStyle(Color.lsAccent)
-                    // Repeating symbol effects are content animations that the
-                    // system does NOT auto-suppress under Reduce Motion — gate
-                    // it ourselves so the now-playing icon stays static.
-                    .symbolEffect(.variableColor.iterative, options: .repeating,
-                                  isActive: player.isPlaying && !reduceMotion)
-            }
-        } else if showVersionBadge {
-            // In recents/search: show ONLY this version's own badge (no fallthrough to song-level)
-            if let b = version?.badge, let badge = Badge(rawValue: b) {
-                Text(badge.emoji)
-                    .font(.caption)
+                    // Repeating symbol effects are not suppressed by Reduce Motion.
+                    .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isPlaying && !reduceMotion)
+            } else if canStream {
+                Button(action: play) {
+                    Image(systemName: "play.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.lsAccent)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.lsAccent.opacity(0.14)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play \(title)")
             } else {
                 Color.clear
             }
-        } else if let badge = song.computedBadge {
-            Text(badge.emoji)
-                .font(.caption)
-        } else {
-            Color.clear
+        }
+        .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Badge, title and (in flat lists) the version tag, on one line.
+private struct SongTitleLine: View {
+    let title: String
+    let badge: Badge?
+    let versionTag: String?
+    let isPlaying: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            if let badge {
+                Text(badge.emoji)
+                    .font(.caption)
+            }
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(isPlaying ? Color.lsAccent : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let versionTag {
+                Text("[\(versionTag)]")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

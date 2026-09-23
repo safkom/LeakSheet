@@ -71,3 +71,37 @@ struct CreditTagsView: View {
         .accessibilityLabel("\(type.accessibilityLabel) \(text)")
     }
 }
+
+/// A version's credits as one line of text — "feat. X · prod. Y" — for list
+/// rows. Wraps like prose at large text sizes, where a pill per credit gave
+/// every credit its own line and made rows several times taller.
+struct CreditLineView: View {
+    let version: SongVersion
+
+    private var parts: [(CreditType, String)] {
+        [
+            (.featuring, version.featuring), (.producers, version.producers),
+            (.collaboration, version.collaboration), (.refs, version.refs),
+            (.director, version.director), (.creditedArtists, version.creditedArtists),
+        ].compactMap { type, text in
+            guard let text, !text.isEmpty else { return nil }
+            return (type, text)
+        }
+    }
+
+    var body: some View {
+        let parts = parts
+        if !parts.isEmpty {
+            parts.enumerated().reduce(Text(verbatim: "")) { line, item in
+                let (type, text) = item.element
+                let label = Text(type.label).foregroundStyle(type.color).fontWeight(.semibold)
+                let separator = item.offset == 0 ? "" : "  ·  "
+                return Text("\(line)\(separator)\(label) \(text)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(3)
+            .accessibilityLabel(parts.map { "\($0.0.accessibilityLabel) \($0.1)" }.joined(separator: ", "))
+        }
+    }
+}

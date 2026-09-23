@@ -7,9 +7,7 @@ struct VersionRowView: View {
     /// version has no explicit tag, so untagged versions stay tellable apart.
     var versionIndex: Int? = nil
     /// The song this version belongs to — carries `songKey` for the
-    /// description sheet's cross-era version picker, and lets its context
-    /// menu offer Favourite (previously passed nil, which silently hid the
-    /// Favourite action from every expanded-version row's menu).
+    /// description sheet's cross-era picker and enables Favourite in the menu.
     let song: Song
     let artistName: String
     let artistSlug: String
@@ -30,81 +28,93 @@ struct VersionRowView: View {
     }
 
     private var versionLabel: String? {
-        if let tag = version.versionTag { return "[\(tag)]" }
+        if let tag = version.versionTag { return tag }
         if let idx = versionIndex { return "#\(idx + 1)" }
         return nil
     }
 
+    /// Length and leak date — what tells two takes apart before opening one.
+    private var detail: String? {
+        let parts = [version.trackLength, version.leakDate]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != "?:??" }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var payload: DescriptionSheet.Payload {
+        DescriptionSheet.Payload(
+            song: song, version: version,
+            artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
+        )
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            // Version tag (indented, no vertical line); untagged versions
-            // fall back to their list position so rows remain identifiable.
-            if let label = versionLabel {
-                Text(label)
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 40, alignment: .center)
-                    .accessibilityLabel("Version \(label)")
-            } else {
-                Spacer().frame(width: 40)
-            }
+            SongPlayControl(
+                isCurrent: isPlaying,
+                isLoading: player.loading,
+                isPlaying: player.isPlaying,
+                canStream: canStream,
+                title: version.name,
+                play: play
+            )
 
-            // Version info — name + inline badges on first line, credits on second
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if let label = versionLabel {
+                        Text(label)
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(isPlaying ? Color.lsAccent : .secondary)
+                    }
                     if let b = version.badge, let badge = Badge(rawValue: b) {
                         Text(badge.emoji)
                             .font(.caption)
                     }
-                    BadgeRowView(version: version)
                 }
-                CreditTagsView(version: version)
+                BadgeRowView(version: version, trailing: detail)
+                CreditLineView(version: version)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Three-dot menu
-            versionMenu
+            ThreeDotMenu(
+                version: version, song: song,
+                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                eraName: eraName, eraArt: eraArt,
+                onPlay: onPlay, onShowDescription: onShowDescription
+            )
         }
-        .padding(.vertical, 4)
-        .padding(.leading, 36)
-        .padding(.trailing, 12)
+        .padding(.vertical, 3)
+        .padding(.leading, 24)
+        .padding(.trailing, 2)
         .background(isPlaying ? Color.lsAccent.opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .rowHoverHighlight()
         .contentShape(Rectangle())
-        .accessibilityAddTraits(.isButton)
         // Tap opens Details, never plays — matches every other row kind.
-        .onTapGesture {
-            onShowDescription(DescriptionSheet.Payload(
-                song: song, version: version,
-                artistName: artistName, artistSlug: artistSlug, eraName: eraName, eraArt: eraArt
-            ))
+        .onTapGesture { onShowDescription(payload) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityValue(isPlaying ? "Now playing" : "")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows details")
+        .accessibilityActions {
+            if canStream {
+                Button("Play", action: play)
+                Button("Add to Queue", action: queue)
+            }
         }
         .swipeActions(edge: .trailing) {
             if canStream {
-                Button {
-                    player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
-                    Haptics.light()
-                } label: {
+                Button(action: queue) {
                     Image(systemName: "text.append")
                 }
                 .tint(.lsAccent)
                 .accessibilityLabel("Add \(version.name) to queue")
             }
         }
-        // Leading swipe-to-play, matching SongRowView. Version rows never had
-        // one — tap was the only way to play a specific version, and tap no
-        // longer plays.
         .swipeActions(edge: .leading) {
             if canStream {
-                Button {
-                    Haptics.light()
-                    if let onPlay {
-                        onPlay(version)
-                    } else {
-                        player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
-                    }
-                } label: {
+                Button(action: play) {
                     Image(systemName: "play.fill")
                 }
                 .tint(.green)
@@ -112,28 +122,37 @@ struct VersionRowView: View {
             }
         }
         .contextMenu {
-            contextMenuItems
+            SongContextMenu(
+                version: version, song: song,
+                artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
+                eraName: eraName, eraArt: eraArt,
+                onPlay: onPlay, onShowDescription: onShowDescription
+            )
         }
     }
 
-    // MARK: - Three-dot menu
-
-    private var versionMenu: some View {
-        ThreeDotMenu(
-            version: version, song: song,
-            artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-            eraName: eraName, eraArt: eraArt,
-            onPlay: onPlay, onShowDescription: onShowDescription
-        )
+    private var accessibilitySummary: String {
+        var parts = ["Version \(versionLabel ?? "")"]
+        if let b = version.badge, let badge = Badge(rawValue: b) { parts.append(badge.label) }
+        if let quality = version.quality, !quality.isEmpty { parts.append(quality) }
+        if let availability = version.availableLength, !availability.isEmpty { parts.append(availability) }
+        if let detail { parts.append(detail) }
+        return parts.joined(separator: ", ")
     }
 
-    @ViewBuilder
-    private var contextMenuItems: some View {
-        SongContextMenu(
-            version: version, song: song,
-            artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
-            eraName: eraName, eraArt: eraArt,
-            onPlay: onPlay, onShowDescription: onShowDescription
-        )
+    private func play() {
+        guard canStream else { return }
+        Haptics.light()
+        if let onPlay {
+            onPlay(version)
+        } else {
+            player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+        }
+    }
+
+    private func queue() {
+        guard canStream else { return }
+        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+        Haptics.light()
     }
 }

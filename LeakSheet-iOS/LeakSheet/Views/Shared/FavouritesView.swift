@@ -34,7 +34,6 @@ struct FavouritesView: View {
             content
         } else {
             NavigationStack { content }
-                .presentationBackground(.ultraThinMaterial)
         }
     }
 
@@ -103,15 +102,12 @@ struct FavouritesView: View {
                                                     )
                                                 }
                                                 Spacer()
-                                                if entry.toSongVersion != nil {
-                                                    Image(systemName: "play.circle")
-                                                        .font(.caption)
+                                                // A play glyph here opened Details, not playback.
+                                                if entry.songVersionCount > 1 {
+                                                    Text("\(entry.songVersionCount) versions")
+                                                        .font(.caption2.monospacedDigit())
                                                         .foregroundStyle(.secondary)
-                                                        .accessibilityHidden(true)
                                                 }
-                                                Text("\(entry.songVersionCount)v")
-                                                    .font(.caption2.monospacedDigit())
-                                                    .foregroundStyle(.secondary)
                                             }
                                             .contentShape(Rectangle())
                                         }
@@ -166,21 +162,19 @@ struct FavouritesView: View {
                 Text("This can't be undone.")
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    if !favourites.entries.isEmpty {
-                        // Confirmed, and marked .destructive: this sits in the
-                        // slot every other sheet uses for Cancel/Done, and
-                        // favourites are the only user-authored data the app
-                        // holds — everything else re-downloads.
-                        Button("Clear All", role: .destructive) {
-                            showClearConfirm = true
-                        }
-                        .foregroundStyle(Color.lsError)
+                // Done where every sheet puts it; Clear All out of the cancel
+                // slot (QueueSheet learned the same lesson), and each item is
+                // omitted rather than left as an empty glass capsule.
+                if !embedded {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    if !embedded {
-                        Button("Done") { dismiss() }
+                if !favourites.entries.isEmpty {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Button("Clear All", systemImage: "trash", role: .destructive) {
+                            showClearConfirm = true
+                        }
                     }
                 }
             }

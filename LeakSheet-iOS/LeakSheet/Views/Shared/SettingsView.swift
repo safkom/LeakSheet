@@ -2,7 +2,7 @@ import SwiftUI
 
 /// App settings — streaming quality mode and other preferences.
 struct SettingsView: View {
-    @AppStorage("leaksheet_streaming_mode") private var useOriginalQuality: Bool = false
+    @AppStorage(AudioEngine.originalQualityKey) private var useOriginalQuality: Bool = false
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault
@@ -44,7 +44,6 @@ struct SettingsView: View {
             settingsList
         } else {
             NavigationStack { settingsList }
-                .presentationBackground(.ultraThinMaterial)
                 // The app root applies the appearance to the window, and sheets
                 // opened afterwards inherit it — but this sheet is already on
                 // screen when the choice changes here, and a presented sheet is

@@ -146,17 +146,8 @@ private struct ArtistContentView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // Notices
                 if let notices = artist.notices, !notices.isEmpty {
-                    VStack(spacing: 4) {
-                        ForEach(notices) { notice in
-                            NoticeBannerView(notice: notice) { url in
-                                safariItem = SafariItem(url: url)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 2)
+                    NoticesView(notices: notices) { safariItem = SafariItem(url: $0) }
                 }
 
                 // Stats bar — tap for the full TrackerStats breakdown.
@@ -185,12 +176,7 @@ private struct ArtistContentView: View {
                 // inert — which also keeps the header from growing a permanent
                 // second row.
                 ContentTabsView(vm: vm)
-                    .padding(.bottom, vm.selectedTabKey == nil ? 6 : 8)
-
-                if vm.selectedTabKey == nil {
-                    FilterTogglesView(vm: vm)
-                        .padding(.bottom, 8)
-                }
+                    .padding(.bottom, 8)
 
                 // Branch on computed state — see DECISIONS.md::ArtistView.swift::content-state-branching
                 let contentState = vm.content.state

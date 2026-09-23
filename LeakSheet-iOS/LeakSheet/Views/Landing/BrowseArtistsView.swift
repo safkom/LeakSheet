@@ -18,6 +18,7 @@ struct BrowseArtistsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var loadingUrl = ""
+    @Environment(\.dismiss) private var dismiss
 
     private var filtered: [DiscoveryArtist] {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -35,6 +36,11 @@ struct BrowseArtistsView: View {
                     #if os(iOS)
                     .toolbarTitleDisplayMode(.inline)
                     #endif
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { dismiss() }
+                        }
+                    }
             }
         }
     }

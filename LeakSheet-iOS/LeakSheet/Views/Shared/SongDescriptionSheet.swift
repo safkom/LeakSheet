@@ -168,7 +168,6 @@ struct SongDescriptionSheet: View {
                     #endif
                     .toolbar { chromeToolbar }
             }
-            .presentationBackground(.ultraThinMaterial)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .webSheet(item: $safariItem)

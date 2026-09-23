@@ -317,6 +317,7 @@ extension Color {
 
     static let filterBestOf = tone(hue: 45 / 360, saturation: 0.85, brightness: 0.90, lightBrightness: 0.46)
     static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)   // trophy gold (grails + wanted)
+    static let filterWorstOf = tone(hue: 20 / 360, saturation: 0.45, brightness: 0.80, lightBrightness: 0.40)  // rust, not Best Of's gold
     static let filterRecent = tone(hue: 140 / 360, saturation: 0.70, brightness: 0.80, lightBrightness: 0.42)
     static let filterNoSnippets = tone(hue: 280 / 360, saturation: 0.60, brightness: 0.85)
     static let filterMisc = tone(hue: 200 / 360, saturation: 0.65, brightness: 0.85)

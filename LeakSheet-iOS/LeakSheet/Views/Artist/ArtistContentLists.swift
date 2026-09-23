@@ -10,20 +10,18 @@ import SwiftUI
 
 // MARK: - Content tabs
 
-/// The tracker's pages: the song tree plus one chip per parsed content tab.
-/// Exactly one is active at a time.
+/// The tracker's pages — the song tree plus one tab per parsed content tab —
+/// with the filters for the page you are on in one menu at the end.
 ///
-/// Split out of the filter row. Both were one scrolling strip of identical
-/// chips, so "Grails" and "Released" looked like the same kind of control while
-/// doing fundamentally different things — a filter annotates the list you are
-/// on, a tab replaces it. `selectTab` already clears the badge filters when a
-/// tab is chosen, which is the same statement in code.
+/// Tabs and filters used to be two rows of identical glass chips, so a page
+/// switch ("Released") and a filter ("Grails") looked like the same control.
+/// Now a page is a tab with an underline, and filters are one button that
+/// says how many are on.
 struct ContentTabsView: View {
     let vm: ArtistViewModel
 
-    /// Icon for a content-tab chip. Badge-annotation kinds (best_of, worst_of,
-    /// …) never reach here — `availableTabs` filters them out because they are
-    /// annotation sources, not pages — so they have no arms.
+    /// Icon for a content tab. Badge-annotation kinds never reach here —
+    /// `availableTabs` filters them out because they are not pages.
     static func tabIcon(for kind: String) -> String {
         switch kind {
         case "misc": return "film.stack"
@@ -35,86 +33,110 @@ struct ContentTabsView: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer {
-                HStack(spacing: 8) {
-                    // The song tree. Named for what these trackers call it —
-                    // the filters beside it (Grails, Snippets, Best Of) are all
-                    // unreleased-leak concepts.
-                    FilterChip(
-                        label: "Unreleased",
-                        icon: "waveform",
-                        isActive: vm.selectedTabKey == nil,
-                        tintColor: .lsAccent
-                    ) {
+        HStack(spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    TabButton(label: "Unreleased", icon: "waveform", isSelected: vm.selectedTabKey == nil && !vm.misc) {
                         vm.selectTab(nil)
                     }
                     if !vm.availableTabs.isEmpty {
                         ForEach(vm.availableTabs) { tab in
-                            FilterChip(
-                                label: tab.name,
-                                icon: Self.tabIcon(for: tab.kind),
-                                isActive: vm.selectedTabKey == tab.id,
-                                tintColor: .lsAccent
-                            ) {
+                            TabButton(label: tab.name, icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
                                 vm.selectTab(tab.id)
                             }
                         }
                     } else if vm.hasMiscEntries {
-                        // Older cached payloads without `tabs` keep the
-                        // legacy flat Misc chip.
-                        FilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tintColor: .lsAccent) {
+                        // Older cached payloads without `tabs` keep a flat Misc tab.
+                        TabButton(label: "Misc", icon: "film.stack", isSelected: vm.misc) {
                             vm.toggleMisc()
                         }
                     }
                 }
+                .padding(.leading, 12)
             }
-            .padding(.horizontal, 16)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Tracker sections")
+
+            FilterMenu(vm: vm)
+                .padding(.trailing, 12)
         }
-        .accessibilityLabel("Tracker sections")
     }
 }
 
-// MARK: - Filter toggles
-
-/// Badge filters over the song tree. Multi-select, and only meaningful on the
-/// song tree — a content tab lists entries, which carry no badges — so the
-/// caller hides this row entirely while a tab is selected rather than showing
-/// controls that would silently do nothing.
-///
-/// @Observable reference input — the narrow-inputs rule for value types
-/// doesn't apply here; per-property observation tracking already scopes
-/// this view's invalidation to exactly the flags it reads.
-struct FilterTogglesView: View {
-    let vm: ArtistViewModel
+private struct TabButton: View {
+    let label: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            // Sibling glass elements belong in one container — standalone
-            // effects re-resolve independently and can trip the
-            // "glassEffect() tried to update multiple times per frame" fault.
-            GlassEffectContainer {
-                HStack(spacing: 8) {
-                    FilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tintColor: .filterBestOf) {
-                        vm.toggleBestOf()
-                    }
-                    FilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tintColor: .filterBestOf) {
-                        vm.toggleWorstOf()
-                    }
-                    FilterChip(label: "Grails", icon: "trophy.fill", isActive: vm.grails, tintColor: .filterGrail) {
-                        vm.toggleGrails()
-                    }
-                    FilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tintColor: .filterRecent) {
-                        vm.toggleRecents()
-                    }
-                    FilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tintColor: .filterNoSnippets) {
-                        vm.toggleNoSnippets()
-                    }
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Label(label, systemImage: icon)
+                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+                Capsule()
+                    .fill(isSelected ? Color.lsAccent : .clear)
+                    .frame(height: 3)
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: Metrics.hitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Every filter for the current page, behind one button that shows how many
+/// are on. On a content tab only No Snippets applies — it used to stay on,
+/// invisible, while the filter row was hidden.
+struct FilterMenu: View {
+    let vm: ArtistViewModel
+
+    private var onSongTree: Bool { vm.selectedTabKey == nil && !vm.misc }
+
+    private var activeCount: Int {
+        onSongTree
+            ? [vm.bestOf, vm.worstOf, vm.grails, vm.recents, vm.noSnippets].filter { $0 }.count
+            : (vm.noSnippets ? 1 : 0)
+    }
+
+    var body: some View {
+        Menu {
+            if onSongTree {
+                SwiftUI.Section("Show only") {
+                    Toggle(isOn: binding(vm.bestOf, vm.toggleBestOf)) { Label("Best Of", systemImage: "star.fill") }
+                    Toggle(isOn: binding(vm.worstOf, vm.toggleWorstOf)) { Label("Worst Of", systemImage: "hand.thumbsdown") }
+                    Toggle(isOn: binding(vm.grails, vm.toggleGrails)) { Label("Grails & Wanted", systemImage: "trophy.fill") }
+                }
+                Toggle(isOn: binding(vm.recents, vm.toggleRecents)) { Label("Recently Leaked", systemImage: "clock") }
+            }
+            Toggle(isOn: binding(vm.noSnippets, vm.toggleNoSnippets)) { Label("Hide Snippets", systemImage: "waveform.slash") }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: activeCount > 0
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+                if activeCount > 0 {
+                    Text(activeCount.formatted())
+                        .font(.caption.weight(.bold).monospacedDigit())
                 }
             }
-            .padding(.horizontal, 16)
+            .font(.title3)
+            .foregroundStyle(activeCount > 0 ? Color.lsAccent : .secondary)
+            .frame(minWidth: Metrics.hitTarget, minHeight: Metrics.hitTarget)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("Filters")
+        .accessibilityValue(activeCount == 0 ? "None" : "\(activeCount) on")
+    }
+
+    /// Toggles go through the view model's methods, which re-run the filter
+    /// and keep the badge filters exclusive.
+    private func binding(_ value: Bool, _ toggle: @escaping () -> Void) -> Binding<Bool> {
+        Binding(get: { value }, set: { _ in toggle() })
     }
 }
 
@@ -370,65 +392,98 @@ struct MiscListView: View {
                 ContentUnavailableView(
                     "No \(vm.selectedTabName ?? "Misc") Entries",
                     systemImage: "film.stack",
-                    description: Text("Nothing matches the current filters.")
+                    // Say which filter is responsible, not "the current filters".
+                    description: Text(
+                        vm.noSnippets ? "Hide Snippets is on. Turn it off in Filters to see snippet entries."
+                        : !vm.content.state.query.isEmpty ? "Nothing on this page matches your search."
+                        : "This page has no entries."
+                    )
                 )
                 .padding(.top, 40)
             }
         } else {
             // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
+            // One flat row per card, section label and entry, each a direct
+            // child of the screen's LazyVStack: a VStack per era group built
+            // every row of an expanded group at once (~1,900 on Ye's Stems).
             let groups = vm.content.miscEraGroups
-            ForEach(groups) { group in
-              // Single root — same LazyVStack identity-templating rule the
-              // eras branch follows (see ArtistRowViews.swift).
-              VStack(spacing: 0) {
-                let expanded = isExpanded(group.eraName, groupCount: groups.count)
-                EraCardView(
-                    era: eraForGroup(group),
-                    expanded: expanded,
-                    displayColors: vm.eraDisplay[colorKey(group.eraName)],
-                    subtitle: "\(group.entries.count.formatted()) entr\(group.entries.count == 1 ? "y" : "ies")",
-                    onTap: {
-                        withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                            if expandedEras.contains(group.eraName) {
-                                expandedEras.remove(group.eraName)
-                            } else {
-                                expandedEras.insert(group.eraName)
+            let playOrder = groups.flatMap(\.entries)
+            ForEach(rows(for: groups)) { row in
+                switch row {
+                case .card(let group, let expanded):
+                    EraCardView(
+                        era: eraForGroup(group),
+                        expanded: expanded,
+                        displayColors: vm.eraDisplay[colorKey(group.eraName)],
+                        subtitle: "\(group.entries.count.formatted()) entr\(group.entries.count == 1 ? "y" : "ies")",
+                        onTap: {
+                            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
+                                if expandedEras.contains(group.eraName) {
+                                    expandedEras.remove(group.eraName)
+                                } else {
+                                    expandedEras.insert(group.eraName)
+                                }
                             }
+                        },
+                        onColorExtracted: { color in
+                            vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
                         }
-                    },
-                    onColorExtracted: { color in
-                        vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
-                    }
-                )
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-
-                if isExpanded(group.eraName, groupCount: groups.count) {
-                    ForEach(group.entries.enumerated(), id: \.element.id) { idx, entry in
-                        MiscEntryRowView(
-                            entry: entry,
-                            artistName: artistName,
-                            artistSlug: artistSlug,
-                            eraArt: eraArtUrl(for: entry.eraName),
-                            onPlay: { _ in playEntry(entry, in: entries) },
-                            onShowDescription: onShowDescription,
-                            onSelectLink: onOpenLink
-                        )
-                        .contentShape(Rectangle())
-                        .accessibilityAddTraits(.isButton)
-                        .onTapGesture { handleRowTap(entry) }
-                        // Content tabs used to render bare rows against the app
-                        // background under a card whose border opens at the
-                        // bottom to flush into a panel that wasn't there.
-                        .songPanel(
-                            vm.eraDisplay[colorKey(group.eraName)],
-                            isLast: idx == group.entries.count - 1
-                        )
-                    }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                case .section(let name, let eraName, _):
+                    MiscSectionHeader(name: name, displayColors: vm.eraDisplay[colorKey(eraName)])
+                case .entry(let entry, let eraName, let isLast):
+                    MiscEntryRowView(
+                        entry: entry,
+                        artistName: artistName,
+                        artistSlug: artistSlug,
+                        eraArt: eraArtUrl(for: entry.eraName),
+                        // Auto-advance follows the order on screen (grouped
+                        // by era), not the sheet order it used to jump through.
+                        onPlay: { _ in playEntry(entry, in: playOrder) },
+                        onShowDescription: onShowDescription,
+                        onSelectLink: onOpenLink
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
+                    .onTapGesture { handleRowTap(entry) }
+                    .songPanel(vm.eraDisplay[colorKey(eraName)], isLast: isLast)
                 }
-              }
             }
         }
+    }
+
+    private enum MiscRow: Identifiable {
+        case card(MiscEraGroup, expanded: Bool)
+        case section(String, eraName: String, ordinal: Int)
+        case entry(MiscEntry, eraName: String, isLast: Bool)
+
+        var id: String {
+            switch self {
+            case .card(let group, _): "card::\(group.eraName)"
+            case .section(let name, let era, let ordinal): "sec::\(era)::\(ordinal)::\(name)"
+            case .entry(let entry, _, _): "entry::\(entry.id)"
+            }
+        }
+    }
+
+    private func rows(for groups: [MiscEraGroup]) -> [MiscRow] {
+        var rows: [MiscRow] = []
+        for group in groups {
+            let expanded = isExpanded(group.eraName, groupCount: groups.count)
+            rows.append(.card(group, expanded: expanded))
+            guard expanded else { continue }
+            var currentSection = ""
+            for (i, entry) in group.entries.enumerated() {
+                if let section = entry.section, !section.isEmpty, section != currentSection {
+                    rows.append(.section(section, eraName: group.eraName, ordinal: rows.count))
+                }
+                currentSection = entry.section ?? ""
+                rows.append(.entry(entry, eraName: group.eraName, isLast: i == group.entries.count - 1))
+            }
+        }
+        return rows
     }
 
     /// Tap always opens Details, whatever the link count.
@@ -589,3 +644,23 @@ struct RecentsListView: View {
     }
 }
 
+
+/// A content tab's sub-section label ("Instrumentals", "Music Videos").
+private struct MiscSectionHeader: View {
+    let name: String
+    let displayColors: EraDisplayColors?
+
+    var body: some View {
+        Text(name)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(displayColors?.readableHeader ?? .secondary)
+            .textCase(.uppercase)
+            .tracking(0.5)
+            .padding(.horizontal, 12)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+            .songPanel(displayColors, isLast: false)
+    }
+}

@@ -52,7 +52,7 @@ struct EraRowView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-            case .sectionHeader(let name, _, let group):
+            case .sectionHeader(let name, _, let group, let notes):
                 panel(isLast: false) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(name)
@@ -68,6 +68,11 @@ struct EraRowView: View {
                             .padding(.horizontal, 12)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
+                        if let notes, !notes.isEmpty {
+                            SectionNotesView(notes: notes)
+                                .padding(.horizontal, 12)
+                        }
+
                         Rectangle()
                             .fill((displayColors?.dominant ?? Color.lsBorder).opacity(0.3))
                             .frame(height: 1)
@@ -76,7 +81,7 @@ struct EraRowView: View {
                     .padding(.top, group == nil ? 14 : 6)
                 }
 
-            case .song(let song, let eraName, let eraArt, _, _, let isLast, let ordinal):
+            case .song(let song, let eraName, let eraArt, let expanded, _, let isLast, let ordinal):
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
@@ -94,6 +99,7 @@ struct EraRowView: View {
                         sourceUrl: sourceUrl,
                         eraName: eraName,
                         eraArt: eraArt,
+                        isExpanded: expanded,
                         onPlay: { onPlayVersion($0, eraName) },
                         onShowDescription: onShowDescription
                     )
@@ -139,48 +145,65 @@ extension EraRow {
         case .card(let filtered, _): return filtered.era.name
         case .divider(let era), .eraGap(let era): return era
         case .groupHeader(_, let era): return era
-        case .sectionHeader(_, let era, _): return era
+        case .sectionHeader(_, let era, _, _): return era
         case .song(_, let era, _, _, _, _, _): return era
         case .version(_, _, _, let era, _, _, _): return era
         }
     }
 }
 
-// MARK: - Filter chip
+// MARK: - Notice banner
 
-struct FilterChip: View {
-    let label: String
-    let icon: String
-    let isActive: Bool
-    var tintColor: Color = .lsAccent
-    var onTap: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
+/// A tracker's header notices. Alerts ("links are down") keep a full banner;
+/// the informational links ("Sheet Link", "Official Discord Server") share
+/// one scrolling row of chips instead of a full-width banner each.
+struct NoticesView: View {
+    let notices: [Notice]
+    var onOpenLink: (URL) -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            Label(label, systemImage: icon)
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                // Judged in the CURRENT appearance: a `Color.tone` tint resolves
-                // to a darker mid-tone in light mode than in dark, so against
-                // the default `.dark` the label picked the wrong colour outright.
-                // Every other preferredText call site already passed the scheme.
-                .foregroundStyle(isActive ? AnyShapeStyle(Color.preferredText(on: tintColor, in: colorScheme)) : AnyShapeStyle(.secondary))
-                // Tint via opacity — see DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity
-                .glassEffect(.regular.tint(tintColor.opacity(isActive ? 1 : 0)).interactive())
+        let banners = notices.filter { $0.isAlert || $0.link == nil }
+        let links = notices.filter { !$0.isAlert && $0.link != nil }
+        VStack(spacing: 4) {
+            ForEach(banners) { notice in
+                NoticeBannerView(notice: notice, onOpenLink: onOpenLink)
+                    .padding(.horizontal, 16)
+            }
+            if !links.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(links) { notice in
+                            Button {
+                                if let link = notice.link, let url = URL(string: link) { onOpenLink(url) }
+                            } label: {
+                                Label(notice.text, systemImage: "arrow.up.right")
+                                    .labelStyle(TrailingIconLabelStyle())
+                                    .font(.caption.weight(.medium))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 12)
+                                    .frame(minHeight: Metrics.hitTarget)
+                                    .background(Capsule().fill(Color.lsCard))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens in the browser")
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .frame(minHeight: Metrics.chipHeight)
-        .contentShape(Capsule())
-        // .isButton too: without it VoiceOver read the chip as plain text and
-        // never announced it as something you can activate.
-        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+        .padding(.vertical, 2)
     }
 }
 
-// MARK: - Notice banner
+private struct TrailingIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.title
+            configuration.icon.font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
 
 struct NoticeBannerView: View {
     let notice: Notice
@@ -188,8 +211,8 @@ struct NoticeBannerView: View {
     var onOpenLink: (URL) -> Void
 
     private var isAlert: Bool { notice.isAlert }
-    private var tintColor: Color { isAlert ? .orange : Color(hex: 0x94A3B8) }
-    private var bgColor: Color { isAlert ? Color.orange.opacity(0.10) : Color(hex: 0x94A3B8).opacity(0.12) }
+    private var tintColor: Color { isAlert ? .badgeRec : .secondary }
+    private var bgColor: Color { isAlert ? Color.badgeRec.opacity(0.12) : Color.lsCard }
 
     var body: some View {
         Button {
@@ -223,5 +246,40 @@ struct NoticeBannerView: View {
         // arrow that signals "this opens something" is decoration.
         .accessibilityLabel("\(isAlert ? "Alert" : "Notice"): \(notice.text)")
         .accessibilityHint(notice.link == nil ? "" : "Opens in the browser")
+    }
+}
+
+// MARK: - Section notes
+
+/// A sub-era's own text from the sheet — usually its timeline, written
+/// "(06/18/2013) (Yeezus officially releases)" one event per line.
+struct SectionNotesView: View {
+    let notes: String
+    @State private var expanded = false
+
+    private var lines: [String] {
+        notes.split(separator: "\n").map { line in
+            let parts = line.split(separator: ")", maxSplits: 1)
+            guard parts.count == 2, line.hasPrefix("(") else { return String(line) }
+            let date = parts[0].dropFirst()
+            var event = parts[1].trimmingCharacters(in: .whitespaces)
+            if event.hasPrefix("("), event.hasSuffix(")") { event = String(event.dropFirst().dropLast()) }
+            return event.isEmpty ? String(date) : "\(date) — \(event)"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(lines.joined(separator: "\n"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(expanded ? nil : 2)
+            if lines.count > 2 {
+                Button(expanded ? "Less" : "More") { expanded.toggle() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .frame(minHeight: Metrics.hitTarget, alignment: .leading)
+            }
+        }
     }
 }

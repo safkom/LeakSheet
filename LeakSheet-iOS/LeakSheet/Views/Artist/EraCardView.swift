@@ -38,26 +38,22 @@ struct EraCardView: View {
                     coverArt
                     titleBlock
                     Spacer(minLength: 8)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(titleColor.opacity(0.6))
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
                         .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(era.name)
-            .accessibilityHint(expanded ? "Collapse era" : "Expand era")
-            .accessibilityAddTraits(.isButton)
+            // The alt names and subtitle are part of what the card says, and
+            // state belongs in the value: a hint can be turned off.
+            .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
 
-            if expanded {
-                if let alts = era.altNames, !alts.isEmpty {
-                    altNamesLabel(alts, lineLimit: nil)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let desc = era.description, !desc.isEmpty {
-                    descriptionBlock(desc)
-                }
+            if expanded, let desc = era.description, !desc.isEmpty {
+                descriptionBlock(desc)
             }
         }
         .padding(16)
@@ -95,7 +91,7 @@ struct EraCardView: View {
                     Text(descriptionExpanded ? "Less" : "More")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(titleColor)
-                        .padding(.vertical, 4)
+                        .frame(minHeight: Metrics.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -130,15 +126,18 @@ struct EraCardView: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // One font and one alt-names view in both states: swapping the
+            // font, and moving the alt names to a new view on expand, left the
+            // old and new text drawn over each other mid-animation.
             Text(era.name)
-                .font((expanded ? Font.title2 : .title3).weight(.semibold))
+                .font(.title3.weight(.semibold))
                 .tracking(-0.3)
                 .foregroundStyle(titleColor)
                 .lineLimit(expanded ? 3 : 2)
                 .multilineTextAlignment(.leading)
 
-            if !expanded, let alts = era.altNames, !alts.isEmpty {
-                altNamesLabel(alts, lineLimit: 1)
+            if let alts = era.altNames, !alts.isEmpty {
+                altNamesLabel(alts, lineLimit: expanded ? nil : 1)
             }
 
             if let subtitle {
