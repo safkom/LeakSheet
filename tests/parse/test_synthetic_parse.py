@@ -27,6 +27,21 @@ def main():
 # Main tab — counts, row accounting, and attribute assignment
 # ---------------------------------------------------------------------------
 
+
+@pytest.fixture(scope="module")
+def travis():
+    return parse_sheet(read_synthetic("travis_style"), "Astro")
+
+
+@pytest.fixture(scope="module")
+def misc():
+    return parse_misc_tab(read_synthetic("misc_tab"), "misc")
+
+
+@pytest.fixture(scope="module")
+def art_map():
+    return parse_art_tab(read_synthetic("art_tab"))
+
 class TestMainTabCounts:
     def test_era_song_version_counts(self, main):
         assert len(main.eras) == 2
@@ -106,10 +121,6 @@ class TestMainTabAttributes:
 # ---------------------------------------------------------------------------
 
 class TestCompoundAvailability:
-    @pytest.fixture(scope="class")
-    def travis(self):
-        return parse_sheet(read_synthetic("travis_style"), "Astro")
-
     def test_no_quality_column_folds_into_availability(self, travis):
         stay = next(
             v for era in travis.eras for song in era.songs
@@ -147,10 +158,6 @@ class TestCompoundAvailability:
 # ---------------------------------------------------------------------------
 
 class TestMiscTab:
-    @pytest.fixture(scope="class")
-    def misc(self):
-        return parse_misc_tab(read_synthetic("misc_tab"), "misc")
-
     def test_entries_parsed(self, misc):
         assert [m.name for m in misc] == ["Music Video One", "Interview Clip"]
         assert all(m.era_name == "Debut Era" for m in misc)
@@ -166,10 +173,6 @@ class TestMiscTab:
 
 
 class TestArtTab:
-    @pytest.fixture(scope="class")
-    def art_map(self):
-        return parse_art_tab(read_synthetic("art_tab"))
-
     def test_art_map_keyed_by_era(self, art_map):
         assert art_map == {
             "debut era": "https://lh3.googleusercontent.com/debut-hq",
