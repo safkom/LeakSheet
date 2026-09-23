@@ -3,7 +3,7 @@ import SwiftUI
 /// Settings. Same `@AppStorage` keys the phone writes, so a device sharing an
 /// iCloud-synced defaults store sees consistent behaviour.
 struct TVSettingsView: View {
-    @AppStorage("leaksheet_streaming_mode") private var useOriginalQuality = false
+    @AppStorage(AudioEngine.originalQualityKey) private var useOriginalQuality = false
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL = ""
 

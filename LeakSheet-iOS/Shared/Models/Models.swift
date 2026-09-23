@@ -504,6 +504,8 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     let streaming: Bool?
     let links: [String]
     let sourceTab: String
+    /// The tab's sub-section ("Instrumentals", "Music Videos"), if any.
+    var section: String? = nil
 
     /// Row identity. `rowIndex` is what makes it unique: these tabs repeat
     /// content constantly — the Ye Stems tab lists ten entries called "Beat 1"
@@ -559,7 +561,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, notes, date, length, available, quality, streaming, links
+        case name, notes, date, length, available, quality, streaming, links, section
         case eraName = "era_name"
         case rowIndex = "row_index"
         case entryType = "entry_type"

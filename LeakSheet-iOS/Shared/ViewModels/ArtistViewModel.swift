@@ -76,7 +76,7 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case card(FilteredEra, expanded: Bool)
     case divider(eraName: String)
     case groupHeader(text: String, eraName: String)
-    case sectionHeader(name: String, eraName: String, group: String?)
+    case sectionHeader(name: String, eraName: String, group: String?, notes: String? = nil)
     // `ordinal` disambiguates same-baseName songs — see DECISIONS.md::ArtistViewModel.swift::song-ordinal
     case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool, ordinal: Int)
     case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool, songOrdinal: Int)
@@ -89,7 +89,7 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
         case .groupHeader(let text, let era): return "grp::\(era)::\(text)"
         // Group is part of section identity (Section.id is name+group) —
         // same-named sections under different groups must not collide.
-        case .sectionHeader(let name, let era, let group): return "sec::\(era)::\(group ?? "")::\(name)"
+        case .sectionHeader(let name, let era, let group, _): return "sec::\(era)::\(group ?? "")::\(name)"
         case .song(let song, let era, _, _, _, _, let ord): return "song::\(era)::\(ord)::\(song.baseName)"
         case .version(let version, let index, let song, let era, _, _, let songOrd):
             return "ver::\(era)::\(songOrd)::\(song.baseName)::\(version.id)::\(index)"
@@ -857,7 +857,7 @@ final class ArtistViewModel {
                         if !section.name.isEmpty {
                             rows.append(.sectionHeader(
                                 name: section.name, eraName: eraName,
-                                group: section.group
+                                group: section.group, notes: section.notes
                             ))
                         }
                         appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)

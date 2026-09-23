@@ -30,7 +30,7 @@ struct LandingView: View {
                     Text("LeakSheet")
                         .font(.largeTitle.bold())
                         .foregroundStyle(.primary)
-                    Text("Music tracker parser")
+                    Text("Browse unreleased music trackers")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

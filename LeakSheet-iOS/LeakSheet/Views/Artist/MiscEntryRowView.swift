@@ -37,7 +37,6 @@ struct MiscEntryRowView: View {
 
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Computed ONCE per row, not per access. `entry.mediaLinks` runs
     /// MiscLinkClassifier.classify (a URLComponents parse plus a
@@ -100,9 +99,8 @@ struct MiscEntryRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             leadingIcon
-                .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
@@ -139,8 +137,9 @@ struct MiscEntryRowView: View {
                 extraLinks: extraLinks, onSelectLink: onSelectLink
             )
         }
-        .padding(.vertical, Metrics.rowVerticalPadding)
-        .padding(.horizontal, Metrics.rowHorizontalPadding)
+        .padding(.vertical, 6)
+        .padding(.leading, 4)
+        .padding(.trailing, 2)
         .background(isPlaying ? Color.lsAccent.opacity(0.08) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .rowHoverHighlight()
@@ -178,17 +177,7 @@ struct MiscEntryRowView: View {
         }
         .swipeActions(edge: .leading) {
             if canStream {
-                Button {
-                    Haptics.light()
-                    if let onPlay {
-                        onPlay(version)
-                    } else {
-                        player.playTrack(
-                            version, artistName: artistName,
-                            eraName: entry.eraName, artUrl: eraArt ?? "", artistSlug: artistSlug
-                        )
-                    }
-                } label: {
+                Button(action: play) {
                     Image(systemName: "play.fill")
                 }
                 .tint(.green)
@@ -215,32 +204,35 @@ struct MiscEntryRowView: View {
 
     // MARK: - Leading slot
 
-    /// The song row's 24pt slot, filled with whatever this entry has: the
-    /// now-playing indicator, else a media preview, else nothing.
-    ///
-    /// The preview used to be 44pt, which made every content-tab row taller
-    /// than a song row and shifted the whole column. It is the same size as a
-    /// song row's badge now, so the two lists line up.
+    /// The same leading slot as a song row: what is playing, else a play
+    /// button for a streamable entry, else the entry's media preview.
     @ViewBuilder
     private var leadingIcon: some View {
-        if isPlaying {
-            if player.loading {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(Color.lsAccent)
-            } else {
-                Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                    .font(.caption)
-                    .foregroundStyle(Color.lsAccent)
-                    // Repeating symbol effects are content animations the
-                    // system does not auto-suppress under Reduce Motion.
-                    .symbolEffect(.variableColor.iterative, options: .repeating,
-                                  isActive: player.isPlaying && !reduceMotion)
-            }
-        } else if let previewURL {
+        if let previewURL, !isPlaying, !canStream {
             thumbnail(url: previewURL)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
         } else {
-            Color.clear
+            SongPlayControl(
+                isCurrent: isPlaying,
+                isLoading: player.loading,
+                isPlaying: player.isPlaying,
+                canStream: canStream,
+                title: entry.name,
+                play: play
+            )
+        }
+    }
+
+    private func play() {
+        guard canStream else { return }
+        Haptics.light()
+        if let onPlay {
+            onPlay(version)
+        } else {
+            player.playTrack(
+                version, artistName: artistName,
+                eraName: entry.eraName, artUrl: eraArt ?? "", artistSlug: artistSlug
+            )
         }
     }
 

@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import AVKit
+#endif
 
 /// Full-screen now-playing view with artwork, progress, and controls.
 struct NowPlayingView: View {
@@ -59,6 +62,11 @@ struct NowPlayingView: View {
                         }
                         .accessibilityLabel("Close now playing")
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        AirPlayButton()
+                            .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
+                            .accessibilityLabel("AirPlay")
+                    }
                     overflowMenu
                 }
                 .sheet(isPresented: $showQueue) {
@@ -70,6 +78,18 @@ struct NowPlayingView: View {
     }
 
     private var content: some View {
+        // Scrolls once the controls outgrow the screen (accessibility text
+        // sizes); otherwise it fills the screen and centres like before.
+        GeometryReader { proxy in
+            ScrollView {
+                controls
+                    .frame(minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    private var controls: some View {
             VStack(spacing: 24) {
                 Spacer()
 
@@ -97,6 +117,17 @@ struct NowPlayingView: View {
                         Text(player.error)
                             .font(.caption)
                             .foregroundStyle(Color.lsError)
+                            .multilineTextAlignment(.center)
+                        if let track = player.currentTrack {
+                            Button("Try Again") {
+                                player.playTrack(
+                                    track, artistName: player.artistName, eraName: player.eraName,
+                                    artUrl: player.artUrl, artistSlug: player.artistSlug
+                                )
+                            }
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.glass)
+                        }
                     }
                 }
                 .padding(.horizontal, 24)
@@ -198,6 +229,10 @@ struct NowPlayingView: View {
                             .padding(.vertical, 8)
                         }
                         .buttonStyle(.glass)
+                        // Label and state, not a word that could be either.
+                        .accessibilityLabel("Audio quality")
+                        .accessibilityValue(player.originalQuality ? "Original file" : "Compressed stream")
+                        .accessibilityHint(player.originalQuality ? "Switches to the compressed stream" : "Switches to the original file")
                     }
 
                     // Queue
@@ -417,3 +452,16 @@ private struct ArtworkSquare: ViewModifier {
         #endif
     }
 }
+
+#if os(iOS)
+/// The system route picker (AirPlay, Bluetooth, HomePod).
+private struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.prioritizesVideoDevices = false
+        return view
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+#endif

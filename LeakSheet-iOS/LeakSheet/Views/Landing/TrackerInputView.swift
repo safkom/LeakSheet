@@ -15,11 +15,21 @@ struct TrackerInputView: View {
     /// whole load — which is what it did ~99% of the time.
     @State private var phaseElapsed: TimeInterval = 0
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             inputRow
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                // Tint via opacity, not by swapping the tint in and out — see
+                // DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity.
+                .glassEffect(.regular.tint(.lsAccent.opacity(focused ? 0.28 : 0)), in: .rect(cornerRadius: 12))
+            // Below the glass, not inside it: growing the glass shape while
+            // this faded in drew the line clipped under the field's edge.
             if loading, let loadPhase {
                 progressRow(for: loadPhase)
+                    .padding(.horizontal, 14)
                     .transition(.opacity)
                     .task(id: loadPhase) {
                         phaseElapsed = 0
@@ -31,17 +41,22 @@ struct TrackerInputView: View {
                     }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        // Tint via opacity, not by swapping the tint in and out — see
-        // DECISIONS.md::ArtistRowViews.swift::glass-tint-opacity. At full
-        // strength the focused field renders as a solid accent-coloured slab
-        // that swallows the text inside it.
-        .glassEffect(.regular.tint(.lsAccent.opacity(focused ? 0.28 : 0)), in: .rect(cornerRadius: 12))
         .animation(.default, value: loading)
     }
 
     private var inputRow: some View {
+        // At accessibility sizes the action button gets its own line, so the
+        // field keeps usable width instead of ~30pt beside a pinned button.
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            fieldRow
+            actionButton
+        }
+    }
+
+    private var fieldRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "link")
                 .foregroundStyle(.secondary)
@@ -78,7 +93,11 @@ struct TrackerInputView: View {
                 .disabled(loading)
                 .accessibilityLabel("Clear URL")
             }
+        }
+    }
 
+    @ViewBuilder
+    private var actionButton: some View {
             if url.trimmingCharacters(in: .whitespaces).isEmpty {
                 // The system PasteButton, not a Button reading the pasteboard.
                 // A programmatic read raised the "Allow Paste?" prompt on every
@@ -90,7 +109,7 @@ struct TrackerInputView: View {
                     }
                 }
                 .buttonBorderShape(.capsule)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(loading)
             } else {
                 Button {
@@ -112,9 +131,8 @@ struct TrackerInputView: View {
                 }
                 .disabled(loading || url.trimmingCharacters(in: .whitespaces).isEmpty)
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
             }
-        }
     }
 
     /// One line of honest progress: fraction when the payload size is known,

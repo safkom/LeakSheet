@@ -41,6 +41,10 @@ struct BadgePill: View {
 struct DedupedBadgePills: View {
     let quality: String?
     let availability: String?
+    /// Plain text laid out in the same flow as the pills ("3 versions").
+    /// In a second, outer FlowLayout it could be measured on one line and
+    /// placed on the next, and was clipped away at large text sizes.
+    var trailing: String? = nil
 
     var body: some View {
         FlowLayout(spacing: 5) {
@@ -59,6 +63,12 @@ struct DedupedBadgePills: View {
                     variant: availabilityVariant(avail.text),
                     accessibilityPrefix: "Availability"
                 )
+            }
+            if let trailing {
+                Text(trailing)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
         }
     }

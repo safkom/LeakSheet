@@ -56,7 +56,6 @@ struct QueueSheet: View {
                         #endif
                         .toolbar { chrome }
                 }
-                .presentationBackground(.ultraThinMaterial)
             }
         }
         .confirmationDialog(

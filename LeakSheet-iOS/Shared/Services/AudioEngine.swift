@@ -14,6 +14,7 @@ final class AudioEngine {
     /// Declared here, on the reader, so shared code doesn't depend on the
     /// Settings screen — which is per-platform.
     static let autoplayNextKey = "leaksheet_autoplay_next"
+    static let originalQualityKey = "leaksheet_streaming_mode"
 
     private nonisolated static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Audio")
 
@@ -156,7 +157,7 @@ final class AudioEngine {
         // If the user prefers original quality and one is available, start directly there
         // to avoid a double replaceCurrentItem (which re-runs KVO setup and causes an extra
         // PlayerRemoteXPC cycle + visible network teardown in the console).
-        let prefersOriginal = UserDefaults.standard.bool(forKey: "leaksheet_streaming_mode")
+        let prefersOriginal = UserDefaults.standard.bool(forKey: Self.originalQualityKey)
         let originalURL = prefersOriginal ? StreamResolver.originalQualityURL(for: link) : nil
         let initialURL = originalURL ?? url
 
