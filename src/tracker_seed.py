@@ -1,16 +1,8 @@
-"""Last-resort fallback tracker list — used when ArtistGrid is unreachable
+"""Last-resort fallback tracker list, used when ArtistGrid is unreachable
 and no live payload has ever succeeded (see api.list_trackers).
 
-Originally seeded after the old TrackerHub master sheet went down, from a
-snapshot of a community-reposted replacement (a forum megathread mirroring
-the same "all trackers" list). GET /trackers now fetches the live ArtistGrid
-CSV registry (src.config.ARTISTGRID_URL) as its primary source, so this only
-serves if that's down too. Rows the megathread poster flagged as broken (a
-red X in the STATUS column) were dropped; a few artist names had mangled
-emoji stripped.
-
-Regenerate by re-running the extraction against a fresh copy of the source
-HTML through src.parser.extract_table if this list ever needs updating.
+A snapshot of a community-reposted "all trackers" list, minus rows flagged
+broken. Regenerate by running fresh source HTML through src.parser.extract_table.
 """
 
 from __future__ import annotations

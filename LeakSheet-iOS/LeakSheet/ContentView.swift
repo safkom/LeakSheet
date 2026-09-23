@@ -12,13 +12,8 @@ struct ContentView: View {
     /// per tracker instead of "Loading…" followed by "Preparing…".
     @State private var prepared: (slug: String, vm: ArtistViewModel)?
 
-    /// The prepared view model, but only when it describes the artist that is
-    /// actually playing — otherwise a tracker left open in the background
-    /// would answer "which versions does this song have?" for a different one.
-    ///
-    /// Reading the singleton rather than @Environment: this view *installs*
-    /// PlayerViewModel into the environment, so it can't read it back out.
-    /// Observation still tracks the `artistSlug` access from `body`.
+    /// The prepared view model, only when it describes the artist actually playing.
+    /// Reads the singleton, not @Environment: this view installs PlayerViewModel itself.
     private var vmForCurrentPlayback: ArtistViewModel? {
         guard let prepared, prepared.slug == PlayerViewModel.shared.artistSlug else { return nil }
         return prepared.vm

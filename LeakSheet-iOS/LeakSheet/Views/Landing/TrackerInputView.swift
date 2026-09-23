@@ -9,10 +9,8 @@ struct TrackerInputView: View {
 
     @FocusState private var focused: Bool
     @State private var selection: TextSelection?
-    /// Seconds spent in the current phase. `.connecting` is one long wait on
-    /// the server (fetching the sheet from Google, then parsing it), so the
-    /// label escalates rather than sitting on "Contacting server…" for the
-    /// whole load — which is what it did ~99% of the time.
+    /// Seconds spent in the current phase: `.connecting` is one long server-side wait,
+    /// so the label escalates rather than sitting on "Contacting server…".
     @State private var phaseElapsed: TimeInterval = 0
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -99,10 +97,8 @@ struct TrackerInputView: View {
     @ViewBuilder
     private var actionButton: some View {
             if url.trimmingCharacters(in: .whitespaces).isEmpty {
-                // The system PasteButton, not a Button reading the pasteboard.
-                // A programmatic read raised the "Allow Paste?" prompt on every
-                // tap; PasteButton is the user's explicit consent, so it never
-                // asks.
+                // The system PasteButton, not a Button reading the pasteboard: it is explicit
+                // consent, so it never raises the "Allow Paste?" prompt.
                 PasteButton(payloadType: String.self) { strings in
                     if let text = strings.first {
                         url = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -120,9 +116,8 @@ struct TrackerInputView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        // One line at any text size: unpinned, the field's
-                        // greedy width squeezed this into a letter-per-line
-                        // column at accessibility sizes.
+                        // One line at any text size, or the field's greedy width squeezes it into a
+                        // letter-per-line column at accessibility sizes.
                         Text("Parse")
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
@@ -186,12 +181,8 @@ struct TrackerInputView: View {
         bytes.formatted(.byteCount(style: .file))
     }
 
-    /// What the server is actually doing while we wait for the first byte.
-    ///
-    /// `.connecting` spans the whole of time-to-first-byte, and on a cold parse
-    /// that is the backend fetching the sheet from Google and parsing it — the
-    /// download and decode that follow are comparatively instant. A single
-    /// "Contacting server…" for all of it read as a hang.
+    /// What the server is actually doing while we wait for the first byte: on a
+    /// cold parse, fetching the sheet from Google and parsing it.
     static func connectingLabel(elapsed: TimeInterval) -> String {
         switch elapsed {
         case ..<1.5: "Contacting server…"
@@ -200,10 +191,8 @@ struct TrackerInputView: View {
         }
     }
 
-    /// Backstop against a concatenated result reaching submit — e.g.
-    /// "https://a.com/xhttps://b.com/y" from a partial retype before
-    /// select-all-on-focus existed. Keeps only the last "http" occurrence,
-    /// which is the URL the user most recently typed or pasted.
+    /// Backstop against a concatenated result reaching submit
+    /// ("https://a.com/xhttps://b.com/y"): keeps only the last "http" occurrence.
     private func normalizeIfConcatenated() {
         var ranges: [Range<String.Index>] = []
         var searchStart = url.startIndex

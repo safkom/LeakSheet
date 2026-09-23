@@ -1,13 +1,9 @@
 #if os(macOS)
 import SwiftUI
 
-/// A song or version row for the Mac list.
-///
-/// The iOS row hangs Play / Add to Queue / Favourite off `swipeActions`, a
-/// gesture macOS does not have — which left right-click and a permanently
-/// visible ellipsis button as the only way to do anything. Here: the row shows
-/// nothing but content until the pointer is over it, then reveals Play and the
-/// menu. Selection, ↑↓, ⏎ and double-click come from the enclosing `List`.
+/// A song or version row for the Mac list: content only until the pointer is over
+/// it, then Play and the menu (macOS has no swipeActions). Selection, ↑↓, ⏎ and
+/// double-click come from the enclosing `List`.
 struct MacSongRow: View {
     let song: Song
     let version: SongVersion?
@@ -57,13 +53,9 @@ struct MacSongRow: View {
                 HStack(spacing: 5) {
                     Text(song.baseName)
                         .font(.subheadline)
-                        // Plain `.primary`, never the accent: SwiftUI inverts a
-                        // primary label on a selected row for free, whereas an
-                        // accent-tinted title on the accent-filled selection is
-                        // blue on blue. `backgroundProminence` is not a reliable
-                        // guard here — it reaches BadgePill but not this read —
-                        // so the playing state is carried by the leading
-                        // speaker glyph alone.
+                        // Plain `.primary`, never the accent: SwiftUI inverts a primary label on a
+                        // selected row, while an accent title on the accent selection is blue on blue.
+                        // `backgroundProminence` doesn't reach this read, so the speaker glyph marks playing.
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if showVersionBadge, let tag = version?.versionTag {
@@ -80,10 +72,7 @@ struct MacSongRow: View {
                     }
                 }
 
-                // One flowing line, badges then credits. They used to be an
-                // HStack of a badge FlowLayout beside a credit VStack, so the
-                // credits stacked down the side of a row with hundreds of
-                // points of empty space to their right.
+                // One flowing line, badges then credits.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if (!hasMultiple || showVersionBadge), let v = version {
                         BadgeRowView(version: v)
@@ -150,9 +139,8 @@ struct MacSongRow: View {
         }
     }
 
-    /// Hidden until hover — a Mac list row should be content, not a control bar.
-    /// `opacity` rather than `if`: removing the buttons changes the row height
-    /// and makes the whole list twitch as the pointer crosses it.
+    /// Hidden until hover. `opacity` rather than `if`: removing the buttons changes the
+    /// row height and makes the list twitch as the pointer crosses it.
     @ViewBuilder
     private var trailingControls: some View {
         HStack(spacing: 2) {

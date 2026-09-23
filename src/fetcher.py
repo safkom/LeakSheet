@@ -8,10 +8,9 @@ Strategy (async pipeline; the sync entry points are thin wrappers over it):
 2. If the URL carries an explicit GID, try that tab first — unless the
    workbook's tab listing classifies it as a content tab (Misc etc.), in
    which case fall through to discovery.
-3. Otherwise fetch the base htmlview page, discover all GIDs plus named tabs,
-   and fetch every candidate concurrently — consuming results in priority
-   order (the "Unreleased" tab first) and cancelling the rest once a winner
-   (most eras, minimum threshold) parses.
+3. Otherwise fetch the base htmlview page and discover all GIDs plus named
+   tabs. The "Unreleased" tab is tried alone first; the other candidates
+   only if it has no songs, consumed in priority order until a winner parses.
 4. Load secondary tabs concurrently: Art and every
    content tab; badge tabs stamp highlights onto existing songs.
 5. Cache both the winning HTML and the parsed result; a size-capped eviction
@@ -71,9 +70,7 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
-# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md).
-# Oldest entries (grouped per hash stem) are evicted first; img_* files have
-# their own cap.
+# Sheet HTML + parsed-JSON cache cap: see docs/decisions.md::fetcher.py — sheet cache size cap
 _SHEET_CACHE_MAX_BYTES = int(
     os.environ.get("LEAKSHEET_SHEET_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))
 )
@@ -82,11 +79,8 @@ _last_sheet_evict = 0.0
 # tempfile.mkstemp(prefix=f"{name}.tmp") → "abc.html.tmpQ7z1zK".
 _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 
-# Concurrent sub-page fetches, across ALL callers.
-#
-# Every fan-out site (GID discovery, hub-workbook tabs) holds a full response
-# body, up to ~12 MB each. One semaphore inside _fetch_gid_page bounds all of
-# them at their single choke point.
+# Concurrent sub-page fetches across ALL callers. Each holds a body of up to
+# ~12 MB, so one semaphore in _fetch_gid_page bounds every fan-out site.
 _GID_FETCH_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
 )
@@ -120,9 +114,8 @@ class PhaseTimer:
 
     def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
-        # Receives human-readable progress events for a client that is waiting
-        # on a cold parse (POST /sheet streamed as NDJSON). Rides on the timer
-        # because the timer already reaches every stage of the pipeline.
+        # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
+        # the timer because the timer already reaches every stage of the pipeline.
         self.on_progress = on_progress
 
     def report(
@@ -174,30 +167,23 @@ def _get_sheets_client() -> httpx.AsyncClient:
             # explicit timeout= doesn't silently get httpx's 5s default.
             timeout=DEFAULT_TIMEOUT,
             headers={"User-Agent": USER_AGENT},
-            # The host allowlist is checked once, up front; this rejects
-            # non-public destinations at connect on EVERY redirect hop, so an
-            # allowed host cannot 30x the fetch into RFC1918 or link-local.
+            # Rejects non-public destinations at connect on every redirect hop. Redirects are
+            # not re-checked against the allowlist: docs/decisions.md::fetcher.py::_get_sheets_client
             transport=PublicOnlyAsyncTransport(retries=1),
         )
     return _sheets_client
 
 
 async def close_sheets_client() -> None:
-    """Close the shared sheet-fetch client. Call on application shutdown.
-
-    The lifespan closed the image-proxy and streaming clients but not this one,
-    so every restart dropped its pooled connections instead of closing them.
-    Mirrors streaming.close_shared_client.
-    """
+    """Close the shared sheet-fetch client. Call on application shutdown."""
     global _sheets_client
     if _sheets_client is not None and not _sheets_client.is_closed:
         await _sheets_client.aclose()
     _sheets_client = None
 
 
-# Largest decoded sheet body we accept. The Ye main tab is ~11 MB; a feed-listed
-# custom host is third-party controlled and could otherwise stream (or
-# gzip-bomb) the worker out of memory.
+# Largest decoded sheet body we accept (the Ye main tab is ~11 MB). A feed-listed
+# host is third-party and could otherwise stream or gzip-bomb the worker out of memory.
 _MAX_SHEET_BYTES = 64 * 1024 * 1024
 
 
@@ -227,11 +213,8 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
     """GET the ArtistGrid registry, parse it, and register its hosts.
 
-    The only path to the feed. /trackers serves the entries and the sheet-host
-    refresh wants only the side effect; they used to be two separate
-    implementations with different clients, status handling and error policy.
-    Raises on any upstream or parse failure, so each caller keeps its own
-    fallback.
+    The only path to the feed. Raises on any upstream or parse failure, so each
+    caller keeps its own fallback.
     """
     resp = await _get_capped(
         _get_sheets_client(), ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
@@ -256,9 +239,8 @@ async def _refresh_tracker_hosts() -> None:
     if _host_refresh is None or _host_refresh.done():
         if not tracker_hosts_are_stale():
             return
-        # One refresh at a time: the throttle is stamped only when a fetch
-        # finishes, so every unknown-host request during the first (up to
-        # 60 s) fetch started its own.
+        # One refresh at a time: the throttle is stamped only when a fetch finishes, so
+        # concurrent unknown-host requests must share this task.
         _host_refresh = asyncio.create_task(_fetch_tracker_hosts())
     await asyncio.shield(_host_refresh)
 
@@ -305,20 +287,8 @@ _TAB_ITEMS_PATTERN = re.compile(
     r'\{name:\s*"([^"]+)"[^{}]*?gid:\s*"(\d+)"',
 )
 
-# The same items.push() switcher, but keyed on pageUrl instead of gid.
-#
-# CORRECTION (verified by live-fetching all three hosts): deftonestracker.net,
-# franktracker.net and tylertracker.net all DO emit `gid:` on every entry, so
-# _discover_named_tabs already found their tabs and the name-merge below is a
-# no-op for them. The load-bearing half of this feature is _build_sheet_html_url
-# preferring the advertised PATH — those hosts answer the ?gid= query form with
-# a table-less shell page. The merge is kept as a cheap fallback for a host that
-# genuinely omits gid; it has not been observed.
-#   items.push({name: "Unreleased", pageUrl: "\/htmlview\/sheet\/554276433.html"});
-#   items.push({name: "Unreleased", pageUrl: "\/preview\/sheet\/937104017.html"});
-# Those hosts answer the ?gid= query form with the 52KB shell page — no
-# <table> — so every one of them failed with NoTablesError until we followed
-# the URL the page itself advertises.
+# The same items.push() switcher, keyed on pageUrl ("\/htmlview\/sheet\/1.html"):
+# see docs/decisions.md::fetcher.py::_build_sheet_html_url — advertised tab paths
 _TAB_PAGEURL_PATTERN = re.compile(
     r'\{name:\s*"([^"]+)"[^{}]*?pageUrl:\s*"([^"]+)"',
 )
@@ -342,8 +312,7 @@ _STEMS_TAB_NAMES = frozenset({"stems"})
 _SPECIAL_TAB_NAMES = frozenset({"special", "notable"})
 # On-streaming catalogues, split out from the unreleased tab (Smino).
 _STREAMING_TAB_NAMES = frozenset({"streaming", "on streaming"})
-# Slash spacing is normalized to " / " by _clean_tab_name before matching;
-# "grails & wanted" observed 7x in the 2026-07-20 TrackerHub sweep.
+# Slash spacing is normalized to " / " by _clean_tab_name before matching.
 _GRAILS_TAB_NAMES = frozenset({"grails", "grails / wanted", "grails & wanted"})
 _WANTED_TAB_NAMES = frozenset({"wanted"})
 _FAKES_TAB_NAMES = frozenset({"fakes"})
@@ -358,9 +327,7 @@ _OTHER_CONTENT_TAB_NAMES = frozenset({
 # Badge tab kinds — see docs/decisions.md::fetcher.py::badge-tab-kinds
 _BADGE_TAB_KINDS = frozenset({"best_of", "worst_of", "special", "grails", "wanted"})
 
-# Tabs deliberately NOT parsed — duplicates of the main tab, bespoke non-song
-# grammars, and lookup tables. A named set rather than a comment because the
-# hub-workbook aggregation needs the same exclusions. Why: docs/decisions.md.
+# Tabs deliberately NOT parsed: see docs/decisions.md::fetcher.py — content-tab keyword sets
 _EXCLUDED_TAB_NAMES = frozenset({
     "recent", "recents", "recent additions", "what's new", "whats new",
     "tracklists", "tracklist", "album copies", "compilations",
@@ -392,7 +359,6 @@ SHEET_ID_PATTERN = re.compile(
 # Regex to extract GID from URL fragment (#gid=...) or query param (?gid=...)
 _URL_GID_PATTERN = re.compile(r"[#?&]gid=(\d+)")
 
-# Regex to extract title
 TITLE_PATTERN = re.compile(r"<title>([^<]+)</title>", re.IGNORECASE)
 
 # Common title suffixes to strip when inferring artist name. Compared
@@ -411,7 +377,7 @@ TITLE_SUFFIXES = [
 
 # Emoji pattern for stripping decorative emoji from tab names.
 # Ranges include Enclosed Alphanumeric Supplement (\ud83c\udd95 U+1F195) and
-# Miscellaneous Technical (\u23ed U+23ED) \u2014 both appear in real tab names.
+# Miscellaneous Technical (⏭ U+23ED) — both appear in real tab names.
 _EMOJI_RE = re.compile(
     r"[\U0001f170-\U0001f9ff\U00002300-\U000023ff\U00002600-\U000027bf\U00002b50\ufe0f\u200d]+"
 )
@@ -450,9 +416,8 @@ def _normalize_url(url: str) -> str:
         port = parsed.port
     except ValueError as exc:
         raise InvalidURLError(f"Invalid URL: {url}") from exc
-    # One key per resource: userinfo, a default port, host case and the
-    # fragment never change what is fetched, but each used to mint its own
-    # cache and single-flight key — N spellings of Ye meant N cold parses.
+    # One key per resource: userinfo, a default port, host case and the fragment don't
+    # change what is fetched, so they must not mint separate cache/single-flight keys.
     host = (parsed.hostname or "").lower()
     if ":" in host:
         host = f"[{host}]"  # IPv6 literal
@@ -516,17 +481,8 @@ def _build_sheet_html_url(
 
     if page_paths and (path := page_paths.get(gid)):
         if path.startswith(("http://", "https://")):
-            # page_paths is scraped out of the fetched page's own JavaScript,
-            # so an absolute entry is attacker-controlled the moment any
-            # allow-listed tracker is compromised. The base URL was checked
-            # once, before this; without the same check here a sub-page could
-            # aim the fetcher at any public host and have the response parsed
-            # and cached. No refresh: the base-URL assertion already warmed the
-            # host set earlier in this request.
-            #
-            # A sheet pointing at its own CDN subdomain (base x.net serving
-            # tabs from cdn.x.net) is the normal case and stays allowed — what
-            # this rejects is an unrelated host.
+            # page_paths come from the fetched page's own JS, so an absolute entry is untrusted:
+            # only allow-listed hosts or the sheet's own site (docs/decisions.md::config.py — the /sheet host allowlist).
             tab_host = urlparse(path).hostname
             if sheet_host_allowed(tab_host) or _same_site(tab_host, parsed.hostname):
                 return path
@@ -579,10 +535,8 @@ def _infer_artist_name(title: str) -> str:
         if name.lower().endswith(suffix.lower()):
             name = name[: -len(suffix)].strip()
 
-    # Step 1b: Strip "Tracker 2.0" / "Tracker v3" version suffixes and
-    # "Tracker PUBLIC" / "Tracker [Official]" style qualifiers that follow
-    # the word Tracker (2026-07-06 census: 'Ye Tracker PUBLIC',
-    # 'Playboi Carti Tracker [Official]')
+    # Step 1b: strip qualifiers after the word Tracker ("Tracker 2.0", "Tracker v3",
+    # "Tracker PUBLIC", "Tracker [Official]").
     name = _TRACKER_QUALIFIER_RE.sub("", name).strip()
     # Re-apply suffix stripping after version removal
     for suffix in TITLE_SUFFIXES:
@@ -666,11 +620,11 @@ def _decode_js_string(s: str) -> str:
         esc = m.group(0)
         if esc.startswith(("\\u", "\\x")):
             return chr(int(esc[2:], 16))
-        return esc[1]  # \/ \u2192 /, \\ \u2192 \, \" \u2192 "
+        return esc[1]  # \/ → /, \\ → \, \" → "
 
     decoded = _JS_ESCAPE_RE.sub(_sub, s)
-    # Recombine UTF-16 surrogate pairs produced by \ud83c\udfc6-style emoji. A lone
-    # (truncated) surrogate can't round-trip \u2014 keep the raw string rather
+    # Recombine UTF-16 surrogate pairs produced by 🏆-style emoji. A lone
+    # (truncated) surrogate can't round-trip — keep the raw string rather
     # than aborting tab discovery for the whole tracker.
     try:
         return decoded.encode("utf-16", "surrogatepass").decode("utf-16")
@@ -691,9 +645,8 @@ def _discover_named_tabs(html: str) -> dict[str, str]:
         name = _decode_js_string(name).strip()
         if name and gid:
             result.setdefault(gid, name)
-    # Hosts whose switcher entries carry no `gid:` key still name every tab —
-    # without this they fell through to keyword-guessing against nothing, so
-    # art/content/unreleased detection never fired for them.
+    # Switcher entries without a `gid:` key still name their tab; merge them in so
+    # art/content/unreleased detection works for those hosts too.
     for gid, (name, _path) in _discover_page_urls(html).items():
         if name:
             result.setdefault(gid, name)
@@ -723,10 +676,9 @@ def _page_path_map(html: str) -> dict[str, str]:
 def _clean_tab_name(name: str) -> str:
     """Normalize a sheet tab name for keyword MATCHING (strip emoji, lower).
 
-    Also strips trailing '(WIP)'-style qualifiers and normalizes slash
-    spacing. The one normalizer for matching — see docs/decisions.md for what
-    broke when a second copy drifted. Use _display_tab_name for anything a
-    user sees; this one lowercases.
+    Also strips trailing '(WIP)'-style qualifiers and normalizes slash spacing.
+    The one normalizer for matching: see docs/decisions.md::fetcher.py::_clean_tab_name.
+    Use _display_tab_name for anything a user sees.
     """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
     clean = _TAB_QUALIFIER_RE.sub("", clean).strip()
@@ -737,9 +689,8 @@ def _clean_tab_name(name: str) -> str:
 def _display_tab_name(name: str) -> str:
     """Tab name fit for display — emoji stripped, the tracker's casing kept.
 
-    `_clean_tab_name` is for *matching*, so it lowercases and drops '(WIP)'
-    suffixes; running .title() back over it mangles real names ("OG Files" →
-    "Og Files"). Section headers use this instead.
+    `_clean_tab_name` lowercases, and .title() over it mangles real names
+    ("OG Files" → "Og Files").
     """
     return re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip()
 
@@ -748,9 +699,7 @@ def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
     """Return the GID of the main unreleased/leaks tab if one exists.
 
     Used to prefer the primary tracker sheet over landing/recent tabs like
-    Travis Scott's "Recent" sheet. Normalises through _clean_tab_name, so
-    the '(WIP)' strip applies here too — "Unreleased (WIP)" (Mag.Lo) was
-    invisible to this check while every other classifier saw it.
+    Travis Scott's "Recent" sheet. Normalises through _clean_tab_name.
     """
     for gid, name in named_tabs.items():
         if _clean_tab_name(name) in _UNRELEASED_TAB_NAMES:
@@ -771,7 +720,7 @@ def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
 
 
 # Kind resolution order for content tabs; earlier entries sort first in the
-# API's tabs list (misc keeps its historical first position).
+# API's tabs list (misc first).
 _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
     (_MISC_TAB_NAMES, "misc"),
     (_MUSIC_VIDEO_TAB_NAMES, "music_videos"),
@@ -815,10 +764,8 @@ def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
 def content_hash(body: bytes) -> str:
     """ETag for a serialized payload: a short SHA-256 of the exact bytes served.
 
-    This used to hash a SECOND, key-sorted json.dumps of the same data, so a
-    cache miss serialized the whole artist three times — once to cache, once to
-    fingerprint, once to respond. The served bytes are already deterministic
-    (model_dump field order is fixed), so they are the fingerprint.
+    The bytes are deterministic (model_dump field order is fixed), so they are
+    the fingerprint.
     """
     return hashlib.sha256(body).hexdigest()[:16]
 
@@ -863,15 +810,12 @@ def _evict_sheet_cache() -> None:
     groups: dict[str, list[tuple[float, int, Path]]] = {}
     total = 0
     for path in CACHE_DIR.iterdir():
-        # img_* is the image cache (own cap); imgalias_* are the tiny pointers
-        # clients' old cover URLs resolve through — evicting them brings back
-        # the expired-token failures they exist to prevent.
+        # img_* is the image cache (own cap); imgalias_* are the pointers old cover URLs
+        # resolve through, and evicting them brings back expired-token failures.
         if not path.is_file() or path.name.startswith(("img_", "imgalias_")) or path.name.endswith(".lock"):
             continue
-        # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
-        # "abc", so temp files grouped with the real entry and got unlinked
-        # mid-write — os.replace then raised FileNotFoundError out of
-        # _set_cache and 500'd a request that had already parsed successfully.
+        # Skip in-flight atomic writes: `abc.html.tmpQ7z1` would group with entry "abc"
+        # and be unlinked mid-write.
         if _TMP_SUFFIX_RE.search(path.name):
             continue
         try:
@@ -934,17 +878,11 @@ def _set_cache(url: str, html: str, title: str) -> None:
     """Write HTML and metadata to cache."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(url)
-    # Atomic: these files are read without a lock, and a background
-    # revalidation rewriting one while a request reads it produced a torn
-    # read. For the parsed cache that reached the client as truncated JSON
-    # under a 200 (get_cached_parsed_bytes does no validation).
+    # Atomic: these files are read without a lock while a background revalidation
+    # may be rewriting them.
     _atomic_write_text(CACHE_DIR / f"{key}.html", html)
-    # Merge, don't overwrite. `.html` and `.parsed.json` share one meta file
-    # but have independent lifecycles: this writes minutes before the parse
-    # exists, and can be followed by a failure that never produces one.
-    # Rebuilding the dict here bumped the parsed cache's freshness to "now"
-    # and dropped its content_hash, so a failed refresh served yesterday's
-    # parse as a fresh hit for a full TTL.
+    # Merge, don't overwrite: `.html` and `.parsed.json` share one meta file but have
+    # independent lifecycles, so the parse's freshness and content_hash must survive.
     _write_meta(key, {"url": url, "title": title, "timestamp": time.time()})
     _maybe_evict_sheet_cache()
 
@@ -1021,18 +959,11 @@ CACHE_COLLAPSE_RATIO = 0.8
 
 
 def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
-    """Why ``data`` must not overwrite the cached parse, or None if it may.
+    """Why a parse of *new* versions must not overwrite the cached one, or None if it may.
 
-    A partial fetch — some tabs short, or a sibling workbook that failed to
-    load — parses cleanly and looks like any other result, so it was cached and
-    then served by stale-while-revalidate until something forced a refresh. The
-    Ye tracker sat at 5,817 tracks across 36 eras for exactly that reason, with
-    its era order scrambled by the partial merge, while a fresh parse of the
-    same URL gave 9,382 across 44.
-
-    The old entry is preferred only while it is still worth something: past
-    ``STALE_CACHE_TTL`` it would not be served anyway, so a tracker that
-    genuinely shrank recovers on its own rather than being frozen forever.
+    A partial fetch parses cleanly and looks like any other result: see
+    docs/decisions.md::fetcher.py::cache-collapse-guard. Past ``STALE_CACHE_TTL``
+    the old entry is never preferred, so a tracker that genuinely shrank recovers.
     """
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
@@ -1051,12 +982,8 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
     if age > STALE_CACHE_TTL:
         return None
 
-    # The counts live in the small meta sidecar, which is read here anyway.
-    # Reading them out of the parse itself meant a full multi-MB json.loads on
-    # every successful write just to compare two integers — doubling peak
-    # memory on a box the README says cannot fit two Ye-sized parses at once.
-    # Entries written before the counts existed fall back to that read once,
-    # and are rewritten with counts by the write below.
+    # The counts live in the small meta sidecar, sparing a multi-MB json.loads per
+    # write. Pre-counts entries fall back to that read once and are rewritten below.
     old = meta.get("total_versions")
     old_eras = meta.get("era_count")
     if old is None or old_eras is None:
@@ -1104,12 +1031,8 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             )
             return
         body, etag = serialize_artist(artist)
-        # parsed_timestamp, not timestamp: the parse's freshness is its own
-        # signal. Under force_refresh the caller skips _set_cache entirely
-        # while still writing the parse, so without a write here a
-        # pull-to-refresh either inherited the OLD timestamp — fresh data
-        # considered stale immediately — or, on a first-ever fetch, wrote a
-        # parsed cache that could never be read.
+        # parsed_timestamp: the parse's own freshness. force_refresh skips _set_cache, so
+        # without it a refreshed parse would inherit the old timestamp, or have none.
         with _entry_lock(key):
             _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
             _merge_meta(key, {
@@ -1145,12 +1068,8 @@ async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
 def stale_parsed_cache_urls(limit: int) -> list[str]:
     """URLs of cached parses inside the stale-while-revalidate gap.
 
-    These are trackers someone actually uses (they have a parsed cache entry)
-    whose next request would be served stale (age between DEFAULT_CACHE_TTL
-    and STALE_CACHE_TTL). The prewarm loop refreshes them in the background
-    so frequently-updated trackers serve fresh data instead of stale-first.
-    Freshest-stale first — those are the most likely to be requested again —
-    capped at ``limit`` per call.
+    Age between DEFAULT_CACHE_TTL and STALE_CACHE_TTL, freshest-stale first,
+    capped at ``limit``. The prewarm loop refreshes them in the background.
     """
     if not CACHE_DIR.exists():
         return []
@@ -1302,15 +1221,10 @@ def _prioritize_gids(
 ) -> tuple[list[str], str | None, str | None, list[tuple[str, str, str]], dict[str, str]]:
     """Reorder GIDs so the main tracker tab is tried first.
 
-    Returns (reordered_gids, art_gid, unreleased_gid, content_tabs,
-    named_tabs) where
-    content_tabs is [(gid, kind, display_name)] for every parseable
-    secondary tab (misc, music_videos, released, best_of, worst_of, stems,
-    other). Moves the identified "Unreleased" tab GID to the front when
-    found, so trackers with a landing/recent tab (e.g. Travis Scott 2.0)
-    don't get stuck on the wrong sheet. Art and content tabs are removed
-    from the candidate list — they are secondary content, never the main
-    tracker, and fetching them as candidates wastes bandwidth.
+    Returns (reordered_gids, art_gid, unreleased_gid, content_tabs, named_tabs),
+    where content_tabs is [(gid, kind, display_name)] for every parseable
+    secondary tab. The "Unreleased" tab moves to the front so landing/recent tabs
+    (Travis Scott 2.0) don't win; Art and content tabs are never candidates.
     """
     named_tabs = _discover_named_tabs(base_html)
     art_gid = _get_art_tab_gid(named_tabs)
@@ -1360,12 +1274,7 @@ def fetch_and_parse(
     use_cache: bool = True,
     write_cache: bool | None = None,
 ) -> Artist:
-    """Synchronous wrapper around :func:`async_fetch_and_parse` (CLI scripts).
-
-    This used to be a separate ~340-line sync pipeline that had drifted from
-    the async one (it ignored ``artist_name`` on one fallback branch and never
-    fetched content tabs). Delegating guarantees parity.
-    """
+    """Synchronous wrapper around :func:`async_fetch_and_parse` (CLI scripts)."""
     return _run_sync(lambda: async_fetch_and_parse(
         url, artist_name=artist_name, gid=gid, timeout=timeout,
         cache_ttl=cache_ttl, use_cache=use_cache, write_cache=write_cache,
@@ -1407,11 +1316,7 @@ class AccessDeniedError(FetchError):
 
 
 def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
-    """Map an httpx exception onto the typed FetchError hierarchy.
-
-    Single source for the mapping both async entry points use — this block
-    used to be copy-pasted per function and drifted between copies.
-    """
+    """Map an httpx exception onto the typed FetchError hierarchy."""
     if isinstance(exc, httpx.TimeoutException):
         raise NetworkError(f"Request timed out: {exc}") from exc
     if isinstance(exc, httpx.ConnectError):
@@ -1437,10 +1342,8 @@ async def _fetch_base_html(
 ) -> tuple[str, str]:
     """Base page HTML + title, always from the network.
 
-    Deliberately not read from the HTML cache: the entry under ``url_norm``
-    holds the winning TAB's page, written after a successful parse, not the
-    base page. Served back as the base page it has no tab switcher, so a
-    re-parse dropped the Art and content tabs and cached the result.
+    Not read from the HTML cache: the entry under ``url_norm`` holds the winning
+    TAB's page, which has no tab switcher.
     """
     r = await _get_capped(client, url_norm, timeout=timeout)
     r.raise_for_status()
@@ -1470,10 +1373,8 @@ async def async_fetch_sheet_html(
     try:
         if gid:
             sheet_url = _build_sheet_html_url(url, gid)
-            # Read the SAME key the write below uses. Reading the base `url`
-            # here meant a gid request never hit its own entry (permanent cold
-            # fetch) and, worse, could match a base-keyed entry written by the
-            # fallback loop — handing back a different tab as the workbook.
+            # Read the SAME key the write below uses; a base-keyed entry may hold a
+            # different tab.
             if use_cache and cache_ttl > 0:
                 cached = await _async_get_cached(sheet_url, cache_ttl)
                 if cached is not None:
@@ -1483,11 +1384,8 @@ async def async_fetch_sheet_html(
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
             if use_cache:
-                # Key by the URL actually fetched, like every other call site
-                # (_fetch_gid_page uses sheet_url). Keying by the base `url`
-                # filed one tab's HTML under the workbook's entry, so a later
-                # gid-less read — the fallback path in async_fetch_and_parse —
-                # got that tab back as if it were the whole sheet.
+                # Key by the URL actually fetched (as _fetch_gid_page does), never the base `url`,
+                # or a later gid-less read would get this tab back as the whole sheet.
                 await _async_set_cache(sheet_url, r.text, title)
             return r.text, title
 
@@ -1584,11 +1482,9 @@ async def _load_secondary_tabs(
 ) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
-    Everything here is optional — a failure never fails the request. Called
-    from both the explicit-GID fast path and the full-discovery path, so the
-    returned content no longer depends on which URL shape the client used.
-    Misc/MV entries stay in the flat ``misc_entries`` list for backward
-    compatibility; every non-empty tab also lands in ``Artist.tabs``.
+    Everything here is optional — a failure never fails the request. Misc/MV
+    entries also stay in the flat ``misc_entries`` list for backward
+    compatibility; every non-empty tab lands in ``Artist.tabs``.
     """
     if not art_gid and not content_tabs:
         return
@@ -1700,10 +1596,8 @@ _PARSE_METADATA_COUNTERS = (
 def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
     """Fold a sibling tab's row accounting into the artist's.
 
-    Without this, ``parse_metadata`` would describe only the winning tab while
-    ``eras`` spans several, silently breaking the row-accounting identity
-    (total == song + skipped + footer + other) that makes data loss
-    measurable — and the skipped-ratio health check with it.
+    Keeps the identity total == song + skipped + footer + other true across
+    tabs, which the skipped-ratio health check relies on.
     """
     base, more = artist.parse_metadata, extra.parse_metadata
     if more is None:
@@ -1725,11 +1619,8 @@ def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
 def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
     """Fold one sibling tab's eras into *artist*. Returns songs merged.
 
-    An era the artist already has gains a `Section` named after the tab, so
-    the tracker's own grouping stays visible ("Pre-True" carries an
-    "Instrumentals & Acapellas" section). An era it doesn't have is appended
-    whole — its name is already unique to that tab, so a section header
-    would only add noise.
+    An existing era gains a `Section` named after the tab; a new era is appended
+    whole. See docs/decisions.md::fetcher.py::_aggregate_hub_workbook.
     """
     by_key = {_era_match_key(era.name): era for era in artist.eras}
     merged = 0
@@ -1774,25 +1665,16 @@ async def _aggregate_hub_workbook(
 ) -> int:
     """Merge sibling catalogue tabs into a hub workbook's era tree.
 
-    A few workbooks use their main tab as a hub of category descriptions and
-    split the catalogue across sibling tabs that each use the ordinary era
-    grammar (Avicii: "Avicii Leaks", "Unreleased", "Rare & Lost", …). Those
-    tabs match no keyword set, so nothing else picks them up and the tracker
-    parses to a fraction of its songs.
-
-    Only reached when the main tab is a hub — see the `hub_gid` gate in
-    async_fetch_and_parse. Best-effort throughout: a failure is logged and
-    the request still returns whatever the winning tab produced.
+    See docs/decisions.md::fetcher.py::_aggregate_hub_workbook. Only reached when
+    the main tab is a hub (the `hub_gid` gate in async_fetch_and_parse).
+    Best-effort: a failure is logged and the winning tab's result still returns.
     """
     if not candidates:
         return 0
     t.report("tabs", f"Merging {len(candidates)} catalogue tabs")
 
-    # A SECOND, smaller bound around fetch+parse together. The gid-fetch
-    # semaphore is released once the body is in hand, so without this every
-    # candidate proceeded to hold its full HTML and build a model tree
-    # concurrently. Distinct semaphore, always acquired outside the inner one,
-    # so the nesting can't deadlock.
+    # A second, smaller bound around fetch+parse together (the gid-fetch semaphore is
+    # released once the body is in hand). Always acquired outside it: no deadlock.
     sem = asyncio.Semaphore(_HUB_LOAD_CONCURRENCY)
 
     async def _load(gid_val: str, display: str) -> tuple[str, Artist] | None:
@@ -1860,11 +1742,9 @@ async def async_fetch_and_parse(
     """Fetch and parse a tracker, trying multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
 
-    ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes*
-    and defaults to ``use_cache`` when unset. A force-refresh passes
-    ``use_cache=False`` (skip the stale copy) but ``write_cache=True`` so the
-    fresh parse still populates the cache for the next reader — otherwise every
-    request after a force-refresh pays a full cold fetch.
+    ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes* and
+    defaults to ``use_cache``. A force-refresh passes ``use_cache=False`` but
+    ``write_cache=True`` so the fresh parse still populates the cache.
     """
     if write_cache is None:
         write_cache = use_cache
@@ -1920,9 +1800,8 @@ async def async_fetch_and_parse(
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                     if not unreleased_tab_gid or unreleased_tab_gid == gid:
                         artist.source_url = url
-                        # Load Art + content tabs here too — without this,
-                        # a URL carrying the main tab's gid returned less
-                        # content than the same tracker via discovery.
+                        # Load Art + content tabs here too, so a gid URL returns the same content
+                        # as discovery.
                         await _load_secondary_tabs(
                             artist,
                             _get_art_tab_gid(named_tabs),
@@ -1940,11 +1819,8 @@ async def async_fetch_and_parse(
             # else: gid is the Misc/Music-Videos tab — fall through to full discovery,
             # see docs/decisions.md::fetcher.py::gid-subpage-discovery
         except AccessDeniedError:
-            # "This tracker is private" is an answer, not a failure to retry.
-            # Swallowing it here sent the request on to full discovery, which
-            # fails differently, so the API's dedicated 403 — the one that
-            # explains the sheet is private rather than echoing a provider's
-            # wording — was unreachable from this path.
+            # "This tracker is private" is an answer, not a failure: let the API's dedicated
+            # 403 through instead of falling back to discovery.
             raise
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
@@ -2034,14 +1910,8 @@ async def async_fetch_and_parse(
                 logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
                 if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
                     hub_gid = result_gid
-                # Songs outrank eras. Era count used to come first, as a
-                # proxy for "properly structured tab", but it stopped being
-                # one once flat-era tabs (no header rows, era implied by the
-                # Era column) started yielding real era counts: a 5-era,
-                # 7-song badge sub-tab then outranked the 3-era, 474-song
-                # main tab on the MIKE tracker, and 43 flat eras beat 26 real
-                # ones on Dr. Dre — costing 668 songs and every era cover.
-                # The payload is songs; rank on it.
+                # Songs outrank eras: flat-era tabs yield real era counts, so a small badge sub-tab
+                # could otherwise outrank the main tab (docs/decisions.md::fetcher.py::gid-fetch-priority).
                 score = (1 if n_songs else 0, n_songs, n_eras)
                 if score > best_score:
                     best_score = score
@@ -2057,23 +1927,15 @@ async def async_fetch_and_parse(
                     logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
                     return True
                 if n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
-                    # Only stop early on a tab that is actually leading.
-                    # This stop abandons every gid still in flight, so a
-                    # small tab that merely clears the era floor must not
-                    # trigger it — that is how a 7-song sub-tab pre-empted
-                    # a 474-song main tab.
+                    # Only stop early on a tab that is actually leading: stopping abandons every
+                    # gid still in flight.
                     return True
             except (ValueError, KeyError):
                 pass
             return False
 
-        # A tab NAMED Unreleased decides the result by itself whenever it has
-        # songs — _consider stops on it before looking at anything else. So
-        # fetch it alone first, and fan out to the other candidates only if it
-        # comes back empty or missing. Starting them all at once meant the
-        # smaller tabs finished downloading while the (largest) Unreleased tab
-        # was still arriving, and were then thrown away: ~10.8 MB of Ye's
-        # Recent, Tracklists, Album Copies and friends on every cold parse.
+        # A tab NAMED Unreleased with songs decides the result alone, so fetch it first and
+        # fan out only if it is empty or missing (docs/decisions.md::fetcher.py::gid-fetch-priority).
         if unreleased_gid and gids and gids[0] == unreleased_gid:
             first_wave, second_wave = gids[:1], gids[1:]
         else:
@@ -2101,9 +1963,8 @@ async def async_fetch_and_parse(
                 f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
             )
 
-            # Hub workbook: the main tab held no songs, so the catalogue is
-            # spread across unclassified sibling tabs. Gated on that, so a
-            # healthy tracker never pays for the extra fetches.
+            # Hub workbook: the main tab held no songs, so the catalogue is spread across
+            # unclassified sibling tabs. Gated, so a healthy tracker never pays for the fetches.
             if hub_gid is not None:
                 await _aggregate_hub_workbook(
                     best_artist,
@@ -2125,12 +1986,8 @@ async def async_fetch_and_parse(
                 use_cache=use_cache, t=t, page_paths=page_paths,
             )
 
-            # Re-run AFTER every merge. parse_sheet guarantees unique era names
-            # for one tab, but _merge_aggregated_eras and _load_secondary_tabs
-            # append sibling tabs' eras to this list afterwards — so the served
-            # artist could still carry a duplicate, which is the one thing
-            # clients cannot survive (SwiftUI drops the second row silently).
-            # Idempotent: names already unique are returned untouched.
+            # Re-run AFTER every merge: sibling tabs' eras are appended after parse_sheet made
+            # names unique, and clients drop duplicate-named eras. Idempotent.
             best_artist.eras = _disambiguate_era_names(best_artist.eras)
 
             if write_cache:

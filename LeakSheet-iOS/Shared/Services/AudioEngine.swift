@@ -10,9 +10,8 @@ import SwiftUI
 final class AudioEngine {
     static let shared = AudioEngine()
 
-    /// UserDefaults key gating end-of-track auto-advance (default on).
-    /// Declared here, on the reader, so shared code doesn't depend on the
-    /// Settings screen — which is per-platform.
+    /// UserDefaults key gating end-of-track auto-advance (default on). Declared on the
+    /// reader so shared code doesn't depend on the per-platform Settings screen.
     static let autoplayNextKey = "leaksheet_autoplay_next"
     static let originalQualityKey = "leaksheet_streaming_mode"
 
@@ -22,9 +21,8 @@ final class AudioEngine {
 
     var currentTrack: SongVersion?
     var artistName = ""
-    /// Canonical artist slug from the API — used as the favourites key so
-    /// hearts toggled from the player match entries written from song rows.
-    /// Falls back to a slugified name when a call site doesn't know it.
+    /// Canonical artist slug from the API — the favourites key, so player hearts match
+    /// song-row entries. Falls back to a slugified name when a call site doesn't know it.
     private(set) var artistSlug = ""
     var eraName = ""
     var artUrl = ""
@@ -44,11 +42,8 @@ final class AudioEngine {
     /// its decisions against AVPlayer.
     private var logic = PlaybackQueueLogic()
 
-    /// Cached from `logic.queue` after every mutation — reading `logic.queue`
-    /// directly here would make every view that reads `queue` depend on the
-    /// whole `PlaybackQueueLogic` struct (era/list cursors included), so era
-    /// rollover or list bookkeeping unrelated to the visible queue would
-    /// invalidate the queue sheet too.
+    /// Cached from `logic.queue` after every mutation, so views reading `queue` don't
+    /// depend on the whole `PlaybackQueueLogic` (era/list cursors included).
     private(set) var queue: [QueueItem] = []
 
     // MARK: - Private
@@ -81,9 +76,8 @@ final class AudioEngine {
     private var seekGeneration = 0
     private var cachedArtworkUrl: String?
     private var cachedArtwork: MPMediaItemArtwork?
-    /// The artUrl we last STARTED a fetch for, successful or not — the retry
-    /// guard. `cachedArtworkUrl` only advances on success, so it cannot serve
-    /// as one.
+    /// The artUrl we last STARTED a fetch for, successful or not: the retry guard
+    /// (`cachedArtworkUrl` only advances on success).
     private var artworkAttemptedUrl: String?
 
     private init() {
@@ -106,10 +100,8 @@ final class AudioEngine {
         artistSlug: String = "",
         preservingQueueContext: Bool = false
     ) {
-        // Ad-hoc playback inherited whatever era/list cursor was left over
-        // from a previous session, so auto-advance walked off into an
-        // unrelated song. Reached from every site where the optional `onPlay`
-        // closure is nil — including Now Playing's own Info sheet.
+        // Ad-hoc playback must not inherit a leftover era/list cursor, or auto-advance
+        // walks off into an unrelated song.
         if !preservingQueueContext {
             logic.clearContexts()
         }
@@ -126,10 +118,8 @@ final class AudioEngine {
         videoAspectRatio = nil
         duration = Self.parseDuration(version?.trackLength)
 
-        // Both bailouts must silence the OLD item. Publishing "new track,
-        // paused" while the player kept running left the previous file
-        // audible, the time observer writing from its clock, and the lock
-        // screen showing the wrong song.
+        // Both bailouts must silence the OLD item, or it keeps playing (and driving the
+        // time observer and lock screen) under the new track's metadata.
         guard let version, let link = version.streamableLink else {
             player?.pause()
             player?.replaceCurrentItem(with: nil)
@@ -154,9 +144,8 @@ final class AudioEngine {
         // Re-activate audio session before each playback attempt
         activateAudioSession()
 
-        // If the user prefers original quality and one is available, start directly there
-        // to avoid a double replaceCurrentItem (which re-runs KVO setup and causes an extra
-        // PlayerRemoteXPC cycle + visible network teardown in the console).
+        // Start directly on original quality when preferred, avoiding a second
+        // replaceCurrentItem (extra KVO setup and network teardown).
         let prefersOriginal = UserDefaults.standard.bool(forKey: Self.originalQualityKey)
         let originalURL = prefersOriginal ? StreamResolver.originalQualityURL(for: link) : nil
         let initialURL = originalURL ?? url
@@ -174,9 +163,7 @@ final class AudioEngine {
         startLoadingTimeout()
 
         // Early video hint — see DECISIONS.md::AudioEngine.swift::early-video-hint
-        // Held and cancelled, not fired and forgotten: skipping through ten
-        // tracks otherwise left ten /metadata requests running to completion
-        // only for the track guard below to discard nine of them.
+        // Held and cancelled on skip, so rapid skipping leaves no /metadata requests running.
         let trackKey = version.id
         videoHintTask?.cancel()
         videoHintTask = Task { [weak self] in
@@ -213,33 +200,22 @@ final class AudioEngine {
 
     /// Start playback, never stop it.
     ///
-    /// `MPRemoteCommandCenter.playCommand` is a discrete intent, not a toggle:
-    /// CarPlay, a car head unit resuming after a call, Siri "play", and the
-    /// lock screen after a state desync all send it unconditionally. Wired to
-    /// `togglePlay()` it paused the music the user just asked to hear.
+    /// `playCommand` is a discrete intent, not a toggle: CarPlay, Siri and a desynced
+    /// lock screen send it unconditionally, so it must never pause.
     func resumePlayback() {
         guard isPlaying == false else { return }
         togglePlay()
     }
 
     func seekTo(_ time: TimeInterval) {
-        // Without this guard the completion never runs, `seekInFlight` stays
-        // true for the process lifetime, and `currentTime` never updates
-        // again — for any track. Reachable because playTrack publishes
-        // currentTrack/duration before its own guards bail, which is exactly
-        // the state the mini-player renders a slider from.
+        // Without this guard the completion never runs and `seekInFlight` stays true
+        // forever, freezing `currentTime` for every track (playTrack publishes state first).
         guard let player else { return }
 
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        // Show the target position immediately, and suppress time-observer
-        // writes until the seek lands — otherwise the observer briefly snaps
-        // the slider back to the pre-seek position.
-        //
-        // Generation, not a bool: AVPlayer runs a superseded seek's completion
-        // with finished == false, so two quick scrubs had the first one's
-        // cancellation clear the flag while the second was still in flight —
-        // the thumb jumped backwards, then forwards. Only the newest seek may
-        // clear it.
+        // Show the target position immediately and suppress time-observer writes until
+        // the seek lands. A generation, not a bool: a superseded seek's completion still
+        // runs (finished == false), and only the newest seek may clear the flag.
         seekGeneration &+= 1
         let generation = seekGeneration
         seekInFlight = true
@@ -282,9 +258,8 @@ final class AudioEngine {
             endOfTrackObserver = nil
         }
         player?.pause()
-        // Cancel any in-flight asset loading so the underlying socket is torn down
-        // immediately instead of leaking until it times out (surfaces as
-        // `nw_read_request_report … Operation timed out` in the console).
+        // Cancel in-flight asset loading so the socket is torn down now instead of
+        // leaking until it times out.
         if let asset = player?.currentItem?.asset as? AVURLAsset {
             asset.cancelLoading()
         }
@@ -301,9 +276,8 @@ final class AudioEngine {
         cachedArtworkUrl = nil
         cachedArtwork = nil
         artworkAttemptedUrl = nil
-        // The AVPlayer outlives replaceCurrentItem(with: nil), and Now Playing
-        // branches on hasVideo — on macOS, where the window persists, a
-        // finished video left a black AVPlayerLayer under "Not Playing".
+        // The AVPlayer outlives replaceCurrentItem(with: nil) and Now Playing branches on
+        // hasVideo: on macOS a finished video would leave a black layer under "Not Playing".
         hasVideo = false
         videoAspectRatio = nil
         logic.clearContexts()
@@ -341,10 +315,8 @@ final class AudioEngine {
         loading = true
         originalQuality = true
         error = ""
-        // A different file for the same track: its duration must be
-        // re-derived, never inherited. `.status` fires once and routinely
-        // sees an indefinite duration on a progressive body, so seed from
-        // the tracker's length and let the duration observer correct it.
+        // A different file: re-derive duration, never inherit it. `.status` often sees an
+        // indefinite duration, so seed from the tracker's length; the duration observer corrects it.
         duration = Self.parseDuration(track.trackLength)
         // The new item is a different file for the same track — trackKey
         // alone can't tell captureStreamFormat this is stale.
@@ -455,11 +427,8 @@ final class AudioEngine {
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = nil
 
-        // A seek against the OUTGOING item is now moot: replaceCurrentItem
-        // cancels it, but its completion still arrives and used to match the
-        // generation, so `seekInFlight` stayed true and the time observer
-        // suppressed every currentTime write — the new track played with a
-        // frozen scrubber until the stale completion landed.
+        // A seek against the OUTGOING item is moot; its completion would otherwise keep
+        // `seekInFlight` set and freeze the new track's scrubber.
         cancelPendingSeek()
 
         // Invalidate all previous KVO observations
@@ -498,13 +467,8 @@ final class AudioEngine {
             }
         }
 
-        // Duration observer. `.status` transitions exactly once, and for a
-        // progressive HTTP body (or FLAC/VBR) the duration is still
-        // indefinite at that instant — so without this the previous source's
-        // duration survived a quality switch and the slider's range and the
-        // total-time label described a file that was no longer playing.
-        // Only `dur` is captured: AVPlayerItem is not Sendable, and a
-        // replaced item's observations are invalidated in setupPlayer.
+        // Duration observer: `.status` fires once, often before a progressive (or FLAC/VBR)
+        // body knows its duration. Captures only `dur`: AVPlayerItem is not Sendable.
         observations.append(item.observe(\.duration) { [weak self] item, _ in
             let dur = item.duration
             Task { @MainActor [weak self] in
@@ -513,9 +477,8 @@ final class AudioEngine {
             }
         })
 
-        // Status observer — restore seek position once ready
-        // NOTE: KVO fires on arbitrary threads. Capture values before hopping to MainActor
-        // to avoid Swift 6 actor-isolation violations (EXC_BREAKPOINT on background thread).
+        // Status observer — restore seek position once ready. KVO fires on arbitrary
+        // threads: capture values before hopping to MainActor (Swift 6 isolation).
         observations.append(item.observe(\.status) { [weak self] item, _ in
             let status = item.status
             let dur = item.duration
@@ -527,17 +490,13 @@ final class AudioEngine {
                     self.loading = false
                     self.loadingTimeoutTask?.cancel()
                     self.loadingTimeoutTask = nil
-                    // `> 0` matches the .duration observer below. A quality
-                    // switch seeds duration from the tracker's length because
-                    // .status routinely fires before a progressive body knows
-                    // its own; an item reporting a valid, definite ZERO here
-                    // destroyed that seed and collapsed the scrubber to 0...1.
+                    // `> 0`, as in the .duration observer: a definite ZERO here would destroy the
+                    // duration seeded from the tracker's length on a quality switch.
                     if dur.isValid, !dur.isIndefinite, dur.seconds > 0 {
                         self.duration = dur.seconds
                     }
-                    // Read format info from the (MainActor-held) current item
-                    // rather than the KVO-captured one — AVPlayerItem is not
-                    // Sendable, and a stale item is caught by the track guard.
+                    // Read format info from the MainActor-held current item, not the KVO-captured one
+                    // (AVPlayerItem is not Sendable); a stale item is caught by the track guard.
                     if let currentItem = self.player?.currentItem {
                         Task { await self.captureStreamFormat(for: currentItem) }
                     }
@@ -575,10 +534,8 @@ final class AudioEngine {
                     case .waitingToPlayAtSpecifiedRate:
                         self.isPlaying = false
                         self.loading = true
-                        // Arm the timeout, same as the buffer-empty observer
-                        // below. The initial one is cancelled at .readyToPlay,
-                        // so a stream that stalls without ever emptying its
-                        // buffer showed a spinner nothing could clear.
+                        // Arm the timeout, as the buffer-empty observer does: the initial one is cancelled
+                        // at .readyToPlay, and a stall that never empties the buffer needs one too.
                         self.startLoadingTimeout()
                     @unknown default:
                         break
@@ -593,10 +550,8 @@ final class AudioEngine {
             let empty = item.isPlaybackBufferEmpty
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // The initial timeout is cancelled at .readyToPlay, so a
-                // mid-track stall previously showed a spinner with no timeout
-                // and no error path — only isPlaybackLikelyToKeepUp could
-                // ever clear it. Re-arm it here so a dead stream surfaces.
+                // The initial timeout is cancelled at .readyToPlay; re-arm it so a mid-track
+                // stall on a dead stream surfaces an error.
                 if empty {
                     self.loading = true
                     self.startLoadingTimeout()
@@ -635,11 +590,8 @@ final class AudioEngine {
                 let autoplay = defaults.object(forKey: Self.autoplayNextKey) == nil
                     || defaults.bool(forKey: Self.autoplayNextKey)
                 guard autoplay else {
-                    // actionAtItemEnd is .none, so the item stays parked at
-                    // its end time. Showing 0:00 without actually seeking
-                    // left the play button dead — AVPlayer will not restart
-                    // from the end without a seek. Paused first: with the rate
-                    // still 1 the seek alone looped the track forever.
+                    // actionAtItemEnd is .none, so the item is parked at its end: AVPlayer won't restart
+                    // without a seek, and pausing first stops the seek from looping the track.
                     self.player?.pause()
                     self.player?.seek(to: .zero)
                     return
@@ -693,9 +645,8 @@ final class AudioEngine {
             }
         }
         if bitrateBps == nil {
-            // iOS 27 deprecated the synchronous accessLog() and replaced it with
-            // fetchAccessLogWithCompletionHandler:, bridged into Swift as an async
-            // getter of the same name — so `await item.accessLog` is the modern form.
+            // iOS 27 replaced the synchronous accessLog() with an async getter of the same
+            // name (bridged from fetchAccessLogWithCompletionHandler:).
             let log = await item.accessLog
             let indicated = log?.events.last?.indicatedBitrate ?? -1
             bitrateBps = indicated > 0 ? indicated : nil
@@ -757,10 +708,8 @@ final class AudioEngine {
                 Self.log.warning("Failed to set audio session category: \(error)")
             }
         }
-        // iOS 27 asynchronous activation — synchronous setActive(true) on the
-        // main thread triggers a UI-unresponsiveness runtime warning.
-        // @Sendable for the reason given at setupRemoteCommands: the completion
-        // block is not annotated, and it may run off the main thread.
+        // iOS 27 asynchronous activation (a synchronous setActive on main warns). @Sendable:
+        // the completion is unannotated and may run off-main (see setupRemoteCommands).
         session.activate(options: []) { @Sendable activated, error in
             if let error {
                 Self.log.warning("Audio session activation failed (activated=\(activated)): \(error)")
@@ -809,12 +758,8 @@ final class AudioEngine {
 
     // MARK: - Now Playing / Remote Commands
 
-    // NOTE: Remote command handlers fire on arbitrary system threads.
-    // Dispatch to MainActor via Task to avoid Swift 6 actor-isolation violations.
-    // The handlers are explicitly @Sendable: the SDK's block parameter is not
-    // annotated, so a closure written in this MainActor method would otherwise
-    // be inferred MainActor-isolated and trap on its isolation check when
-    // called off-main — the same crash as DesignTokens.swift::adaptive.
+    // Remote command handlers fire on arbitrary threads, so they hop to MainActor and
+    // are explicitly @Sendable: unannotated, they'd infer MainActor and trap off-main.
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
 
@@ -841,9 +786,8 @@ final class AudioEngine {
             Task { @MainActor in self?.seekTo(position) }
             return .success
         }
-        // Keep the seconds-skip commands disabled: when they're enabled the
-        // lock screen shows ±skip buttons instead of previous/next track.
-        // In-app skip buttons cover seconds-skipping (Self.skipInterval).
+        // Seconds-skip commands stay disabled: enabled, the lock screen shows ±skip
+        // buttons instead of previous/next track.
         commandCenter.skipForwardCommand.isEnabled = false
         commandCenter.skipBackwardCommand.isEnabled = false
     }
@@ -853,9 +797,8 @@ final class AudioEngine {
         // macOS has no session interruption or route-change model to observe;
         // CoreAudio handles device changes below the AVPlayer.
         #else
-        // iOS 27 replaces AVAudioSession.interruptionNotification with a
-        // deactivation notification (interruption began) and a resumption
-        // recommendation notification (interruption ended + should resume).
+        // iOS 27 replaces interruptionNotification with deactivation (began) and
+        // resumption-recommendation (ended + should resume) notifications.
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.didBecomeInactiveNotification,
             object: AVAudioSession.sharedInstance(),
@@ -939,10 +882,8 @@ final class AudioEngine {
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
-        // Load artwork once per track. `artworkAttemptedUrl` is set BEFORE the
-        // fetch, not after it succeeds: updateNowPlayingInfo runs from the
-        // periodic observer every ~3s, so a cover that 404s used to spawn a
-        // fresh task and request every 3 seconds for the whole track.
+        // Load artwork once per track: `artworkAttemptedUrl` is set BEFORE the fetch, since
+        // this runs every ~3s and a 404ing cover would otherwise be re-requested each time.
         if !artUrl.isEmpty, artworkAttemptedUrl != artUrl {
             let targetUrl = artUrl
             artworkAttemptedUrl = targetUrl
@@ -953,13 +894,8 @@ final class AudioEngine {
     }
 
     /// Builds an MPMediaItemArtwork from a CGImage.
-    /// Must be nonisolated so the image-provider closure carries no actor isolation —
-    /// MediaPlayer calls it from MPNowPlayingInfoCenter/accessQueue (background), and Swift 6
-    /// runtime-checks that any @MainActor closure is invoked on the MainActor (EXC_BREAKPOINT).
-    ///
-    /// `platformImage` is the only remaining UIKit/AppKit boundary in the app —
-    /// MPMediaItemArtwork's request handler is TARGET_OS_IPHONE-forked in the
-    /// MediaPlayer headers (NSImage on macOS, UIImage elsewhere).
+    /// Nonisolated: MediaPlayer calls the image provider on a background queue, where a
+    /// @MainActor closure traps. `platformImage` is the app's last UIKit/AppKit boundary.
     private nonisolated static func makeArtwork(from image: CGImage) -> MPMediaItemArtwork {
         let size = CGSize(width: image.width, height: image.height)
         return MPMediaItemArtwork(boundsSize: size) { _ in platformImage(image) }

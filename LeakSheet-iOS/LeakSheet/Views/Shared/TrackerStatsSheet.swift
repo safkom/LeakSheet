@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Full tracker breakdown — the header bar shows four numbers, but the API
-/// carries a much richer `TrackerStats`: quality distribution, availability
-/// tiers, badge counts, and data-completeness ("help wanted") signals.
+/// Full tracker breakdown: quality distribution, availability tiers, badge counts
+/// and data-completeness ("help wanted") signals from `TrackerStats`.
 struct TrackerStatsSheet: View {
     let stats: TrackerStats
     @Environment(\.dismiss) private var dismiss
@@ -28,13 +27,8 @@ struct TrackerStatsSheet: View {
     private var availabilityRows: [Row] {
         [
             Row(label: "OG Files", value: stats.ogFiles ?? 0, color: .badgeOGFile),
-            // Trackers use one wording or the other and leave the other at 0,
-            // so take whichever is populated. NOT `totalFull ?? full`: the
-            // server sends `total_full: 0` rather than omitting it, which
-            // decodes as Optional(0), and `??` would never fall through —
-            // showing "0" (i.e. hiding the row) for every plain-"Full" sheet.
-            // Reading `full` alone was the original bug: Carti reports 862 in
-            // totalFull and 0 in full, so the row vanished entirely.
+            // Trackers use `full` or `totalFull` and send the other as 0 (not nil), so take
+            // the max; `??` would never fall through past Optional(0).
             Row(label: "Full", value: max(stats.totalFull ?? 0, stats.full ?? 0), color: .badgeFull),
             Row(label: "Tagged", value: stats.tagged ?? 0, color: .badgeTagged),
             Row(label: "Partial", value: stats.partial ?? 0, color: .badgePartial),
@@ -66,9 +60,7 @@ struct TrackerStatsSheet: View {
     private var totalLinks: Int { stats.totalLinks ?? 0 }
     private var deadLinks: Int { stats.notAvailableLinks ?? 0 }
 
-    /// Working links over the tracker's own total. "42 missing" alone says
-    /// nothing about whether that is most of the tracker or a rounding error —
-    /// the denominator was on the wire all along and simply wasn't decoded.
+    /// Working links over the tracker's own total, so "42 missing" has a denominator.
     private var linkHealth: (working: Int, total: Int, percent: Int)? {
         guard totalLinks > 0 else { return nil }
         let working = max(0, totalLinks - missingLinks - deadLinks)

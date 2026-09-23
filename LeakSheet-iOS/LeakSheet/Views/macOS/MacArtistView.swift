@@ -2,13 +2,8 @@
 import SwiftUI
 
 /// The Mac artist screen: a header (art, name, stats, filters), then either the
-/// era grid or one era's song list.
-///
-/// Forked from `ArtistView` rather than shared. The iOS screen is one flattened
-/// `LazyVStack` of accordion rows driven by taps and swipes; this one is a grid
-/// plus a selectable `List` driven by clicks, keys and hover. They agree on the
-/// view model — every filter, search and playback path below calls the same
-/// `ArtistViewModel` the iOS screen does.
+/// era grid or one era's song list. Forked from `ArtistView` (a grid plus a
+/// selectable `List` for clicks, keys and hover) but on the same `ArtistViewModel`.
 struct MacArtistView: View {
     let artist: Artist
     @Bindable var vm: ArtistViewModel
@@ -39,33 +34,23 @@ struct MacArtistView: View {
         self.eraArtByLowercasedName = eraArt
     }
 
-    /// The era drilled into, or nil for the grid. Search, the badge filters and
-    /// the content tabs all produce a flat cross-era list, so they force the
-    /// list view regardless.
-    ///
-    /// Reads the view model's own `expandedEra` rather than keeping a second
-    /// copy. It used to shadow it in `MacUIState`, and the two desynced:
-    /// turning the LAST badge filter off makes `toggleBestOf` clear
-    /// `expandedEra`, so the shadow still named an era while the view model had
-    /// no era expanded — the page rendered "No Songs" for an era full of them.
+    /// The era drilled into, or nil for the grid; search, badge filters and content
+    /// tabs force the flat list. Reads the view model's `expandedEra` directly: a second
+    /// copy desyncs when turning off a badge filter clears it.
     private var openEra: String? {
         isFlatMode ? nil : vm.expandedEra
     }
 
-    /// True when the filter state produces one cross-era song list rather than a
-    /// per-era browse. `isEraExpanded` already returns true for every era under a
-    /// badge filter, so the grid would be a dead end there.
+    /// True when the filter state produces one cross-era song list; see
+    /// DECISIONS.md::MacArtistView.swift::flat-modes.
     private var isFlatMode: Bool {
         vm.isSearching || vm.isBadgeFilterActive || vm.recents || isMiscMode
     }
 
-    /// Content tabs (Misc / Music Videos / Released / Stems) carry `MiscEntry`
-    /// values, not songs, so they render through the shared accordion rather
-    /// than the selectable song list.
+    /// Content tabs carry `MiscEntry` values, not songs, so they render through the
+    /// shared accordion.
     ///
-    /// ponytail: reuses the iOS `MiscListView` verbatim — no selection, no
-    /// keyboard, no hover controls on these rows. Fork it too if content tabs
-    /// become something people browse rather than dip into.
+    /// ponytail: reuses iOS `MiscListView` verbatim (no selection, keys or hover); fork it if tabs get browsed heavily.
     private var isMiscMode: Bool {
         vm.misc || vm.selectedTabKey != nil
     }
@@ -75,8 +60,7 @@ struct MacArtistView: View {
     }
 
     var body: some View {
-        // Computed ONCE per body evaluation and handed down. As a computed
-        // property it was re-derived at every use site — six of them.
+        // Computed ONCE per body evaluation and handed down to every use site.
         let rows = visibleRows
         content(rows)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -85,10 +69,8 @@ struct MacArtistView: View {
         .navigationSubtitle(subtitleText)
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
         .searchFocused($searchFocused)
-        // ⌘F is the standard Find shortcut and the search field is right there,
-        // but nothing bound the two — the field could only be reached with the
-        // mouse. The command bumps a token because focus state belongs to this
-        // view, not to the menu.
+        // ⌘F focuses the search field; the command bumps a token because focus state
+        // belongs to this view.
         .onChange(of: ui.focusSearchToken) { _, _ in searchFocused = true }
         .toolbar { toolbarItems }
         .sheet(isPresented: $showStats) {
@@ -102,9 +84,8 @@ struct MacArtistView: View {
         .onChange(of: colorScheme, initial: true) { _, scheme in
             vm.setColorScheme(scheme)
         }
-        // Keyed on the view model's identity, not the slug: ⌘R replaces the
-        // parsed tracker in place, so a slug-keyed task never re-fired and the
-        // "Updated …" stamp and playback contexts stayed on the old parse.
+        // Keyed on the view model's identity, not the slug: ⌘R replaces the parsed
+        // tracker in place under the same slug.
         .task(id: ObjectIdentifier(vm)) {
             if let url = artist.sourceUrl {
                 lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
@@ -124,11 +105,8 @@ struct MacArtistView: View {
 
     // MARK: - Page header
 
-    /// Scrolls with the content rather than sitting above it.
-    ///
-    /// Pinned, it cost ~290pt of a 700pt window — and on an era page it showed
-    /// the WHOLE tracker's totals (9,343) under a title reading "77 songs",
-    /// which answers a question nobody asked on that page.
+    /// Scrolls with the content rather than sitting above it, where it took ~290pt
+    /// of a 700pt window.
     @ViewBuilder
     private var pageHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -138,9 +116,8 @@ struct MacArtistView: View {
                 trackerHeader
             }
 
-            // FlowLayout, not a horizontal scroller: a Mac has no scroll
-            // affordance on an indicator-less strip, so chips past the fold
-            // were simply invisible.
+            // FlowLayout, not a horizontal scroller: a Mac shows no scroll affordance on an
+            // indicator-less strip, so chips past the fold would be invisible.
             FlowLayout(spacing: 8) {
                 MacFilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tint: .filterBestOf) { vm.toggleBestOf() }
                 MacFilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tint: .filterWorstOf) { vm.toggleWorstOf() }
@@ -185,9 +162,7 @@ struct MacArtistView: View {
         }
     }
 
-    /// Era-level chrome: cover, name, and the era's own numbers — plus the Play
-    /// action the page was missing entirely (starting an era meant finding a
-    /// song in it and double-clicking that).
+    /// Era-level chrome: cover, name, the era's own numbers, and a Play action.
     @ViewBuilder
     private func eraHeader(_ name: String) -> some View {
         let filtered = vm.filteredEra(named: name)
@@ -246,8 +221,7 @@ struct MacArtistView: View {
         }
     }
 
-    /// Compact stat row. The four tiles were `maxWidth: .infinity`, stretching
-    /// a glanceable summary across the whole window.
+    /// Compact stat row, not a set of full-width tiles.
     private func statRow(_ stats: ArtistViewModel.Stats) -> some View {
         HStack(spacing: 8) {
             statTile(stats.total, "Total", .secondary)
@@ -525,10 +499,8 @@ private struct MacFilterChip: View {
     var tint: Color = .lsAccent
     var onTap: () -> Void
 
-    /// `tint` is a `Color.tone`, whose light variant is a DARKER mid-tone than
-    /// its dark one — judging the label against the wrong variant picks the
-    /// wrong text colour outright. See
-    /// DECISIONS.md::DesignTokens.swift::scheme-threading.
+    /// `tint` is a `Color.tone`, whose light variant is darker than its dark one, so the
+    /// label is judged in the actual scheme: DECISIONS.md::DesignTokens.swift::scheme-parameter.
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {

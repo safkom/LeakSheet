@@ -1,8 +1,7 @@
 import CoreGraphics
 import SwiftUI
 
-/// Extracts the dominant RGB color from an era image — mirrors ColorThief's approach.
-/// Returns actual image RGB values so card gradients, text, and borders match the web app exactly.
+/// Extracts the dominant RGB color from an era image, ColorThief-style (median cut).
 actor EraColorExtractor {
     static let shared = EraColorExtractor()
 
@@ -16,18 +15,11 @@ actor EraColorExtractor {
     private var flushTask: Task<Void, Never>?
 
     private init() {
-        // One-time cleanup of the superseded v2 cache key (v3 re-keyed the
-        // cache from era name to art URL); harmless if already absent.
+        // One-time cleanup of the superseded v2 (era-name-keyed) cache; harmless if absent.
         UserDefaults.standard.removeObject(forKey: "leaksheet_era_rgb_v2")
         cache = UserDefaults.standard.dictionary(forKey: Self.cacheKey) as? [String: [Double]] ?? [:]
-        // Seed the eviction order from what we just restored. Without this the
-        // list started empty against a full cache, so the first extraction of
-        // every launch pushed count to 201 and then evicted
-        // insertionOrder.prefix(1) — the key just added. The cache froze at
-        // whatever 200 entries were persisted and no new era colour was ever
-        // written again. Dictionary order is arbitrary, so restored entries
-        // evict in an arbitrary (but stable-for-this-launch) order; entries
-        // added during the session still evict oldest-first behind them.
+        // Seed the eviction order from the restored cache: starting empty against a full
+        // cache would make each new extraction evict itself. Restored keys evict arbitrarily.
         insertionOrder = Array(cache.keys)
     }
 
@@ -45,11 +37,8 @@ actor EraColorExtractor {
         return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
     }
 
-    /// Extract from a URL — uses ImageCache to avoid re-downloading. A 128px
-    /// thumbnail is plenty: the algorithm samples at ≤100×100 anyway.
-    /// `cacheKey` should be the era's raw art URL, unique per image — not the
-    /// resolved/proxied fetch URL passed via `url`, which varies by requested
-    /// width and would otherwise fragment the cache per caller.
+    /// Extract from a URL via ImageCache (a 128px thumbnail is plenty: sampling is
+    /// ≤100×100). `cacheKey` is the era's raw art URL, not the width-varying fetch URL.
     func extractColor(from url: URL, cacheKey: String) async -> Color? {
         if let cached = cache[cacheKey] {
             return color(from: cached)
@@ -184,19 +173,9 @@ actor EraColorExtractor {
 
     static let cacheLimit = 200
 
-    /// Trim to `cacheLimit`, dropping oldest-inserted first.
-    ///
-    /// Oldest-first, not `cache.keys.prefix` — dictionary key order is
-    /// arbitrary, so the original eviction threw away whichever entries it
-    /// happened to visit, including ones extracted seconds earlier.
-    ///
-    /// `min()` guards two things: `removeFirst(k)` traps when k exceeds the
-    /// count, and `insertionOrder` can legitimately be shorter than `cache`
-    /// (it is seeded from the restored keys, but a persisted dictionary larger
-    /// than the limit still has to drain over several calls).
-    ///
-    /// Split out as a pure function purely so the invariant is testable — the
-    /// extractor itself is a singleton actor whose init runs once per process.
+    /// Trim to `cacheLimit`, dropping oldest-inserted first (dictionary key order is
+    /// arbitrary). `min()` guards `removeFirst(k)`, which traps when k exceeds the count,
+    /// since `insertionOrder` can be shorter than `cache`. Pure, so it is testable.
     nonisolated static func evict(
         cache: inout [String: [Double]], insertionOrder: inout [String]
     ) {
@@ -206,10 +185,8 @@ actor EraColorExtractor {
         insertionOrder.removeFirst(excess)
     }
 
-    /// Memory is authoritative; UserDefaults is caught up shortly after the
-    /// last extraction. Writing on every extraction re-encoded the whole
-    /// dictionary (up to 200 entries) per era cover, repeatedly, while the
-    /// user was scrolling a cold tracker.
+    /// Memory is authoritative; UserDefaults catches up shortly after the last
+    /// extraction rather than re-encoding the whole dictionary per cover.
     private func scheduleFlush() {
         flushTask?.cancel()
         flushTask = Task { [weak self] in

@@ -12,9 +12,8 @@ import UIKit
 
 // MARK: - Clipboard
 
-/// Clipboard access. tvOS has no pasteboard at all, so it degrades to a no-op;
-/// the tvOS URL screen omits its Paste button outright rather than showing a
-/// control that does nothing.
+/// Clipboard access. tvOS has no pasteboard, so it is a no-op there (and the
+/// tvOS URL screen has no Paste button).
 enum Pasteboard {
     static var string: String? {
         #if canImport(AppKit)
@@ -72,11 +71,8 @@ extension View {
         #endif
     }
 
-    /// Pointer hover highlight. Only macOS has a persistent cursor.
-    ///
-    /// A no-op elsewhere, and not a modifier there at all: the modifier's
-    /// `@State` sat outside the platform check, so every row on iOS and tvOS
-    /// allocated hover storage nothing ever read.
+    /// Pointer hover highlight. Only macOS has a persistent cursor; elsewhere this is
+    /// not a modifier at all, so rows don't allocate hover state nothing reads.
     @ViewBuilder
     func rowHoverHighlight() -> some View {
         #if os(macOS)

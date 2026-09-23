@@ -1,16 +1,14 @@
 import SwiftUI
 
 /// Explore trackers panel — loads the tracker list from the backend
-/// /trackers endpoint (TrackerHub sheet).
+/// /trackers endpoint (ArtistGrid registry).
 struct BrowseArtistsView: View {
     /// Called with (url, curated artist name) — the name overrides the
     /// backend's sheet-title inference, which trips on joke tracker titles.
     var onPick: (String, String?) -> Void
 
-    /// Set when hosted as a sidebar destination rather than presented as a
-    /// sheet — the host supplies the navigation chrome. A nested
-    /// `NavigationStack` inside a split view's detail column fights it for the
-    /// window title, the toolbar, and the search field.
+    /// Set when hosted as a sidebar destination rather than a sheet: the host supplies
+    /// the chrome, and a nested NavigationStack would fight it for title, toolbar and search.
     var embedded = false
 
     @State private var artists: [DiscoveryArtist] = []
@@ -61,9 +59,8 @@ struct BrowseArtistsView: View {
                     } description: {
                         Text(error)
                     } actions: {
-                        // Without this the sheet is stuck on the error forever:
-                        // .task doesn't re-run while presented and `artists` is
-                        // still empty. loadArtists() clears `error` and refetches.
+                        // .task doesn't re-run while presented, so without Retry the sheet is stuck on
+                        // the error. loadArtists() clears `error` and refetches.
                         Button("Retry") { Task { await loadArtists() } }
                             .buttonStyle(.borderedProminent)
                     }
@@ -98,8 +95,7 @@ struct BrowseArtistsView: View {
                                         }
                                         HStack(spacing: 6) {
                                             if let credit = artist.credit, !credit.isEmpty {
-                                                // .secondary (not .tertiary) clears WCAG AA on OLED
-                                                // black for this info-bearing text — see SongRowView.
+                                                // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
                                                 Text("by \(credit)")
                                                     .font(.caption2)
                                                     .foregroundStyle(.secondary)
@@ -110,11 +106,8 @@ struct BrowseArtistsView: View {
                                                     .font(.caption2)
                                                     .foregroundStyle(.orange)
                                             }
-                                            // Link health is tri-state upstream:
-                                            // only a definite false is worth a
-                                            // warning, and it is worth it BEFORE
-                                            // the user opens a tracker whose
-                                            // files are all gone.
+                                            // Link health is tri-state upstream: only a definite false is worth a warning,
+                                            // shown BEFORE the user opens a tracker whose files are gone.
                                             if artist.workingLinks == false {
                                                 Text("dead links")
                                                     .font(.caption2)
@@ -134,10 +127,7 @@ struct BrowseArtistsView: View {
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
-                                // Inside the label, not outside the Button:
-                                // .buttonStyle(.plain) hit-tests only its drawn
-                                // content, so on macOS the empty space beside a
-                                // short name was dead. See ArtistRowViews:87.
+                                // Inside the label, not outside the Button (DECISIONS.md::contentShape).
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -146,15 +136,11 @@ struct BrowseArtistsView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
-                    // .task below is a one-shot for the process lifetime, so
-                    // without this the list never picked up a tracker added to
-                    // the feed, or an "outdated"/"dead links" flag clearing.
+                    // .task below runs once per process, so pull-to-refresh is how the list picks
+                    // up feed changes.
                     .refreshable { await loadArtists(force: true) }
-                    // Same placement as the artist screen (ArtistView.swift).
-                    // Passing no placement gets `.automatic`, which puts the
-                    // field in the bottom slot on iPhone — so opening a
-                    // tracker moved the search bar between top and bottom
-                    // depending on which screen you were on.
+                    // Same placement as the artist screen (ArtistView.swift): `.automatic` puts
+                    // the field in the bottom slot on iPhone.
                     #if os(iOS)
                     .searchable(
                         text: $searchText,

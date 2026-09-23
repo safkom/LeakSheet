@@ -13,18 +13,15 @@ final class RecentTrackersManager {
     var trackers: [RecentTracker] = []
 
     nonisolated struct RecentTracker: Codable, Identifiable, Sendable {
-        // Identity is the normalized tracker URL so URL variants of the same
-        // tracker (edit vs htmlview, gid fragments, share params) collapse to
-        // one entry. Entries without a URL fall back to the artist slug.
+        // Identity is the normalized tracker URL, so URL variants collapse to one entry;
+        // entries without a URL fall back to the artist slug.
         var id: String { RecentTrackersManager.identityKey(sourceUrl: sourceUrl, slug: slug) }
         let name: String
         let slug: String
         let sourceUrl: String
         let totalSongs: Int
-        /// Total playable versions across the tracker — this is what the
-        /// artist header's "N tracks" subtitle counts, so the card shows the
-        /// same number under the same "tracks" label instead of a
-        /// same-looking-but-different song count (see U-4).
+        /// Total playable versions across the tracker: what the artist header's "N tracks"
+        /// subtitle counts. See DECISIONS.md::RecentTrackerCardView.swift::stat-line-count.
         let totalVersions: Int
         let artUrl: String?
         let availableCount: Int
@@ -102,11 +99,7 @@ final class RecentTrackersManager {
     }
 
     /// The name this tracker URL was last opened under, if it is in recents.
-    ///
-    /// The backend derives the artist slug from the name it is given, and
-    /// favourites are keyed on that slug — so the same tracker opened under two
-    /// names has two identities. See
-    /// DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
+    /// See DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
     func savedName(forSourceUrl url: String) -> String? {
         Self.savedName(forSourceUrl: url, in: trackers)
     }
@@ -166,9 +159,8 @@ final class RecentTrackersManager {
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey) else { return }
         let decoded = (try? JSONDecoder().decode([RecentTracker].self, from: data)) ?? []
-        // One-time migration: collapse duplicates persisted before identity
-        // moved to the normalized URL. Must happen before first render so
-        // ForEach ids stay unique.
+        // Collapse duplicates persisted under an older identity scheme, before first
+        // render, so ForEach ids stay unique.
         trackers = Self.deduplicated(decoded)
         if trackers.count != decoded.count {
             save()

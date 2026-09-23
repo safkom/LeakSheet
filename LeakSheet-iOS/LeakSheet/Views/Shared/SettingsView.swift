@@ -13,10 +13,8 @@ struct SettingsView: View {
     /// NavigationStack and the Done button.
     var embedded = false
 
-    /// The presenter's colour scheme, which follows the device once the root
-    /// drops its override. Needed because `.preferredColorScheme(nil)` on a
-    /// sheet does not release an override the sheet already applied: choosing
-    /// System left this sheet dark on a light phone until it was closed.
+    /// The presenter's colour scheme: `.preferredColorScheme(nil)` on a sheet doesn't
+    /// release an override it already applied, so System needs an explicit value.
     var presenterScheme: ColorScheme? = nil
 
     @State private var cacheSizeBytes: Int64 = 0
@@ -24,8 +22,7 @@ struct SettingsView: View {
     @State private var clearingCache = false
     @State private var confirmingClearCache = false
 
-    /// Shown so a sideloaded build can be identified. Without it there was no
-    /// way to say which version you were running.
+    /// Shown so a sideloaded build can be identified.
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "—"
@@ -44,11 +41,8 @@ struct SettingsView: View {
             settingsList
         } else {
             NavigationStack { settingsList }
-                // The app root applies the appearance to the window, and sheets
-                // opened afterwards inherit it — but this sheet is already on
-                // screen when the choice changes here, and a presented sheet is
-                // its own presentation. Without this it stayed in the old
-                // appearance until closed.
+                // This sheet is already on screen when the choice changes, and a presented sheet
+                // doesn't pick up the root's new appearance until reopened.
                 .preferredColorScheme(appearance.colorScheme ?? presenterScheme)
         }
     }
@@ -68,10 +62,8 @@ struct SettingsView: View {
                 }
 
                 SwiftUI.Section {
-                    // The stock inline picker: a checkmark row per option, with
-                    // selection announced by VoiceOver for free. This used to be
-                    // a hand-rolled pair of buttons drawing checkmark/circle
-                    // glyphs and adding .isSelected traits by hand.
+                    // The stock inline picker: a checkmark row per option, selection announced by
+                    // VoiceOver for free.
                     Picker("Playback Quality", selection: $useOriginalQuality) {
                         qualityLabel(
                             title: "Streaming",

@@ -5,19 +5,10 @@ import SwiftUI
 extension Color {
     // MARK: - Appearance
 
-    /// An appearance-aware colour.
+    /// An appearance-aware colour: see DECISIONS.md::DesignTokens.swift::adaptive-palette
     ///
-    /// SwiftUI has no cross-platform dynamic `Color` initialiser, so the fork
-    /// lives here once and every token below is built from it. Asset-catalog
-    /// colour sets would work too, but 30 of them is a lot of JSON to keep in
-    /// step with the HSB literals the badge palette is actually derived from.
-    ///
-    /// `nonisolated`, with both platform colours built BEFORE the provider:
-    /// the provider runs on whatever thread resolves the colour, and SwiftUI's
-    /// async renderer does that off the main thread. Under this target's
-    /// MainActor default isolation the closure was inferred `@MainActor`, so
-    /// that resolution tripped Swift's executor check and the app crashed with
-    /// SIGTRAP — reproduced by tapping a version chip in the description sheet.
+    /// `nonisolated`, with both platform colours built BEFORE the provider: SwiftUI
+    /// resolves colours off-main, where a MainActor-inferred provider traps (SIGTRAP).
     nonisolated static func adaptive(light: Color, dark: Color) -> Color {
         #if canImport(AppKit)
         let lightColor = NSColor(light)
@@ -36,13 +27,9 @@ extension Color {
 
     /// A palette tone: one hue, two appearances.
     ///
-    /// Every badge/credit/filter colour is used as TEXT on a low-opacity wash of
-    /// itself (`BadgePill`, `CreditTagsView`). The tuned values sit at brightness
-    /// 0.75–0.96, which is right on black and illegible on white — so the light
-    /// appearance keeps the hue, nudges saturation up and drops brightness into
-    /// AA range instead of hand-authoring 30 second literals.
-    ///
-    /// `dark` is the original value verbatim; the dark appearance is unchanged.
+    /// Tones are TEXT on a low-opacity wash of themselves, and the tuned brightness
+    /// (0.75–0.96) is illegible on white, so the light appearance keeps the hue, nudges
+    /// saturation up and drops brightness into AA range. `dark` is used verbatim.
     static func tone(
         hue: Double,
         saturation: Double,
@@ -57,12 +44,8 @@ extension Color {
 
     // MARK: - Core palette
 
-    /// App background.
-    ///
-    /// iPhone keeps OLED black (it is a real power saving on that panel and the
-    /// design was drawn for it). A desktop display has no such payoff and a
-    /// full-window pure black reads as a phone app blown up, so the Mac sits a
-    /// few points off zero.
+    /// App background: OLED black on iPhone (a real power saving); the Mac sits a few
+    /// points off zero, since full-window pure black reads as a blown-up phone app.
     static let lsBackground = adaptive(light: Color(hex: 0xFFFFFF), dark: macDark(0x141414, iOS: 0x000000))
     static let lsCard = adaptive(light: Color(hex: 0xF2F2F5), dark: macDark(0x1C1C1C, iOS: 0x0F0F0F))
     static let lsBorder = adaptive(light: Color(hex: 0xD9D9DE), dark: Color(hex: 0x242424))
@@ -73,16 +56,11 @@ extension Color {
     // Accent
     static let lsPrimary = tone(hue: 220 / 360, saturation: 0.655, brightness: 0.96, lightBrightness: 0.74)
 
-    /// Selected-row fill for the macOS list.
+    /// Selected-row fill for the macOS list: a neutral lifted row rather than the
+    /// saturated system accent.
     ///
-    /// The system default is a saturated accent slab, which fights an OLED-dark
-    /// app whose every panel is tinted by its era art. A neutral lifted row
-    /// reads as "this one" without repainting it.
-    ///
-    /// Two static values rather than one `adaptive` colour: the list's selection
-    /// fill comes from its `tint`, and a tint built from a dynamic platform
-    /// colour is ignored — the list falls back to the system accent. The caller
-    /// picks by scheme.
+    /// Two static values, not one `adaptive` colour: a list ignores a tint built from a
+    /// dynamic platform colour and falls back to the accent. The caller picks by scheme.
     static let lsSelectionDark = Color(hex: 0x3A3A3C)
     static let lsSelectionLight = Color(hex: 0xD6D6DB)
 
@@ -128,14 +106,8 @@ extension Color {
     static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)      // tentative amber
     static let badgeConflicting = tone(hue: 15 / 360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
-    // Content-tab entry type ("Production", "Music Video"). Deliberately
-    // neutral: on song rows colour means quality or availability, and the
-    // type pill used lsAccent — the same blue as badgeFull — so "PRODUCTION"
-    // read as an availability badge. Type is what KIND of entry this is, not
-    // its status, so it recedes and leaves colour to carry status.
-    //
-    // A tone like every other pill colour. As a static 0.72 grey it read at
-    // 1.8:1 on the light background — the one pill the light palette missed.
+    // Content-tab entry type ("Production", "Music Video"). Deliberately neutral:
+    // on song rows colour means status (quality or availability), not kind.
     static let badgeEntryType = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.72, lightBrightness: 0.40)
 
     // MARK: - Hex Initializer
@@ -157,7 +129,7 @@ enum BadgeVariant: String {
     case ogfile, full, tagged, stem, partial, snippet, confirmed, unavailable
     case rumored, conflicting
     /// Not a quality/availability value — the content-tab entry type
-    /// ("Production", "Music Video"), which had its own bespoke pill before.
+    /// ("Production", "Music Video").
     case entryType
 
     var color: Color {
@@ -214,10 +186,8 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
     if a.contains("conflicting") { return .conflicting }
     if a.contains("confirmed") { return .confirmed }
     if a.contains("unavailable") { return .unavailable }
-    // Compound values ("Full Lossless") reach here because the checks above are
-    // exact or more specific. Falling through to .na painted them neutral grey
-    // while a plain "Full" on the next row was blue — the same concept in two
-    // colours. Last, so it can never outrank a more specific match above.
+    // Compound values ("Full Lossless") land here; without this they'd paint neutral
+    // grey beside a blue "Full". Last, so it never outranks a more specific match.
     if a.contains("full") { return .full }
     if a.contains("lossless") { return .lossless }
     return .na
@@ -228,14 +198,8 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
 extension Color {
     /// Extract sRGB components (0–1 range) as they resolve in `scheme`.
     ///
-    /// Uses SwiftUI's own `resolve(in:)` rather than `UIColor(self)` — the
-    /// UIKit round-trip has no macOS equivalent.
-    /// See DECISIONS.md::DesignTokens.swift::color-resolve.
-    ///
-    /// The scheme is a parameter, not a constant, because the palette above is
-    /// appearance-aware: resolving `.lsBackground` in the wrong scheme hands the
-    /// contrast maths the opposite backdrop and every derived colour inverts.
-    /// It defaults to `.dark` so the pinned literal tests keep their meaning.
+    /// See DECISIONS.md::DesignTokens.swift::color-resolve and ::scheme-parameter.
+    /// Defaults to `.dark` so the pinned literal tests keep their meaning.
     func rgbComponents(in scheme: ColorScheme = .dark) -> (red: Double, green: Double, blue: Double) {
         var env = EnvironmentValues()
         env.colorScheme = scheme
@@ -266,12 +230,8 @@ extension Color {
         return (l1 + 0.05) / (l2 + 0.05)
     }
 
-    /// Step away from `background` until WCAG AA contrast is met.
-    ///
-    /// Direction follows the backdrop: brighten on a dark one, darken on a light
-    /// one. Brightening only — which is what this did while the app was
-    /// force-dark — walks a colour on a white page *toward* white and never
-    /// converges. Falls back to `.primary` if 20 steps can't reach the target.
+    /// Step away from `background` until WCAG AA contrast is met: brighten on a dark
+    /// backdrop, darken on a light one. Falls back to `.primary` after 20 steps.
     func ensureReadable(
         against background: Color,
         minRatio: Double = 4.5,
@@ -287,12 +247,7 @@ extension Color {
     }
 
     /// White or black — whichever actually contrasts more with `background`.
-    ///
-    /// Compares both candidates rather than splitting at luminance 0.5: the WCAG
-    /// crossover is near 0.179, so every mid-tone backdrop between the two got
-    /// white text when black reads better. An era card from a near-white cover
-    /// lands exactly there (its dimmed gradient is mid-grey), and titled itself
-    /// in white at 3.70:1 where black gives 5.72:1.
+    /// See DECISIONS.md::DesignTokens.swift::preferred-text-crossover.
     static func preferredText(on background: Color, in scheme: ColorScheme = .dark) -> Color {
         let luminance = background.relativeLuminance(in: scheme)
         let againstWhite = 1.05 / (luminance + 0.05)
@@ -325,9 +280,7 @@ extension Color {
 
 // MARK: - Shared formatters
 
-/// Tiny cross-cutting formatters with one definition each — these were
-/// previously copy-pasted across the player, description sheet, and landing
-/// views, and had already drifted apart.
+/// Tiny cross-cutting formatters with one definition each.
 nonisolated enum Format {
     /// Seconds → "m:ss" (e.g. 139.8 → "2:19").
     static func time(_ seconds: TimeInterval) -> String {
@@ -337,9 +290,7 @@ nonisolated enum Format {
         return "\(mins):\(String(format: "%02d", secs))"
     }
 
-    /// Host without the "www." prefix, for compact link labels. Strips only a
-    /// leading "www." — the old copies used replacingOccurrences, which also
-    /// mangled hosts containing "www." mid-string.
+    /// Host without a leading "www." (only leading), for compact link labels.
     static func shortHost(_ urlString: String) -> String {
         guard let url = URL(string: urlString), let host = url.host else { return urlString }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -370,15 +321,8 @@ extension String {
 enum CreditType: String {
     case featuring, producers, collaboration, refs, director, creditedArtists
 
-    // `static let`, not literals in the switch: `Color.tone` builds a dynamic
-    // platform colour (a closure the system calls per appearance), and
-    // `CreditTagsView` reads `color` twice per tag on every body evaluation.
-    // Inline, that allocated a fresh one each time on a list that can be
-    // thousands of rows. The badge palette was already declared this way.
-    //
-    // Dark brightnesses raised where the shipped value could not clear AA on
-    // its own tag (producers 3.67:1, creditedArtists 3.87:1, director 3.45:1).
-    // Hues are unchanged, so the credits still read as the same six colours.
+    // `static let`, not literals in the switch: `Color.tone` builds a dynamic platform
+    // colour, and `CreditTagsView` reads `color` twice per tag per body evaluation.
     private static let featuringColor = Color.tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
     private static let producersColor = Color.tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
     private static let collaborationColor = Color.tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)

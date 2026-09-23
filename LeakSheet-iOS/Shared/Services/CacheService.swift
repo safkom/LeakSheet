@@ -3,20 +3,9 @@ import Foundation
 
 /// Disk-based cache for tracker payloads with ETag validation.
 ///
-/// v2 (2026-07-17): stores the raw server response bytes instead of a
-/// re-encoded `Artist` (kills a full multi-MB encode pass per load and
-/// guarantees cache == server payload, so new optional API fields survive
-/// the round-trip), and keys files by the full SHA-256 of the URL — the v1
-/// scheme truncated base64(url) to 64 chars, so long URLs sharing a prefix
-/// collided.
-///
-/// v3 (2026-08-26): the payload file IS the response bytes, with no JSON
-/// envelope around them. v2 still wrapped them in a `CachedEntry`, and
-/// `JSONEncoder` base64s a `Data` property by default — so every write
-/// inflated a multi-MB tracker by a third and copied it again, and every cold
-/// read decoded that base64 back, on the slowest path in the app. The etag,
-/// timestamp and version live in the sidecar, which already existed and is the
-/// only thing the load path reads before it knows whether it wants the payload.
+/// The payload file IS the raw response bytes: no envelope (JSONEncoder would base64
+/// them) and no re-encode, so new API fields survive. Keyed by the SHA-256 of the
+/// normalized URL; ETag, timestamp and version live in a small sidecar.
 actor CacheService {
     static let shared = CacheService()
 
@@ -55,9 +44,8 @@ actor CacheService {
         var version: Int = CacheService.currentVersion
     }
 
-    /// Keyed on the normalized URL: "yetracker.net" typed once and the
-    /// server's "https://yetracker.net/" from Recents are one tracker, and
-    /// were two multi-MB cache files that missed each other's ETag.
+    /// Keyed on the normalized URL, so "yetracker.net" and "https://yetracker.net/"
+    /// share one entry and ETag.
     private func digest(for url: String) -> String {
         let key = TrackerURLNormalizer.normalize(url)
         return SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -67,13 +55,8 @@ actor CacheService {
         cacheDirectory.appending(path: "tracker_\(digest(for: url)).json")
     }
 
-    /// Sidecar holding `CachedMeta`.
-    ///
-    /// Exists because reading one ETag used to cost a full multi-MB
-    /// `Data(contentsOf:)` + JSONDecoder pass over the base64'd payload — and
-    /// that happened on *every* tracker load, before the conditional request
-    /// was even sent. The data-age chip paid it a second time. Both now read a
-    /// ~100 byte file.
+    /// Sidecar holding `CachedMeta`, so reading an ETag is a ~100-byte read rather
+    /// than a decode of the multi-MB payload.
     private func metaFile(for url: String) -> URL {
         cacheDirectory.appending(path: "tracker_\(digest(for: url))_meta.json")
     }
@@ -89,8 +72,7 @@ actor CacheService {
     }
 
     func getCachedTracker(for url: String) -> CachedEntry? {
-        // The payload carries no metadata of its own now, so the sidecar is
-        // authoritative: no sidecar means a v2 envelope or a half-written pair,
+        // The sidecar is authoritative: none means a v2 envelope or a half-written pair,
         // and either way the bytes cannot be validated. Both files go.
         guard let meta = readMeta(for: url), meta.version == Self.currentVersion else {
             removeTracker(for: url)

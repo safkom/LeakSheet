@@ -10,10 +10,8 @@ struct TVRootView: View {
 
     @State private var selection: Tab = .browse
 
-    // Each screen owns its own NavigationStack (and its path) rather than
-    // being wrapped in one here — they push programmatically after an async
-    // load, so each needs its own binding. The Menu button then pops within
-    // the tab instead of switching tabs.
+    // Each screen owns its NavigationStack and path (they push programmatically after
+    // async loads), so the Menu button pops within the tab rather than switching tabs.
     var body: some View {
         TabView(selection: $selection) {
             // Qualified as SwiftUI.Tab: the nested `Tab` enum above shadows it.

@@ -1,16 +1,12 @@
 import SwiftUI
 
-/// The two self-contained sections of the song description sheet, split
-/// out of it (2026-07-25) so each stays its own readable unit — and its
-/// own SwiftUI invalidation boundary, which is why they were separate
-/// `View` types to begin with.
+/// The two self-contained sections of the song description sheet, each its own
+/// SwiftUI invalidation boundary.
 
 // MARK: - File Info section
 
-/// Stream file info (container, codec, bitrate, sample rate, …) for the
-/// version's streamable link. Loads from the backend /metadata endpoint;
-/// when the provider has no metadata API (krakenfiles), falls back to the
-/// format info the player captured for the currently playing track.
+/// Stream file info (container, codec, bitrate, sample rate, …) for the version's
+/// streamable link, from /metadata, else the format the player captured.
 /// Separate View type so its async load state invalidates only this section.
 struct FileInfoSection: View {
     let version: SongVersion
@@ -68,11 +64,8 @@ struct FileInfoSection: View {
             }
         }
         .task(id: version.id) {
-            // Reset first. `.task(id:)` restarts the task but the view keeps
-            // its identity, so @State survived a version switch — V1's codec,
-            // bitrate and sample rate stayed on screen labelled as V2's,
-            // because the tail guard below only writes .unavailable when the
-            // state is still .loading.
+            // Reset first: `.task(id:)` restarts but keeps @State, so the previous version's
+            // info would otherwise stay on screen under this one.
             state = .loading
             await load()
         }
@@ -110,9 +103,8 @@ struct FileInfoSection: View {
                 return
             }
         }
-        // The concurrent onChange(of: player.streamFormat) handler may have
-        // already published a good result while this awaited fetchMetadata —
-        // don't clobber it just because this path came up empty.
+        // The streamFormat onChange handler may already have published a good result
+        // while this awaited; don't clobber it.
         if state == .loading {
             state = .unavailable
         }
@@ -127,11 +119,8 @@ nonisolated enum FileInfoRows {
         var id: String { label }
     }
 
-    /// Round a backend-supplied numeric string, keeping any unit suffix.
-    ///
-    /// `/metadata` forwards the container's own value, which for an MP3 is a
-    /// float — "308.75000823649214" rendered verbatim next to "44100Hz".
-    /// Non-numeric values (and anything already tidy) pass through untouched.
+    /// Round a backend-supplied numeric string, keeping any unit suffix (an MP3's
+    /// bitrate arrives as "308.75000823649214"). Non-numeric values pass through.
     static func roundedNumeric(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespaces)

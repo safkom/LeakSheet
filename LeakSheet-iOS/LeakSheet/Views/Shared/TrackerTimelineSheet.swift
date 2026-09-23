@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// The tracker's history, era by era — built from each era's `timeline`
-/// events (date + note), which the API returns but the app never showed.
-/// Eras are already in chronological order, so rendering them in sequence
-/// reads as the story of the catalogue.
+/// The tracker's history, era by era, from each era's `timeline` events (date +
+/// note). Eras are already chronological, so they render in sequence.
 struct TrackerTimelineSheet: View {
     let artist: Artist
     @Environment(\.dismiss) private var dismiss

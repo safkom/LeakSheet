@@ -1,9 +1,8 @@
 #if os(macOS)
 import SwiftUI
 
-/// What the detail column is showing. Recents is not a destination on the Mac —
-/// the trackers you have opened live in the sidebar itself, so going back to one
-/// is a click, not a re-load.
+/// What the detail column is showing. Recents is not a destination on the Mac:
+/// opened trackers live in the sidebar itself.
 enum MacSelection: Hashable {
     case browse
     case favourites
@@ -16,9 +15,8 @@ struct LoadedTracker {
     let vm: ArtistViewModel
 }
 
-/// Mac window + library state. One main window (File ▸ New is removed), so a
-/// singleton is the whole story: the menu bar, the sidebar, the detail column
-/// and the inspector all read the same instance instead of threading bindings.
+/// Mac window + library state. One main window, so a singleton read by the menu
+/// bar, sidebar, detail column and inspector instead of threaded bindings.
 @MainActor
 @Observable
 final class MacUIState {
@@ -48,23 +46,16 @@ final class MacUIState {
     /// Set by ⇧⌘V so the Browse pane can pick up a pasted tracker URL.
     var pastedURL: String?
 
-    /// Bumped by ⌘F. The artist screen owns the search field's focus state, so
-    /// the menu command cannot set it directly — it nudges this instead and the
-    /// screen focuses on the change.
+    /// Bumped by ⌘F. The artist screen owns the search field's focus state, so the
+    /// command nudges this and the screen focuses on the change.
     var focusSearchToken = 0
 
-    /// Measured height of the mini player bar.
-    ///
-    /// The bar is a window-level `safeAreaBar`, which insets the detail column
-    /// but NOT the inspector — so the Details panel's Play button sat behind it
-    /// whenever anything was playing. Measured rather than hardcoded because the
-    /// bar grows a progress slider once a duration is known.
+    /// Measured height of the mini player bar: the window-level `safeAreaBar` insets
+    /// the detail column but NOT the inspector. Measured, since the bar grows a slider.
     var playerBarHeight: CGFloat = 0
 
-    /// Parsed trackers keyed by slug, most-recently-opened last.
-    ///
-    /// Capped: a big tracker (Ye is ~9k versions) plus its view model is tens of
-    /// MB, and holding every tracker a session ever opened would pin all of them.
+    /// Parsed trackers keyed by slug, most-recently-opened last. Capped: a big tracker
+    /// plus its view model is tens of MB.
     private(set) var trackers: [String: LoadedTracker] = [:]
     private var order: [String] = []
     private static let limit = 3
@@ -78,26 +69,16 @@ final class MacUIState {
 
     func tracker(_ slug: String) -> LoadedTracker? { trackers[slug] }
 
-    /// Mark a tracker as most-recently used.
-    ///
-    /// Re-selecting an already-loaded tracker never goes through `store`, so its
-    /// recency was otherwise frozen at first open and three later trackers could
-    /// evict it. Called from the sidebar-selection change rather than from
-    /// `tracker(_:)`, which the detail column reads during `body` — bumping
-    /// recency there would mutate observed state mid-update.
+    /// Mark a tracker as most-recently used (re-selecting never goes through `store`).
+    /// Called on selection change, not from `tracker(_:)`, which `body` reads.
     func touch(_ slug: String) {
         guard order.contains(slug), order.last != slug else { return }
         order.removeAll { $0 == slug }
         order.append(slug)
     }
 
-    /// LRU insert. The entry just stored is always at the tail, so the eviction
-    /// below can never drop what the user is looking at.
-    ///
-    /// It also skips whatever is currently playing: the mini player and the
-    /// Details panel resolve the playing song through this cache
-    /// (`vmForCurrentPlayback`), so evicting that tracker left the bar playing a
-    /// track it could no longer describe.
+    /// LRU insert. The entry just stored is at the tail, and eviction also skips the
+    /// playing tracker, which the mini player and Details panel resolve through this cache.
     func store(_ loaded: LoadedTracker) {
         let slug = loaded.artist.slug
         order.removeAll { $0 == slug }

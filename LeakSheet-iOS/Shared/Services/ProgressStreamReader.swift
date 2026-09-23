@@ -47,8 +47,7 @@ nonisolated struct ProgressStreamReader {
             buffer = Data(rest)
         }
         if buffer.count > Self.maxLineBytes {
-            // Without this the megabytes of payload were rescanned for a
-            // newline on every chunk and then decoded as one progress line.
+            // Stop rescanning megabytes of unreadable payload for a newline.
             // ponytail: the rest of the body still downloads and is dropped.
             buffer = Data()
             failed = true

@@ -53,8 +53,8 @@ logger = logging.getLogger(__name__)
 def _ip_is_public(ip_str: str) -> bool:
     """True only for globally routable unicast addresses.
 
-    is_global, not a deny-list: the deny-list missed shared address space
-    (100.64.0.0/10 — CGNAT, Tailscale, some cloud metadata endpoints).
+    is_global rather than a deny-list, so shared address space (100.64.0.0/10:
+    CGNAT, Tailscale, some cloud metadata endpoints) is rejected too.
     """
     ip = ipaddress.ip_address(ip_str)
     if ip.version == 6:
@@ -107,12 +107,8 @@ async def assert_public_redirect_target(resp: httpx.Response, *, source: str) ->
     """Re-validate that the FINAL url of a (redirect-followed) response is a
     public https host; aclose the response and raise ValueError otherwise.
 
-    ``follow_redirects=True`` means an allow-listed / pre-validated origin can
-    still 30x to an internal address (169.254.169.254, localhost, RFC1918) — the
-    exact SSRF class the gdrive path already guards. This closes the same hole
-    on the general stream / image-proxy paths. Because callers pass
-    ``stream=True`` and run this before reading the body, no internal content is
-    ever relayed to the client.
+    Callers pass ``stream=True`` and run this before reading the body, so no
+    internal content is ever relayed to the client.
     """
     final = str(resp.url)
     parsed = urlparse(final)
@@ -131,11 +127,8 @@ class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
     each redirect hop) reject any host that resolves only-or-partly to a
     non-public address.
 
-    This narrows the DNS-rebinding window — the check runs at connect time, not
-    only during pre-flight validation — and defends every request made through
-    the shared clients. Exact-IP pinning would fully close the residual rebind
-    race but needs live verification against each upstream, so it is deferred;
-    ``assert_public_redirect_target`` is the tested belt-and-suspenders on top.
+    Checking at connect time narrows the DNS-rebinding window; exact-IP pinning
+    would close the residual race but needs live verification per upstream.
     """
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -220,8 +213,7 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# pixeldrain.com — /u/ is a single file, /l/ is a list (intentionally not
-# matched here; multi-file lists are deliberately unsupported).
+# pixeldrain.com: /u/ is a single file; /l/ lists are deliberately unsupported.
 _PIXELDRAIN_PATTERN = re.compile(
     r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
 )
@@ -233,11 +225,10 @@ _GDRIVE_FILE_D_PATTERN = re.compile(
 _GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # Every host `resolve_stream_url` can emit. The API's stream-proxy allowlist
-# is this set, so resolver and allowlist can't drift (they had: four stale
-# entries accumulated in the hand-maintained copy).
+# is this set, so resolver and allowlist can't drift.
 ALLOWED_STREAM_HOSTS = frozenset({
     "api.pillows.su",     # pillows.su / pillowcase.su both resolve here
-    "imgur.gg",           # primary API host (2026-08: temp.imgur.gg now 404s)
+    "imgur.gg",           # primary API host
     "temp.imgur.gg",      # kept as the resolver's fallback host
     "music.froste.lol",
     "krakenfiles.com",    # view URL passes through; CDN host validated by
@@ -252,7 +243,7 @@ ALLOWED_STREAM_HOSTS = frozenset({
 # ---------------------------------------------------------------------------
 
 _STREAM_TIMEOUT = 30.0
-_STREAM_USER_AGENT = USER_AGENT  # shared backend UA from src.config
+_STREAM_USER_AGENT = USER_AGENT
 
 
 class TTLCache:
@@ -280,51 +271,25 @@ class TTLCache:
         self._data[key] = (time.monotonic(), value)
 
 
-# Resolved CDN URLs for imgur.gg and krakenfiles.com.
-#
-# Without this, EVERY client range request re-ran the resolve. AVPlayer opens a
-# track with a `bytes=0-1` probe and then chunk fetches, and each one paid an
-# extra HTTPS round-trip to imgur's API (measured at ~750ms) plus three DNS
-# lookups — the transport's, the SSRF pre-flight's blocking getaddrinfo, and
-# the transport's again for the CDN. On a 164MB lossless file that is the
-# difference between "slow to start" and "starts".
+# Resolved CDN URLs for imgur.gg and krakenfiles.com. AVPlayer sends many range
+# requests per track; each uncached resolve costs an API round-trip plus DNS lookups.
 _CDN_URL_TTL = 1800.0
 _cdn_url_cache = TTLCache(ttl=_CDN_URL_TTL, max_entries=500)
 
-# Coalesces simultaneous cold resolves for the same key into one call — two
-# range requests that both miss the cache for the same file no longer each
-# pay the round-trip; the TTL cache above already covers every request after
-# the first one to actually finish.
+# Coalesces simultaneous cold resolves for the same key into one call.
 _inflight_resolves: dict[str, asyncio.Task[str]] = {}
 
 
 async def _cached_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> str:
     """Memoized, coalesced resolve: cache hit, else one shared run per key.
 
-    Owns all three steps so a resolver can't get the cache without the
-    coalescing (or the reverse): read the TTL cache, run *resolve* at most once
-    across concurrent callers, store the result.
+    The run is its own task, awaited through ``asyncio.shield``: a disconnecting
+    caller (routine for AVPlayer) must not cancel the shared work, and a cancelled
+    resolver must not hand its CancelledError to other waiters. Caching in the
+    done-callback leaves no window where a key is in neither
+    ``_inflight_resolves`` nor the cache.
 
-    The run lives in its own task, and callers await it through
-    ``asyncio.shield``, because both halves of that matter under a client
-    disconnect — the common case here, since AVPlayer abandons range requests
-    routinely:
-
-    * A caller that goes away must not cancel the shared work. Awaiting a bare
-      future propagates the awaiting task's cancellation INTO that future, so
-      one disconnect used to cancel the future out from under the caller doing
-      the actual resolve, whose ``set_result`` then died with InvalidStateError.
-    * A cancelled resolver must not hand its CancelledError to unrelated
-      waiters, who would then unwind as if they had been cancelled themselves.
-
-    Caching in the done-callback, not after the await, keeps the pop and the
-    store in one callback — so there is no window where the key has left
-    ``_inflight_resolves`` but is not yet in the cache for a fresh caller.
-
-    ponytail: process-local only (a plain dict, no cross-worker coordination).
-    With gunicorn running several workers a cold key resolves once per worker
-    rather than once in total; the TTL cache absorbs the rest. Not worth a
-    shared store unless it shows up in the logs.
+    ponytail: process-local dict, so a cold key resolves once per gunicorn worker.
     """
     cached = _cdn_url_cache.get(key)
     if isinstance(cached, str):
@@ -351,9 +316,8 @@ async def _cached_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> st
 # Audio MIME types we accept (reject HTML error pages etc.)
 _AUDIO_MIMES = {
     "audio/",
-    # Some hosts (imgur.gg) serve audio inside an mp4/webm container and
-    # label it video/*. The client plays the audio track either way; this
-    # gate exists to reject HTML error pages, not to police containers.
+    # Some hosts (imgur.gg) label audio in an mp4/webm container as video/*. This
+    # gate rejects HTML error pages; it does not police containers.
     "video/",
     "application/octet-stream",
     "application/ogg",
@@ -421,8 +385,7 @@ def resolve_metadata_url(link: str) -> dict[str, str] | None:
     """Convert a file-sharing link to its provider metadata API URL.
 
     Returns ``{"url": "...", "provider": "pillows"|"froste"|"imgur"|"pixeldrain"}``
-    or ``None`` if the host has no metadata API (this includes drive.google.com —
-    no metadata provider is implemented for it yet).
+    or ``None`` if the host has no metadata API (including drive.google.com).
     """
     m = _PILLOWS_PATTERN.match(link)
     if m:
@@ -478,9 +441,7 @@ def resolve_stream_url(link: str) -> str | None:
     m = _IMGUR_PATTERN.match(link)
     if m:
         file_id = m.group(2)
-        # imgur.gg is the live API host; temp.imgur.gg started 404ing in
-        # 2026-08. resolve_imgur_cdn_url still falls back to temp. if this
-        # host fails, so a future flip back needs no code change.
+        # resolve_imgur_cdn_url falls back to temp.imgur.gg if this host fails.
         resolved = f"https://imgur.gg/api/file/{file_id}"
         logger.debug("Resolved imgur.gg link %s → metadata API %s", link, resolved)
         return resolved
@@ -511,9 +472,8 @@ def resolve_stream_url(link: str) -> str | None:
         logger.debug("Resolved drive.google.com link %s → %s", link, resolved)
         return resolved
 
-    # A non-streamable host (YouTube, Instagram, imgbb, …) is normal tracker
-    # content, not an anomaly — census/health tooling probes every link, so a
-    # WARNING here floods logs. The /stream endpoint still 400s unmatched URLs.
+    # DEBUG, not WARNING: non-streamable hosts are normal tracker content and health
+    # tooling probes every link. The /stream endpoint still 400s unmatched URLs.
     logger.debug("No stream host matched for link: %s", link)
     return None
 
@@ -584,10 +544,8 @@ def is_imgur_api_url(url: str) -> bool:
 async def resolve_imgur_cdn_url(api_url: str) -> str:
     """Fetch imgur.gg file metadata and return the CDN stream URL.
 
-    Tries the given URL first; if it fails and the domain isn't already
-    temp.imgur.gg, retries with temp.imgur.gg. Which of the two hosts works
-    has flipped before (temp. was the live one until 2026-08), so both are
-    tried rather than hard-coding today's winner.
+    Tries the given URL first, then temp.imgur.gg: which of the two hosts is
+    live has flipped before.
 
     Args:
         api_url: e.g. ``https://imgur.gg/api/file/wGLEqSB``
@@ -636,10 +594,8 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
                 )
                 return cdn_url
-            # ValueError too, not just HTTPError: the SSRF pre-flight above raises
-            # ValueError (including for a transient DNS failure), and catching only
-            # HTTPError let it escape the loop — making the temp.imgur.gg fallback
-            # this function exists to provide unreachable for that whole class.
+            # ValueError too: the SSRF pre-flight raises it (even for a transient DNS
+            # failure), and that must still reach the temp.imgur.gg fallback.
             except (httpx.HTTPError, ValueError) as exc:
                 last_err = exc if isinstance(exc, ValueError) else ValueError(
                     f"imgur.gg API request failed: {exc}"
@@ -659,13 +615,9 @@ _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.c
 class UpstreamStatusError(ValueError):
     """Upstream answered with a status we cannot stream.
 
-    Carries the code so the API can tell the client what actually happened: a
-    deleted file (404) and a rate-limited host (429) were both collapsed into a
-    generic 502, so clients could not tell "gone" from "try again later".
-    Subclasses ValueError because every existing caller already handles that.
-
-    The code is all it carries — messages on this path have named internal
-    hosts and SSRF-check internals before now.
+    Carries the code so the API can tell "gone" (404) from "try again later"
+    (429). Subclasses ValueError, which every caller already handles. Carries no
+    message: messages on this path can name internal hosts.
     """
 
     def __init__(self, status_code: int) -> None:
@@ -753,9 +705,8 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
 
     resp = await _get(stream_url)
 
-    # Permission-required/private files: pass through untouched so the
-    # caller can relay the 403 as-is rather than treating it as an
-    # interstitial or a generic upstream error.
+    # Private files: pass the 403 through for the caller to relay as-is, rather
+    # than treating it as an interstitial or a generic upstream error.
     if resp.status_code == 403:
         return resp
 
@@ -865,9 +816,8 @@ async def stream_audio(
     request = client.build_request("GET", stream_url, headers=req_headers)
     resp = await client.send(request, stream=True)
 
-    # follow_redirects=True can land us on an internal host even when the
-    # resolved stream_url was public/allow-listed (SSRF). Re-validate the final
-    # url before relaying any bytes — mirrors the gdrive path's re-check.
+    # A redirect can land on an internal host even from an allow-listed URL (SSRF):
+    # re-validate the final url before relaying any bytes.
     await assert_public_redirect_target(resp, source="stream upstream")
 
     try:

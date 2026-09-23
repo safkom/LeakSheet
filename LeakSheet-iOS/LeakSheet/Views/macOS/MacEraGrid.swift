@@ -1,12 +1,8 @@
 #if os(macOS)
 import SwiftUI
 
-/// Era browser: a grid of covers. The iOS accordion puts one full-width bar per
-/// era, which on a desktop window is a column of mostly-empty rows — a grid uses
-/// the width the window actually has and shows a dozen covers at once.
-///
-/// Picking a tile drills into that era's song list (`MacArtistView` swaps the
-/// pane); there is no in-place expansion.
+/// Era browser: a grid of covers, using the width a desktop window has. Picking a
+/// tile drills into that era's song list (`MacArtistView` swaps the pane).
 struct MacEraGrid: View {
     let vm: ArtistViewModel
     let onSelect: (String) -> Void
@@ -64,11 +60,8 @@ private struct MacEraTile: View {
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 8) {
-                // A clear square sized by the grid cell, with the cover drawn
-                // INSIDE it. `aspectRatio(1, .fill)` directly on the cover has
-                // no definite size to work from — CachedImage is already
-                // `.resizable().aspectRatio(.fill)`, so the pair grew without
-                // bound and tiles painted over the header and out of the window.
+                // A clear square sized by the grid cell, with the cover drawn INSIDE it: see
+                // DECISIONS.md::MacEraGrid.swift::tile-sizing
                 Color.clear
                     .aspectRatio(1, contentMode: .fit)
                     .overlay { cover }

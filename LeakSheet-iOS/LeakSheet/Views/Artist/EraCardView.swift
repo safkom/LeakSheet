@@ -17,22 +17,19 @@ struct EraCardView: View {
 
     private let cornerRadius: CGFloat = 16
 
-    /// Collapsed by default. An era blurb runs to a full screen on the bigger
-    /// trackers, so expanding an era used to show a wall of prose and push
-    /// every song below the fold — the opposite of what tapping an era is for.
+    /// Collapsed by default: an era blurb can run to a full screen and push every
+    /// song below the fold.
     @State private var descriptionExpanded = false
 
-    /// Long enough that collapsing earns its "More" control. Shorter blurbs
-    /// render whole, so the toggle never appears next to text it would not
-    /// actually shorten.
+    /// Long enough that collapsing earns its "More" control; shorter blurbs render
+    /// whole.
     private let descriptionCollapseThreshold = 180
     private let descriptionCollapsedLines = 3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Only the header toggles the era. The description below needs its
-            // own control, and a Button inside another Button's label never
-            // receives taps.
+            // Only the header toggles the era: a Button inside another Button's label never
+            // receives taps, and the description needs its own control.
             Button(action: onTap) {
                 HStack(alignment: .center, spacing: 14) {
                     coverArt
@@ -126,9 +123,8 @@ struct EraCardView: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // One font and one alt-names view in both states: swapping the
-            // font, and moving the alt names to a new view on expand, left the
-            // old and new text drawn over each other mid-animation.
+            // One font and one alt-names view in both states, so expanding doesn't draw
+            // old and new text over each other mid-animation.
             Text(era.name)
                 .font(.title3.weight(.semibold))
                 .tracking(-0.3)
@@ -148,9 +144,8 @@ struct EraCardView: View {
         }
     }
 
-    /// Alt era names, dimmer than the era title so they read as aliases.
-    /// The "A.K.A." prefix is gone — it repeated on every card, and the
-    /// styling already says the same thing. VoiceOver still spells it out.
+    /// Alt era names, dimmer than the era title so they read as aliases (VoiceOver
+    /// still says "A.K.A.").
     private func altNamesLabel(_ alts: [String], lineLimit: Int?) -> some View {
         Text(alts.joined(separator: " · "))
             .font(.caption)

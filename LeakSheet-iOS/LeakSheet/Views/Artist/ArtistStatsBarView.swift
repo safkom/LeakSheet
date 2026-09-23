@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// Total / available / snippets / full HQ as one line of text. Tappable (when
-/// `onTap` is set) to open the full `TrackerStats` breakdown.
-///
-/// Four glass tiles used to take a quarter of the first screen on their own;
-/// a line of prose carries the same four numbers and wraps at large sizes.
+/// Total / available / snippets / full HQ as one line of text that wraps at large
+/// sizes. Tappable (when `onTap` is set) to open the full `TrackerStats` breakdown.
 struct ArtistStatsBarView: View {
     let stats: ArtistViewModel.Stats
     /// What the totals count — "tracks" for the song tree, "entries" for a tab.

@@ -3,13 +3,7 @@ import SwiftUI
 
 /// Mac shell: a source-list sidebar over a detail column, with the player bar
 /// pinned to the window bottom and a Details/Queue inspector on the trailing edge.
-///
-/// The detail column is driven by the sidebar *selection*, not by a
-/// `NavigationStack`. The push-stack shape it replaced had to clear its path on
-/// every section change to dodge a crash (the stack's root changed identity
-/// while a value was pushed), which meant visiting Favourites threw away the
-/// loaded tracker. Selection has no such coupling: trackers stay parsed in
-/// `MacUIState`, so switching back is instant.
+/// See DECISIONS.md::MacRootView.swift::selection-shell.
 struct MacRootView: View {
     @Environment(RecentTrackersManager.self) private var recents
 
@@ -22,12 +16,8 @@ struct MacRootView: View {
         ui.trackers[PlayerViewModel.shared.artistSlug]?.vm
     }
 
-    /// The view model the Details panel should resolve against: the tracker
-    /// being BROWSED, falling back to the one playing (a favourite of a tracker
-    /// that isn't open). Handing it the playing tracker unconditionally made the
-    /// cross-era version picker answer for the wrong artist whenever you browsed
-    /// one tracker while another played — and answer nothing at all when
-    /// nothing was playing, which is the common case.
+    /// The view model the Details panel resolves against: the tracker being BROWSED,
+    /// falling back to the one playing (a favourite of a tracker that isn't open).
     private var vmForInspector: ArtistViewModel? {
         if let slug = ui.selectedSlug, let vm = ui.tracker(slug)?.vm { return vm }
         return vmForCurrentPlayback
@@ -37,13 +27,8 @@ struct MacRootView: View {
         NavigationSplitView {
             MacSidebar(selection: $ui.selection)
         } detail: {
-            // GeometryReader clamps the detail column to the size it is
-            // offered. Without it a tall LazyVGrid (Ye has ~40 eras) reports an
-            // ideal height of the whole grid, the split view sizes to that, and
-            // BOTH columns get pushed up under the titlebar — taking hover
-            // hit-testing with them, so row controls appeared on the wrong row.
-            // Small trackers fit and looked fine, which is why it only showed
-            // up on the big ones.
+            // GeometryReader clamps the detail column to its offered size: see
+            // DECISIONS.md::MacRootView.swift::geometry-clamp
             GeometryReader { proxy in
                 detail
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
@@ -74,10 +59,8 @@ struct MacRootView: View {
         // Selecting a tracker that isn't parsed yet (a sidebar row from a
         // previous launch) loads it on demand.
         .onChange(of: ui.selection) { _, selection in
-            // The Details panel is scoped to what you are looking at. Left
-            // alone it kept showing the previous tracker's song while
-            // `vmForInspector` had already moved on, so the version picker
-            // resolved one tracker's song against another's era tree.
+            // The Details panel is scoped to what you are looking at, so a stale song
+            // can't resolve against another tracker's era tree.
             ui.selectedSong = nil
             if case .tracker(let slug) = selection { ui.touch(slug) }
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
@@ -103,9 +86,7 @@ struct MacRootView: View {
         case .browse, nil:
             browsePane
         case .favourites:
-            // onShowDescription routes into the inspector — without it a
-            // favourite opened a modal sheet while every song row opened the
-            // panel, which is two answers to the same question.
+            // onShowDescription routes into the inspector, the same surface song rows use.
             FavouritesView(
                 embedded: true,
                 onShowDescription: { payload in
@@ -167,8 +148,7 @@ struct MacRootView: View {
 
             Divider().overlay(Color.lsBorder)
 
-            // embedded: the split view already supplies the title and toolbar —
-            // a nested NavigationStack here fought the detail column for both.
+            // embedded: the split view already supplies the title and toolbar.
             BrowseArtistsView(
                 onPick: { pickedUrl, pickedName in
                     Task { await open(pickedUrl, artistName: pickedName) }

@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// A wrapping HStack: lays subviews left-to-right and wraps to the next row when
-/// the next subview would overflow the proposed width. Used for badge / quality
-/// / credit pills so they wrap to a second line at large Dynamic Type sizes
-/// instead of clipping off the trailing edge.
+/// A wrapping HStack: lays subviews left-to-right, wrapping when the next would
+/// overflow, so pills wrap at large Dynamic Type sizes instead of clipping.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 
@@ -73,9 +71,8 @@ struct FlowLayout: Layout {
             maxX = max(maxX, x - spacing)
         }
 
-        // Clamp reported width to the available space so parent containers
-        // (especially LazyVStack) don't receive an inflated size when a single
-        // child is wider than the proposal (e.g. a very long credit tag).
+        // Clamp reported width to the available space so parents (especially LazyVStack)
+        // don't get an inflated size from one over-wide child.
         let clampedWidth = maxWidth < .infinity ? min(maxX, maxWidth) : maxX
         return (offsets, sizes, CGSize(width: clampedWidth, height: y + rowHeight))
     }

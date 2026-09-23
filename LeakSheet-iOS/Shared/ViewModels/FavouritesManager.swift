@@ -15,8 +15,7 @@ final class FavouritesManager {
     var entries: [FavouriteEntry] = [] {
         didSet {
             keyIndex = Set(entries.map(\.key))
-            // Here rather than at each mutation: five call sites cleared it
-            // by hand, and the three writes in load() did not.
+            // Invalidated here rather than at each mutation, so no write path can miss it.
             _groupedCache = nil
         }
     }
@@ -36,8 +35,7 @@ final class FavouritesManager {
         let songVersionCount: Int
         let badge: String?
         let addedAt: Date
-        // Full version snapshot — preserves featuring, producers, samples,
-        // refs, etc. so the description sheet renders complete metadata.
+        // Full version snapshot, so the description sheet renders complete metadata.
         // Optional so entries persisted before this field existed still decode.
         let primaryVersion: SongVersion?
         // Legacy flat fields kept for backward compatibility with entries
@@ -102,23 +100,11 @@ final class FavouritesManager {
 
     // MARK: - Key
 
-    /// Favourite identity.
+    /// Favourite identity: artist + era + song name, lower-cased (the parser groups
+    /// names that differ only in case).
     ///
-    /// Artist + era + song name identifies a normal song. It does NOT identify
-    /// a placeholder: "???" is how these trackers write "nobody knows what
-    /// this is", and one era carries dozens of them — 282 Ye songs shared a
-    /// key, so favouriting one filled the heart on every other unidentified
-    /// track in that era.
-    ///
-    /// A placeholder's identity is the file it points at, which is the same
-    /// discriminator the now-playing indicator uses and the only thing that
-    /// tells two mystery tracks apart. Appended for placeholders ONLY, so
-    /// every existing key is byte-identical and nothing needs migrating except
-    /// the placeholder entries themselves.
-    ///
-    /// Case-insensitive: the parser groups "Touch The Sky" and "Touch the Sky
-    /// [V2]" into one song, so a row and its versions disagreed on case and
-    /// one heart made two favourites. The discriminator (a link) keeps its case.
+    /// A placeholder name ("???") identifies nothing, so placeholders ALONE also carry
+    /// the file link, the same discriminator the now-playing indicator uses.
     static func key(
         artistSlug: String, eraName: String, baseName: String,
         discriminator: String? = nil
@@ -255,11 +241,8 @@ final class FavouritesManager {
     @ObservationIgnored private var _groupedCache: [GroupedArtist]?
 
     var groupedByArtist: [GroupedArtist] {
-        // Read `entries` before the cache check. The cache is
-        // @ObservationIgnored, so a hit that never touched `entries` left the
-        // reading view subscribed to nothing, and a favourite changed elsewhere
-        // would not refresh it. Both current callers happen to read
-        // entries.count too; this must not depend on that.
+        // Read `entries` before the cache check: the cache is @ObservationIgnored, so a hit
+        // that never touched `entries` would leave the reading view subscribed to nothing.
         let current = entries
         if let cached = _groupedCache { return cached }
         let result = Self.grouped(from: current)
@@ -267,11 +250,8 @@ final class FavouritesManager {
         return result
     }
 
-    /// Group entries by artist → era with a DETERMINISTIC order: artists by
-    /// their most recently added favourite (newest first), eras likewise,
-    /// entries in stored order (newest first — inserts happen at index 0).
-    /// Dictionary iteration order previously shuffled the favourites panel
-    /// on every recompute.
+    /// Group entries by artist → era with a DETERMINISTIC order: artists and eras by
+    /// their most recently added favourite, entries in stored order (newest first).
     static func grouped(from entries: [FavouriteEntry]) -> [GroupedArtist] {
         struct EraBucket {
             let art: String?
@@ -335,12 +315,10 @@ final class FavouritesManager {
         // One-shot migration from UserDefaults
         if let legacyData = UserDefaults.standard.data(forKey: Self.storageKey),
            let migrated = try? JSONDecoder().decode([FavouriteEntry].self, from: legacyData) {
-            // Migrate here too: this branch returned early, so the cohort
-            // most likely to hold pre-version-tag keys was the one cohort
-            // that never got the rewrite.
+            // Migrate here too: this branch returns early, and holds the oldest keys.
             entries = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(migrated)))
-            // Written synchronously, and the old copy removed only once the new
-            // one exists: a debounced save left a 150 ms window with neither.
+            // Written synchronously, and the old copy removed only once the new one exists,
+            // so there is never a moment with neither.
             if let data = try? JSONEncoder().encode(entries),
                (try? data.write(to: Self.storageFile, options: .atomic)) != nil {
                 UserDefaults.standard.removeObject(forKey: Self.storageKey)
@@ -378,28 +356,18 @@ final class FavouritesManager {
         }
     }
 
-    /// Tags the backend started recognising in 2026-08. Entries saved before
-    /// that carry them inside `songBaseName` ("90210 [Demo 8]"), while rows now
-    /// report the stripped name — so the heart silently stopped matching. This
-    /// is a one-shot rewrite, deliberately narrow: it lists exactly the tag
-    /// families that changed, so a genuine bracketed title like "X [Mixtape]"
-    /// is left alone.
+    /// Version-tag families the backend recognises now but did not always: older
+    /// entries carry them in `songBaseName` ("90210 [Demo 8]") and stopped matching.
+    /// Narrow on purpose, so a genuine bracketed title like "X [Mixtape]" is left alone.
     ///
-    /// ponytail: delete this once no install predates the change.
+    /// ponytail: delete once no install predates the backend change.
     private static let orphanedTagRE = try? NSRegularExpression(
         pattern: #"\s*\[(?:Demo(?:\s+\d+)?|OG File|Master File|Instrumental|Rough Mix|Final(?:\s+Mix)?(?:\s+\d+)?|Remix|Mix [A-Z]|Live)\]\s*$"#,
         options: [.caseInsensitive]
     )
 
-    /// Re-key placeholder favourites onto their file.
-    ///
-    /// Everything saved before the key gained a discriminator keyed "???" on
-    /// artist + era + name alone, which every unidentified track in that era
-    /// shares. Those entries are already broken — 282 of them collide on the
-    /// Ye tracker — so this is not preserving behaviour, it is unsticking it:
-    /// each keeps the file its stored version points at, which is what the
-    /// rows now look up. An entry whose stored version has no link keeps its
-    /// old key; there is nothing to tell it apart by.
+    /// Re-key placeholder favourites onto their file. Old "???" keys collide across an
+    /// era, so each takes its stored version's link; one without a link keeps its key.
     static func migratingPlaceholderKeys(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
         var seen = Set(stored.map(\.key))
         return stored.map { entry in
@@ -427,9 +395,8 @@ final class FavouritesManager {
             else { return entry }
             let stripped = String(name[name.startIndex..<swiftRange.lowerBound])
             let newKey = key(artistSlug: entry.artistSlug, eraName: entry.eraName, baseName: stripped)
-            // Another version of the same song is already favourited under the
-            // stripped name — leave this one alone rather than create a
-            // duplicate key.
+            // Another version of the same song is already favourited under the stripped
+            // name: leave this one alone rather than create a duplicate key.
             guard !seen.contains(newKey) else { return entry }
             seen.insert(newKey)
             return entry.rekeyed(to: newKey, baseName: stripped)
@@ -439,9 +406,6 @@ final class FavouritesManager {
     private var saveTask: Task<Void, Never>?
 
     /// Persist off the main actor and coalesce bursts of toggles into one write.
-    /// Previously this JSON-encoded the whole entries array (each embeds a full
-    /// version snapshot) and did a synchronous atomic file write on the main
-    /// actor on every heart tap — a per-tap hitch that scaled with library size.
     private func save() {
         let snapshot = entries              // Sendable value snapshot
         let file = Self.storageFile
@@ -454,19 +418,10 @@ final class FavouritesManager {
         }
     }
 
-    /// Persist immediately, skipping the debounce.
+    /// Persist immediately, skipping the debounce (the app is backgrounding).
     ///
-    /// Called when the app backgrounds. Without it, hearting a song and then
-    /// force-quitting (or being jetsammed) inside 150ms silently dropped the
-    /// write — and two toggles inside one window cancelled the first task, so
-    /// both were lost, not just the last.
-    ///
-    /// Awaits the in-flight task rather than only cancelling it. `cancel()`
-    /// does nothing once the debounce has elapsed and `Self.persist` is
-    /// already running — it checks no cancellation and its file write is
-    /// synchronous — so cancel-then-write raced two writers with different
-    /// snapshots, and the OLDER one landing second would clobber the newest
-    /// favourite. Exactly the loss this method exists to prevent.
+    /// Awaits the in-flight task rather than cancelling it: once `persist` is running
+    /// it checks no cancellation, so a second writer could land an OLDER snapshot last.
     func flush() async {
         let inFlight = saveTask
         saveTask = nil

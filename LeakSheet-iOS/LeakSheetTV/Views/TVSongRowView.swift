@@ -9,8 +9,7 @@ struct TVSongRowView: View {
     let eraName: String
     let eraArt: String?
     let artist: Artist
-    /// Every streamable version in the era, so playback continues into the
-    /// next song. Passing only this song's versions stopped after one song.
+    /// Every streamable version in the era, so playback continues into the next song.
     let eraVersions: [SongVersion]
 
     @Environment(PlayerViewModel.self) private var player

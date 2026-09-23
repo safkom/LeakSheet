@@ -5,9 +5,7 @@ import SwiftUI
 #if os(macOS)
 
 /// macOS video surface. AVKit's SwiftUI `VideoPlayer` renders the same shared
-/// AVPlayer and brings its own transport chrome and full-screen button, which
-/// is the Mac convention — so the platform has no separate presenter.
-/// See DECISIONS.md::VideoSurfaceView.swift::macos-videoplayer.
+/// AVPlayer with its own transport chrome and full-screen button, the Mac convention.
 struct VideoSurfaceView: View {
     let player: AVPlayer?
 
@@ -31,12 +29,9 @@ struct NativeFullScreenVideoPresenter: View {
 
 #else
 
-/// AVPlayerLayer host bound to the engine's shared AVPlayer. Shown in place
-/// of the Now Playing artwork when the current item carries a video track —
-/// playback state, scrubbing, and remote controls stay unified because the
-/// layer renders the same player the audio path drives. When the view goes
-/// away (background, dismissal) the layer detaches and playback continues
-/// audio-only.
+/// AVPlayerLayer host bound to the engine's shared AVPlayer, shown in place of the
+/// Now Playing artwork for video. When the view goes away the layer detaches and
+/// playback continues audio-only.
 struct VideoSurfaceView: UIViewRepresentable {
     let player: AVPlayer?
 
@@ -58,12 +53,9 @@ struct VideoSurfaceView: UIViewRepresentable {
     }
 }
 
-/// Presents the native AVPlayerViewController modally when `isPresented`
-/// flips true — a true UIKit presentation, so the player shows its OWN
-/// chrome (Done button, transport controls, AirPlay) with nothing custom
-/// layered on top. Bound to the SAME AVPlayer the inline surface and audio
-/// path drive; dismissing continues playback inline. Attach to any view via
-/// `.background(...)` — it renders nothing itself.
+/// Presents the native AVPlayerViewController modally (its OWN chrome, nothing
+/// layered on top) when `isPresented` flips true, bound to the same AVPlayer.
+/// Attach via `.background(...)`; it renders nothing itself.
 struct NativeFullScreenVideoPresenter: UIViewControllerRepresentable {
     let player: AVPlayer?
     @Binding var isPresented: Bool
@@ -96,10 +88,8 @@ struct NativeFullScreenVideoPresenter: UIViewControllerRepresentable {
         var playerController: DismissReportingPlayerViewController?
     }
 
-    /// The presenter's view branch disappears when the current track loses
-    /// its video (e.g. autoplay advances to an audio-only song). Without
-    /// this, an already-presented fullscreen player would be orphaned with
-    /// no binding left to dismiss it.
+    /// The presenter's view branch disappears when the track loses its video (autoplay
+    /// to an audio-only song); dismiss here so the fullscreen player isn't orphaned.
     static func dismantleUIViewController(_ host: UIViewController, coordinator: Coordinator) {
         if let controller = coordinator.playerController {
             coordinator.playerController = nil

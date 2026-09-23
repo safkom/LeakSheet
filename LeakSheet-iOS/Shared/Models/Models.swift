@@ -11,8 +11,7 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     let notices: [Notice]?
     let totalSongs: Int?
     let totalVersions: Int?
-    /// Entries from secondary Misc / Music Videos tabs — optional so older
-    /// cached responses and servers decode fine (ogFilenames precedent).
+    /// Entries from secondary Misc / Music Videos tabs; optional so older payloads decode.
     let miscEntries: [MiscEntry]?
     /// All parsed secondary tabs (misc, music_videos, released, best_of,
     /// worst_of, stems, other) — the uniform switchable-mode surface.
@@ -120,10 +119,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     let versions: [SongVersion]
     let badge: String?
     /// Every version the tracker lists, including ones the active filter hid.
-    /// `versions` is only what matched the filter, so a Best Of row would
-    /// otherwise expand to a single chip and its detail sheet would play a
-    /// one-track queue. Nil when the song was never filtered (and on decode,
-    /// which is why it is excluded from CodingKeys).
+    /// Nil when never filtered (and after decode: it is excluded from CodingKeys).
     var unfilteredVersions: [SongVersion]? = nil
 
     /// The full version set — what expansion, the detail sheet, and the
@@ -134,10 +130,8 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
 
     var primary: SongVersion? { versions.first }
 
-    /// Names the fanbase uses for a track nobody has identified. Mirrors the
-    /// backend's `_PLACEHOLDER_BASE_NAMES`, which is why such a song is sent
-    /// with an empty `songKey`: rows sharing one of these names are distinct
-    /// mystery tracks, not versions of one song.
+    /// Names the fanbase uses for an unidentified track. Mirrors the backend's
+    /// `_PLACEHOLDER_BASE_NAMES`: such rows are distinct tracks, sent with an empty `songKey`.
     static let placeholderBaseNames: Set<String> = [
         "???", "??", "?", "unknown", "untitled", "tba", "n/a",
     ]
@@ -162,15 +156,8 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
         versions.contains { $0.isStreamable }
     }
 
-    /// Whether the row shows more than one version — the *displayed* set, not
-    /// the full one.
-    ///
-    /// This read `allVersions`, while the row's "N versions" label and
-    /// `bestVersion` read `versions`. Under a badge filter the two disagreed:
-    /// a Best Of row said "1 versions" and then expanded to show the ⭐ take
-    /// next to a Rumored one the filter was supposed to have hidden. Playback
-    /// and the description sheet still use `allVersions` explicitly, so
-    /// auto-advance is not truncated.
+    /// Whether the row shows more than one version — the *displayed* set, matching the
+    /// row's "N versions" label. Playback and the description sheet use `allVersions`.
     var hasMultipleVersions: Bool {
         versions.count > 1
     }
@@ -193,14 +180,8 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
         Self.best(of: versions)
     }
 
-    /// The version a collapsed row should represent: the best one the user can
-    /// actually play, falling back to the best overall when nothing is
-    /// playable. `bestVersion` ranks on quality and availability only, so on
-    /// 457 of the corpus's multi-version songs it selected a version with no
-    /// link while a playable sibling sat underneath — the row then showed no
-    /// play affordance at all. Picking the best STREAMABLE one keeps the row's
-    /// badges describing the thing tapping it plays, which is the property the
-    /// original `versions.first` bug broke in the other direction.
+    /// The version a collapsed row represents: the best playable one, else the best
+    /// overall, so the row's badges describe what tapping it plays.
     var bestPlayableVersion: SongVersion? {
         Self.best(of: versions.filter(\.isStreamable)) ?? bestVersion
     }
@@ -324,7 +305,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     /// Director credit, from "[dir. Name]" on music-video and visual rows.
     let director: String?
     /// Performer from a dedicated Artist / Credited Artist column (collab-style
-    /// trackers) — distinct from `featuring`; added backend-side 2026-07-20.
+    /// trackers), distinct from `featuring`.
     let creditedArtists: String?
     let altTitles: [String]?
     let notes: String?
@@ -334,13 +315,11 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let trackLength: String?
     let fileDate: String?
     let leakDate: String?
-    /// When a snippet/preview first surfaced. Often months ahead of the leak
-    /// date, and for a preview-only version it is the ONLY date there is — so
-    /// Recents could not see those versions at all.
+    /// When a snippet/preview first surfaced; the only date a preview-only version has.
     let previewDate: String?
     let availableLength: String?
     let quality: String?
-    /// Streaming Yes/No from a main-tab Streaming column (backend 2026-07-24).
+    /// Streaming Yes/No from a main-tab Streaming column.
     let streaming: Bool?
     let links: [String]?
     let dateOfRecording: String?
@@ -409,14 +388,12 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         self.rating = rating
     }
 
-    /// Name + tag alone is not unique: Ye has ~700 untagged same-name
-    /// versions, and callers matching on this id played, highlighted or
-    /// described the first of them. The file link tells them apart.
+    /// Name + tag alone is not unique (untagged same-name versions are common);
+    /// the file link tells them apart.
     var id: String { "\(name)::\(versionTag ?? "")::\(links?.first ?? "")" }
 
-    /// File extensions that identify the linked file as NOT a playable audio stream.
-    /// Marking a version as non-streamable hides Play actions and shows the
-    /// description sheet instead of attempting playback.
+    /// File extensions that identify the linked file as NOT playable audio: such a
+    /// version hides Play actions and opens the description sheet instead.
     static let nonAudioExtensions: [String] = [
         ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz",
         ".pdf", ".txt", ".doc", ".docx", ".rtf",
@@ -507,13 +484,9 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     /// The tab's sub-section ("Instrumentals", "Music Videos"), if any.
     var section: String? = nil
 
-    /// Row identity. `rowIndex` is what makes it unique: these tabs repeat
-    /// content constantly — the Ye Stems tab lists ten entries called "Beat 1"
-    /// in one era with no date — and ForEach silently keeps only the first row
-    /// per duplicate id, so 458 of that tab's 1,721 rows never rendered while
-    /// the stats bar above them counted all of them. 527 rows across the
-    /// tracker. Falls back to the old content-derived shape for payloads
-    /// cached before the backend sent an index.
+    /// Row identity. `rowIndex` makes it unique: these tabs repeat content constantly,
+    /// and ForEach keeps only the first row per duplicate id. Payloads cached before
+    /// the backend sent an index fall back to the content-derived shape.
     var id: String {
         guard let rowIndex else {
             return "\(sourceTab)::\(eraName)::\(name)::\(date ?? "")"
@@ -608,12 +581,8 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
         self == .best || self == .special
     }
 
-    /// Display precedence when one song carries several differently-badged
-    /// versions (common on big trackers — Ye's "Hurricane" has best, special
-    /// AND worst versions). Positive badges outrank negative ones: a song
-    /// with a ⭐ version should not be labelled 🗑️ just because a worse
-    /// version happens to come first in the list. Mirrors the backend's
-    /// `Song.badge` ordering.
+    /// Display precedence when one song carries several differently-badged versions:
+    /// positive badges outrank negative ones. Mirrors the backend's `Song.badge` ordering.
     var displayPriority: Int {
         switch self {
         case .grail: 0
@@ -667,10 +636,8 @@ nonisolated struct TrackerStats: Codable, Hashable, Sendable {
     let ogFiles: Int?
     let stemBounces: Int?
     let full: Int?
-    /// The "Total Full" wording, which already counts the OG files within it.
-    /// Trackers use one or the other, so a Carti-style sheet reports `full: 0`
-    /// with everything in here — and reading `full` alone dropped the Full row
-    /// from the stats sheet entirely (862 of 1,635 versions unaccounted for).
+    /// The "Total Full" wording, which already counts the OG files. Trackers use this
+    /// or `full`, so a Carti-style sheet reports `full: 0` with everything in here.
     let totalFull: Int?
     let tagged: Int?
     let partial: Int?
@@ -727,16 +694,15 @@ nonisolated struct TimelineEvent: Codable, Identifiable, Hashable, Sendable {
 
 // MARK: - DiscoveryArtist
 
-/// One entry of the backend /trackers discovery feed (TrackerHub sheet).
+/// One entry of the backend /trackers discovery feed (ArtistGrid registry).
 nonisolated struct DiscoveryArtist: Codable, Identifiable, Sendable {
     let name: String
     let url: String
     let credit: String?
     let best: Bool?
     let upToDate: Bool?
-    /// TrackerHub's link-health flag. Tri-state on purpose: the source encodes
-    /// "partially working" as neither true nor false, and a tracker whose links
-    /// are known dead is worth saying so BEFORE the user opens it.
+    /// The registry's link-health flag. Tri-state: "partially working" is neither true
+    /// nor false, and known-dead links are worth flagging before the user opens it.
     let workingLinks: Bool?
 
     var id: String { url }

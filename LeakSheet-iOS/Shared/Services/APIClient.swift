@@ -11,8 +11,7 @@ actor APIClient {
     static let baseURLDefaultsKey = "leaksheet_api_base_url"
 
     /// Active API base URL — a custom server from Settings, or the production
-    /// default. Read fresh each time: UserDefaults already serves this from
-    /// memory, and a memo needed a lock, a change observer and its own tests.
+    /// default. Read fresh each time: UserDefaults already serves it from memory.
     static var baseURL: String {
         resolveBaseURL(UserDefaults.standard.string(forKey: baseURLDefaultsKey))
     }
@@ -64,22 +63,17 @@ actor APIClient {
         let etag: String?
     }
 
-    /// Cold-load progress for the landing screen. `expectedBytes` is the
-    /// wire Content-Length when the server sent one (nil for chunked/gzip
-    /// responses without it) — the UI shows a fraction when it's known and
-    /// a byte counter otherwise.
+    /// Cold-load progress for the landing screen. `expectedBytes` is the wire
+    /// Content-Length when sent (nil for chunked/gzip): a fraction if known, else a byte counter.
     nonisolated enum LoadPhase: Equatable, Sendable {
-        /// Reading the local ETag/payload. Cheap now that the ETag lives in a
-        /// sidecar, but the 304 replay still decodes a multi-MB payload here.
+        /// Reading the local ETag/payload; the 304 replay decodes a multi-MB payload here.
         case readingCache
         case connecting
         /// What the server says it is doing during a cold parse, when it streams
         /// progress. `done`/`total` count the extra tabs being read.
         case server(message: String, done: Int?, total: Int?)
         case downloading(receivedBytes: Int64, expectedBytes: Int64?)
-        /// Decoding the payload and building the artist view model. Used to be
-        /// silent, which is most of why "Contacting server…" appeared to cover
-        /// the whole load.
+        /// Decoding the payload and building the artist view model.
         case preparing
     }
 
@@ -93,9 +87,8 @@ actor APIClient {
     ) async throws -> ParseResult {
         var request = URLRequest(url: Self.sheetEndpoint)
         request.httpMethod = "POST"
-        // A cold parse can take many seconds; ask the server to narrate it.
-        // Hits and 304s still come back as plain JSON, and a server that
-        // predates the stream ignores this and sends JSON too.
+        // A cold parse can take many seconds; ask the server to narrate it. Hits, 304s
+        // and older servers still answer with plain JSON.
         request.setValue("application/x-ndjson, application/json", forHTTPHeaderField: "Accept")
 
         if let etag = cachedEtag, !forceRefresh {
@@ -142,9 +135,8 @@ actor APIClient {
                 )
             }
             etag = Self.normalizeETag(streamedEtag)
-            // A proxy that closes the connection cleanly mid-payload ends the
-            // task without an error; without this it surfaced as a JSON
-            // decoding failure.
+            // A proxy closing the connection cleanly mid-payload ends the task without an
+            // error; catch the truncation here rather than as a JSON decoding failure.
             if let bytes = stream.bytes, Int64(data.count) != bytes {
                 throw APIError.httpError(
                     status: 0, message: "The download was cut off before the tracker finished. Try again."
@@ -178,14 +170,11 @@ actor APIClient {
         var failure: (status: Int, detail: String)?
     }
 
-    /// Accumulates a response body from delegate chunk callbacks and reports
-    /// throttled LoadPhase progress. URLSession serializes delegate calls,
-    /// so the mutable state needs no locking (@unchecked Sendable).
+    /// Accumulates a response body from delegate chunk callbacks and reports throttled
+    /// LoadPhase progress. URLSession serializes delegate calls, so no locking is needed.
     ///
-    /// For a streamed cold parse it also splits the body: progress lines
-    /// become `.server` phases until the artist header, and everything after
-    /// that is the payload. A delegate rather than `data(for:)`, because the
-    /// lines have to be acted on as they arrive.
+    /// For a streamed cold parse it also splits the body: progress lines become
+    /// `.server` phases until the artist header; everything after is the payload.
     private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let onProgress: (@Sendable (LoadPhase) -> Void)?
         private let continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
@@ -233,10 +222,8 @@ actor APIClient {
             } else {
                 data.append(chunk)
             }
-            // gzip bodies decompress past the wire Content-Length — drop the
-            // total rather than showing a >100% bar; the UI falls back to a
-            // byte counter. A stream's total is exact (its payload's trailing
-            // newline is the one extra byte), so it is left alone.
+            // gzip bodies decompress past the wire Content-Length: drop the total rather than
+            // show >100%. A stream's total is exact (plus the payload's trailing newline).
             if reader == nil, let total = expected, Int64(data.count) > total { expected = nil }
             if data.count - lastReport >= 262_144 {
                 lastReport = data.count
@@ -280,9 +267,8 @@ actor APIClient {
 
     // MARK: - Image Proxy
 
-    /// Proxy URL for an art image. Pass `width` (a pixel bucket) to have the
-    /// backend downscale — sized requests decode dramatically faster on
-    /// device and cache better.
+    /// Proxy URL for an art image. Pass `width` (a pixel bucket) to have the backend
+    /// downscale; sized requests decode faster on device and cache better.
     nonisolated func imageProxyURL(for imageURL: String, width: Int? = nil) -> URL? {
         guard var components = URLComponents(string: "\(Self.baseURL)/image-proxy") else { return nil }
         var fullURL = imageURL
@@ -329,7 +315,7 @@ actor APIClient {
     // MARK: - Trackers (discovery)
 
     /// Fetch the artist-tracker discovery list from the backend /trackers
-    /// endpoint (TrackerHub sheet, server-cached).
+    /// endpoint (ArtistGrid registry, server-cached).
     func fetchTrackers() async throws -> [DiscoveryArtist] {
         guard let url = URL(string: "\(Self.baseURL)/trackers") else {
             throw APIError.invalidURL

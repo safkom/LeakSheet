@@ -17,15 +17,8 @@ struct LeakSheetApp: App {
 
     var body: some Scene {
         #if os(macOS)
-        // Window frames and sidebar state restore automatically on macOS —
-        // `restorationBehavior` is the opt-out, so there's nothing to add here.
-        //
-        // `Window`, not `WindowGroup`: the commands raise this window by id
-        // (⌘I and ⌥⌘Q drive an inspector only this window shows), and
-        // `openWindow(id:)` on a WindowGroup OPENS ANOTHER COPY instead of
-        // bringing the existing one forward — two identical main windows.
-        // A Window scene is a singleton, and it also removes File ▸ New and
-        // supplies its own Window-menu item for free.
+        // Window frames and sidebar state restore automatically on macOS.
+        // `Window`, not `WindowGroup`: see DECISIONS.md::LeakSheetApp.swift::window-scene
         Window("LeakSheet", id: "main") {
             MacRootView()
                 .environment(PlayerViewModel.shared)
@@ -52,8 +45,7 @@ struct LeakSheetApp: App {
         .windowResizability(.contentMinSize)
         .keyboardShortcut("0", modifiers: [.command, .shift])
 
-        // ⌘, — the Mac's one place for preferences. It used to be a sidebar row,
-        // which is neither where a Mac user looks nor reachable by keyboard.
+        // ⌘, — the Mac's one place for preferences.
         Settings {
             SettingsView(embedded: true)
                 .frame(width: 460, height: 520)
@@ -76,9 +68,8 @@ struct LeakSheetApp: App {
         #if os(macOS)
         // macOS has no AVAudioSession.
         #else
-        // Only set the category here. Activating the session at launch would
-        // interrupt other apps' audio before the user plays anything —
-        // AudioEngine activates the session right before playback instead.
+        // Only set the category here: activating at launch would interrupt other apps'
+        // audio. AudioEngine activates the session right before playback.
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [])

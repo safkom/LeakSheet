@@ -1,10 +1,8 @@
 import SwiftUI
 
-/// General-purpose cached image view using ImageCache.
-/// Loads from memory cache instantly, falls back to network.
-/// `maxPixelSize` bounds the decode — pass the bucket matching the display
-/// size (128, 320, 640, 1280 or 1600, the backend's resize widths) so
-/// full-res bitmaps never materialize.
+/// General-purpose cached image view using ImageCache: memory cache first, then
+/// network. Pass the `maxPixelSize` bucket matching the display size (128, 320,
+/// 640, 1280 or 1600, the backend's resize widths) so full-res bitmaps never exist.
 struct CachedImage<Placeholder: View>: View {
     let url: URL?
     var maxPixelSize: Int = 1280
@@ -35,12 +33,8 @@ struct CachedImage<Placeholder: View>: View {
                 await onLoad?(cached)
                 return
             }
-            // Clear so the PREVIOUS url's bitmap isn't left on screen under
-            // the new one's label while this resolves. Deliberate trade: the
-            // miss above is a MEMORY miss, and `loadImage` can still be served
-            // from URLCache on disk, so this does flash the placeholder on a
-            // warm-disk hit. Showing the wrong art is worse than showing none,
-            // and the in-memory fast path above already covers the common case.
+            // Clear so the PREVIOUS url's bitmap isn't shown under the new label. This can
+            // flash the placeholder on a warm-disk hit; wrong art is worse than none.
             image = nil
             if let loaded = await ImageCache.shared.loadImage(from: url, maxPixelSize: maxPixelSize) {
                 image = loaded

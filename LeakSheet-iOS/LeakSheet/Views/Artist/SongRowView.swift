@@ -118,8 +118,7 @@ struct SongRowView: View {
         .background(isPlaying ? Color.lsAccent.opacity(0.08) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .rowHoverHighlight()
-        // One VoiceOver stop per song, with its actions named — the pills,
-        // credits, chevron and buttons were 6–10 separate stops per row.
+        // One VoiceOver stop per song, with its actions named.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityValue(isPlaying ? "Now playing" : "")
@@ -217,8 +216,7 @@ struct SongRowView: View {
 }
 
 /// The row's leading control: what is playing, or a play button for anything
-/// streamable. Playback used to be reachable only by swipe, long-press or the
-/// ⋯ menu, with nothing on the row saying a song could be played at all.
+/// streamable, so the row itself says a song can be played.
 struct SongPlayControl: View {
     let isCurrent: Bool
     let isLoading: Bool
