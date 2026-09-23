@@ -539,6 +539,11 @@ app.add_middleware(
 # POST /api/sheet — parse a tracker URL → full Artist JSON
 # ---------------------------------------------------------------------------
 
+# A whole cold parse, every tab included. Per-request timeouts alone let a
+# slow-drip host hold a parse (and everyone joined to it) indefinitely; this
+# stays under Cloudflare's 125 s edge timeout so the client gets our message.
+_PARSE_DEADLINE_S = 110.0
+
 # Normalized tracker URL → the parse running for it: (task, progress listeners,
 # the timer the parse reports into).
 _parses: dict[str, tuple[asyncio.Task, list[Callable[[dict], None]], PhaseTimer]] = {}
@@ -581,10 +586,11 @@ async def _parse_once(
         shared = PhaseTimer(on_progress=broadcast)
 
         async def run() -> tuple[Artist, asyncio.Task]:
-            artist = await async_fetch_and_parse(
-                url, artist_name=None, cache_ttl=cache_ttl,
-                use_cache=use_cache, write_cache=write_cache, timer=shared,
-            )
+            async with asyncio.timeout(_PARSE_DEADLINE_S):
+                artist = await async_fetch_and_parse(
+                    url, artist_name=None, cache_ttl=cache_ttl,
+                    use_cache=use_cache, write_cache=write_cache, timer=shared,
+                )
             # Detached: covers download while the response is already on its
             # way. See _warm_era_art for why they must be fetched now.
             return artist, _spawn_detached(_warm_era_art(artist, url))
@@ -846,6 +852,11 @@ def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
             status_code=403,
             detail="This tracker is private or has been taken down.",
         )
+    if isinstance(e, (httpx.InvalidURL, UnicodeError)):
+        return HTTPException(status_code=400, detail="Invalid URL")
+    if isinstance(e, TimeoutError):
+        logger.warning("sheet parse exceeded %ss for %s", _PARSE_DEADLINE_S, req.url[:120])
+        return HTTPException(status_code=503, detail="This tracker took too long to load. Please try again.")
     if isinstance(e, NetworkError):
         # NEVER interpolate: NetworkError wraps the SSRF guard's message,
         # which names the resolved address ("blocked non-public address

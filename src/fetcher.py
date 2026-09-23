@@ -197,6 +197,30 @@ async def close_sheets_client() -> None:
     _sheets_client = None
 
 
+# Largest decoded sheet body we accept. The Ye main tab is ~11 MB; a feed-listed
+# custom host is third-party controlled and could otherwise stream (or
+# gzip-bomb) the worker out of memory.
+_MAX_SHEET_BYTES = 64 * 1024 * 1024
+
+
+async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """client.get, but the decoded body stops at _MAX_SHEET_BYTES."""
+    request = client.build_request("GET", url, **kwargs)
+    resp = await client.send(request, stream=True)
+    try:
+        body = bytearray()
+        async for chunk in resp.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > _MAX_SHEET_BYTES:
+                raise NetworkError(f"{urlparse(url).hostname} sent more than {_MAX_SHEET_BYTES} bytes")
+    finally:
+        await resp.aclose()
+    # Already decoded, so the encoding headers no longer describe the body.
+    headers = [(k, v) for k, v in resp.headers.multi_items()
+               if k.lower() not in ("content-encoding", "content-length")]
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+
+
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
     """GET the ArtistGrid registry, parse it, and register its hosts.
 
@@ -206,8 +230,8 @@ async def fetch_artistgrid_entries() -> list[TrackerEntry]:
     Raises on any upstream or parse failure, so each caller keeps its own
     fallback.
     """
-    resp = await _get_sheets_client().get(
-        ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
+    resp = await _get_capped(
+        _get_sheets_client(), ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
     )
     if resp.status_code != 200:
         raise NetworkError(f"ArtistGrid returned {resp.status_code}")
@@ -1355,7 +1379,9 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         if code == 404:
             raise InvalidURLError(f"URL not found (404): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
-    raise exc
+    # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
+    # upstream failing, none of them a server bug worth a 500.
+    raise NetworkError(f"Upstream error from {url}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1372,7 +1398,7 @@ async def _fetch_base_html(
     base page. Served back as the base page it has no tab switcher, so a
     re-parse dropped the Art and content tabs and cached the result.
     """
-    r = await client.get(url_norm, timeout=timeout)
+    r = await _get_capped(client, url_norm, timeout=timeout)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1408,7 +1434,7 @@ async def async_fetch_sheet_html(
                 cached = await _async_get_cached(sheet_url, cache_ttl)
                 if cached is not None:
                     return cached
-            r = await client.get(sheet_url, timeout=timeout)
+            r = await _get_capped(client, sheet_url, timeout=timeout)
             r.raise_for_status()
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
@@ -1427,7 +1453,7 @@ async def async_fetch_sheet_html(
             cached = await _async_get_cached(url, cache_ttl)
             if cached is not None:
                 return cached
-        r = await client.get(url, timeout=timeout)
+        r = await _get_capped(client, url, timeout=timeout)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)
@@ -1449,7 +1475,7 @@ async def async_fetch_sheet_html(
         for try_gid in gids:
             try:
                 sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
-                r = await client.get(sheet_url, timeout=timeout)
+                r = await _get_capped(client, sheet_url, timeout=timeout)
                 if r.status_code == 200 and "<table" in r.text.lower():
                     if use_cache:
                         await _async_set_cache(url, r.text, title)
@@ -1488,7 +1514,7 @@ async def _fetch_gid_page(
                     cached = await _async_get_cached(sheet_url, cache_ttl)
                     if cached is not None:
                         return (gid_val, cached[0])
-                resp = await client.get(sheet_url, timeout=timeout)
+                resp = await _get_capped(client, sheet_url, timeout=timeout)
                 if resp.status_code != 200 or "<table" not in resp.text.lower():
                     return None
                 if use_cache and cache_ttl > 0:
