@@ -69,6 +69,8 @@ final class AudioEngine {
     private var endOfTrackObserver: (any NSObjectProtocol)?
     private var interruptionObserver: (any NSObjectProtocol)?
     private var resumptionObserver: (any NSObjectProtocol)?
+    /// Whether audio was playing when the system deactivated the session.
+    @ObservationIgnored private var resumeAfterInterruption = false
     private var loadingTimeoutTask: Task<Void, Never>?
     private var videoHintTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
@@ -635,7 +637,9 @@ final class AudioEngine {
                     // actionAtItemEnd is .none, so the item stays parked at
                     // its end time. Showing 0:00 without actually seeking
                     // left the play button dead — AVPlayer will not restart
-                    // from the end without a seek.
+                    // from the end without a seek. Paused first: with the rate
+                    // still 1 the seek alone looped the track forever.
+                    self.player?.pause()
                     self.player?.seek(to: .zero)
                     return
                 }
@@ -862,6 +866,7 @@ final class AudioEngine {
             let systemDeactivated = context?.source == .system
             MainActor.assumeIsolated {
                 guard let self, systemDeactivated else { return }
+                self.resumeAfterInterruption = self.isPlaying
                 self.isPlaying = false
             }
         }
@@ -875,7 +880,10 @@ final class AudioEngine {
                 as? AVAudioSession.ResumptionContext
             let shouldResume = context?.recommendation == .shouldResume
             MainActor.assumeIsolated {
-                guard let self, shouldResume else { return }
+                // Only what the interruption stopped: a track the user had
+                // paused must not start again when a call ends.
+                guard let self, shouldResume, self.resumeAfterInterruption else { return }
+                self.resumeAfterInterruption = false
                 AVAudioSession.sharedInstance().activate(options: []) { @Sendable _, _ in }
                 self.player?.play()
             }

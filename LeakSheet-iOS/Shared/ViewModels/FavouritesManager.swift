@@ -115,11 +115,15 @@ final class FavouritesManager {
     /// tells two mystery tracks apart. Appended for placeholders ONLY, so
     /// every existing key is byte-identical and nothing needs migrating except
     /// the placeholder entries themselves.
+    ///
+    /// Case-insensitive: the parser groups "Touch The Sky" and "Touch the Sky
+    /// [V2]" into one song, so a row and its versions disagreed on case and
+    /// one heart made two favourites. The discriminator (a link) keeps its case.
     static func key(
         artistSlug: String, eraName: String, baseName: String,
         discriminator: String? = nil
     ) -> String {
-        let base = "\(artistSlug)::\(eraName)::\(baseName)"
+        let base = "\(artistSlug)::\(eraName)::\(baseName)".lowercased()
         guard Song.isPlaceholderName(baseName),
               let discriminator, !discriminator.isEmpty
         else { return base }
@@ -172,7 +176,9 @@ final class FavouritesManager {
             discriminator: Self.discriminator(for: song.primary),
             versionCount: song.versions.count,
             badge: song.computedBadge?.rawValue,
-            primaryVersion: song.primary,
+            // The version the row shows, not versions[0] — the saved entry
+            // should look like what was hearted.
+            primaryVersion: song.bestPlayableVersion ?? song.primary,
             artistSlug: artistSlug, artistName: artistName, sourceUrl: sourceUrl,
             eraName: eraName, eraArt: eraArt
         )
@@ -332,22 +338,43 @@ final class FavouritesManager {
             // Migrate here too: this branch returned early, so the cohort
             // most likely to hold pre-version-tag keys was the one cohort
             // that never got the rewrite.
-            entries = Self.migratingPlaceholderKeys(Self.migratingVersionTags(migrated))
-            save()
-            UserDefaults.standard.removeObject(forKey: Self.storageKey)
+            entries = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(migrated)))
+            // Written synchronously, and the old copy removed only once the new
+            // one exists: a debounced save left a 150 ms window with neither.
+            if let data = try? JSONEncoder().encode(entries),
+               (try? data.write(to: Self.storageFile, options: .atomic)) != nil {
+                UserDefaults.standard.removeObject(forKey: Self.storageKey)
+            }
             return
         }
 
         guard let data = try? Data(contentsOf: Self.storageFile) else { return }
         do {
             let stored = try JSONDecoder().decode([FavouriteEntry].self, from: data)
-            let migrated = Self.migratingPlaceholderKeys(Self.migratingVersionTags(stored))
+            let migrated = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(stored)))
             entries = migrated
             // Persist the rewrite, or it re-runs on every launch forever.
             if migrated.map(\.key) != stored.map(\.key) { save() }
         } catch {
             Self.log.error("Failed to decode favourites (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
+            // Keep the unreadable file: the next save would otherwise replace
+            // every favourite with whatever the user hearts next.
+            let aside = Self.storageFile.deletingPathExtension().appendingPathExtension("unreadable.json")
+            try? FileManager.default.removeItem(at: aside)
+            try? FileManager.default.moveItem(at: Self.storageFile, to: aside)
             entries = []
+        }
+    }
+
+    /// Lower-cases the name part of keys saved before `key` did.
+    static func migratingKeyCase(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
+        var seen = Set<String>()
+        return stored.compactMap { entry in
+            let parts = entry.key.components(separatedBy: "::")
+            let newKey = (parts.prefix(3).map { $0.lowercased() } + parts.dropFirst(3)).joined(separator: "::")
+            // Two entries that differed only in case are one favourite now.
+            guard seen.insert(newKey).inserted else { return nil }
+            return newKey == entry.key ? entry : entry.rekeyed(to: newKey, baseName: entry.songBaseName)
         }
     }
 

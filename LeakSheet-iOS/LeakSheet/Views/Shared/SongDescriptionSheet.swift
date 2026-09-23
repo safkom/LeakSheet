@@ -54,7 +54,16 @@ struct SongDescriptionSheet: View {
     /// Present when the sheet is shown from the artist screen — powers the
     /// cross-era version picker. Nil from Now Playing / Favourites, where the
     /// picker falls back to just this song's own versions.
-    @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
+    @Environment(ArtistViewModel.self) private var environmentVM: ArtistViewModel?
+
+    /// The environment's view model only when it describes this payload's
+    /// artist. The Favourites sheet gets the *playing* artist's, and resolving
+    /// a Ye favourite against Travis's indexes offered (and played) Travis's
+    /// "Intro" under Ye's name.
+    private var artistVM: ArtistViewModel? {
+        guard let vm = environmentVM, let slug = payload.artistSlug, vm.artist.slug == slug else { return nil }
+        return vm
+    }
 
     /// One version, wherever it lives — its own era if the song is era-unique,
     /// or every era sharing the same `songKey` when it isn't. Falls back to the

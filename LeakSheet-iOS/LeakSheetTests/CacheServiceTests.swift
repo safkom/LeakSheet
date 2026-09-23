@@ -31,11 +31,11 @@ struct CacheServiceTests {
         let (service, dir) = makeService()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        // The v1 key was base64(url) truncated to 64 chars — these two URLs
+        // The v1 key was base64(url) truncated to 64 chars — these two sheets
         // share their first 48+ bytes and collided under that scheme.
-        let base = "https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/edit?gid="
-        let urlA = base + "111"
-        let urlB = base + "222"
+        let base = "https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        let urlA = base + "111/edit"
+        let urlB = base + "222/edit"
 
         await service.cacheTracker(url: urlA, data: Data(#"{"name": "A", "slug": "a", "eras": []}"#.utf8), etag: "a")
         await service.cacheTracker(url: urlB, data: Data(#"{"name": "B", "slug": "b", "eras": []}"#.utf8), etag: "b")
@@ -214,4 +214,26 @@ struct CacheServiceTests {
         #expect(await service.cacheSizeBytes() == 0)
         #expect(await service.getCachedMeta(for: "https://example.com/c1") == nil)
     }
+
+    @Test func `spellings of one tracker share one entry`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Typed once as "yetracker.net", reopened from Recents as the
+        // server's "https://yetracker.net/": one tracker, one cache entry.
+        await service.cacheTracker(url: "yetracker.net", data: Data(#"{"name": "Ye", "slug": "ye", "eras": []}"#.utf8), etag: "e1")
+        #expect(await service.getCachedEtag(for: "https://yetracker.net/") == "e1")
+    }
+
+    @Test func `an old entry is still returned, not deleted`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = "https://example.com/old"
+        await service.cacheTracker(url: url, data: Data(#"{"name": "O", "slug": "o", "eras": []}"#.utf8), etag: "o")
+        // Backdate the sidecar's timestamp well past any freshness window.
+        let meta = await service.metaFileForTesting(url: url)
+        let old = #"{"etag":"o","timestamp":0,"version":3}"#
+        try Data(old.utf8).write(to: meta)
+        #expect(await service.getCachedArtist(for: url)?.slug == "o")
+    }
 }
+

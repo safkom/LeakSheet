@@ -106,6 +106,14 @@ final class TrackerLoader {
                 return cached
             }
             withAnimation { error = "This tracker is taking a while to load. Please try again." }
+        } catch is DecodingError {
+            // The server answered, but with data this build can't read. Not
+            // an outage, so don't say "couldn't reach the server".
+            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
+                staleNotice = "Couldn't read the latest data — showing the last saved copy."
+                return cached
+            }
+            withAnimation { error = "This tracker's data couldn't be read. The app may need an update." }
         } catch is CancellationError {
             // The user navigated away. Not a failure to recover from — falling
             // back here would also write a recents entry for a tracker they

@@ -27,10 +27,11 @@ struct ContentView: View {
     var body: some View {
         NavigationStack(path: $path) {
             LandingView(
-                onArtistLoaded: { artist in
+                onArtistLoaded: { artist, notice in
                     // Still inside the landing spinner: build the view model
                     // (off-main filter/stats pass) before navigating.
                     let vm = await ArtistViewModel.make(artist: artist)
+                    vm.loadNotice = notice
                     prepared = (artist.slug, vm)
                     withAnimation { path.append(artist) }
                 },

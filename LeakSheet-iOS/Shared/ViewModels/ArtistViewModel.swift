@@ -134,6 +134,10 @@ final class ArtistViewModel {
 
     // MARK: - Search
 
+    /// Set when the shown data is a saved copy or a refresh failed; the
+    /// artist screen shows it in place of the data age.
+    var loadNotice: String?
+
     var searchQuery: String = "" {
         didSet { scheduleDebounce() }
     }

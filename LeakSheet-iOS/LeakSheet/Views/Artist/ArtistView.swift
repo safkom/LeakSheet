@@ -20,6 +20,11 @@ struct ArtistView: View {
     @State private var displayed: Artist?
     @State private var vm: ArtistViewModel?
     @State private var lastUpdated: Date?
+    /// Pull-to-refresh goes through the same loader as the landing screen, so
+    /// it keeps the artist's name (favourites key on its slug), falls back to
+    /// the saved copy on a server error, and reports failure instead of
+    /// silently ending the refresh.
+    @State private var refresher = TrackerLoader()
     @Environment(RecentTrackersManager.self) private var recents
 
     /// The artist currently shown — the pushed value until a pull-to-refresh
@@ -68,23 +73,19 @@ struct ArtistView: View {
         }
     }
 
-    /// Force-refetch the tracker (bypassing the ETag/cache), rebuild the view
-    /// model, and stamp the data age. On failure the current data stays put.
+    /// Force-refetch the tracker, rebuild the view model, and stamp the data
+    /// age. On failure the current data stays put and the reason is shown.
     private func refresh() async {
         guard let url = current.sourceUrl, !url.isEmpty else { return }
-        do {
-            let result = try await APIClient.shared.parseSheet(url: url, forceRefresh: true)
-            if let etag = result.etag {
-                await CacheService.shared.cacheTracker(url: url, data: result.rawData, etag: etag)
-            }
-            recents.saveTracker(artist: result.artist)
-            let refreshedVM = await ArtistViewModel.make(artist: result.artist)
-            displayed = result.artist
-            vm = refreshedVM
-            lastUpdated = .now
-        } catch {
-            // Keep showing the current data; the refresh control just ends.
+        let fresh = await refresher.load(url, artistName: current.name, forceRefresh: true, recents: recents)
+        guard let fresh, refresher.staleNotice == nil else {
+            (vm ?? preparedVM)?.loadNotice = refresher.error ?? refresher.staleNotice
+            return
         }
+        let refreshedVM = await ArtistViewModel.make(artist: fresh)
+        displayed = fresh
+        vm = refreshedVM
+        lastUpdated = .now
     }
 }
 
@@ -169,13 +170,14 @@ private struct ArtistContentView: View {
                 // Always occupies its line, even before the timestamp resolves:
                 // appearing later inserts content above the scroll position and
                 // shunts the list down under the user's finger.
-                Text(lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
+                Text(vm.loadNotice ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(vm.loadNotice == nil ? Color.secondary : Color.lsError)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 1)
-                    .opacity(lastUpdated == nil ? 0 : 1)
-                    .accessibilityHidden(lastUpdated == nil)
+                    .opacity(vm.loadNotice == nil && lastUpdated == nil ? 0 : 1)
+                    .accessibilityHidden(vm.loadNotice == nil && lastUpdated == nil)
 
                 // Sections first, then the filters that apply to whichever
                 // section is showing. Filters only act on the song tree, so
@@ -269,6 +271,9 @@ private struct ArtistContentView: View {
         .onChange(of: colorScheme, initial: true) { _, scheme in
             vm.setColorScheme(scheme)
         }
+        .onChange(of: ObjectIdentifier(vm)) {
+            vm.setColorScheme(colorScheme)
+        }
         .swipeActionsContainer()
         .navigationTitle(artist.name)
         .navigationSubtitle("\(vm.visibleStats.total.formatted()) \(vm.isShowingTabEntries ? "entries" : "tracks")")
@@ -320,14 +325,14 @@ private struct ArtistContentView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search songs…"
         )
+        #if !SDK_WITHOUT_TOOLBAR_MINIMIZE
+        // SDK 27.0 API that GitHub's Xcode 27 beta 6 image lacks; CI sets the
+        // flag until the runner ships the release SDK. Delete the #if then.
         .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
-        // Minimizing the bar with a large title, a searchable drawer AND a
-        // refresh control resized the scroll view's top safe area mid-gesture,
-        // and the offset correction that followed read as the list jumping up
-        // and down before resuming. The adjustment exists to keep controls
-        // pinned in a top safe-area inset; there are none here, so disabling
-        // it holds the content still while the bar still collapses.
+        // Disabled: with a large title, search drawer and refresh control the
+        // safe-area adjustment made the list jump while the bar collapsed.
         .toolbarMinimizationSafeAreaAdjustment(.disabled, for: .navigationBar)
+        #endif
         #else
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
         #endif
@@ -353,7 +358,9 @@ private struct ArtistContentView: View {
         .sheet(item: $embedItem) { item in
             EmbedPlayerView(item: item)
         }
-        .task {
+        // Keyed on the view model so a pull-to-refresh, which swaps in a new
+        // one, re-registers its eras instead of leaving the old song lists.
+        .task(id: ObjectIdentifier(vm)) {
             // Prebuilt off-main in Precomputed — this used to walk every
             // version of every era on the MainActor, on every appearance.
             player.setArtistEras(vm.eraPlaybackContexts)

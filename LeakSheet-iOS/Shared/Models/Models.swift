@@ -95,6 +95,8 @@ nonisolated struct Section: Codable, Identifiable, Hashable, Sendable {
     let name: String
     let group: String?
     let songs: [Song]
+    /// Text on the sheet's label row — usually a sub-era timeline.
+    var notes: String? = nil
 
     var id: String { name + (group ?? "") }
 
@@ -407,7 +409,10 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         self.rating = rating
     }
 
-    var id: String { "\(name)::\(versionTag ?? "")" }
+    /// Name + tag alone is not unique: Ye has ~700 untagged same-name
+    /// versions, and callers matching on this id played, highlighted or
+    /// described the first of them. The file link tells them apart.
+    var id: String { "\(name)::\(versionTag ?? "")::\(links?.first ?? "")" }
 
     /// File extensions that identify the linked file as NOT a playable audio stream.
     /// Marking a version as non-streamable hides Play actions and shows the

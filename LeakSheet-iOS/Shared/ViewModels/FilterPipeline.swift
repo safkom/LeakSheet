@@ -96,9 +96,11 @@ extension ArtistViewModel {
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
                 guard !songs.isEmpty else { return nil }
-                return Section(name: section.name, group: section.group, songs: songs)
+                return Section(name: section.name, group: section.group, songs: songs, notes: section.notes)
             }
-            let songs = filterSongs(allSongs, state: state)
+            // Songs only live in sections, so this is the same list the
+            // sections were just filtered into — not a second filter pass.
+            let songs = sections.flatMap(\.songs)
             guard !songs.isEmpty else { continue }
 
             eras.append(FilteredEra(
@@ -343,9 +345,10 @@ extension ArtistViewModel {
             }
         }
         if state.recents {
-            entries = entries.sorted {
-                Self.parseLeakDate($0.date ?? "") > Self.parseLeakDate($1.date ?? "")
-            }
+            // Parse each date once: inside the comparator it ran ~n log n
+            // times, each trying several DateFormatters.
+            let dates = entries.map { Self.parseLeakDate($0.date ?? "") }
+            entries = entries.indices.sorted { dates[$0] > dates[$1] }.map { entries[$0] }
         }
         return entries
     }
