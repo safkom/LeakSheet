@@ -9,9 +9,8 @@ Endpoints:
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
   POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
-Note: In production (DO App Platform), these are served under /api/* via
-ingress routing.  The /api prefix is stripped by the platform before reaching
-this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
+In production nginx serves these under /api/* and strips the prefix; in local
+dev Vite's proxy does the same.
 """
 
 from __future__ import annotations
@@ -454,9 +453,10 @@ class _RateLimitMiddleware:
     the streaming response body).
 
     Off by default — set ``LEAKSHEET_RATE_LIMIT_PER_MIN`` to a positive integer
-    to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
-    (see Dockerfile), so in-process counters are authoritative. The limit is read
-    per request so it can be tuned without a redeploy.
+    to cap requests-per-minute-per-IP on the expensive endpoints. Counters are
+    per worker process (the Dockerfile runs 3), so the effective limit is up to
+    3x the setting and resets when a worker recycles; Cloudflare's rate rule on
+    /api/sheet is the real limit. The value is read per request.
 
     Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
     :func:`_client_ip`, without which every caller shares one bucket.
@@ -561,8 +561,9 @@ async def _parse_once(
 
     Returns the artist and the task warming its era covers, which starts once
     per parse. One parse per tracker at a time: a client retrying a stream it
-    lost, a second device and the prewarm loop all used to start their own,
-    and the box cannot fit two Ye-sized parses at once (README "Deployment").
+    lost, a second device and the prewarm loop all used to start their own.
+    Per worker process: with 3 workers the same tracker can still parse up to
+    3 times at once.
 
     The first caller's cache flags decide. A joiner gets the same fresh parse
     its own flags would have produced from the cache miss that brought it here.
@@ -994,7 +995,7 @@ async def clear_fetch_cache(request: Request):
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
-_IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
+_IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
 # Concurrent Pillow decodes. Each can hold a 15MB input plus a 20MP decode
 # (~80MB as RGBA), and an artist screen fires 40-120 image requests at once.
 # At least 1: a Semaphore(0) would hang every resize forever.
@@ -1016,7 +1017,7 @@ _IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
 # Compressed-byte size says nothing about decoded size (a small, highly
 # compressible image can unpack to hundreds of MB) — cap decoded pixels too,
 # checked from the header before the full-frame load() below.
-_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA on the 512MB box
+_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and
 # docs.google.com/sheets-images 302s to login for N>0 (see web

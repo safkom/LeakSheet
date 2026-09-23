@@ -12,7 +12,7 @@ Strategy (async pipeline; the sync entry points are thin wrappers over it):
    and fetch every candidate concurrently — consuming results in priority
    order (the "Unreleased" tab first) and cancelling the rest once a winner
    (most eras, minimum threshold) parses.
-4. Load secondary tabs concurrently: Art (with pHash verification) and every
+4. Load secondary tabs concurrently: Art and every
    content tab; badge tabs stamp highlights onto existing songs.
 5. Cache both the winning HTML and the parsed result; a size-capped eviction
    keeps the cache directory bounded.
@@ -21,6 +21,7 @@ Strategy (async pipeline; the sync entry points are thin wrappers over it):
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import logging
@@ -70,10 +71,9 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
-# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md; the
-# image cache has had a 200MB cap for a while, the sheet cache had none — a
-# TrackerHub sweep left ~700MB behind on a 512MB-class box). Oldest entries
-# (grouped per hash stem) are evicted first; img_* files have their own cap.
+# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md).
+# Oldest entries (grouped per hash stem) are evicted first; img_* files have
+# their own cap.
 _SHEET_CACHE_MAX_BYTES = int(
     os.environ.get("LEAKSHEET_SHEET_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))
 )
@@ -84,11 +84,9 @@ _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 
 # Concurrent sub-page fetches, across ALL callers.
 #
-# Discovery started every discovered GID at once and _aggregate_hub_workbook
-# fetched *and parsed* every unclassified tab at once, each holding its full
-# response body — the largest export here is 11.85MB, and README.md ("Deployment") says
-# the box cannot fit two concurrent Ye-sized parses. One semaphore inside
-# _fetch_gid_page bounds all three fan-out sites at their single choke point.
+# Every fan-out site (GID discovery, hub-workbook tabs) holds a full response
+# body, up to ~12 MB each. One semaphore inside _fetch_gid_page bounds all of
+# them at their single choke point.
 _GID_FETCH_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
 )
@@ -951,12 +949,21 @@ def _read_meta(key: str) -> dict:
 
 
 def _write_meta(key: str, updates: dict) -> None:
-    """Merge `updates` into the entry's metadata and write it atomically."""
-    meta = _read_meta(key)
-    meta.update(updates)
-    _atomic_write_text(
-        CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
-    )
+    """Merge `updates` into the entry's metadata and write it atomically.
+
+    The read-modify-write runs under an flock on a sidecar file: the gunicorn
+    workers share this cache, and two revalidations of one tracker could
+    otherwise put back an older content_hash over newer parsed bytes (a false
+    304 for every client holding the old ones).
+    """
+    CACHE_DIR.mkdir(exist_ok=True)
+    with open(CACHE_DIR / f"{key}.meta.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        meta = _read_meta(key)
+        meta.update(updates)
+        _atomic_write_text(
+            CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
+        )
 
 
 def _parsed_timestamp(meta: dict) -> float:
@@ -1213,8 +1220,8 @@ def get_cached_parsed_bytes(
 
     Serving the raw file bytes skips pydantic validation and re-serialization
     of multi-MB artists on the warm path. The stored content hash equals the
-    ETag the full path would compute for the same data (both derive from the
-    identical ``artist.dict()`` written at cache time).
+    ETag the full path would compute for the same data (both hash the bytes
+    written at cache time).
     """
     url_norm = _normalize_url(url)
     key = _cache_key(url_norm)
@@ -1829,9 +1836,7 @@ async def async_fetch_and_parse(
     write_cache: bool | None = None,
     timer: PhaseTimer | None = None,
 ) -> Artist:
-    """Async version of fetch_and_parse.
-
-    Like the sync version, tries multiple GIDs when the first result
+    """Fetch and parse a tracker, trying multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
 
     ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes*
