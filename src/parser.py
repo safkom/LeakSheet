@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from collections import Counter
 import unicodedata
 from functools import lru_cache
 from typing import Iterable
@@ -1736,6 +1737,12 @@ def parse_sheet(
     # abbreviation heuristic, which exists for sheets that shorten the era name
     # on song rows.
     flat_era_mode = not any(_is_era_header(r) for r in rows[header_row_idx + 1:])
+    # How often each era-column value occurs: a one-character value seen once
+    # is a typo; seen repeatedly it is an era the sheet declares only in cells.
+    _era_idx = col_map.get("era", 0)
+    era_value_counts = Counter(
+        _get_cell_text(r, _era_idx).split("\n")[0].strip() for r in rows[header_row_idx + 1:]
+    )
 
     # Step 1b: extract announcement notices from header cells and pre-header rows.
     pre_header_rows = rows[:header_row_idx] if header_row_idx > 0 else []
@@ -1957,7 +1964,7 @@ def parse_sheet(
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                             era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
-                        elif len(row_era.strip()) <= 1 and not flat_era_mode:
+                        elif len(row_era.strip()) <= 1 and era_value_counts[row_era.strip()] <= 1 and not flat_era_mode:
                             # A one-character era cell on a row with no song
                             # data is a typo on a sub-era label (Ye: "x" on
                             # "808s & Heartbreak at the Hollywood Bowl"), not
@@ -2062,7 +2069,7 @@ def parse_sheet(
                     # Single-line section label (e.g. "Other Media",
                     # "OG / Uncut Files") — add as a named section to the
                     # current era and let later song rows auto-create if needed.
-                    notes = _get_cell_text(row, col_map.get("notes", 2)).strip()
+                    notes = _get_cell_text(row, col_map["notes"]).strip() if "notes" in col_map else ""
                     current_era.sections.append(Section(name=name_first_line, notes=notes or None))
                     # Section-label-as-alias — see docs/decisions.md::parser.py::section-label-alias
                     _register_era_keys(current_era, name_first_line, era_by_key_fallback)
@@ -2822,6 +2829,12 @@ def _looks_like_date(text: str | None) -> bool:
     return len(stripped) <= _MAX_DATE_LEN and any(c.isdigit() for c in stripped)
 
 
+def _looks_like_section_label(text: str) -> bool:
+    """A sub-section name ("Instrumentals"), not an instruction line an editor
+    left in the column ("<-- not at all available means…")."""
+    return len(text) <= 40 and not text.startswith(("<", "-", "*")) and not text.endswith((".", ":"))
+
+
 def parse_misc_tab(
     html: str, kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
@@ -2940,7 +2953,14 @@ def parse_misc_tab(
 
         def opt(field: str) -> str | None:
             val = cell_text(row, field)
-            if field in ("date", "length") and not _looks_like_date(val):
+            if field == "date" and not _looks_like_date(val):
+                return None
+            # A length carries a digit ("3:14") or is a tiny placeholder
+            # ("?:??", "N/A", "-"). Era header rows put a description in the
+            # Full Length column, which is neither.
+            if field == "length" and not (
+                _looks_like_date(val) or (val and len(val) <= 5)
+            ):
                 return None
             return val or None
 
@@ -2979,7 +2999,7 @@ def parse_misc_tab(
             # features are credited. On content tabs the label names the
             # rows below it (Ye Stems: Instrumentals / Acapellas / Sessions).
             if (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS:
-                if not is_badge_tab:
+                if not is_badge_tab and _looks_like_section_label(first_line):
                     current_section = first_line
                 continue
 
