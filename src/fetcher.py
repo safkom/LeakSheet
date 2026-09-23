@@ -403,29 +403,35 @@ def _normalize_url(url: str) -> str:
     directly, bypassing GID discovery and missing the main tracker tab.
     """
     url = url.strip()
-    if not url.startswith(("http://", "https://")):
+    if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
+    parsed = urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise InvalidURLError(f"Invalid URL: {url}") from exc
+    # One key per resource: userinfo, a default port, host case and the
+    # fragment never change what is fetched, but each used to mint its own
+    # cache and single-flight key — N spellings of Ye meant N cold parses.
+    host = (parsed.hostname or "").lower()
+    netloc = host if port in (None, 80, 443) else f"{host}:{port}"
 
     # Normalize Google Sheets URLs to /htmlview for reliable GID discovery
-    if _is_google_sheets_url(url):
-        sheet_id = _extract_sheet_id(url)
+    if host == "docs.google.com":
+        sheet_id = _extract_sheet_id(f"docs.google.com{parsed.path}")
         if sheet_id:
-            parsed = urlparse(url)
-            url = f"{parsed.scheme}://{parsed.netloc}/spreadsheets/d/{sheet_id}/htmlview"
-    else:
-        # Non-Google hosts (yetracker.net): 'host' and 'host/' are the same
-        # resource but hash to different cache keys — canonicalize the bare
-        # host-root form to a trailing slash.
-        parsed = urlparse(url)
-        if not parsed.path and not parsed.query and not parsed.fragment:
-            url = url + "/"
-
+            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+    url = parsed._replace(scheme=parsed.scheme.lower(), netloc=netloc, fragment="").geturl()
+    # 'host' and 'host/' are the same resource.
+    if not parsed.path and not parsed.query:
+        url += "/"
     return url
 
 
 def _is_google_sheets_url(url: str) -> bool:
     """Check if URL is a Google Sheets URL."""
-    return "docs.google.com/spreadsheets" in url
+    parsed = urlparse(url)
+    return (parsed.hostname or "").lower() == "docs.google.com" and parsed.path.startswith("/spreadsheets")
 
 
 def _extract_sheet_id(url: str) -> str | None:
