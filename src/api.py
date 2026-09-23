@@ -699,6 +699,8 @@ async def parse_sheet(
         if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
         if if_none_match:
             server_etag = await async_get_cached_etag(req.url)
+            if server_etag:
+                server_etag = _display_etag(server_etag, req.artist_name)
             if server_etag and server_etag == if_none_match:
                 age = await async_get_cached_age(req.url)
                 if age is not None and age < STALE_CACHE_TTL:
@@ -726,6 +728,9 @@ async def parse_sheet(
                 # of the served bytes, so this is one SHA-256 — no parse.
                 with timer.phase("etag"):
                     etag = content_hash(raw)
+            if req.artist_name:
+                with timer.phase("rename"):
+                    raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
@@ -788,27 +793,39 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         timer=timer,
     )
 
-    # The cache write already serialized this artist; serve those bytes. Doing
-    # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
-    #
-    # Serialize here only when there are no such bytes: the write was skipped
-    # (use_cache false, or the collapse guard refused it) or the caller asked
-    # for a display rename. That rename is applied after the shared cache was
-    # written with the page-inferred name, so a later cache hit serves the
-    # inferred name to everyone and only this caller sees the override.
-    #
-    # When serializing, encode to bytes off the event loop. Handing FastAPI a
-    # plain dict ran jsonable_encoder (a full recursive walk of the payload)
-    # and then json.dumps again, both on the loop.
-    wire = None if req.artist_name else artist._wire
-    if wire is not None:
-        return wire
+    # The cache write already serialized this artist; serve those bytes.
+    # Serialize only when there are none (use_cache false, or the collapse
+    # guard refused the write) — off the event loop either way.
+    wire = artist._wire
+    if wire is None:
+        with timer.phase("serialize"):
+            wire = await asyncio.to_thread(serialize_artist, artist)
     if req.artist_name:
-        artist = artist.model_copy(
-            update={"name": req.artist_name, "slug": slugify(req.artist_name)}
-        )
-    with timer.phase("serialize"):
-        return await asyncio.to_thread(serialize_artist, artist)
+        with timer.phase("rename"):
+            return await asyncio.to_thread(_with_display_name, *wire, req.artist_name)
+    return wire
+
+
+def _display_etag(etag: str, artist_name: str | None) -> str:
+    """ETag of a response served under a caller's display name."""
+    return content_hash(f"{etag}:{artist_name}".encode()) if artist_name else etag
+
+
+def _with_display_name(raw: bytes, etag: str, artist_name: str) -> tuple[bytes, str]:
+    """The cached payload renamed for one caller, and its ETag. Blocking.
+
+    The shared cache always holds the page-inferred name (see _parse_once), so
+    every path — cold, warm and 304 — applies the override the same way and
+    derives the same ETag from the cached one. Applying it only on the cold
+    path flipped the slug (iOS favourites key material) between requests.
+    """
+    tagged = _display_etag(etag, artist_name)
+    data = json.loads(raw)
+    slug = slugify(artist_name)
+    if data.get("name") == artist_name and data.get("slug") == slug:
+        return raw, tagged
+    data["name"], data["slug"] = artist_name, slug
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(), tagged
 
 
 def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
