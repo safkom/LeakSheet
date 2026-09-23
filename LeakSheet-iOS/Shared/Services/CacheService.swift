@@ -30,8 +30,10 @@ actor CacheService {
     }
 
     private static let currentVersion = 3
-    /// Age after which a cached entry is treated as stale and discarded on read.
-    private static let maxAge: TimeInterval = 7 * 24 * 3600
+    /// Entries untouched this long are deleted by the launch sweep. Age never
+    /// invalidates a read: an old copy is still the offline fallback, and its
+    /// ETag still earns a 304 when the tracker hasn't changed.
+    private static let maxAge: TimeInterval = 30 * 24 * 3600
 
     init(directory: URL? = nil) {
         cacheDirectory = directory
@@ -53,8 +55,12 @@ actor CacheService {
         var version: Int = CacheService.currentVersion
     }
 
+    /// Keyed on the normalized URL: "yetracker.net" typed once and the
+    /// server's "https://yetracker.net/" from Recents are one tracker, and
+    /// were two multi-MB cache files that missed each other's ETag.
     private func digest(for url: String) -> String {
-        SHA256.hash(data: Data(url.utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = TrackerURLNormalizer.normalize(url)
+        return SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func cacheFile(for url: String) -> URL {
@@ -86,10 +92,7 @@ actor CacheService {
         // The payload carries no metadata of its own now, so the sidecar is
         // authoritative: no sidecar means a v2 envelope or a half-written pair,
         // and either way the bytes cannot be validated. Both files go.
-        guard let meta = readMeta(for: url),
-              meta.version == Self.currentVersion,
-              Date.now.timeIntervalSince(meta.timestamp) <= Self.maxAge
-        else {
+        guard let meta = readMeta(for: url), meta.version == Self.currentVersion else {
             removeTracker(for: url)
             return nil
         }
@@ -115,7 +118,6 @@ actor CacheService {
     func getCachedMeta(for url: String) -> CachedMeta? {
         guard let meta = readMeta(for: url),
               meta.version == Self.currentVersion,
-              Date.now.timeIntervalSince(meta.timestamp) <= Self.maxAge,
               FileManager.default.fileExists(atPath: cacheFile(for: url).path)
         else { return nil }
         return meta
@@ -169,8 +171,8 @@ actor CacheService {
         }
     }
 
-    /// Remove v1-era files whose base64-derived names don't match the SHA-256
-    /// hex scheme — they would otherwise sit orphaned until manually cleared.
+    /// Remove entries untouched for `maxAge`, and v1-era files whose
+    /// base64-derived names don't match the SHA-256 hex scheme.
     /// Runs detached from `init`; exposed for tests to invoke deterministically.
     func sweepLegacyEntries() {
         Self.sweepLegacyFiles(in: cacheDirectory)
@@ -179,9 +181,14 @@ actor CacheService {
     private nonisolated static func sweepLegacyFiles(in directory: URL) {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: nil
+            includingPropertiesForKeys: [.contentModificationDateKey]
         )) ?? []
         for file in files where file.lastPathComponent.hasPrefix("tracker_") {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, Date.now.timeIntervalSince(modified) > maxAge {
+                try? FileManager.default.removeItem(at: file)
+                continue
+            }
             var stem = file.deletingPathExtension().lastPathComponent.dropFirst("tracker_".count)
             // Sidecars are "tracker_<hex>_meta.json" — strip the suffix before
             // the hex check, or this sweep deletes every one of them on launch.

@@ -27,6 +27,8 @@ struct TVArtistView: View {
         .navigationTitle(artist.name)
         .task {
             if vm == nil { vm = await ArtistViewModel.make(artist: artist) }
+            // Era rollover needs the artist's era list, as on iOS and macOS.
+            if let vm { PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts) }
         }
     }
 
@@ -100,14 +102,16 @@ struct TVArtistView: View {
     }
 
     private func filterChips(_ vm: ArtistViewModel) -> some View {
-        @Bindable var vm = vm
-        return ScrollView(.horizontal) {
+        ScrollView(.horizontal) {
             HStack(spacing: 16) {
-                chip("Best Of", "star", isOn: $vm.bestOf)
-                chip("Worst Of", "hand.thumbsdown", isOn: $vm.worstOf)
-                chip("Grails", "trophy", isOn: $vm.grails)
-                chip("Recent", "clock", isOn: $vm.recents)
-                chip("No Snippets", "scissors", isOn: $vm.noSnippets)
+                // Through the toggle methods: they re-run the filter and keep
+                // the badge filters exclusive. Flipping the flags directly did
+                // neither, so every chip here was a no-op. No "Recent" chip —
+                // this screen has no recents list to show.
+                chip("Best Of", "star", isOn: vm.bestOf, action: vm.toggleBestOf)
+                chip("Worst Of", "hand.thumbsdown", isOn: vm.worstOf, action: vm.toggleWorstOf)
+                chip("Grails", "trophy", isOn: vm.grails, action: vm.toggleGrails)
+                chip("No Snippets", "scissors", isOn: vm.noSnippets, action: vm.toggleNoSnippets)
             }
             .padding(.horizontal, 60)
             .padding(.vertical, 8)
@@ -117,15 +121,13 @@ struct TVArtistView: View {
         .focusSection()
     }
 
-    private func chip(_ title: String, _ symbol: String, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
+    private func chip(_ title: String, _ symbol: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.callout)
                 .padding(.horizontal, 22)
                 .padding(.vertical, 12)
-                .background(isOn.wrappedValue ? Color.lsPrimary.opacity(0.28) : Color.lsCard)
+                .background(isOn ? Color.lsPrimary.opacity(0.28) : Color.lsCard)
                 .clipShape(Capsule())
                 .contentShape(Capsule())
         }
@@ -171,8 +173,9 @@ struct TVArtistView: View {
                 // `offset` in the id, not baseName — trackers emit several
                 // distinct "???" songs per era, and ForEach would drop the
                 // duplicates. Same reason EraRow.id carries an ordinal.
+                let eraVersions = songs.flatMap { $0.versions.filter(\.isStreamable) }
                 ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
-                    TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist)
+                    TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraVersions: eraVersions)
                 }
             }
         }

@@ -17,7 +17,8 @@ struct LandingView: View {
     /// Async so the caller can finish preparing the artist screen (building
     /// its view model) while this screen's loading state is still up — one
     /// loading state per tracker, not two.
-    var onArtistLoaded: (Artist) async -> Void
+    /// The artist, and `TrackerLoader.staleNotice` when it came from the saved copy.
+    var onArtistLoaded: (Artist, String?) async -> Void
     var onBrowseTapped: () -> Void = {}
     @Binding var pendingBrowse: PendingBrowse?
 
@@ -92,7 +93,8 @@ struct LandingView: View {
         if let artist = await loader.load(urlString, artistName: artistName, recents: recents) {
             // Inside `preparing` so the progress row stays up through the
             // view-model build and the first-screenful art warm.
-            await loader.preparing { await onArtistLoaded(artist) }
+            let notice = loader.staleNotice
+            await loader.preparing { await onArtistLoaded(artist, notice) }
         }
     }
 }

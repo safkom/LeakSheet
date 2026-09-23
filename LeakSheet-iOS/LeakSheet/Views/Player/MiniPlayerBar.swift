@@ -16,6 +16,10 @@ struct MiniPlayerBar: View {
     #endif
 
     var body: some View {
+        // The sheet hangs off this Group, not the bar: when the track ends and
+        // `currentTrack` goes nil, a sheet attached inside the `if` was torn
+        // down in the user's face.
+        Group {
         if let track = player.currentTrack {
             VStack(spacing: 0) {
                 // Progress slider
@@ -143,17 +147,18 @@ struct MiniPlayerBar: View {
                 MacUIState.shared.playerBarHeight = height
             }
             #endif
-            #if !os(macOS)
-            .sheet(isPresented: $showNowPlaying) {
-                NowPlayingView()
-                    .environment(PlayerViewModel.shared)
-                    .environment(FavouritesManager.shared)
-                    .environment(artistVM)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-            #endif
         }
+        }
+        #if !os(macOS)
+        .sheet(isPresented: $showNowPlaying) {
+            NowPlayingView()
+                .environment(PlayerViewModel.shared)
+                .environment(FavouritesManager.shared)
+                .environment(artistVM)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        #endif
     }
 
     private var artPlaceholder: some View {

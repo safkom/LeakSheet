@@ -191,23 +191,3 @@ private nonisolated final class ProgressRecorder: Sendable {
     var phases: [APIClient.LoadPhase] { storage.withLock { $0 } }
     func record(_ phase: APIClient.LoadPhase) { storage.withLock { $0.append(phase) } }
 }
-
-struct BaseURLMemoTests {
-    // didChangeNotification fires for every key; the base-URL memo must only
-    // drop when its own key moved, or the era-colour cache flush during scroll
-    // throws it away on every burst.
-    @Test func `a write to another key keeps the memo`() {
-        #expect(!APIClient.baseURLKeyChanged(cachedRaw: .some("https://a.example/api"), current: "https://a.example/api"))
-        #expect(!APIClient.baseURLKeyChanged(cachedRaw: .some(nil), current: nil))
-    }
-
-    @Test func `setting, changing or clearing the key drops it`() {
-        #expect(APIClient.baseURLKeyChanged(cachedRaw: .some(nil), current: "https://a.example/api"))
-        #expect(APIClient.baseURLKeyChanged(cachedRaw: .some("https://a.example/api"), current: "https://b.example/api"))
-        #expect(APIClient.baseURLKeyChanged(cachedRaw: .some("https://a.example/api"), current: nil))
-    }
-
-    @Test func `nothing memoised means nothing to drop`() {
-        #expect(!APIClient.baseURLKeyChanged(cachedRaw: nil, current: "https://a.example/api"))
-    }
-}

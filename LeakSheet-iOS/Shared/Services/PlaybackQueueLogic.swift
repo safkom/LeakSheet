@@ -35,6 +35,13 @@ nonisolated struct PlaybackQueueLogic {
     /// list in place for when the user plays something from B.
     private var erasByArtist: [String: [EraSongContext]] = [:]
 
+    /// Slug, not display name: alternate trackers of one artist share a name,
+    /// and browsing one replaced the other's era list mid-playback.
+    private static func artistKey(_ context: EraSongContext) -> String {
+        if let slug = context.artistSlug, !slug.isEmpty { return slug }
+        return context.artistName
+    }
+
     private var eraIndex: Int?   // position of eraSongs within its artist's list
     private var songIndex: Int?  // position within eraSongs.versions
     private var listIndex: Int?  // position within playbackList
@@ -66,7 +73,7 @@ nonisolated struct PlaybackQueueLogic {
         listIndex = nil
         eraSongs = context
         songIndex = nil
-        eraIndex = Self.indexOfEra(context, in: erasByArtist[context.artistName] ?? [])
+        eraIndex = Self.indexOfEra(context, in: erasByArtist[Self.artistKey(context)] ?? [])
     }
 
     /// Set the era context and position the cursor at `version`. Full-struct
@@ -100,7 +107,7 @@ nonisolated struct PlaybackQueueLogic {
     /// registering one never disturbs another's rollover — and an artist
     /// browsed mid-playback still has its list ready when the user plays it.
     mutating func setArtistEras(_ eras: [EraSongContext]) {
-        guard let artist = eras.first?.artistName else { return }
+        guard let artist = eras.first.map(Self.artistKey) else { return }
         erasByArtist[artist] = eras
         registrationOrder.removeAll { $0 == artist }
         registrationOrder.append(artist)
@@ -110,7 +117,7 @@ nonisolated struct PlaybackQueueLogic {
         // artist, plus the most recent registrations.
         while registrationOrder.count > Self.maxRetainedArtists {
             let evicted = registrationOrder.removeFirst()
-            if evicted != eraSongs?.artistName {
+            if evicted != eraSongs.map(Self.artistKey) {
                 erasByArtist[evicted] = nil
             } else {
                 registrationOrder.append(evicted)  // never evict what's playing
@@ -249,7 +256,7 @@ nonisolated struct PlaybackQueueLogic {
     /// identity match `setEraSongs` uses when the position is unset
     /// (setArtistEras ran after setEraSongs).
     private mutating func advanceToNextEra(after current: EraSongContext) -> EraSongContext? {
-        let eras = erasByArtist[current.artistName] ?? []
+        let eras = erasByArtist[Self.artistKey(current)] ?? []
         let startIdx: Int
         if let idx = eraIndex, eras.indices.contains(idx) {
             startIdx = idx + 1

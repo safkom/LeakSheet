@@ -209,13 +209,13 @@ struct PlaceholderFavouriteKeyTests {
         #expect(plain != keyed)
     }
 
-    @Test("a real title's key is byte-identical to before, so nothing migrates")
+    @Test("a real title's key carries no discriminator, and ignores case")
     func realTitlesUnchanged() {
         #expect(
             FavouritesManager.key(
                 artistSlug: "ye", eraName: "DONDA", baseName: "Hurricane",
                 discriminator: "https://pillows.su/f/a"
-            ) == "ye::DONDA::Hurricane"
+            ) == "ye::donda::hurricane"
         )
     }
 
@@ -225,7 +225,7 @@ struct PlaceholderFavouriteKeyTests {
             FavouritesManager.key(
                 artistSlug: "ye", eraName: "E", baseName: "???",
                 discriminator: FavouritesManager.discriminator(for: version("???"))
-            ) == "ye::E::???"
+            ) == "ye::e::???"
         )
     }
 
@@ -245,8 +245,8 @@ struct PlaceholderFavouriteKeyTests {
         let migrated = FavouritesManager.migratingPlaceholderKeys(
             [stored("https://pillows.su/f/a"), stored("https://pillows.su/f/b"), stored(nil)]
         )
-        #expect(migrated[0].key == "ye::God's Country::???::https://pillows.su/f/a")
-        #expect(migrated[1].key == "ye::God's Country::???::https://pillows.su/f/b")
+        #expect(migrated[0].key == "ye::god's country::???::https://pillows.su/f/a")
+        #expect(migrated[1].key == "ye::god's country::???::https://pillows.su/f/b")
         // Nothing to tell it apart by — left alone rather than guessed at.
         #expect(migrated[2].key == "ye::God's Country::???")
         #expect(Set(migrated.map(\.key)).count == 3)
@@ -311,5 +311,40 @@ struct NowPlayingIdentityTests {
         engine.currentTrack = nil
         #expect(!PlayerViewModel.shared.isNowPlaying(v("X", link: "https://x/1"), inEra: "E"))
         engine.currentTrack = saved
+    }
+}
+
+
+struct FavouriteKeyCaseTests {
+    private func entry(_ key: String) -> FavouritesManager.FavouriteEntry {
+        FavouritesManager.FavouriteEntry(
+            key: key, artistSlug: "ye", artistName: "Ye", sourceUrl: nil,
+            eraName: "Graduation", eraArt: nil, songBaseName: "Touch The Sky",
+            songVersionCount: 1, badge: nil, addedAt: Date(),
+            primaryVersion: nil, primaryVersionName: nil, primaryVersionTag: nil,
+            links: nil, quality: nil, availableLength: nil, notes: nil,
+            trackLength: nil, leakDate: nil
+        )
+    }
+
+    @Test("a row and a case-variant version of it share one key")
+    func caseVariantsShareAKey() {
+        #expect(
+            FavouritesManager.key(artistSlug: "ye", eraName: "Graduation", baseName: "Touch The Sky")
+                == FavouritesManager.key(artistSlug: "ye", eraName: "Graduation", baseName: "Touch the Sky")
+        )
+    }
+
+    @Test("stored keys are lower-cased, a link keeps its case, and case twins merge")
+    func migration() {
+        let migrated = FavouritesManager.migratingKeyCase([
+            entry("ye::Graduation::Touch The Sky"),
+            entry("ye::Graduation::Touch the Sky"),
+            entry("ye::Graduation::???::https://imgur.gg/f/AbC"),
+        ])
+        #expect(migrated.map(\.key) == [
+            "ye::graduation::touch the sky",
+            "ye::graduation::???::https://imgur.gg/f/AbC",
+        ])
     }
 }

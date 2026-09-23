@@ -17,9 +17,6 @@ struct LeakSheetTVApp: App {
         } catch {
             Self.log.error("Failed to configure audio session: \(error.localizedDescription, privacy: .public)")
         }
-        // TVSettingsView writes the custom-server key through @AppStorage too,
-        // so tvOS needs the same memo invalidation as iOS/macOS.
-        MainActor.assumeIsolated { APIClient.startObservingBaseURL() }
     }
 
     var body: some Scene {
