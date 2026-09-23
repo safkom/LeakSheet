@@ -1,20 +1,14 @@
 # Project and tool configuration for LeakSheet.
 #
-# Dependencies live here and are locked in uv.lock, so a clean checkout, CI and
-# the production image install byte-identical trees. Before the lock, every
-# requirement was an open `>=` range and the environments had already drifted
-# apart. Add or bump a dependency here, then `uv lock`.
-#
-# This file is also the single source of pytest config, so the suite behaves
-# identically for every developer and in CI.
+# Dependencies are locked in uv.lock, so checkout, CI and the production image
+# install identical trees. Add or bump a dependency here, then `uv lock`.
+# Also the single source of pytest config.
 
 [project]
 name = "leaksheet"
 version = "0.1.0"
 description = "Parses Google Sheets leak trackers into a structured API."
-# 3.11, not the 3.10 the README used to claim: api.py's range parsing relies on
-# the 4300-digit str->int cap that 3.11 introduced. Docker and CI were already
-# on 3.11; only local envs lagged.
+# api.py's range parsing relies on the 4300-digit str->int cap added in 3.11.
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.104.0",
@@ -30,18 +24,15 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    # 0.23 is the first release whose asyncio_mode="auto" is stable under
-    # pytest 8/9. The repo declared this before and local envs still ran 0.18,
-    # which is the drift uv.lock exists to stop.
+    # 0.23 is the first release whose asyncio_mode="auto" is stable under pytest 8/9.
     "pytest-asyncio>=0.23",
     "coverage[toml]>=7.0",
     "ruff>=0.14",
 ]
 
 [tool.uv]
-# The app runs from source and is never installed: every import is `from src.x`,
-# resolved by the pythonpath setting below. Declaring a build backend would
-# publish a distribution whose top-level package is literally named `src`.
+# The app runs from source (`from src.x`, via pythonpath below) and is never
+# installed; a build backend would publish a top-level package named `src`.
 package = false
 
 [tool.ruff]
@@ -49,10 +40,8 @@ target-version = "py311"
 extend-exclude = [".cache", "Trackers", "web", "LeakSheet-iOS"]
 
 [tool.ruff.lint]
-# Correctness only: pyflakes (unused/undefined names, dead f-strings) plus the
-# pycodestyle error classes that are bugs rather than style. Explicit because
-# ruff's own defaults have grown to include style rules this repo never adopted,
-# and CI gates on this — a lint job should fail on bugs, not taste.
+# Correctness only: pyflakes plus the pycodestyle error classes that are bugs.
+# Explicit, because ruff's defaults include style rules and CI gates on this.
 select = ["E4", "E7", "E9", "F"]
 # E741 ("l" as a name) is taste, not a bug.
 ignore = ["E741"]
@@ -67,12 +56,10 @@ minversion = "7.0"
 testpaths = ["tests"]
 # Import `src` as a top-level package without installing the project.
 pythonpath = ["."]
-# Coroutine tests need no per-test @pytest.mark.asyncio decorator. This also
-# makes the previously-legacy async tests run deterministically.
+# Coroutine tests need no per-test @pytest.mark.asyncio decorator.
 asyncio_mode = "auto"
-# A bare `pytest` runs the fast, deterministic offline gate: no network (live),
-# no local-dump baselines (accuracy), no long sweeps (slow). Opt into those with
-# an explicit `-m accuracy` / `-m live` / `-m slow`, which overrides this default.
+# Bare `pytest` is the fast offline gate: no network (live), no local-dump
+# baselines (accuracy), no long sweeps (slow). An explicit `-m ...` overrides it.
 addopts = "-ra --strict-markers -m 'not live and not accuracy and not slow'"
 markers = [
   "live: hits real Google Sheets / provider hosts over the network. Excluded from the default run; used by the CI 'live' job (see .github/workflows/tests.yml).",
