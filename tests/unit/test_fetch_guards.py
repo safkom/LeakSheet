@@ -34,3 +34,20 @@ def test_every_upstream_failure_is_a_network_error(exc):
     # These used to escape unmapped and surface as a 500 "Internal error".
     with pytest.raises(fetcher.NetworkError):
         fetcher._raise_fetch_error(exc, "https://example.com/")
+
+
+async def test_concurrent_unknown_hosts_share_one_feed_refresh(monkeypatch):
+    import asyncio
+
+    calls = []
+
+    async def slow_fetch():
+        calls.append(1)
+        await asyncio.sleep(0.05)
+        return []
+
+    monkeypatch.setattr(fetcher, "fetch_artistgrid_entries", slow_fetch)
+    monkeypatch.setattr(fetcher, "tracker_hosts_are_stale", lambda: True)
+    monkeypatch.setattr(fetcher, "_host_refresh", None)
+    await asyncio.gather(*(fetcher._refresh_tracker_hosts() for _ in range(5)))
+    assert calls == [1]

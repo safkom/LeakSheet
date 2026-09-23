@@ -463,3 +463,17 @@ class TestDisplayName:
             headers={"If-None-Match": plain.headers["ETag"]},
         )
         assert r.status_code == 200 and r.json()["name"] == "Renamed"
+
+
+class TestRevalidationBackoff:
+    async def test_a_failed_revalidation_is_not_retried_on_every_stale_hit(self, monkeypatch):
+        calls: list[str] = []
+
+        async def failing_fetch(url, **kwargs):
+            calls.append(url)
+            raise api.NetworkError("upstream down")
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", failing_fetch)
+        await api._background_revalidate(URL)
+        await api._background_revalidate(URL)
+        assert calls == [URL]

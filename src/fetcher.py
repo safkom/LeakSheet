@@ -249,8 +249,21 @@ async def _refresh_tracker_hosts() -> None:
     Self-throttled by ``TRACKER_HOST_REFRESH_INTERVAL`` so a flood of bogus
     hosts can't turn this into an amplifier.
     """
-    if not tracker_hosts_are_stale():
-        return
+    global _host_refresh
+    if _host_refresh is None or _host_refresh.done():
+        if not tracker_hosts_are_stale():
+            return
+        # One refresh at a time: the throttle is stamped only when a fetch
+        # finishes, so every unknown-host request during the first (up to
+        # 60 s) fetch started its own.
+        _host_refresh = asyncio.create_task(_fetch_tracker_hosts())
+    await asyncio.shield(_host_refresh)
+
+
+_host_refresh: asyncio.Task | None = None
+
+
+async def _fetch_tracker_hosts() -> None:
     try:
         entries = await fetch_artistgrid_entries()
         logger.info("ArtistGrid host refresh: %d trackers listed", len(entries))
@@ -843,7 +856,10 @@ def _evict_sheet_cache() -> None:
     groups: dict[str, list[tuple[float, int, Path]]] = {}
     total = 0
     for path in CACHE_DIR.iterdir():
-        if not path.is_file() or path.name.startswith("img_"):
+        # img_* is the image cache (own cap); imgalias_* are the tiny pointers
+        # clients' old cover URLs resolve through — evicting them brings back
+        # the expired-token failures they exist to prevent.
+        if not path.is_file() or path.name.startswith(("img_", "imgalias_")):
             continue
         # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
         # "abc", so temp files grouped with the real entry and got unlinked

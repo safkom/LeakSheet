@@ -140,7 +140,7 @@ class TestWarmEraArt:
         asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
         assert bin_path.stat().st_mtime > 1
 
-    def test_overlapping_warms_keep_each_others_last_good_covers(self, google):
+    def test_overlapping_warms_both_store_their_covers(self, google):
         donda, yandhi = _cover("donda"), _cover("yandhi")
         google.alive.update({donda, yandhi})
 
@@ -151,7 +151,9 @@ class TestWarmEraArt:
             )
 
         asyncio.run(both())
-        assert api._read_era_art_index(TRACKER) == {"Donda": donda, "Yandhi": yandhi}
+        for era in ("Donda", "Yandhi"):
+            key = api._image_cache_key(api._era_art_base(TRACKER, era), None)
+            assert api._read_image_cache(key), era
 
 
 class TestImageProxyReads:

@@ -835,13 +835,15 @@ async def stream_audio(
 
     # music.froste.lol requires a Referer header
     if "music.froste.lol/song/" in stream_url:
-        song_page = stream_url.removesuffix("/download")
-        req_headers["Referer"] = song_page
+        req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
 
     # krakencloud.net requires Referer: https://krakenfiles.com/
     if "krakencloud.net" in stream_url:
         req_headers["Referer"] = "https://krakenfiles.com/"
 
+    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range,
+    # so the body must not arrive content-encoded (httpx would decode it).
+    req_headers["Accept-Encoding"] = "identity"
     client = _get_shared_client()
 
     request = client.build_request("GET", stream_url, headers=req_headers)

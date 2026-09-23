@@ -617,14 +617,27 @@ async def _parse_once(
 async def _background_revalidate(url: str) -> None:
     """Re-fetch and re-parse a tracker URL in the background to refresh cache.
 
-    A revalidation already running for the URL is joined, not repeated.
+    A revalidation already running for the URL is joined, not repeated. One
+    that failed, or whose result the cache refused, is not retried for
+    _REVALIDATE_BACKOFF_S: every stale hit used to start another full parse.
     """
+    key = _normalize_url(url)
+    if time.monotonic() < _revalidate_backoff.get(key, 0.0):
+        return
     try:
-        _artist, warm = await _parse_once(url, cache_ttl=0, use_cache=True, write_cache=True)
+        artist, warm = await _parse_once(url, cache_ttl=0, use_cache=True, write_cache=True)
         await asyncio.shield(warm)
+        if artist._wire is None:
+            _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.info("Background revalidation complete: %s", url[:80])
     except Exception as e:
+        _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
+
+
+# Per worker, like _parses. Keyed by normalized URL.
+_REVALIDATE_BACKOFF_S = 15 * 60.0
+_revalidate_backoff: dict[str, float] = {}
 
 
 # Stale-cache prewarm — refresh parses inside the stale-while-revalidate gap
@@ -982,14 +995,10 @@ _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
-# Concurrent Pillow decodes. asyncio.to_thread's default pool is
-# min(32, cpu+4) threads and each slot can hold a 15MB input plus a 20MP
-# decode (~80MB as RGBA), so an artist screen firing 40-120 image requests at
-# once could ask the 512MB box for multiples of its own memory. The per-item
-# caps bound one decode; this bounds how many run together.
-_IMAGE_RESIZE_CONCURRENCY = int(
-    os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY", "3") or 3
-)
+# Concurrent Pillow decodes. Each can hold a 15MB input plus a 20MP decode
+# (~80MB as RGBA), and an artist screen fires 40-120 image requests at once.
+# At least 1: a Semaphore(0) would hang every resize forever.
+_IMAGE_RESIZE_CONCURRENCY = max(1, int(os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY") or 3))
 _resize_sem: asyncio.Semaphore | None = None
 
 
@@ -1262,13 +1271,6 @@ def _image_request_headers(url: str) -> dict[str, str]:
 
 _ERA_ART_WARM_CONCURRENCY = 3
 _background_tasks: set[asyncio.Task] = set()
-# One warm at a time per tracker. Each reads the last-good index, updates it and
-# writes it back whole, so two overlapping warms (a parse's, then the next
-# parse's while the first is still downloading) lost each other's entries.
-# The second one waits, then finds the first's covers already stored.
-_era_art_locks: dict[str, asyncio.Lock] = {}
-
-
 def _spawn_detached(coro) -> asyncio.Task:
     """Run *coro* past the request that started it, keeping a reference so
     the task is not garbage-collected mid-flight."""
@@ -1276,27 +1278,6 @@ def _spawn_detached(coro) -> asyncio.Task:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return task
-
-
-def _era_art_index_path(tracker_url: str):
-    digest = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()
-    return CACHE_DIR / f"eraart_{digest}.json"
-
-
-def _read_era_art_index(tracker_url: str) -> dict[str, str]:
-    try:
-        index = json.loads(_era_art_index_path(tracker_url).read_text())
-        return index if isinstance(index, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _write_era_art_index(tracker_url: str, index: dict[str, str]) -> None:
-    try:
-        CACHE_DIR.mkdir(exist_ok=True)
-        _atomic_write_bytes(_era_art_index_path(tracker_url), json.dumps(index).encode())
-    except OSError as e:
-        logger.warning("era art index write failed: %s", e)
 
 
 async def _warm_era_art(artist, tracker_url: str) -> None:
@@ -1310,9 +1291,7 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     0), which /image-proxy reads before going upstream.
 
     A URL that is already dead here (yetracker.net serves Cloudflare copies up
-    to an hour old) gets the era's last good cover instead, remembered per
-    tracker in a small index. Never another tracker's: the index is keyed by
-    tracker URL.
+    to an hour old) keeps the era's last good cover.
     """
     covers: dict[str, str] = {}
     for era in artist.eras:
@@ -1324,12 +1303,6 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     if not covers:
         return
 
-    async with _era_art_locks.setdefault(_normalize_url(tracker_url), asyncio.Lock()):
-        await _warm_era_art_locked(covers, tracker_url)
-
-
-async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None:
-    index = await asyncio.to_thread(_read_era_art_index, tracker_url)
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
 
     async def warm(era_name: str, url: str) -> None:
@@ -1340,14 +1313,13 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
         if await asyncio.to_thread(_touch_image_cache, key):
-            index[era_name] = url
             return
         data, content_type = b"", ""
         async with slots:
             try:
                 resp, data = await _get_image_capped(url, _image_request_headers(url))
                 content_type = resp.headers.get("content-type", "")
-            except (httpx.HTTPError, HTTPException) as exc:
+            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
                 logger.info("era art warm: %s failed: %s", url[:80], exc)
         if not data:
             # The URL was already dead when we got here (yetracker.net serves
@@ -1357,11 +1329,9 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
             if not stored:
                 return
             data, content_type = stored[0], stored[1]
-        if await asyncio.to_thread(_write_image_cache, key, data, content_type):
-            index[era_name] = url
+        await asyncio.to_thread(_write_image_cache, key, data, content_type)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
-    await asyncio.to_thread(_write_era_art_index, tracker_url, index)
 
 
 @app.get("/image-proxy")
@@ -2238,7 +2208,8 @@ async def proxy_stream(
             # Derive Content-Length from Content-Range — some upstreams
             # (e.g. pillows.su) return the *total* file size in
             # Content-Length even for 206 responses, which breaks iOS Safari.
-            cr_match = re.match(r"bytes (\d+)-(\d+)/", cr)
+            # Bounded digits: int() refuses >4300, which was a 500 and a leaked response.
+            cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
             if cr_match:
                 headers["Content-Length"] = str(
                     int(cr_match.group(2)) - int(cr_match.group(1)) + 1
@@ -2308,17 +2279,18 @@ async def proxy_stream(
     content_length = range_end - range_start + 1
 
     # The slice operates on the FULL byte-offset stream (prepend chunk first).
+    # A 'partial' plan is only made when total_size is known.
+    partial_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": ct or "application/octet-stream",
+        "Content-Length": str(content_length),
+        "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
+    }
+    if _disposition:
+        partial_headers["Content-Disposition"] = _disposition
     return StreamingResponse(
         _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
         status_code=206,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Type": ct or "application/octet-stream",
-            "Content-Length": str(content_length),
-            "Content-Range": (
-                f"bytes {range_start}-{range_end}/"
-                f"{total_size if total_size is not None else '*'}"
-            ),
-        },
+        headers=partial_headers,
         media_type=ct or "application/octet-stream",
     )
