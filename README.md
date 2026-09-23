@@ -148,17 +148,18 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 
 ### Deployment
 
-Self-hosted via Docker Compose (`docker-compose.yml`): an `api` container (`gunicorn` with a
-single `UvicornWorker`, see `Dockerfile`) and a `web` container (`nginx` serving the built SPA
+Self-hosted via Docker Compose (`docker-compose.yml`): an `api` container (`gunicorn` with three
+`UvicornWorker`s, see `Dockerfile`) and a `web` container (`nginx` serving the built SPA
 and reverse-proxying `/api/*` to `api` with the prefix stripped, see `web/Dockerfile` and
 `web/nginx.conf`) — this replicates the same-origin `/api` routing the frontend and the
 LeakSheet-iOS app both assume. `web` publishes port `8081` on the host; a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 (run separately, e.g. as a CasaOS app) points `sheets.safko.eu` at `http://localhost:8081`.
 
-Single worker on purpose: the box can't fit two concurrent Ye-sized cold parses (11.7 MB HTML →
-model tree + serialized dict each). CPU-bound parse/serialize work is pushed off the event loop
-via `asyncio.to_thread`, so the single worker stays responsive during a cold miss.
+Three workers, so one cold parse doesn't stall every other request; parse/serialize work also
+runs off the event loop via `asyncio.to_thread`. Anything held in process memory — the rate
+limiter, single-flight parses, revalidation backoff, CDN-resolve caches — is therefore per worker,
+and `LEAKSHEET_PREWARM` must stay `0` (see `docker-compose.yml`).
 
 
 ---

@@ -1,6 +1,7 @@
 """Tests for the /trackers ArtistGrid discovery endpoint."""
 
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -91,22 +92,26 @@ class FakeResponse:
 
 
 class FakeClient:
+    """A real httpx client over a mock transport, so the production read path
+    (streaming, size cap) runs unchanged."""
+
     def __init__(self):
         self.response: FakeResponse | None = FakeResponse(FIXTURE_CSV)
         self.calls = 0
+        self.client = httpx.AsyncClient(transport=httpx.MockTransport(self._handle))
 
-    async def get(self, url, headers=None, **kwargs):
+    def _handle(self, request: httpx.Request) -> httpx.Response:
         self.calls += 1
         if self.response is None:
-            raise RuntimeError("upstream down")
-        return self.response
+            raise httpx.ConnectError("upstream down", request=request)
+        return httpx.Response(self.response.status_code, text=self.response.text, headers=self.response.headers)
 
 
 @pytest.fixture()
 def trackers_env(monkeypatch):
     fake = FakeClient()
     import src.fetcher as fetcher
-    monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: fake)
+    monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: fake.client)
     monkeypatch.setattr(api, "_trackers_cache", api.TTLCache(ttl=3600.0, max_entries=1))
     monkeypatch.setattr(api, "_trackers_stale", None)
     return TestClient(app), fake

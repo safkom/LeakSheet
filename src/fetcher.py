@@ -12,7 +12,7 @@ Strategy (async pipeline; the sync entry points are thin wrappers over it):
    and fetch every candidate concurrently — consuming results in priority
    order (the "Unreleased" tab first) and cancelling the rest once a winner
    (most eras, minimum threshold) parses.
-4. Load secondary tabs concurrently: Art (with pHash verification) and every
+4. Load secondary tabs concurrently: Art and every
    content tab; badge tabs stamp highlights onto existing songs.
 5. Cache both the winning HTML and the parsed result; a size-capped eviction
    keeps the cache directory bounded.
@@ -21,6 +21,7 @@ Strategy (async pipeline; the sync entry points are thin wrappers over it):
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import logging
@@ -70,10 +71,9 @@ DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
 STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
-# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md; the
-# image cache has had a 200MB cap for a while, the sheet cache had none — a
-# TrackerHub sweep left ~700MB behind on a 512MB-class box). Oldest entries
-# (grouped per hash stem) are evicted first; img_* files have their own cap.
+# Size cap for the sheet HTML + parsed-JSON cache (why: docs/decisions.md).
+# Oldest entries (grouped per hash stem) are evicted first; img_* files have
+# their own cap.
 _SHEET_CACHE_MAX_BYTES = int(
     os.environ.get("LEAKSHEET_SHEET_CACHE_MAX_BYTES", str(1024 * 1024 * 1024))
 )
@@ -84,11 +84,9 @@ _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
 
 # Concurrent sub-page fetches, across ALL callers.
 #
-# Discovery started every discovered GID at once and _aggregate_hub_workbook
-# fetched *and parsed* every unclassified tab at once, each holding its full
-# response body — the largest export here is 11.85MB, and README.md ("Deployment") says
-# the box cannot fit two concurrent Ye-sized parses. One semaphore inside
-# _fetch_gid_page bounds all three fan-out sites at their single choke point.
+# Every fan-out site (GID discovery, hub-workbook tabs) holds a full response
+# body, up to ~12 MB each. One semaphore inside _fetch_gid_page bounds all of
+# them at their single choke point.
 _GID_FETCH_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
 )
@@ -197,6 +195,35 @@ async def close_sheets_client() -> None:
     _sheets_client = None
 
 
+# Largest decoded sheet body we accept. The Ye main tab is ~11 MB; a feed-listed
+# custom host is third-party controlled and could otherwise stream (or
+# gzip-bomb) the worker out of memory.
+_MAX_SHEET_BYTES = 64 * 1024 * 1024
+
+
+class ResponseTooLarge(httpx.HTTPError):
+    """A body over _MAX_SHEET_BYTES. An httpx error, so a tab loop skips the
+    one oversized tab instead of failing the whole parse."""
+
+
+async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """client.get, but the decoded body stops at _MAX_SHEET_BYTES."""
+    request = client.build_request("GET", url, **kwargs)
+    resp = await client.send(request, stream=True)
+    try:
+        body = bytearray()
+        async for chunk in resp.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > _MAX_SHEET_BYTES:
+                raise ResponseTooLarge(f"{urlparse(url).hostname} sent more than {_MAX_SHEET_BYTES} bytes")
+    finally:
+        await resp.aclose()
+    # Already decoded, so the encoding headers no longer describe the body.
+    headers = [(k, v) for k, v in resp.headers.multi_items()
+               if k.lower() not in ("content-encoding", "content-length")]
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+
+
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
     """GET the ArtistGrid registry, parse it, and register its hosts.
 
@@ -206,8 +233,8 @@ async def fetch_artistgrid_entries() -> list[TrackerEntry]:
     Raises on any upstream or parse failure, so each caller keeps its own
     fallback.
     """
-    resp = await _get_sheets_client().get(
-        ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
+    resp = await _get_capped(
+        _get_sheets_client(), ARTISTGRID_URL, headers={"Accept": "text/csv"}, timeout=DEFAULT_TIMEOUT
     )
     if resp.status_code != 200:
         raise NetworkError(f"ArtistGrid returned {resp.status_code}")
@@ -225,8 +252,21 @@ async def _refresh_tracker_hosts() -> None:
     Self-throttled by ``TRACKER_HOST_REFRESH_INTERVAL`` so a flood of bogus
     hosts can't turn this into an amplifier.
     """
-    if not tracker_hosts_are_stale():
-        return
+    global _host_refresh
+    if _host_refresh is None or _host_refresh.done():
+        if not tracker_hosts_are_stale():
+            return
+        # One refresh at a time: the throttle is stamped only when a fetch
+        # finishes, so every unknown-host request during the first (up to
+        # 60 s) fetch started its own.
+        _host_refresh = asyncio.create_task(_fetch_tracker_hosts())
+    await asyncio.shield(_host_refresh)
+
+
+_host_refresh: asyncio.Task | None = None
+
+
+async def _fetch_tracker_hosts() -> None:
     try:
         entries = await fetch_artistgrid_entries()
         logger.info("ArtistGrid host refresh: %d trackers listed", len(entries))
@@ -262,7 +302,7 @@ GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 # Google Sheets embeds tab metadata as:
 #   items.push({name: "Tab Name", pageUrl: "...", gid: "12345", ...});
 _TAB_ITEMS_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
+    r'\{name:\s*"([^"]+)"[^{}]*?gid:\s*"(\d+)"',
 )
 
 # The same items.push() switcher, but keyed on pageUrl instead of gid.
@@ -280,7 +320,7 @@ _TAB_ITEMS_PATTERN = re.compile(
 # <table> — so every one of them failed with NoTablesError until we followed
 # the URL the page itself advertises.
 _TAB_PAGEURL_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^}]*?pageUrl:\s*"([^"]+)"',
+    r'\{name:\s*"([^"]+)"[^{}]*?pageUrl:\s*"([^"]+)"',
 )
 
 # Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
@@ -403,29 +443,39 @@ def _normalize_url(url: str) -> str:
     directly, bypassing GID discovery and missing the main tracker tab.
     """
     url = url.strip()
-    if not url.startswith(("http://", "https://")):
+    if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
+    parsed = urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise InvalidURLError(f"Invalid URL: {url}") from exc
+    # One key per resource: userinfo, a default port, host case and the
+    # fragment never change what is fetched, but each used to mint its own
+    # cache and single-flight key — N spellings of Ye meant N cold parses.
+    host = (parsed.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"  # IPv6 literal
+    scheme = parsed.scheme.lower()
+    default = port is None or (scheme, port) in (("https", 443), ("http", 80))
+    netloc = host if default else f"{host}:{port}"
 
     # Normalize Google Sheets URLs to /htmlview for reliable GID discovery
-    if _is_google_sheets_url(url):
-        sheet_id = _extract_sheet_id(url)
+    if host == "docs.google.com":
+        sheet_id = _extract_sheet_id(f"docs.google.com{parsed.path}")
         if sheet_id:
-            parsed = urlparse(url)
-            url = f"{parsed.scheme}://{parsed.netloc}/spreadsheets/d/{sheet_id}/htmlview"
-    else:
-        # Non-Google hosts (yetracker.net): 'host' and 'host/' are the same
-        # resource but hash to different cache keys — canonicalize the bare
-        # host-root form to a trailing slash.
-        parsed = urlparse(url)
-        if not parsed.path and not parsed.query and not parsed.fragment:
-            url = url + "/"
-
+            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+    url = parsed._replace(scheme=scheme, netloc=netloc, fragment="").geturl()
+    # 'host' and 'host/' are the same resource.
+    if not parsed.path and not parsed.query:
+        url += "/"
     return url
 
 
 def _is_google_sheets_url(url: str) -> bool:
     """Check if URL is a Google Sheets URL."""
-    return "docs.google.com/spreadsheets" in url
+    parsed = urlparse(url)
+    return (parsed.hostname or "").lower() == "docs.google.com" and parsed.path.startswith("/spreadsheets")
 
 
 def _extract_sheet_id(url: str) -> str | None:
@@ -499,6 +549,19 @@ def _build_sheet_html_url(
     return f"{parsed.scheme}://{parsed.netloc}{path}?{query}"
 
 
+# Trailing-text regexes below start with (?<!\s) or exclude the opener from
+# their inner class, so no run of spaces or brackets is rescanned from every
+# character in it (S8786).
+_TRACKER_QUALIFIER_RE = re.compile(
+    r"(?<!\s)\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE"
+    r"|\[[^\]]*\]|\([^)]*\))\s*$",
+    re.IGNORECASE,
+)
+_TRAILING_BRACKET_RE = re.compile(r"(?<!\s)\s*[\(\[][^()\[\]]*[\)\]]\s*$")
+_TAB_QUALIFIER_RE = re.compile(r"[\(\[][^()\[\]]*[\)\]]\s*$")
+_SLASH_SPACING_RE = re.compile(r"(?<!\s)\s*/\s*")
+
+
 def _infer_artist_name(title: str) -> str:
     """Infer artist name from a page title.
 
@@ -520,12 +583,7 @@ def _infer_artist_name(title: str) -> str:
     # "Tracker PUBLIC" / "Tracker [Official]" style qualifiers that follow
     # the word Tracker (2026-07-06 census: 'Ye Tracker PUBLIC',
     # 'Playboi Carti Tracker [Official]')
-    name = re.sub(
-        r"\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE|\[[^\]]*\]|\([^)]*\))\s*$",
-        "",
-        name,
-        flags=re.IGNORECASE,
-    ).strip()
+    name = _TRACKER_QUALIFIER_RE.sub("", name).strip()
     # Re-apply suffix stripping after version removal
     for suffix in TITLE_SUFFIXES:
         if name.endswith(suffix):
@@ -533,11 +591,7 @@ def _infer_artist_name(title: str) -> str:
 
     # Step 2: Strip trailing parenthetical/bracketed metadata like
     # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
-    #
-    # The inner class excludes '(' and '[' too (S8786): without that, a name
-    # with several opening brackets and no close retries the scan-to-end from
-    # every one of them — 6s on a 32 KB cell.
-    paren_match = re.search(r"\s*[\(\[][^()\[\]]*[\)\]]\s*$", name)
+    paren_match = _TRAILING_BRACKET_RE.search(name)
     if paren_match:
         stripped = name[: paren_match.start()].strip()
         # Re-apply suffix stripping on the cleaned name
@@ -675,10 +729,8 @@ def _clean_tab_name(name: str) -> str:
     user sees; this one lowercases.
     """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
-    # Same S8786 fix as _infer_artist_name's paren strip: exclude '(' and '['
-    # from the inner class so the scan can't retry from every open bracket.
-    clean = re.sub(r"[\(\[][^()\[\]]*[\)\]]\s*$", "", clean).strip()
-    clean = re.sub(r"\s*/\s*", " / ", clean)
+    clean = _TAB_QUALIFIER_RE.sub("", clean).strip()
+    clean = _SLASH_SPACING_RE.sub(" / ", clean)
     return re.sub(r"\s+", " ", clean).strip()
 
 
@@ -811,7 +863,10 @@ def _evict_sheet_cache() -> None:
     groups: dict[str, list[tuple[float, int, Path]]] = {}
     total = 0
     for path in CACHE_DIR.iterdir():
-        if not path.is_file() or path.name.startswith("img_"):
+        # img_* is the image cache (own cap); imgalias_* are the tiny pointers
+        # clients' old cover URLs resolve through — evicting them brings back
+        # the expired-token failures they exist to prevent.
+        if not path.is_file() or path.name.startswith(("img_", "imgalias_")) or path.name.endswith(".lock"):
             continue
         # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
         # "abc", so temp files grouped with the real entry and got unlinked
@@ -902,13 +957,33 @@ def _read_meta(key: str) -> dict:
         return {}
 
 
-def _write_meta(key: str, updates: dict) -> None:
-    """Merge `updates` into the entry's metadata and write it atomically."""
+@contextmanager
+def _entry_lock(key: str):
+    """Exclusive across the gunicorn workers, which share this cache.
+
+    Held around every meta read-modify-write, and around a parsed body plus
+    the content_hash describing it: two revalidations of one tracker could
+    otherwise leave one's hash over the other's bytes (a false 304 for every
+    client holding the old ones). Not re-entrant — flock on a second fd of
+    the same file blocks even within one process.
+    """
+    CACHE_DIR.mkdir(exist_ok=True)
+    with open(CACHE_DIR / f"{key}.meta.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def _merge_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata. Caller holds _entry_lock."""
     meta = _read_meta(key)
     meta.update(updates)
-    _atomic_write_text(
-        CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
-    )
+    _atomic_write_text(CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False))
+
+
+def _write_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata and write it atomically."""
+    with _entry_lock(key):
+        _merge_meta(key, updates)
 
 
 def _parsed_timestamp(meta: dict) -> float:
@@ -1029,21 +1104,22 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             )
             return
         body, etag = serialize_artist(artist)
-        _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
         # parsed_timestamp, not timestamp: the parse's freshness is its own
         # signal. Under force_refresh the caller skips _set_cache entirely
         # while still writing the parse, so without a write here a
         # pull-to-refresh either inherited the OLD timestamp — fresh data
         # considered stale immediately — or, on a first-ever fetch, wrote a
         # parsed cache that could never be read.
-        _write_meta(key, {
-            "content_hash": etag,
-            "parsed_timestamp": time.time(),
-            # Read back by _collapse_reason, so the collapse check costs a
-            # small sidecar read instead of re-parsing the whole entry.
-            "total_versions": artist.total_versions,
-            "era_count": len(artist.eras),
-        })
+        with _entry_lock(key):
+            _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
+            _merge_meta(key, {
+                "content_hash": etag,
+                "parsed_timestamp": time.time(),
+                # Read back by _collapse_reason, so the collapse check costs a
+                # small sidecar read instead of re-parsing the whole entry.
+                "total_versions": artist.total_versions,
+                "era_count": len(artist.eras),
+            })
         artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:
@@ -1165,8 +1241,8 @@ def get_cached_parsed_bytes(
 
     Serving the raw file bytes skips pydantic validation and re-serialization
     of multi-MB artists on the warm path. The stored content hash equals the
-    ETag the full path would compute for the same data (both derive from the
-    identical ``artist.dict()`` written at cache time).
+    ETag the full path would compute for the same data (both hash the bytes
+    written at cache time).
     """
     url_norm = _normalize_url(url)
     key = _cache_key(url_norm)
@@ -1347,7 +1423,9 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         if code == 404:
             raise InvalidURLError(f"URL not found (404): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
-    raise exc
+    # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
+    # upstream failing, none of them a server bug worth a 500.
+    raise NetworkError(f"Upstream error from {url}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1364,7 +1442,7 @@ async def _fetch_base_html(
     base page. Served back as the base page it has no tab switcher, so a
     re-parse dropped the Art and content tabs and cached the result.
     """
-    r = await client.get(url_norm, timeout=timeout)
+    r = await _get_capped(client, url_norm, timeout=timeout)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1400,7 +1478,7 @@ async def async_fetch_sheet_html(
                 cached = await _async_get_cached(sheet_url, cache_ttl)
                 if cached is not None:
                     return cached
-            r = await client.get(sheet_url, timeout=timeout)
+            r = await _get_capped(client, sheet_url, timeout=timeout)
             r.raise_for_status()
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
@@ -1419,7 +1497,7 @@ async def async_fetch_sheet_html(
             cached = await _async_get_cached(url, cache_ttl)
             if cached is not None:
                 return cached
-        r = await client.get(url, timeout=timeout)
+        r = await _get_capped(client, url, timeout=timeout)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)
@@ -1441,7 +1519,7 @@ async def async_fetch_sheet_html(
         for try_gid in gids:
             try:
                 sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
-                r = await client.get(sheet_url, timeout=timeout)
+                r = await _get_capped(client, sheet_url, timeout=timeout)
                 if r.status_code == 200 and "<table" in r.text.lower():
                     if use_cache:
                         await _async_set_cache(url, r.text, title)
@@ -1480,7 +1558,7 @@ async def _fetch_gid_page(
                     cached = await _async_get_cached(sheet_url, cache_ttl)
                     if cached is not None:
                         return (gid_val, cached[0])
-                resp = await client.get(sheet_url, timeout=timeout)
+                resp = await _get_capped(client, sheet_url, timeout=timeout)
                 if resp.status_code != 200 or "<table" not in resp.text.lower():
                     return None
                 if use_cache and cache_ttl > 0:
@@ -1779,9 +1857,7 @@ async def async_fetch_and_parse(
     write_cache: bool | None = None,
     timer: PhaseTimer | None = None,
 ) -> Artist:
-    """Async version of fetch_and_parse.
-
-    Like the sync version, tries multiple GIDs when the first result
+    """Fetch and parse a tracker, trying multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
 
     ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes*

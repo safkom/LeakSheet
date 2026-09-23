@@ -427,3 +427,72 @@ class TestOneParsePerTracker:
 
         asyncio.run(twice())
         assert calls == [URL, URL]
+
+
+class TestDisplayName:
+    """artist_name is the iOS app's favourites key material (via the slug), so
+    every path must apply it the same way: a warm hit that ignored it flipped
+    the slug between two opens of the same tracker."""
+
+    def _fake_fetch_that_caches(self, artist):
+        async def fake_fetch(url, **kwargs):
+            _set_cached_parsed(_normalize_url(url), artist)
+            return artist
+        return fake_fetch
+
+    def test_every_path_serves_the_same_name_and_etag(self, api_client, artist, monkeypatch):
+        monkeypatch.setattr(api, "async_fetch_and_parse", self._fake_fetch_that_caches(artist))
+        body = {"url": URL, "artist_name": "Renamed"}
+        miss = api_client.post("/sheet", json=body)
+        hit = api_client.post("/sheet", json=body)
+        assert hit.headers["X-Cache-Status"] == "hit"
+        for r in (miss, hit):
+            assert (r.json()["name"], r.json()["slug"]) == ("Renamed", "renamed")
+        assert hit.headers["ETag"] == miss.headers["ETag"]
+        not_modified = api_client.post("/sheet", json=body, headers={"If-None-Match": hit.headers["ETag"]})
+        assert not_modified.status_code == 304
+
+    def test_the_renamed_etag_differs_from_the_shared_one(self, api_client, artist, monkeypatch):
+        monkeypatch.setattr(api, "async_fetch_and_parse", self._fake_fetch_that_caches(artist))
+        plain = api_client.post("/sheet", json={"url": URL})
+        renamed = api_client.post("/sheet", json={"url": URL, "artist_name": "Renamed"})
+        assert plain.headers["ETag"] != renamed.headers["ETag"]
+        # A client holding the plain copy must not get a 304 for the renamed one.
+        r = api_client.post(
+            "/sheet", json={"url": URL, "artist_name": "Renamed"},
+            headers={"If-None-Match": plain.headers["ETag"]},
+        )
+        assert r.status_code == 200 and r.json()["name"] == "Renamed"
+
+
+class TestRevalidationBackoff:
+    async def test_a_failed_revalidation_is_not_retried_on_every_stale_hit(self, monkeypatch):
+        calls: list[str] = []
+
+        async def failing_fetch(url, **kwargs):
+            calls.append(url)
+            raise api.NetworkError("upstream down")
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", failing_fetch)
+        await api._background_revalidate(URL)
+        await api._background_revalidate(URL)
+        assert calls == [URL]
+
+
+class TestInvalidURL:
+    @pytest.mark.parametrize("headers", [{}, {"If-None-Match": '"x"'}, {"Accept": "application/x-ndjson"}])
+    def test_a_bad_port_is_a_400_on_every_path(self, api_client, headers):
+        r = api_client.post("/sheet", json={"url": "https://example.com:99999/"}, headers=headers)
+        assert r.status_code == 400
+
+
+def test_the_rename_splice_matches_a_full_rewrite(artist):
+    from src.fetcher import serialize_artist
+
+    raw, etag = serialize_artist(artist)
+    for name in ("Renamed", 'Kanye "Ye" West', "Beyoncé", artist.name):
+        body, tagged = api._with_display_name(raw, etag, name)
+        data = json.loads(body)
+        expected = {**json.loads(raw), "name": name, "slug": api.slugify(name)}
+        assert data == expected
+        assert tagged == api._display_etag(etag, name)

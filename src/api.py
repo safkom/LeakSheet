@@ -9,9 +9,8 @@ Endpoints:
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
   POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
-Note: In production (DO App Platform), these are served under /api/* via
-ingress routing.  The /api prefix is stripped by the platform before reaching
-this app.  In local dev, Vite's proxy rewrites /api/* → /* when forwarding.
+In production nginx serves these under /api/* and strips the prefix; in local
+dev Vite's proxy does the same.
 """
 
 from __future__ import annotations
@@ -454,9 +453,10 @@ class _RateLimitMiddleware:
     the streaming response body).
 
     Off by default — set ``LEAKSHEET_RATE_LIMIT_PER_MIN`` to a positive integer
-    to cap requests-per-minute-per-IP on the expensive endpoints. Single-worker
-    (see Dockerfile), so in-process counters are authoritative. The limit is read
-    per request so it can be tuned without a redeploy.
+    to cap requests-per-minute-per-IP on the expensive endpoints. Counters are
+    per worker process (the Dockerfile runs 3), so the effective limit is up to
+    3x the setting and resets when a worker recycles; Cloudflare's rate rule on
+    /api/sheet is the real limit. The value is read per request.
 
     Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
     :func:`_client_ip`, without which every caller shares one bucket.
@@ -539,6 +539,11 @@ app.add_middleware(
 # POST /api/sheet — parse a tracker URL → full Artist JSON
 # ---------------------------------------------------------------------------
 
+# A whole cold parse, every tab included. Per-request timeouts alone let a
+# slow-drip host hold a parse (and everyone joined to it) indefinitely; this
+# stays under Cloudflare's 125 s edge timeout so the client gets our message.
+_PARSE_DEADLINE_S = 110.0
+
 # Normalized tracker URL → the parse running for it: (task, progress listeners,
 # the timer the parse reports into).
 _parses: dict[str, tuple[asyncio.Task, list[Callable[[dict], None]], PhaseTimer]] = {}
@@ -556,8 +561,9 @@ async def _parse_once(
 
     Returns the artist and the task warming its era covers, which starts once
     per parse. One parse per tracker at a time: a client retrying a stream it
-    lost, a second device and the prewarm loop all used to start their own,
-    and the box cannot fit two Ye-sized parses at once (README "Deployment").
+    lost, a second device and the prewarm loop all used to start their own.
+    Per worker process: with 3 workers the same tracker can still parse up to
+    3 times at once.
 
     The first caller's cache flags decide. A joiner gets the same fresh parse
     its own flags would have produced from the cache miss that brought it here.
@@ -581,10 +587,11 @@ async def _parse_once(
         shared = PhaseTimer(on_progress=broadcast)
 
         async def run() -> tuple[Artist, asyncio.Task]:
-            artist = await async_fetch_and_parse(
-                url, artist_name=None, cache_ttl=cache_ttl,
-                use_cache=use_cache, write_cache=write_cache, timer=shared,
-            )
+            async with asyncio.timeout(_PARSE_DEADLINE_S):
+                artist = await async_fetch_and_parse(
+                    url, artist_name=None, cache_ttl=cache_ttl,
+                    use_cache=use_cache, write_cache=write_cache, timer=shared,
+                )
             # Detached: covers download while the response is already on its
             # way. See _warm_era_art for why they must be fetched now.
             return artist, _spawn_detached(_warm_era_art(artist, url))
@@ -611,14 +618,27 @@ async def _parse_once(
 async def _background_revalidate(url: str) -> None:
     """Re-fetch and re-parse a tracker URL in the background to refresh cache.
 
-    A revalidation already running for the URL is joined, not repeated.
+    A revalidation already running for the URL is joined, not repeated. One
+    that failed, or whose result the cache refused, is not retried for
+    _REVALIDATE_BACKOFF_S: every stale hit used to start another full parse.
     """
+    key = _normalize_url(url)
+    if time.monotonic() < _revalidate_backoff.get(key, 0.0):
+        return
     try:
-        _artist, warm = await _parse_once(url, cache_ttl=0, use_cache=True, write_cache=True)
+        artist, warm = await _parse_once(url, cache_ttl=0, use_cache=True, write_cache=True)
         await asyncio.shield(warm)
+        if artist._wire is None:
+            _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.info("Background revalidation complete: %s", url[:80])
     except Exception as e:
+        _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
+
+
+# Per worker, like _parses. Keyed by normalized URL.
+_REVALIDATE_BACKOFF_S = 15 * 60.0
+_revalidate_backoff: dict[str, float] = {}
 
 
 # Stale-cache prewarm — refresh parses inside the stale-while-revalidate gap
@@ -693,12 +713,20 @@ async def parse_sheet(
     while a background refresh is triggered.
     """
     use_cache = req.use_cache and not req.force_refresh
+    # Up front: every path below normalizes the URL, and an invalid one
+    # raised out of the cache lookups as a 500.
+    try:
+        _normalize_url(req.url)
+    except InvalidURLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {e}") from e
 
     # --- ETag-based 304 fast path ---
     if use_cache:
         if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
         if if_none_match:
             server_etag = await async_get_cached_etag(req.url)
+            if server_etag:
+                server_etag = _display_etag(server_etag, req.artist_name)
             if server_etag and server_etag == if_none_match:
                 age = await async_get_cached_age(req.url)
                 if age is not None and age < STALE_CACHE_TTL:
@@ -726,6 +754,9 @@ async def parse_sheet(
                 # of the served bytes, so this is one SHA-256 — no parse.
                 with timer.phase("etag"):
                     etag = content_hash(raw)
+            if req.artist_name:
+                with timer.phase("rename"):
+                    raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
             is_stale = age > DEFAULT_CACHE_TTL
 
             if is_stale:
@@ -788,27 +819,79 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         timer=timer,
     )
 
-    # The cache write already serialized this artist; serve those bytes. Doing
-    # it again cost ~0.2 s here and ~0.4 s on the production box for Ye.
-    #
-    # Serialize here only when there are no such bytes: the write was skipped
-    # (use_cache false, or the collapse guard refused it) or the caller asked
-    # for a display rename. That rename is applied after the shared cache was
-    # written with the page-inferred name, so a later cache hit serves the
-    # inferred name to everyone and only this caller sees the override.
-    #
-    # When serializing, encode to bytes off the event loop. Handing FastAPI a
-    # plain dict ran jsonable_encoder (a full recursive walk of the payload)
-    # and then json.dumps again, both on the loop.
-    wire = None if req.artist_name else artist._wire
-    if wire is not None:
-        return wire
+    # The cache write already serialized this artist; serve those bytes.
+    # Serialize only when there are none (use_cache false, or the collapse
+    # guard refused the write) — off the event loop either way.
+    wire = artist._wire
+    if wire is None:
+        with timer.phase("serialize"):
+            wire = await asyncio.to_thread(serialize_artist, artist)
     if req.artist_name:
-        artist = artist.model_copy(
-            update={"name": req.artist_name, "slug": slugify(req.artist_name)}
-        )
-    with timer.phase("serialize"):
-        return await asyncio.to_thread(serialize_artist, artist)
+        with timer.phase("rename"):
+            return await asyncio.to_thread(_with_display_name, *wire, req.artist_name)
+    return wire
+
+
+def _display_etag(etag: str, artist_name: str | None) -> str:
+    """ETag of a response served under a caller's display name."""
+    return content_hash(f"{etag}:{artist_name}".encode()) if artist_name else etag
+
+
+def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
+    """(name, slug) from the start of a payload, and where the slug ends.
+
+    Raises ValueError unless the object opens with exactly those two keys.
+    """
+    if not head.startswith("{"):
+        raise ValueError("unexpected payload head")
+    decoder = json.JSONDecoder()
+    values = []
+    i = 0
+    for key in ("name", "slug"):
+        i = _skip_json_ws(head, i + 1)  # past "{" or ","
+        found, i = decoder.raw_decode(head, i)
+        i = _skip_json_ws(head, i)
+        if found != key or head[i:i + 1] != ":":
+            raise ValueError("unexpected payload head")
+        value, i = decoder.raw_decode(head, _skip_json_ws(head, i + 1))
+        values.append(value)
+        i = _skip_json_ws(head, i)
+        if head[i:i + 1] != ",":
+            raise ValueError("unexpected payload head")
+    return (values[0], values[1]), i
+
+
+def _skip_json_ws(text: str, i: int) -> int:
+    while i < len(text) and text[i] in " \t\n\r":
+        i += 1
+    return i
+
+
+def _with_display_name(raw: bytes, etag: str, artist_name: str) -> tuple[bytes, str]:
+    """The cached payload renamed for one caller, and its ETag. Blocking.
+
+    The shared cache always holds the page-inferred name (see _parse_once), so
+    every path — cold, warm and 304 — applies the override the same way and
+    derives the same ETag from the cached one. Applying it only on the cold
+    path flipped the slug (iOS favourites key material) between requests.
+    """
+    tagged = _display_etag(etag, artist_name)
+    slug = slugify(artist_name)
+    # The payload opens with name then slug (Artist field order), so splice
+    # those two instead of round-tripping an ~11 MB document through json on
+    # every warm hit (0.5 s and ~100 MB for Ye).
+    head = raw[:4096].decode("utf-8", errors="ignore")
+    try:
+        (name, old_slug), end = _leading_name_and_slug(head)
+    except ValueError:
+        data = json.loads(raw)
+        data["name"], data["slug"] = artist_name, slug
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(), tagged
+    if (name, old_slug) == (artist_name, slug):
+        return raw, tagged
+    rest = raw[len(head[:end].encode("utf-8")):]
+    new_head = f'{{"name": {json.dumps(artist_name, ensure_ascii=False)}, "slug": {json.dumps(slug, ensure_ascii=False)}'
+    return new_head.encode("utf-8") + rest, tagged
 
 
 def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
@@ -829,6 +912,11 @@ def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
             status_code=403,
             detail="This tracker is private or has been taken down.",
         )
+    if isinstance(e, (httpx.InvalidURL, UnicodeError)):
+        return HTTPException(status_code=400, detail="Invalid URL")
+    if isinstance(e, TimeoutError):
+        logger.warning("sheet parse exceeded %ss for %s", _PARSE_DEADLINE_S, req.url[:120])
+        return HTTPException(status_code=503, detail="This tracker took too long to load. Please try again.")
     if isinstance(e, NetworkError):
         # NEVER interpolate: NetworkError wraps the SSRF guard's message,
         # which names the resolved address ("blocked non-public address
@@ -953,15 +1041,11 @@ async def clear_fetch_cache(request: Request):
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
-_IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB on the 512MB box
-# Concurrent Pillow decodes. asyncio.to_thread's default pool is
-# min(32, cpu+4) threads and each slot can hold a 15MB input plus a 20MP
-# decode (~80MB as RGBA), so an artist screen firing 40-120 image requests at
-# once could ask the 512MB box for multiples of its own memory. The per-item
-# caps bound one decode; this bounds how many run together.
-_IMAGE_RESIZE_CONCURRENCY = int(
-    os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY", "3") or 3
-)
+_IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
+# Concurrent Pillow decodes. Each can hold a 15MB input plus a 20MP decode
+# (~80MB as RGBA), and an artist screen fires 40-120 image requests at once.
+# At least 1: a Semaphore(0) would hang every resize forever.
+_IMAGE_RESIZE_CONCURRENCY = max(1, int(os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY") or 3))
 _resize_sem: asyncio.Semaphore | None = None
 
 
@@ -979,7 +1063,7 @@ _IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
 # Compressed-byte size says nothing about decoded size (a small, highly
 # compressible image can unpack to hundreds of MB) — cap decoded pixels too,
 # checked from the header before the full-frame load() below.
-_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA on the 512MB box
+_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and
 # docs.google.com/sheets-images 302s to login for N>0 (see web
@@ -987,6 +1071,18 @@ _IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA on the 512MB box
 _GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
+
+
+# Raster types only. image/svg+xml is a document that can carry script, and
+# this proxy serves inline from the app's origin with ACAO *.
+_RASTER_IMAGE_TYPES = frozenset({
+    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
+    "image/avif", "image/heic", "image/heif", "image/bmp",
+})
+
+
+def _is_raster_image(content_type: str) -> bool:
+    return content_type.split(";", 1)[0].strip().lower() in _RASTER_IMAGE_TYPES
 
 
 def _snap_image_width(w: int) -> int:
@@ -1222,13 +1318,6 @@ def _image_request_headers(url: str) -> dict[str, str]:
 
 _ERA_ART_WARM_CONCURRENCY = 3
 _background_tasks: set[asyncio.Task] = set()
-# One warm at a time per tracker. Each reads the last-good index, updates it and
-# writes it back whole, so two overlapping warms (a parse's, then the next
-# parse's while the first is still downloading) lost each other's entries.
-# The second one waits, then finds the first's covers already stored.
-_era_art_locks: dict[str, asyncio.Lock] = {}
-
-
 def _spawn_detached(coro) -> asyncio.Task:
     """Run *coro* past the request that started it, keeping a reference so
     the task is not garbage-collected mid-flight."""
@@ -1236,27 +1325,6 @@ def _spawn_detached(coro) -> asyncio.Task:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return task
-
-
-def _era_art_index_path(tracker_url: str):
-    digest = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()
-    return CACHE_DIR / f"eraart_{digest}.json"
-
-
-def _read_era_art_index(tracker_url: str) -> dict[str, str]:
-    try:
-        index = json.loads(_era_art_index_path(tracker_url).read_text())
-        return index if isinstance(index, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _write_era_art_index(tracker_url: str, index: dict[str, str]) -> None:
-    try:
-        CACHE_DIR.mkdir(exist_ok=True)
-        _atomic_write_bytes(_era_art_index_path(tracker_url), json.dumps(index).encode())
-    except OSError as e:
-        logger.warning("era art index write failed: %s", e)
 
 
 async def _warm_era_art(artist, tracker_url: str) -> None:
@@ -1270,9 +1338,7 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     0), which /image-proxy reads before going upstream.
 
     A URL that is already dead here (yetracker.net serves Cloudflare copies up
-    to an hour old) gets the era's last good cover instead, remembered per
-    tracker in a small index. Never another tracker's: the index is keyed by
-    tracker URL.
+    to an hour old) keeps the era's last good cover.
     """
     covers: dict[str, str] = {}
     for era in artist.eras:
@@ -1284,12 +1350,6 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     if not covers:
         return
 
-    async with _era_art_locks.setdefault(_normalize_url(tracker_url), asyncio.Lock()):
-        await _warm_era_art_locked(covers, tracker_url)
-
-
-async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None:
-    index = await asyncio.to_thread(_read_era_art_index, tracker_url)
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
 
     async def warm(era_name: str, url: str) -> None:
@@ -1300,14 +1360,13 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
         if await asyncio.to_thread(_touch_image_cache, key):
-            index[era_name] = url
             return
         data, content_type = b"", ""
         async with slots:
             try:
                 resp, data = await _get_image_capped(url, _image_request_headers(url))
                 content_type = resp.headers.get("content-type", "")
-            except (httpx.HTTPError, HTTPException) as exc:
+            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
                 logger.info("era art warm: %s failed: %s", url[:80], exc)
         if not data:
             # The URL was already dead when we got here (yetracker.net serves
@@ -1317,11 +1376,9 @@ async def _warm_era_art_locked(covers: dict[str, str], tracker_url: str) -> None
             if not stored:
                 return
             data, content_type = stored[0], stored[1]
-        if await asyncio.to_thread(_write_image_cache, key, data, content_type):
-            index[era_name] = url
+        await asyncio.to_thread(_write_image_cache, key, data, content_type)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
-    await asyncio.to_thread(_write_era_art_index, tracker_url, index)
 
 
 @app.get("/image-proxy")
@@ -1357,6 +1414,8 @@ async def proxy_image(
         # _image_host_allowed, re-checked after redirects, so the reach is
         # public tracker art and nothing else.
         "Access-Control-Allow-Origin": "*",
+        # Served from the app's own origin: an image must never run script.
+        "Content-Security-Policy": "sandbox; default-src 'none'",
     }
 
     # The URL the client holds may be an expired cover token; the bytes are
@@ -1408,7 +1467,7 @@ async def proxy_image(
                     # into the other branch.
                     resp, gdata = await _get_image_capped(google_url, headers)
                     ct = resp.headers.get("content-type", "")
-                    if resp.status_code == 200 and ct.startswith("image/"):
+                    if resp.status_code == 200 and _is_raster_image(ct):
                         return Response(
                             content=gdata, media_type=ct,
                             headers={**base_headers, "X-Cache-Status": "origin"},
@@ -1431,7 +1490,7 @@ async def proxy_image(
             resp, data = await _get_image_capped(url, headers)
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
-        if upstream_status == 200 and ct.startswith("image/"):
+        if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
                 async with _resize_slot():
@@ -1533,7 +1592,7 @@ async def _get_image_capped(
         raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
-        if resp.status_code != 200 or not ct.startswith("image/"):
+        if resp.status_code != 200 or not _is_raster_image(ct):
             return resp, b""
 
         chunks: list[bytes] = []
@@ -2196,7 +2255,8 @@ async def proxy_stream(
             # Derive Content-Length from Content-Range — some upstreams
             # (e.g. pillows.su) return the *total* file size in
             # Content-Length even for 206 responses, which breaks iOS Safari.
-            cr_match = re.match(r"bytes (\d+)-(\d+)/", cr)
+            # Bounded digits: int() refuses >4300, which was a 500 and a leaked response.
+            cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
             if cr_match:
                 headers["Content-Length"] = str(
                     int(cr_match.group(2)) - int(cr_match.group(1)) + 1
@@ -2266,17 +2326,18 @@ async def proxy_stream(
     content_length = range_end - range_start + 1
 
     # The slice operates on the FULL byte-offset stream (prepend chunk first).
+    # A 'partial' plan is only made when total_size is known.
+    partial_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": ct or "application/octet-stream",
+        "Content-Length": str(content_length),
+        "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
+    }
+    if _disposition:
+        partial_headers["Content-Disposition"] = _disposition
     return StreamingResponse(
         _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
         status_code=206,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Type": ct or "application/octet-stream",
-            "Content-Length": str(content_length),
-            "Content-Range": (
-                f"bytes {range_start}-{range_end}/"
-                f"{total_size if total_size is not None else '*'}"
-            ),
-        },
+        headers=partial_headers,
         media_type=ct or "application/octet-stream",
     )

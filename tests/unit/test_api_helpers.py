@@ -70,6 +70,14 @@ class TestNormalizeUrlCacheKeys:
             # Non-Google host: bare vs trailing slash vs missing scheme
             ("https://yetracker.net/", "https://yetracker.net"),
             ("https://yetracker.net/", "yetracker.net"),
+            # Spellings that used to mint extra keys (one cold parse each)
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "https://x@docs.google.com/spreadsheets/d/ABC123/edit"),
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "HTTPS://DOCS.Google.com:443/spreadsheets/d/ABC123/edit"),
+            ("https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+             "http://docs.google.com/spreadsheets/d/ABC123/htmlview"),
+            ("https://yetracker.net/", "https://u:p@YeTracker.NET:443/#top"),
         ],
     )
     def test_variants_share_a_key(self, a, b):
@@ -89,6 +97,12 @@ class TestNormalizeUrlCacheKeys:
         from src.fetcher import _cache_key, _normalize_url
 
         assert _cache_key(_normalize_url(a)) != _cache_key(_normalize_url(b))
+
+    def test_an_invalid_port_is_a_url_error(self):
+        from src.fetcher import InvalidURLError, _normalize_url
+
+        with pytest.raises(InvalidURLError):
+            _normalize_url("https://docs.google.com:99999/spreadsheets/d/ABC123/edit")
 
 
 @pytest.mark.parametrize(

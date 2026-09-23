@@ -51,12 +51,29 @@ logger = logging.getLogger(__name__)
 
 # imgur cdnUrl SSRF guard — see docs/decisions.md::streaming.py::imgur-cdnurl-guard
 def _ip_is_public(ip_str: str) -> bool:
-    """True unless *ip_str* is a private/loopback/link-local/reserved/etc. address."""
+    """True only for globally routable unicast addresses.
+
+    is_global, not a deny-list: the deny-list missed shared address space
+    (100.64.0.0/10 — CGNAT, Tailscale, some cloud metadata endpoints).
+    """
     ip = ipaddress.ip_address(ip_str)
-    return not (
+    if ip.version == 6:
+        # IPv6 forms that carry an IPv4 address the IPv6 flags don't judge:
+        # IPv4-mapped, deprecated IPv4-compatible (::a.b.c.d) and NAT64.
+        embedded = ip.ipv4_mapped
+        if embedded is None and int(ip) >> 32 == 0:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is None and ip in _NAT64:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is not None:
+            return _ip_is_public(str(embedded))
+    return ip.is_global and not (
         ip.is_private or ip.is_loopback or ip.is_link_local
         or ip.is_reserved or ip.is_multicast or ip.is_unspecified
     )
+
+
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 
 def _assert_public_host(host: str, *, source: str) -> None:
@@ -834,13 +851,15 @@ async def stream_audio(
 
     # music.froste.lol requires a Referer header
     if "music.froste.lol/song/" in stream_url:
-        song_page = stream_url.removesuffix("/download")
-        req_headers["Referer"] = song_page
+        req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
 
     # krakencloud.net requires Referer: https://krakenfiles.com/
     if "krakencloud.net" in stream_url:
         req_headers["Referer"] = "https://krakenfiles.com/"
 
+    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range,
+    # so the body must not arrive content-encoded (httpx would decode it).
+    req_headers["Accept-Encoding"] = "identity"
     client = _get_shared_client()
 
     request = client.build_request("GET", stream_url, headers=req_headers)

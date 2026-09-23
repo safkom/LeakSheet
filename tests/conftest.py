@@ -51,6 +51,9 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     cache_dir = tmp_path_factory.mktemp("leaksheet-cache")
     monkeypatch.setattr(fetcher, "CACHE_DIR", cache_dir)
     monkeypatch.setattr(api, "CACHE_DIR", cache_dir)
+    # Process-global state keyed by tracker URL must not leak between tests.
+    monkeypatch.setattr(api, "_revalidate_backoff", {})
+    monkeypatch.setattr(fetcher, "_host_refresh", None)
     return cache_dir
 
 

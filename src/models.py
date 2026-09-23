@@ -51,7 +51,7 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
 _DECORATIVE_EMOJI = r"[💿🎵🎶🔥]*"
 
 BADGE_EMOJI_PATTERN = re.compile(
-    rf"^[\s]*{_DECORATIVE_EMOJI}[\s]*(⭐️|⭐|💎|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)[\s]*"
+    rf"^\s*+{_DECORATIVE_EMOJI}+\s*+(⭐️|⭐|💎|✨|🗑️|🗑|🏆|🏅|🥇|🥉|🤖)\s*"
 )
 
 # Version tags like [V1], [Alt.], [Radio Mix], [MASTER] — form list:
@@ -632,7 +632,7 @@ EMOJI_RUN_RE = re.compile(
 # Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
 # Also handles emoji-prefixed labels ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
-    r"(\d+)\s+([A-Za-z][A-Za-z /()]*?)(?=\s*\d|[^A-Za-z /()]|\Z)",
+    r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",
 )
 
 
@@ -796,7 +796,10 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 # earlier form allowed spaces on both sides of the newline inside the repeat,
 # and backtracked exponentially on an unclosed "(" followed by many
 # ", <newline>" lines — 2,000 characters did not finish in 15 s (S5852).
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*)[\)\]]")
+# Possessive scan plus an optional closer: an opener with no closer consumes up
+# to where its scan stopped, so the openers inside that stretch are never
+# retried (they would stop at the same place). take_group leaves those alone.
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
 
 # field name → the keyword that introduces it, separator included. Order is
 # the match order, so nothing here may be a prefix of a later entry.
@@ -988,6 +991,8 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 
     def take_group(match: "re.Match[str]") -> str:
         """Harvest one bracketed group's credits; return "" if it was one."""
+        if match.group(2) is None:
+            return match.group(0)
         parts = _split_credit_parts(match.group(1))
         opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
         # The keyword must open the group, exactly as it always had to. Without
@@ -1101,6 +1106,8 @@ _SAMPLE_TITLE_PATTERN = re.compile(r'"([^"\n]+)"')
 
 # Pattern 2: "Samples Rufus & Chaka Khan's 'Ain't Nobody'". The closing single
 # quote must sit on a word boundary so apostrophes inside the title survive.
+# "Samples" + artist (<=60) + 's + a title (<=80), with room to spare.
+_POSSESSIVE_MAX_CHARS = 300
 _SAMPLE_POSSESSIVE_PATTERN = re.compile(
     r"Samples\s+([^\"'\n]+?)'s\s+'(.+?)'(?=[\s,.;)!?]|$)",
     re.IGNORECASE,
@@ -1230,19 +1237,27 @@ def _clean_sample_artist(artist: str) -> str | None:
     # Drop trailing separators and dangling conjunctions left by slicing at
     # the next quoted title ('Mobb Deep and ' \u2192 'Mobb Deep').
     artist = artist.strip().rstrip(",;.").strip()
-    artist = re.sub(r"\s+and$", "", artist, flags=re.IGNORECASE)
-    # Trailing sentence-noise heuristic \u2014 see docs/decisions.md::models.py::artist-cleanup
-    artist = re.sub(r"\s+and\s+.+$", "", artist, flags=re.IGNORECASE).strip()
-    artist = re.sub(r"\s+vs\.?\s*.*$", "", artist, flags=re.IGNORECASE).strip()
-    artist = re.sub(r"\s+feat\.?(\s+.+)?$", "", artist, flags=re.IGNORECASE).strip()
-    # Prose continuation ('CyHi from his 2014 mixtape …') is commentary, not
-    # part of the artist name.
-    artist = re.sub(r"\s+from\s+(?:his|her|their|the)\b.*$", "", artist, flags=re.IGNORECASE).strip()
+    artist = _ARTIST_TRAILING_AND_RE.sub("", artist)
+    # Trailing sentence-noise heuristic — see docs/decisions.md::models.py::artist-cleanup
+    for noise in _ARTIST_NOISE_RES:
+        artist = noise.sub("", artist).strip()
     artist = artist.rstrip(",;.").strip()
     # An implausibly long "artist" means the capture ran into prose.
     if len(artist) > 60:
         return None
     return artist or None
+
+
+# Each starts with (?<!\s) so a long whitespace run is scanned once, from its
+# first character, instead of once from every character in it.
+_ARTIST_TRAILING_AND_RE = re.compile(r"(?<!\s)\s+and$", re.IGNORECASE)
+_ARTIST_NOISE_RES = [
+    re.compile(r"(?<!\s)\s+and\s+.+$", re.IGNORECASE),
+    re.compile(r"(?<!\s)\s+vs\.?\s*.*$", re.IGNORECASE),
+    re.compile(r"(?<!\s)\s+feat\.?(\s+.+)?$", re.IGNORECASE),
+    # Prose continuation ('CyHi from his 2014 mixtape …') is commentary.
+    re.compile(r"(?<!\s)\s+from\s+(?:his|her|their|the)\b.*$", re.IGNORECASE),
+]
 
 
 def _format_sample(song: str, artist: str | None) -> str:
@@ -1259,17 +1274,24 @@ def extract_samples(notes: str) -> list[str]:
     text = _normalize_quotes(notes)
     results: list[str] = []
 
-    for lead in _SAMPLES_LEADIN_PATTERN.finditer(text):
+    leads = list(_SAMPLES_LEADIN_PATTERN.finditer(text))
+    for i_lead, lead in enumerate(leads):
         # One enumeration runs to the end of the line.
         end = text.find("\n", lead.end())
-        segment = text[lead.end():end if end != -1 else len(text)]
+        end = end if end != -1 else len(text)
+        segment = text[lead.end():end]
 
-        titles = list(_SAMPLE_TITLE_PATTERN.finditer(segment))
-        if titles:
+        # Lazily, with one title of lookahead: an enumeration stops at its
+        # first gap, so materialising every later title on the line made a
+        # line of many "Samples" quadratic.
+        titles = _SAMPLE_TITLE_PATTERN.finditer(segment)
+        title_match = next(titles, None)
+        if title_match:
             prev_end = 0
-            for i, title_match in enumerate(titles):
+            i = 0
+            while title_match:
                 # The lead-in and each further title must sit close to the
-                # previous one \u2014 quoted phrases later in a prose sentence are
+                # previous one — quoted phrases later in a prose sentence are
                 # quotations, not sample titles.
                 gap = segment[prev_end:title_match.start()]
                 if i == 0:
@@ -1281,19 +1303,23 @@ def extract_samples(notes: str) -> list[str]:
                 if len(song) > 80:
                     break
                 # Text between this title and the next holds the optional
-                # "by Artist" clause \u2014 slicing here is what keeps one
+                # "by Artist" clause — slicing here is what keeps one
                 # sample's artist from swallowing the next sample.
-                tail_end = titles[i + 1].start() if i + 1 < len(titles) else len(segment)
+                following = next(titles, None)
+                tail_end = following.start() if following else len(segment)
                 tail = segment[title_match.end():tail_end]
                 artist_match = _SAMPLE_ARTIST_PATTERN.match(tail.strip())
                 artist = _clean_sample_artist(artist_match.group(1)) if artist_match else None
                 results.append(_format_sample(song, artist))
                 prev_end = title_match.end()
+                title_match = following
+                i += 1
         else:
-            # Pattern 2: Samples Artist's 'Song'
-            possessive = _SAMPLE_POSSESSIVE_PATTERN.search(
-                text[lead.start():end if end != -1 else len(text)]
-            )
+            # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and
+            # bounded to a sane length (a title may itself say "Samples"), so
+            # a line of many leads is not rescanned from each one.
+            stop = min(end, lead.start() + _POSSESSIVE_MAX_CHARS)
+            possessive = _SAMPLE_POSSESSIVE_PATTERN.match(text[lead.start():stop])
             if possessive:
                 artist = possessive.group(1).strip()
                 song = possessive.group(2).strip()
