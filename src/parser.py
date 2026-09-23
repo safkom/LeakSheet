@@ -1917,7 +1917,7 @@ def parse_sheet(
                 version = _parse_song_row(row, col_map)
                 if version:
                     if _is_section_label_version(version, row, era_col):
-                        current_era.sections.append(Section(name=version.name))
+                        current_era.sections.append(Section(name=version.name, notes=version.notes))
                     else:
                         _add_version_to_era(current_era, version, song_index)
                         song_rows += 1
@@ -1957,6 +1957,12 @@ def parse_sheet(
                             _add_version_to_era(current_era, version, song_index)
                             song_rows += 1
                             era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
+                        elif len(row_era.strip()) <= 1 and not flat_era_mode:
+                            # A one-character era cell on a row with no song
+                            # data is a typo on a sub-era label (Ye: "x" on
+                            # "808s & Heartbreak at the Hollywood Bowl"), not
+                            # a new era holding one fake song.
+                            current_era.sections.append(Section(name=version.name, notes=version.notes))
                         else:
                             new_era = Era(name=row_era, sections=[Section()])
                             eras.append(new_era)
@@ -2056,7 +2062,8 @@ def parse_sheet(
                     # Single-line section label (e.g. "Other Media",
                     # "OG / Uncut Files") — add as a named section to the
                     # current era and let later song rows auto-create if needed.
-                    current_era.sections.append(Section(name=name_first_line))
+                    notes = _get_cell_text(row, col_map.get("notes", 2)).strip()
+                    current_era.sections.append(Section(name=name_first_line, notes=notes or None))
                     # Section-label-as-alias — see docs/decisions.md::parser.py::section-label-alias
                     _register_era_keys(current_era, name_first_line, era_by_key_fallback)
                 else:
@@ -2747,6 +2754,8 @@ _MISC_COLUMN_ALIASES = {
     "length": "length",
     "media length": "length",
     "track length": "length",
+    "full length": "length",  # Ye Stems
+    "image / length": "length",  # Ye Misc
     "date": "date",
     "release date": "date",
     "leak date": "date",  # Best Of / Worst Of / Stems tabs
@@ -2797,7 +2806,7 @@ def _misc_header_key(text: str) -> str:
     return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 
 
-# A date cell is short and carries a digit. Era-header rows on some Misc tabs
+# A date (or length) cell is short and carries a digit. Era-header rows on some Misc tabs
 # put the era DESCRIPTION in the column that maps to `date`, which made the
 # header look like it carried track data, so the era-header guard below never
 # fired and the era was emitted as an entry whose "date" was a paragraph — 37
@@ -2875,6 +2884,14 @@ def parse_misc_tab(
     # cell is an entry, not a label.
     is_badge_tab = kind in _BADGE_BY_TAB_KIND
 
+    def set_era(era: str) -> None:
+        # A content tab's sub-sections belong to one era. Badge-tab blocks
+        # (Grails / Wanted) span eras, so theirs carry over.
+        nonlocal current_era, current_section
+        if era != current_era and not is_badge_tab:
+            current_section = ""
+        current_era = era
+
     for row in rows[header_idx + 1:]:
         if all(not c.text.strip() for c in row):
             continue
@@ -2894,7 +2911,7 @@ def parse_misc_tab(
         # column (mirrors the main tab's grammar).
         if era_text and _MISC_ERA_STATS_RE.search(era_text):
             if name:
-                current_era = name.split("\n")[0].strip()
+                set_era(name.split("\n")[0].strip())
             continue
         if not name:
             continue
@@ -2904,7 +2921,7 @@ def parse_misc_tab(
         era_key = _era_match_key(era_text.split("\n")[0].strip()) if era_text else ""
 
         if era_text:
-            current_era = era_text.split("\n")[0].strip()
+            set_era(era_text.split("\n")[0].strip())
 
         # Links: prefer parsed <a href> targets, fall back to URL-ish text.
         links: list[str] = []
@@ -2923,7 +2940,7 @@ def parse_misc_tab(
 
         def opt(field: str) -> str | None:
             val = cell_text(row, field)
-            if field == "date" and not _looks_like_date(val):
+            if field in ("date", "length") and not _looks_like_date(val):
                 return None
             return val or None
 
@@ -2952,17 +2969,18 @@ def parse_misc_tab(
         stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
         if name_key and name_key in known_eras and name_key != era_key:
             if stats_era or (not era_text and not has_track_data):
-                current_era = first_line
+                set_era(first_line)
                 continue
 
         if not has_track_data:
             # Bare label rows — see docs/decisions.md::parser.py::badge-tab-structural-rows
-            if not entry.notes and not entry.entry_type:
-                continue
             # A known divider keyword with no track data is a label even when
             # it carries an aside — Travis's "Project" rows explain how
-            # features are credited.
-            if first_line.lower() in SECTION_SEPARATORS:
+            # features are credited. On content tabs the label names the
+            # rows below it (Ye Stems: Instrumentals / Acapellas / Sessions).
+            if (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS:
+                if not is_badge_tab:
+                    current_section = first_line
                 continue
 
         entries.append(entry)
