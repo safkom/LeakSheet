@@ -345,6 +345,7 @@ class Section(BaseModel):
     """A named sub-section within an era (e.g. 'Early Sessions', 'July 2020')."""
     name: str = Field("", description="Section name, empty for default section")
     group: str | None = Field(None, description="Parent group label (e.g. 'Die Lit 2', 'Kanye West - Donda')")
+    notes: str | None = Field(None, description="Text on the label row, usually a sub-era timeline")
     songs: list[Song] = Field(default_factory=list)
 
 
@@ -976,6 +977,9 @@ def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
     return True
 
 
+_CREDIT_NAME_SPLIT_RE = re.compile(r"[,&]")
+
+
 def parse_song_credits(raw_name: str) -> SongCredits:
     """Parse a raw multi-line song name into title + structured credits.
 
@@ -1021,7 +1025,16 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 
     def joined(field: str) -> str | None:
         values = collected.get(field)
-        return ", ".join(values) if values else None
+        if not values:
+            return None
+        # "(prod. A) (prod. A, B & C)" must not credit A twice: drop a value
+        # that is already one of the names inside another value.
+        names = [{n.strip().lower() for n in _CREDIT_NAME_SPLIT_RE.split(v)} for v in values]
+        kept = [
+            v for i, v in enumerate(values)
+            if not any(j != i and len(names[j]) > 1 and v.strip().lower() in names[j] for j in range(len(values)))
+        ]
+        return ", ".join(dict.fromkeys(kept))
 
     # Split by newline: first line = title, rest = alt titles
     lines = [ln.strip() for ln in cleaned.split("\n")]
@@ -1031,7 +1044,8 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     alt_titles: list[str] = []
     for line in lines[1:]:
         line = line.strip()
-        if not line:
+        # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
+        if not line.strip("()[] "):
             continue
         # Multi-alias paren splitting — see docs/decisions.md::models.py::ALIAS_LABEL_RE
         if line.startswith("(") and line.endswith(")"):
