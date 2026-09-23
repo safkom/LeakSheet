@@ -262,7 +262,7 @@ GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 # Google Sheets embeds tab metadata as:
 #   items.push({name: "Tab Name", pageUrl: "...", gid: "12345", ...});
 _TAB_ITEMS_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^}]*?gid:\s*"(\d+)"',
+    r'\{name:\s*"([^"]+)"[^{}]*?gid:\s*"(\d+)"',
 )
 
 # The same items.push() switcher, but keyed on pageUrl instead of gid.
@@ -280,7 +280,7 @@ _TAB_ITEMS_PATTERN = re.compile(
 # <table> — so every one of them failed with NoTablesError until we followed
 # the URL the page itself advertises.
 _TAB_PAGEURL_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^}]*?pageUrl:\s*"([^"]+)"',
+    r'\{name:\s*"([^"]+)"[^{}]*?pageUrl:\s*"([^"]+)"',
 )
 
 # Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
@@ -499,6 +499,19 @@ def _build_sheet_html_url(
     return f"{parsed.scheme}://{parsed.netloc}{path}?{query}"
 
 
+# Trailing-text regexes below start with (?<!\s) or exclude the opener from
+# their inner class, so no run of spaces or brackets is rescanned from every
+# character in it (S8786).
+_TRACKER_QUALIFIER_RE = re.compile(
+    r"(?<!\s)\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE"
+    r"|\[[^\]]*\]|\([^)]*\))\s*$",
+    re.IGNORECASE,
+)
+_TRAILING_BRACKET_RE = re.compile(r"(?<!\s)\s*[\(\[][^()\[\]]*[\)\]]\s*$")
+_TAB_QUALIFIER_RE = re.compile(r"[\(\[][^()\[\]]*[\)\]]\s*$")
+_SLASH_SPACING_RE = re.compile(r"(?<!\s)\s*/\s*")
+
+
 def _infer_artist_name(title: str) -> str:
     """Infer artist name from a page title.
 
@@ -520,12 +533,7 @@ def _infer_artist_name(title: str) -> str:
     # "Tracker PUBLIC" / "Tracker [Official]" style qualifiers that follow
     # the word Tracker (2026-07-06 census: 'Ye Tracker PUBLIC',
     # 'Playboi Carti Tracker [Official]')
-    name = re.sub(
-        r"\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE|\[[^\]]*\]|\([^)]*\))\s*$",
-        "",
-        name,
-        flags=re.IGNORECASE,
-    ).strip()
+    name = _TRACKER_QUALIFIER_RE.sub("", name).strip()
     # Re-apply suffix stripping after version removal
     for suffix in TITLE_SUFFIXES:
         if name.endswith(suffix):
@@ -533,11 +541,7 @@ def _infer_artist_name(title: str) -> str:
 
     # Step 2: Strip trailing parenthetical/bracketed metadata like
     # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
-    #
-    # The inner class excludes '(' and '[' too (S8786): without that, a name
-    # with several opening brackets and no close retries the scan-to-end from
-    # every one of them — 6s on a 32 KB cell.
-    paren_match = re.search(r"\s*[\(\[][^()\[\]]*[\)\]]\s*$", name)
+    paren_match = _TRAILING_BRACKET_RE.search(name)
     if paren_match:
         stripped = name[: paren_match.start()].strip()
         # Re-apply suffix stripping on the cleaned name
@@ -675,10 +679,8 @@ def _clean_tab_name(name: str) -> str:
     user sees; this one lowercases.
     """
     clean = _EMOJI_RE.sub(" ", name).strip().lower()
-    # Same S8786 fix as _infer_artist_name's paren strip: exclude '(' and '['
-    # from the inner class so the scan can't retry from every open bracket.
-    clean = re.sub(r"[\(\[][^()\[\]]*[\)\]]\s*$", "", clean).strip()
-    clean = re.sub(r"\s*/\s*", " / ", clean)
+    clean = _TAB_QUALIFIER_RE.sub("", clean).strip()
+    clean = _SLASH_SPACING_RE.sub(" / ", clean)
     return re.sub(r"\s+", " ", clean).strip()
 
 

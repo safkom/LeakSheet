@@ -68,6 +68,10 @@ _MAX_UNMATCHED_ROWS = 50
 # Low-level HTML table extraction
 # ---------------------------------------------------------------------------
 
+# The HTML spec's own ceiling; an unbounded value would allocate that many cells.
+_MAX_COLSPAN = 1000
+
+
 class _TableExtractor(HTMLParser):
     """Extract rows from every <table> in a Google Sheets HTML export.
 
@@ -107,7 +111,7 @@ class _TableExtractor(HTMLParser):
             self._cell_link_lines = []
             self._cell_images = []
             try:
-                self._colspan = int(a.get("colspan", "1") or "1")
+                self._colspan = min(int(a.get("colspan", "1") or "1"), _MAX_COLSPAN)
             except (ValueError, TypeError):
                 self._colspan = 1
         elif tag == "a" and self.in_td:
@@ -256,7 +260,7 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
             cell = _cell_from_td(td)
             current.append(cell)
             try:
-                colspan = int(td.get("colspan", "1") or "1")
+                colspan = min(int(td.get("colspan", "1") or "1"), _MAX_COLSPAN)
             except (ValueError, TypeError):
                 colspan = 1
             for _ in range(colspan - 1):
@@ -428,6 +432,31 @@ def detect_dropped_columns(
     return unknown, duplicate
 
 
+# Keywords that mark an urgent notice (vs informational links). The "X ... Y"
+# pairs must share a line; each is checked from the FIRST X only, since a later
+# X has less of the line after it — one scan per line instead of one per X.
+_ALERT_KEYWORDS = re.compile(
+    r"not working|shut down|shutdown|expired|broken|taken down|"
+    r"dmca|copyright|removed|reuploaded?|reupload|unavailable|"
+    r"\bno eta\b|in.progress.of",
+    re.IGNORECASE,
+)
+_ALERT_PAIRS = [
+    (re.compile(r"\bdown\b", re.IGNORECASE), re.compile(r"fix|working|progress|eta", re.IGNORECASE)),
+    (re.compile(r"fix|working on", re.IGNORECASE), re.compile(r"asap|soon|eta", re.IGNORECASE)),
+]
+
+
+def _is_alert_line(line: str) -> bool:
+    if _ALERT_KEYWORDS.search(line):
+        return True
+    for head, tail in _ALERT_PAIRS:
+        m = head.search(line)
+        if m and tail.search(line, m.end()):
+            return True
+    return False
+
+
 def _extract_header_notices(
     header_row: list[_Cell],
     pre_header_rows: list[list[_Cell]],
@@ -441,15 +470,6 @@ def _extract_header_notices(
 
     Returns a deduplicated list of Notice objects.
     """
-    # Keywords that indicate an urgent/alert notice (vs informational links)
-    _ALERT_KEYWORDS = re.compile(
-        r"not working|shut down|shutdown|expired|broken|taken down|"
-        r"dmca|copyright|removed|reuploaded?|reupload|unavailable|"
-        r"\bdown\b.*(?:fix|working|progress|eta)|"
-        r"(?:fix|working on).*(?:asap|soon|eta)|"
-        r"\bno eta\b|in.progress.of",
-        re.IGNORECASE,
-    )
 
     notices: list[Notice] = []
     seen: set[str] = set()
@@ -461,7 +481,7 @@ def _extract_header_notices(
         return text
 
     def _is_alert(text: str) -> bool:
-        return bool(_ALERT_KEYWORDS.search(text))
+        return any(_is_alert_line(line) for line in text.split("\n"))
 
     def _add(text: str, link: str | None = None) -> None:
         text = _clean(text)
@@ -549,7 +569,7 @@ def _extract_header_notices(
 # pair turned 86 Bonnie McKee song rows into empty eras. A real discography
 # block always states several counts, so require two.
 ERA_STATS_PATTERN = re.compile(
-    r"\d+\s+"
+    r"(?<!\d)\d++\s++"
     r"("
     r"OG File|Total Full|Full|Tagged|Partial|Snippet|Stem|Unavailable"
     r"|Edited"                                                          # Michael Jackson
@@ -564,7 +584,7 @@ ERA_STATS_PATTERN = re.compile(
 
 # Release-type counts. Only trusted inside a multi-pair block — see above.
 _DISCOGRAPHY_STATS_PATTERN = re.compile(
-    r"\d+\s+"
+    r"(?<!\d)\d++\s++"
     r"("
     r"Album Tracks?|Mixtape Tracks?|EP Tracks?|OST Tracks?|TV Tracks?"
     r"|Bonus Tracks?|Compilation Tracks?|Loose Tracks?|Reference Tracks?"
