@@ -1,11 +1,8 @@
 import SwiftUI
 
-/// The seek slider shared by the mini player and Now Playing.
-///
-/// A view of its own so the ~10 Hz time updates invalidate only this row.
-/// Inline, each parent read `player.displayTime` in its own body, so every tick
-/// re-ran the whole mini player and the whole Now Playing screen — the latter
-/// including the WCAG contrast search for its era tint, twice per pass.
+/// The seek slider shared by the mini player and Now Playing: its own view so the
+/// ~10 Hz time updates invalidate only this row.
+/// See DECISIONS.md::ScrubberSlider.swift::isolated-time-reads.
 struct ScrubberSlider: View {
     @Environment(PlayerViewModel.self) private var player
     var tint: Color = .lsAccent
@@ -26,15 +23,14 @@ struct ScrubberSlider: View {
             }
         )
         .tint(tint)
-        // Unlabelled, VoiceOver read the raw TimeInterval — "142.0".
+        // Without a label VoiceOver reads the raw TimeInterval ("142.0").
         .accessibilityLabel("Playback position")
         .accessibilityValue("\(Self.spoken(player.displayTime)) of \(Self.spoken(player.duration))")
-        // Slider's built-in adjustment only writes the binding, which sets the
-        // scrub target without ever calling onEditingChanged — so a VoiceOver
-        // swipe moved nothing. Seek directly instead.
+        // Slider's built-in adjustment only writes the binding, never calling
+        // onEditingChanged, so a VoiceOver swipe would move nothing. Seek directly.
         .accessibilityAdjustableAction { direction in
-            // No known length yet (loading, or a live stream): clamping to a
-            // duration of 0 sent every swipe back to the start.
+            // No known length yet (loading, or a live stream): clamping to 0 would send
+            // every swipe back to the start.
             guard player.duration > 0 else { return }
             let step = direction == .increment ? Self.accessibilityStep : -Self.accessibilityStep
             player.seekTo(min(max(player.currentTime + step, 0), player.duration))

@@ -14,10 +14,9 @@ struct LandingView: View {
 
     @State private var loader = TrackerLoader()
 
-    /// Async so the caller can finish preparing the artist screen (building
-    /// its view model) while this screen's loading state is still up — one
-    /// loading state per tracker, not two.
-    /// The artist, and `TrackerLoader.staleNotice` when it came from the saved copy.
+    /// Async so the caller can prepare the artist screen while this screen's loading
+    /// state is still up. Receives the artist, and `TrackerLoader.staleNotice` when it
+    /// came from the saved copy.
     var onArtistLoaded: (Artist, String?) async -> Void
     var onBrowseTapped: () -> Void = {}
     @Binding var pendingBrowse: PendingBrowse?

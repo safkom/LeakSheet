@@ -2,15 +2,10 @@ import Foundation
 
 /// Resolves file-sharing links to stream proxy URLs.
 ///
-/// Implemented with a single `URLComponents` parse plus host/path checks
-/// rather than regex. `Regex` is not `Sendable`, so the patterns could not be
-/// hoisted into statics and were rebuilt on *every* call — and this is a hot
-/// path: `isStreamable` runs per version inside the era-stats and filter
-/// passes (a big tab carries ~1900 entries), where the common case is a
-/// non-matching host that had to fall through all seven patterns.
+/// One `URLComponents` parse plus host/path checks, not regex: `Regex` isn't
+/// `Sendable` (so can't be a static), and `isStreamable` is a hot path.
 enum StreamResolver {
-    /// What a supported link points at. Parsing once and switching on the
-    /// result replaces six sequential match attempts per URL.
+    /// What a supported link points at.
     nonisolated enum Target: Equatable, Sendable {
         case pillows(id: String)
         case imgur(id: String)
@@ -20,8 +15,7 @@ enum StreamResolver {
         case gdrive
     }
 
-    /// Characters a provider id may contain. Matches the previous regex
-    /// classes exactly — pixeldrain ids are alphanumeric only.
+    /// Characters a provider id may contain; pixeldrain ids are alphanumeric only.
     private nonisolated static func isID(_ s: String, allowsSeparators: Bool = true) -> Bool {
         !s.isEmpty && s.allSatisfy { ch in
             ch.isASCII && (ch.isLetter || ch.isNumber || (allowsSeparators && (ch == "_" || ch == "-")))
@@ -32,23 +26,17 @@ enum StreamResolver {
         !s.isEmpty && s.allSatisfy(\.isHexDigit)
     }
 
-    /// Query keys Google Docs glues onto every link it rewrites through its
-    /// redirector. They are not part of the file URL, and the sheet parser
-    /// carries them through verbatim.
+    /// Query keys Google Docs glues onto every link it rewrites through its redirector:
+    /// not part of the file URL, and the sheet parser carries them through verbatim.
     private nonisolated static let googleWrapperKeys: Set<String> = [
         "sa", "source", "ust", "usg", "ved",
     ]
 
     /// A link with Google's redirect tracking removed.
     ///
-    /// Two shapes reach us. On Drive links the params sit in a real query
-    /// (`open?id=X&usp=…&sa=D&…`), which classification already ignored. On
-    /// pillows links they are glued straight onto the path with no `?` at all
-    /// (`/f/{id}&sa=D&source=editors&…`), which made the id fail `isID` — so
-    /// 25 links in the live corpus carried no play affordance at all.
-    ///
-    /// Only strips when EVERY trailing `&key=value` pair is a known wrapper
-    /// key, so a genuine multi-param link is left alone.
+    /// On pillows links the params are glued onto the path with no `?`
+    /// (`/f/{id}&sa=D&…`), which fails `isID`. Only strips when EVERY trailing
+    /// `&key=value` pair is a known wrapper key.
     nonisolated static func canonical(_ link: String) -> String {
         guard let marker = link.range(of: "&sa=") else { return link }
         let tail = link[marker.lowerBound...].dropFirst()
@@ -59,9 +47,8 @@ enum StreamResolver {
         return String(link[..<marker.lowerBound])
     }
 
-    /// Classify a link. Trailing path segments are ignored the way the old
-    /// patterns did (they matched an id followed by `/`, `?`, `#`, or end),
-    /// so `/file/d/{id}/view?usp=sharing` still resolves.
+    /// Classify a link. Trailing path segments are ignored, so
+    /// `/file/d/{id}/view?usp=sharing` still resolves.
     nonisolated static func target(for link: String) -> Target? {
         guard let comps = URLComponents(string: canonical(link)),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
@@ -121,11 +108,7 @@ enum StreamResolver {
 
     /// Returns the proxied stream URL for a file-sharing link.
     nonisolated static func streamURL(for originalLink: String) -> URL? {
-        // `.urlQueryAllowed` leaves `&`, `=` and `?` unescaped, but the link is
-        // nested as the VALUE of the backend's own `url=` parameter — so
-        // everything after the first `&` arrived as separate top-level params
-        // and the backend saw a truncated URL. Escape everything outside the
-        // RFC 3986 unreserved set.
+        // Nested as the VALUE of the backend's `url=` parameter: see `leakSheetURLValue`.
         let link = canonical(originalLink)
         guard isStreamableURL(link),
               let encoded = link.addingPercentEncoding(withAllowedCharacters: .leakSheetURLValue)
@@ -143,16 +126,13 @@ enum StreamResolver {
             return URL(string: "https://music.froste.lol/song/\(hash)/download")
 
         case .imgur:
-            // Same trap as kraken below: the /f/{id} link is an HTML page, and
-            // the real CDN URL is only discoverable through imgur's API, which
-            // the backend proxy already calls. Returning the page URL handed
-            // AVPlayer HTML and failed with "Operation Stopped".
+            // The /f/{id} link is an HTML page; only imgur's API, which the backend proxy
+            // calls, knows the CDN URL.
             return streamURL(for: originalLink)
 
         case .kraken:
-            // The view URL is an HTML page — AVPlayer can't play it directly.
-            // The backend proxy scrapes the CDN URL and streams the original
-            // file bytes, so "original quality" IS the proxied stream here.
+            // The view URL is an HTML page; the backend proxy scrapes the CDN URL and streams
+            // the original bytes, so "original quality" IS the proxied stream.
             return streamURL(for: originalLink)
 
         case .pixeldrain(let id):

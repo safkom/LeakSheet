@@ -2,28 +2,19 @@ import SwiftUI
 
 /// Artist detail screen — stats, search/filter, era cards, song lists.
 ///
-/// All list content renders as direct children of ONE LazyVStack: era cards,
-/// song rows, and version rows are flattened into `vm.eraRows` so every row
-/// materializes lazily. Filtering runs off-main in the view model; the body
-/// only iterates prepared arrays.
-///
-/// Each content branch (search/misc/recents/eras) is its own `View` type with
-/// narrow inputs — not a computed property — so toggling one doesn't share an
-/// invalidation boundary with the others or with this screen's own `@State`.
+/// All list content renders as direct children of ONE LazyVStack (`vm.eraRows` is
+/// flattened), filtering runs off-main in the view model, and each content branch
+/// is its own `View` type with narrow inputs, not a computed property.
 struct ArtistView: View {
     let artist: Artist
-    /// View model built during the landing screen's own loading state, so the
-    /// pushed screen renders content on its first frame instead of showing a
-    /// second "Preparing…" spinner. Nil only for entry points that push an
-    /// artist without preparing one first.
+    /// View model built during the landing screen's own loading state, so the first
+    /// frame has content. Nil only for entry points that push without preparing one.
     var preparedVM: ArtistViewModel?
     @State private var displayed: Artist?
     @State private var vm: ArtistViewModel?
     @State private var lastUpdated: Date?
-    /// Pull-to-refresh goes through the same loader as the landing screen, so
-    /// it keeps the artist's name (favourites key on its slug), falls back to
-    /// the saved copy on a server error, and reports failure instead of
-    /// silently ending the refresh.
+    /// Pull-to-refresh goes through the landing screen's loader: it keeps the artist's
+    /// name (favourites key), falls back to the saved copy, and reports failure.
     @State private var refresher = TrackerLoader()
     @Environment(RecentTrackersManager.self) private var recents
 
@@ -40,9 +31,7 @@ struct ArtistView: View {
                     onRefresh: refresh
                 )
             } else {
-                // Sub-second placeholder while the stats/content pass runs
-                // off-main — pushing a huge tracker no longer hitches the
-                // navigation transition.
+                // Sub-second placeholder while the stats/content pass runs off-main.
                 ProgressView("Preparing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.lsBackground)
@@ -59,16 +48,13 @@ struct ArtistView: View {
                     vm = await ArtistViewModel.make(artist: artist)
                 }
                 if let url = artist.sourceUrl {
-                    // Sidecar read, not the multi-MB payload — this used to
-                    // land hundreds of ms after first render and insert the
-                    // data-age row ABOVE the scroll position, shunting the
-                    // whole list down mid-gesture.
+                    // Sidecar read, not the multi-MB payload, so the data-age row lands before
+                    // the user scrolls.
                     lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
                 }
             }
-            // The first screenful was warmed (art AND colour) before this
-            // screen was pushed — see ArtistViewModel.make. Warm the rest now
-            // that content is up. Cancelled when the screen goes away.
+            // The first screenful was warmed before this screen was pushed (see
+            // ArtistViewModel.make); warm the rest now. Cancelled when the screen goes away.
             await vm?.warmEraArt()
         }
     }
@@ -112,10 +98,8 @@ private struct ArtistContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
-    /// era name (lowercased) → art URL, first occurrence wins — mirrors the
-    /// case-insensitive `.first { }` lookup misc entries used to do directly
-    /// against `artist.eras`. Precomputed once so MiscListView takes a small
-    /// dictionary instead of the artist's whole (potentially large) era tree.
+    /// era name (lowercased) → art URL, first occurrence wins. Precomputed once so
+    /// MiscListView takes a small dictionary instead of the whole era tree.
     private let eraArtByLowercasedName: [String: String?]
 
     init(artist: Artist, vm: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
@@ -131,9 +115,8 @@ private struct ArtistContentView: View {
         self.eraArtByLowercasedName = eraArt
     }
 
-    /// Routes a non-stream link tap: embeddable hosts get their official
-    /// in-app player, everything else opens in the in-app Safari sheet —
-    /// the user is never bounced out of the app.
+    /// Routes a non-stream link tap: embeddable hosts get their official in-app
+    /// player, everything else the in-app Safari sheet.
     private func openLink(_ link: MiscLink) {
         guard let url = URL(string: link.url) else { return }
         if link.kind == .embed, let embedURL = MiscLinkClassifier.embedURL(for: link.url) {
@@ -157,10 +140,8 @@ private struct ArtistContentView: View {
                     onTap: artist.trackerStats != nil ? { showStats = true } : nil
                 )
 
-                // Data-age chip — how fresh the shown data is (pull to refresh).
-                // Always occupies its line, even before the timestamp resolves:
-                // appearing later inserts content above the scroll position and
-                // shunts the list down under the user's finger.
+                // Data-age chip (pull to refresh). Always occupies its line, so a late timestamp
+                // can't shunt the list down under the user's finger.
                 Text(vm.loadNotice ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
                     .font(.caption2)
                     .foregroundStyle(vm.loadNotice == nil ? Color.secondary : Color.lsError)
@@ -170,11 +151,8 @@ private struct ArtistContentView: View {
                     .opacity(vm.loadNotice == nil && lastUpdated == nil ? 0 : 1)
                     .accessibilityHidden(vm.loadNotice == nil && lastUpdated == nil)
 
-                // Sections first, then the filters that apply to whichever
-                // section is showing. Filters only act on the song tree, so
-                // they disappear on a content tab rather than sitting there
-                // inert — which also keeps the header from growing a permanent
-                // second row.
+                // Sections first, then the filters for the section showing; filters act only on
+                // the song tree, so they disappear on a content tab.
                 ContentTabsView(vm: vm)
                     .padding(.bottom, 8)
 
@@ -241,8 +219,7 @@ private struct ArtistContentView: View {
                 }
             }
         )
-        // Bottom-anchored so it can't hide behind the nav bar or the search
-        // drawer (the old top anchor sat underneath both).
+        // Bottom-anchored so it can't hide behind the nav bar or the search drawer.
         .overlay(alignment: .bottom) {
             if vm.isFiltering {
                 ProgressView()
@@ -301,10 +278,7 @@ private struct ArtistContentView: View {
             }
         }
         // navigationBarDrawer + displayMode .always — see
-        // DECISIONS.md::ArtistView.swift::search-field-placement
-        // Both modifiers below are iOS-only: `navigationBarDrawer` and
-        // `.onScrollDown` don't exist off-iOS, and neither does the
-        // `.navigationBar` toolbar placement on macOS.
+        // DECISIONS.md::ArtistView.swift::search-field-placement. iOS-only modifiers.
         #if os(iOS)
         .searchable(
             text: $vm.searchQuery,
@@ -347,8 +321,7 @@ private struct ArtistContentView: View {
         // Keyed on the view model so a pull-to-refresh, which swaps in a new
         // one, re-registers its eras instead of leaving the old song lists.
         .task(id: ObjectIdentifier(vm)) {
-            // Prebuilt off-main in Precomputed — this used to walk every
-            // version of every era on the MainActor, on every appearance.
+            // Prebuilt off-main in Precomputed.
             player.setArtistEras(vm.eraPlaybackContexts)
             // Seeded colors (from the persisted extraction cache) give the
             // background tint immediately; otherwise the first per-card

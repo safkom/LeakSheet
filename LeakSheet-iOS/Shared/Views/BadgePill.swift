@@ -1,17 +1,14 @@
 import SwiftUI
 
-/// The single capsule pill for quality / availability text — previously five
-/// near-identical implementations across song rows, misc rows, favourites,
-/// and the description sheet.
+/// The single capsule pill for quality / availability text.
 struct BadgePill: View {
     let text: String
     let variant: BadgeVariant
 
     /// VoiceOver prefix, e.g. "Quality" → "Quality: CD Quality".
     var accessibilityPrefix: String? = nil
-    /// Larger type and padding for the description sheet, which reads at
-    /// arm's length rather than inside a dense list. This was the fifth
-    /// near-identical copy the comment above claims to have folded in.
+    /// Larger type and padding for the description sheet, which reads at arm's
+    /// length rather than inside a dense list.
     var prominent: Bool = false
 
     var body: some View {
@@ -20,11 +17,8 @@ struct BadgePill: View {
             .foregroundStyle(variant.color)
             .padding(.horizontal, prominent ? 10 : 7)
             .padding(.vertical, prominent ? 5 : 3)
-            // Opaque base under the tint, so the pill composites against the
-            // app background rather than whatever row is behind it. The tint is
-            // only 15%; over a selected row's fill it drifted off the contrast
-            // the palette is tested at, which is why the pill used to invert
-            // itself on selection and look washed out.
+            // Opaque base under the 15% tint, so the pill composites against the app
+            // background (the contrast it is tested at), not a selected row's fill.
             .background {
                 Capsule()
                     .fill(Color.lsBackground)
@@ -41,9 +35,8 @@ struct BadgePill: View {
 struct DedupedBadgePills: View {
     let quality: String?
     let availability: String?
-    /// Plain text laid out in the same flow as the pills ("3 versions").
-    /// In a second, outer FlowLayout it could be measured on one line and
-    /// placed on the next, and was clipped away at large text sizes.
+    /// Plain text laid out in the same flow as the pills ("3 versions"); a separate
+    /// outer FlowLayout could clip it at large text sizes.
     var trailing: String? = nil
 
     var body: some View {
@@ -74,8 +67,7 @@ struct DedupedBadgePills: View {
     }
 }
 
-/// Shared music-note artwork placeholder — previously eight near-identical
-/// inline implementations. Size it with .frame at the call site.
+/// Shared music-note artwork placeholder. Size it with .frame at the call site.
 struct ArtworkPlaceholder: View {
     var cornerRadius: CGFloat = 6
 

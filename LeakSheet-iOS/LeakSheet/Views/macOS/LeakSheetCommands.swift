@@ -1,12 +1,9 @@
 #if os(macOS)
 import SwiftUI
 
-/// Menu bar commands. Everything here drives a singleton, so no view state has
-/// to be threaded up — see `MacUIState` for the two exceptions.
-///
-/// Deliberately no bare-`Space` Play/Pause binding: a menu shortcut with no
-/// modifier fires even while a TextField has focus, which would make the
-/// tracker URL field unusable.
+/// Menu bar commands. Everything here drives a singleton (see `MacUIState` for the
+/// two exceptions). No bare-`Space` Play/Pause: a modifier-less menu shortcut fires
+/// even while a TextField has focus.
 struct LeakSheetCommands: Commands {
     /// Seconds moved by Skip Forward / Skip Back.
     private static let skipInterval: TimeInterval = 15
@@ -18,10 +15,8 @@ struct LeakSheetCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        // No CommandGroup(replacing: .newItem) and no hand-rolled Window-menu
-        // items: both scenes are singleton `Window`s, so there is no File ▸ New
-        // to remove and each already contributes its own Window-menu entry that
-        // reopens it.
+        // No File ▸ New removal or hand-rolled Window-menu items: both scenes are
+        // singleton `Window`s, which take care of both.
 
         CommandMenu("Playback") {
             Button(player.isPlaying ? "Pause" : "Play") {
@@ -32,10 +27,7 @@ struct LeakSheetCommands: Commands {
 
             Divider()
 
-            // ⌥⌘←/→, not ⌘←/→: a menu key equivalent is matched before the
-            // first responder sees the event, so binding the bare-⌘ arrows —
-            // the system's move-to-start/end-of-line shortcuts — made them play
-            // tracks instead of moving the caret in the tracker URL field.
+            // ⌥⌘←/→, not ⌘←/→: see DECISIONS.md::LeakSheetCommands.swift::arrow-modifiers
             Button("Next Track") { player.playNext() }
                 .keyboardShortcut(.rightArrow, modifiers: [.option, .command])
                 .disabled(player.currentTrack == nil)
@@ -50,10 +42,8 @@ struct LeakSheetCommands: Commands {
                 player.seekTo(min(player.currentTime + Self.skipInterval, player.duration))
             }
             .keyboardShortcut(.rightArrow, modifiers: [.shift, .option, .command])
-            // Gated on duration too: currentTrack is set as soon as playback is
-            // requested, before the asset reports its length. Without this,
-            // pressing Skip Forward in that window computes min(15, 0) == 0
-            // and seeks to the very start — Skip Forward rewinds.
+            // Gated on duration too: before the asset reports its length, min(15, 0) == 0
+            // would make Skip Forward seek to the start.
             .disabled(player.currentTrack == nil || player.duration <= 0)
 
             Button("Skip Back") {
@@ -66,7 +56,7 @@ struct LeakSheetCommands: Commands {
         CommandMenu("Tracker") {
             Button("Refresh Tracker") { ui.refreshToken += 1 }
                 .keyboardShortcut("r", modifiers: .command)
-                // Silently did nothing on every pane but a tracker.
+                // Only meaningful with a tracker selected.
                 .disabled(ui.selectedSlug == nil)
 
             Button("Paste Tracker URL") {
@@ -79,9 +69,8 @@ struct LeakSheetCommands: Commands {
             .keyboardShortcut("v", modifiers: [.shift, .command])
         }
 
-        // Standard Find slot, so ⌘F lands where a Mac user expects it. The
-        // artist screen owns the search field's focus, so this nudges a token
-        // it observes rather than reaching into the view.
+        // Standard Find slot for ⌘F. The artist screen owns the search field's focus,
+        // so this nudges a token it observes.
         CommandGroup(replacing: .textEditing) {
             Button("Find") {
                 ui.focusSearchToken += 1
@@ -91,9 +80,8 @@ struct LeakSheetCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
-            // The inspector these drive lives only in the main window. Bring it
-            // forward too, or toggling while the Now Playing window is key
-            // changes state with no visible effect.
+            // The inspector lives only in the main window: bring it forward too, or toggling
+            // while Now Playing is key has no visible effect.
             Button("Song Details") {
                 ui.inspectorTab = .details
                 ui.showInspector = true

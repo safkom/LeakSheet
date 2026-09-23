@@ -2,10 +2,6 @@ import Foundation
 
 /// SPEC §12 "Display Logic" — badge dedupe rules: one primary pill, plus an
 /// availability pill only when it adds information beyond the quality.
-///
-/// The web app (`web/`, unmaintained per README.md) had a mirrored
-/// `useUtils.effectiveBadge` / `getAvailBadge`, kept in sync only by
-/// convention; that reference is now frozen, so this is the sole live copy.
 nonisolated enum BadgeLogic {
     struct Pill: Equatable {
         let text: String
@@ -57,9 +53,7 @@ nonisolated enum BadgeLogic {
 // MARK: - Glossary
 
 /// The vocabulary a tracker uses ("Stem Bounce", "OG File", …), shared so the
-/// iOS legend sheet and the tvOS one can't drift. They had: tvOS listed "Best
-/// of" twice under two emoji — which also collided its ForEach ids, since it
-/// keys on the description — and omitted every quality term.
+/// iOS and tvOS legend sheets can't drift.
 extension BadgeLogic {
     struct Term: Identifiable, Sendable {
         let name: String

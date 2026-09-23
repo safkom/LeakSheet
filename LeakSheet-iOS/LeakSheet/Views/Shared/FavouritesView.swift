@@ -89,20 +89,15 @@ struct FavouritesView: View {
                                                         .font(.caption2)
                                                         .foregroundStyle(.secondary)
                                                         .lineLimit(1)
-                                                    // primaryVersion first: new
-                                                    // writes leave the flat
-                                                    // fields nil (they are the
-                                                    // pre-snapshot legacy path),
-                                                    // so reading them alone made
-                                                    // every recent favourite
-                                                    // render a blank badge row.
+                                                    // primaryVersion first: new writes leave the
+                                                    // legacy flat fields nil.
                                                     DedupedBadgePills(
                                                         quality: entry.primaryVersion?.quality ?? entry.quality,
                                                         availability: entry.primaryVersion?.availableLength ?? entry.availableLength
                                                     )
                                                 }
                                                 Spacer()
-                                                // A play glyph here opened Details, not playback.
+                                                // No play glyph: tapping the row opens Details, not playback.
                                                 if entry.songVersionCount > 1 {
                                                     Text("\(entry.songVersionCount) versions")
                                                         .font(.caption2.monospacedDigit())
@@ -120,9 +115,8 @@ struct FavouritesView: View {
                                             }
                                             .accessibilityLabel("Remove from favourites")
                                         }
-                                        // macOS ignores swipeActions, which left
-                                        // this screen with no way to un-favourite
-                                        // anything — the only exit was Clear All.
+                                        // macOS ignores swipeActions; the context menu is its
+                                        // only way to un-favourite.
                                         .contextMenu {
                                             Button("Remove from Favourites", systemImage: "heart.slash", role: .destructive) {
                                                 favourites.remove(key: entry.key)
@@ -162,9 +156,8 @@ struct FavouritesView: View {
                 Text("This can't be undone.")
             }
             .toolbar {
-                // Done where every sheet puts it; Clear All out of the cancel
-                // slot (QueueSheet learned the same lesson), and each item is
-                // omitted rather than left as an empty glass capsule.
+                // Done where every sheet puts it; Clear All out of the cancel slot. Each item
+                // is omitted rather than left as an empty glass capsule.
                 if !embedded {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }

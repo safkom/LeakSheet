@@ -69,9 +69,8 @@ nonisolated struct FilteredContent: Equatable, Sendable {
     var miscEraGroups: [MiscEraGroup] = []
 }
 
-/// One row of the flattened era list. All rows render as direct children of
-/// the screen's single LazyVStack so every song row is lazily materialized —
-/// nested non-lazy per-era stacks were the chip-toggle freeze.
+/// One row of the flattened era list. All rows are direct children of the screen's
+/// single LazyVStack, so every song row materializes lazily.
 nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case card(FilteredEra, expanded: Bool)
     case divider(eraName: String)
@@ -116,9 +115,8 @@ final class ArtistViewModel {
     private let eraStatsByName: [String: Stats]
     private let tabStatsByKey: [String: Stats]
 
-    /// Totals for the list currently on screen. The stats bar and the nav
-    /// subtitle both read this: showing the era tree's totals above a content
-    /// tab's entries made the header describe a list the user wasn't looking at.
+    /// Totals for the list currently on screen (song tree or content tab); the
+    /// stats bar and the nav subtitle both read this.
     var visibleStats: Stats {
         guard let key = selectedTabKey, let stats = tabStatsByKey[key] else {
             return artistStats
@@ -153,14 +151,11 @@ final class ArtistViewModel {
     var recents: Bool = false
     var noSnippets: Bool = false
 
-    /// The badge "highlight" filters — each expands every matching era and
-    /// they are mutually exclusive (only one active at a time), so the AND
-    /// logic in the filter pipeline never intersects two badge sets.
+    /// The badge "highlight" filters: each expands every matching era, and only one
+    /// is active at a time, so the AND pipeline never intersects two badge sets.
     var isBadgeFilterActive: Bool { bestOf || worstOf || grails }
-    /// Misc mode — a strict switch, not a peer filter: when ON, only entries
-    /// from the tracker's Misc / Music Videos tabs are shown, never mixed
-    /// with era songs; the other chips (and search) filter within them.
-    /// Legacy path for payloads without `tabs`; superseded by tab chips.
+    /// Misc mode — a strict switch, not a peer filter: only Misc / Music Videos entries
+    /// show, filtered by the other chips and search. Legacy path for payloads without `tabs`.
     var misc: Bool = false
     /// Selected content-tab id (TabSection.id) — same strict-switch
     /// semantics as misc, one chip per parsed tab.
@@ -182,10 +177,8 @@ final class ArtistViewModel {
     /// changes so `body` only iterates.
     private(set) var eraRows: [EraRow] = []
 
-    /// The appearance the cached `eraDisplay` values were derived for. Era card
-    /// gradients and header contrast are computed per scheme, so switching
-    /// light/dark has to re-derive them — the raw dominant colours behind them
-    /// are appearance-independent and never need re-extracting.
+    /// The appearance the cached `eraDisplay` values were derived for; switching
+    /// re-derives them (the dominant colours are appearance-independent).
     private(set) var colorScheme: ColorScheme = .dark
 
     /// songKey → eras containing that song (only keys spanning >1 era) —
@@ -213,11 +206,8 @@ final class ArtistViewModel {
 
     /// Derived display colors per era, computed once per extracted color.
     private(set) var eraDisplay: [String: EraDisplayColors] = [:]
-    /// Colors derived since the last flush — buffered so a burst of cards
-    /// finishing extraction in the same runloop turn (cold cache, first
-    /// scroll into a section) lands as one `eraDisplay` assignment instead
-    /// of one observer invalidation per card, which trips SwiftUI's
-    /// "glassEffect() tried to update multiple times per frame" fault.
+    /// Colors derived since the last flush, so a burst of extractions lands as one
+    /// `eraDisplay` write (per-card writes trip the glassEffect multiple-updates fault).
     private var pendingEraColors: [String: EraDisplayColors] = [:]
     private var eraColorFlushScheduled = false
 
@@ -227,8 +217,7 @@ final class ArtistViewModel {
         !(artist.miscEntries ?? []).isEmpty
     }
 
-    /// Badge-annotation kinds — never pages (the backend stopped emitting
-    /// them 2026-07-18; the filter also hides them in older cached payloads).
+    /// Badge-annotation kinds: never pages. Older cached payloads may still carry them.
     private static let badgeTabKinds: Set<String> = [
         "best_of", "worst_of", "special", "grails", "wanted",
     ]
@@ -249,9 +238,6 @@ final class ArtistViewModel {
 
     // MARK: - Init
 
-    /// The heavy startup pass — era stats + the unfiltered content tree —
-    /// computed off-main by `make(artist:)` so pushing a huge tracker
-    /// doesn't hitch the navigation transition.
     /// One era containing another copy of a song (matched by `songKey`).
     nonisolated struct CrossEraRef: Equatable, Sendable, Identifiable {
         let eraName: String
@@ -270,6 +256,8 @@ final class ArtistViewModel {
         var id: String { "\(eraName)::\(version.id)" }
     }
 
+    /// The heavy startup pass (era stats + the unfiltered content tree), computed
+    /// off-main by `make(artist:)` so pushing a huge tracker doesn't hitch navigation.
     nonisolated struct Precomputed: Sendable {
         let eraStatsByName: [String: Stats]
         let artistStats: Stats
@@ -290,18 +278,11 @@ final class ArtistViewModel {
         let titleKeySongs: [String: [CrossEraRef]]
         let altTitleKeySongs: [String: [CrossEraRef]]
         let eraOrder: [String: Int]
-        /// Per-era, per-song lowercased search haystack, built once off-main so
-        /// each keystroke's scoring is comparison-only (no re-lowercasing every
-        /// song name / alt title / version name across the whole tracker).
-        /// Shape mirrors `artist.eras[i].allSongs[j]`.
+        /// Per-era, per-song lowercased search haystack, built once off-main so each
+        /// keystroke only compares. Shape mirrors `artist.eras[i].allSongs[j]`.
         let searchIndex: [[SongSearchFields]]
-        /// Ordered playback contexts, one per era — what drives auto-advance
-        /// into the next era. Built here rather than in ArtistView's `.task`,
-        /// where it walked the whole tracker on the MainActor on every screen
-        /// appearance (including every back-navigation): `Era.allSongs`
-        /// allocates a fresh flattened array per access and `isStreamable`
-        /// does a URL parse plus a full StreamResolver.target parse per
-        /// version — tens of thousands of parses on a 40-era tracker.
+        /// Ordered playback contexts, one per era — what drives auto-advance into the
+        /// next era. Built once off-main: it parses every version's link.
         let eraPlaybackContexts: [EraSongContext]
 
         init(artist: Artist) {
@@ -320,21 +301,13 @@ final class ArtistViewModel {
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
                 for song in era.allSongs {
-                    // Before the placeholder guard: a "???" row's alt title is
-                    // its only identity, and it should still link to the named
-                    // song. Its title keys are empty, so it is never linked BY
-                    // that placeholder title.
+                    // Before the placeholder guard: a "???" row's alt title is its only identity and
+                    // still links to the named song (never BY the placeholder title).
                     let linkRef = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
                     for key in song.titleKeys { byTitleKey[key, default: []].append(linkRef) }
                     for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(linkRef) }
-                    // A placeholder title identifies nothing, so indexing it
-                    // groups every unidentified track in the tracker under one
-                    // key: 319 of them on Ye. The description sheet then
-                    // listed all 319 as "versions" of whichever "???" was
-                    // tapped, with colliding ids, and could re-point itself at
-                    // an unrelated track. The backend says so by sending these
-                    // with an empty songKey; the base-name fallback has to
-                    // honour the same rule.
+                    // A placeholder title identifies nothing: indexing it would group every
+                    // unidentified track under one key. Mirrors the backend's empty songKey.
                     guard !song.isPlaceholder else { continue }
                     byBaseName[song.baseName, default: []].append(
                         CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
@@ -392,15 +365,11 @@ final class ArtistViewModel {
             ?? payload.song
     }
 
-    /// Every era containing this payload's song. Prefers `songKey`, which only
-    /// indexes songs spanning >1 era, and falls back to the base-name index —
-    /// which also covers era-unique songs and payloads carrying no songKey.
+    /// Every era containing this payload's song. Prefers `songKey` (only songs
+    /// spanning >1 era), falling back to the base-name index, which covers the rest.
     ///
-    /// A nil `payload.song` is NOT a dead end: Now Playing and Favourites only
-    /// hold a bare `SongVersion`, and bailing here is why the description sheet
-    /// opened from the player's Info button lost its Versions picker, its alt
-    /// title, and its song-level credits. The version's own `derivedBaseName`
-    /// (tag stripped) is the same key the base-name index is built on.
+    /// A nil `payload.song` (Now Playing, Favourites) still resolves via the
+    /// version's `derivedBaseName`, the key the base-name index is built on.
     func crossEraRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
         if let payloadSong = payload.song {
             if let key = payloadSong.songKey, !key.isEmpty, let refs = songKeyEras[key] {
@@ -414,15 +383,10 @@ final class ArtistViewModel {
         return baseNameEras[derived] ?? []
     }
 
-    /// Songs linked to this payload's song by name, one hop: a song whose title
-    /// is one of this song's names (its title, a slash-title part, or an alt
-    /// title), or a song that lists this song's title as an alt title.
-    ///
-    /// Linked, never merged — trackers cross-list distinct songs as each
-    /// other's alt titles, and one hop keeps "All Falls Down" from dragging in
-    /// everything "Self Conscious" names. Excludes the song's own eras (the
-    /// Versions row already has those). See
-    /// docs/decisions.md::parser.py::_reconcile_title_misreads.
+    /// Songs linked to this payload's song by name, one hop: a song whose title is one
+    /// of this song's names (title, slash-title part, alt title), or one listing this
+    /// song's title as an alt title. Linked, never merged; excludes the song's own eras.
+    /// See docs/decisions.md::parser.py::_reconcile_title_misreads.
     func linkedRefs(for payload: SongDetailPayload) -> [CrossEraRef] {
         let family = crossEraRefs(for: payload)
         let ownSongs = family.isEmpty ? payload.song.map { [$0] } ?? [] : family.map(\.song)
@@ -468,26 +432,20 @@ final class ArtistViewModel {
             let (a, b) = (eraOrder[$0.eraName] ?? .max, eraOrder[$1.eraName] ?? .max)
             return a != b ? a < b : $0.song.baseName < $1.song.baseName
         }
-        // ponytail: a generic alias ("Freestyle", "Intro") can name dozens of
-        // songs; cap the row rather than rank them. Rank if users ask why one is missing.
+        // ponytail: cap the row rather than rank; a generic alias ("Intro") names dozens of songs.
         return Array(linked.prefix(Self.maxLinkedSongs))
     }
 
     nonisolated static let maxLinkedSongs = 24
 
-    /// How many era covers are warmed before the artist screen is pushed.
-    /// Roughly two screenfuls of collapsed cards — enough that the first thing
-    /// the user sees is never a grid of placeholders, without making a 40-era
-    /// tracker wait on 40 downloads before it opens.
+    /// How many era covers are warmed before the artist screen is pushed: about two
+    /// screenfuls of collapsed cards, without a 40-era tracker waiting on 40 downloads.
     static let coldStartArtCount = 8
 
     /// Preferred construction path: the stats/content pass runs off-main.
     ///
-    /// `warmArt` pulls the first few era covers (and their dominant colours)
-    /// into the cache before returning. The caller is still showing the landing
-    /// spinner at this point, so the work is free; without it the screen
-    /// rendered, *then* started fetching, and the first pass down a cold
-    /// tracker was a sequence of grey cards popping into colour.
+    /// `warmArt` pulls the first few era covers (and their colours) into the cache
+    /// while the landing spinner still shows, so the first cards don't pop in grey.
     static func make(artist: Artist, warmArt: Bool = true) async -> ArtistViewModel {
         let precomputed = await Task.detached(priority: .userInitiated) {
             Precomputed(artist: artist)
@@ -499,19 +457,14 @@ final class ArtistViewModel {
         return vm
     }
 
-    /// Load era covers into the image cache and derive their display colours.
-    ///
-    /// Warming bytes alone is not enough: without colour extraction, cards
-    /// still arrived grey and re-tinted a frame later. Extraction is cheap once
-    /// the image is decoded and cached.
+    /// Load era covers into the image cache and derive their display colours (bytes
+    /// alone would still leave cards grey for a frame).
     ///
     /// `limit` nil warms every era (the background pass from ArtistView).
     func warmEraArt(limit: Int? = nil) async {
         let eras = limit.map { Array(artist.eras.prefix($0)) } ?? artist.eras
-        // Keyed on the cover, not the era: sibling eras legitimately share one
-        // (a tracker that lists a single cover for "[V1]" and "[V2]"), and
-        // de-duping by era name fetched and colour-extracted it once per era.
-        // The result is applied to every era using that URL below either way.
+        // Keyed on the cover, not the era: sibling eras can share one, and the result
+        // is applied to every era using that URL below.
         var seenArt = Set<String>()
         let targets: [(artUrl: String, url: URL)] = eras.compactMap { era in
             guard let art = era.artUrl,
@@ -686,10 +639,8 @@ final class ArtistViewModel {
                 guard self.currentFilterState == state else { return }
                 self.content = result
                 self.isFiltering = false
-                // Ordinals are positions within the FILTERED era, so a filter
-                // change renumbers them. Keeping the set meant expanding the
-                // 4th song, toggling a chip, and finding a different song
-                // expanded instead.
+                // Ordinals are positions within the FILTERED era, so a filter change renumbers
+                // them and the expanded set must reset.
                 self.expandedSongs.removeAll()
                 self.resetRecentsWindow()
                 self.rebuildEraRows()
@@ -727,11 +678,8 @@ final class ArtistViewModel {
         rebuildEraRows()
     }
 
-    /// Set (or clear) the single expanded era outright.
-    ///
-    /// `toggleEra` flips, which makes "drill into *this* era" a two-case dance
-    /// at every call site — the macOS grid needs to open a named era whatever
-    /// was open before.
+    /// Set (or clear) the single expanded era outright, whatever was open before
+    /// (`toggleEra` flips).
     func openEra(_ name: String?) {
         guard !isBadgeFilterActive, expandedEra != name else { return }
         expandedEra = name
@@ -882,12 +830,8 @@ final class ArtistViewModel {
                 expanded: expanded, hasMultiple: hasMultiple, isLast: false, ordinal: ordinal
             ))
             if expanded {
-                // `versions`, i.e. what matched the filter — the same array
-                // the row's count and chevron are derived from. Expanding
-                // `allVersions` here put versions the badge filter had
-                // excluded back on screen while the row still claimed the
-                // filtered count. Playback context is built from
-                // `allVersions` elsewhere, so auto-advance is unaffected.
+                // `versions` (what matched the filter): the array the row's count and chevron use.
+                // Playback context uses `allVersions` elsewhere, so auto-advance is unaffected.
                 for (idx, version) in song.versions.enumerated() {
                     rows.append(.version(
                         version, index: idx, song: song,

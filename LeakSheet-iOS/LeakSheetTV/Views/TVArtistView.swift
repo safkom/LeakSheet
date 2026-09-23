@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// The artist screen. Uses the same `ArtistViewModel` and `FilterPipeline` the
-/// phone does — only the presentation differs: eras are expandable sections in
-/// one vertical column rather than a card list, because the focus engine walks
-/// rows and columns rather than responding to taps on headers.
+/// The artist screen, on the phone's `ArtistViewModel`: eras are expandable sections
+/// in one column, because the focus engine walks rows rather than tapping headers.
 struct TVArtistView: View {
     let artist: Artist
 
@@ -104,10 +102,8 @@ struct TVArtistView: View {
     private func filterChips(_ vm: ArtistViewModel) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 16) {
-                // Through the toggle methods: they re-run the filter and keep
-                // the badge filters exclusive. Flipping the flags directly did
-                // neither, so every chip here was a no-op. No "Recent" chip —
-                // this screen has no recents list to show.
+                // Through the toggle methods, which re-run the filter and keep the badge filters
+                // exclusive. No "Recent" chip: this screen has no recents list.
                 chip("Best Of", "star", isOn: vm.bestOf, action: vm.toggleBestOf)
                 chip("Worst Of", "hand.thumbsdown", isOn: vm.worstOf, action: vm.toggleWorstOf)
                 chip("Grails", "trophy", isOn: vm.grails, action: vm.toggleGrails)
@@ -170,9 +166,8 @@ struct TVArtistView: View {
             .padding(.horizontal, 36)
 
             if isExpanded {
-                // `offset` in the id, not baseName — trackers emit several
-                // distinct "???" songs per era, and ForEach would drop the
-                // duplicates. Same reason EraRow.id carries an ordinal.
+                // `offset` in the id, not baseName: several distinct "???" songs per era would
+                // collide in ForEach (the same reason EraRow.id carries an ordinal).
                 let eraVersions = songs.flatMap { $0.versions.filter(\.isStreamable) }
                 ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
                     TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraVersions: eraVersions)
@@ -238,11 +233,8 @@ struct TVArtistView: View {
         guard let url = artist.sourceUrl else { return }
         refreshing = true
         defer { refreshing = false }
-        // Mirrors ArtistView.refresh() on iOS: forceRefresh skips the ETag
-        // check so the backend actually re-parses, and the result is re-cached
-        // — the tvOS version previously deleted the cache entry and never
-        // wrote a new one, so every open after one refresh re-downloaded and
-        // re-decoded the full multi-MB payload instead of replaying a 304.
+        // As on iOS: forceRefresh skips the ETag check so the backend re-parses, and
+        // the result is re-cached.
         do {
             let result = try await APIClient.shared.parseSheet(
                 url: url, artistName: artist.name, forceRefresh: true

@@ -1,11 +1,8 @@
 #if os(macOS)
 import SwiftUI
 
-/// Source list: the two fixed destinations, then every tracker you have opened.
-///
-/// Recents used to be its own pane; on the Mac the recents list *is* the sidebar,
-/// which is what makes going back to a tracker a single click instead of a
-/// re-open. Settings is not here — it lives in the ⌘, Settings scene.
+/// Source list: the two fixed destinations, then every tracker you have opened
+/// (on the Mac the recents list IS the sidebar). Settings lives in the ⌘, scene.
 struct MacSidebar: View {
     @Binding var selection: MacSelection?
     @Environment(RecentTrackersManager.self) private var recents

@@ -3,23 +3,20 @@ import SwiftUI
 /// Convenience alias used throughout the app.
 typealias DescriptionSheet = SongDescriptionSheet
 
-/// Sheet showing detailed song/version information — mirrors the web SongDescriptionModal.
+/// Sheet showing detailed song/version information.
 struct SongDescriptionSheet: View {
     let payload: Payload
 
-    /// Set when hosted as the macOS Details inspector rather than presented as
-    /// a sheet — the host supplies the chrome, and there is nothing to dismiss.
-    /// Same convention as `QueueSheet`/`FavouritesView`/`SettingsView`.
+    /// Set when hosted as the macOS Details inspector rather than presented as a
+    /// sheet: the host supplies the chrome, and there is nothing to dismiss.
     let embedded: Bool
 
     /// Defined in Shared/Models so FavouritesManager and the tvOS detail screen
     /// can build one without depending on this sheet.
     typealias Payload = SongDetailPayload
 
-    /// The version the sheet is currently showing — starts as `payload.version`
-    /// but changes when the user picks a chip in the version picker (same song,
-    /// same or a different era). Everything below reads `active`, never
-    /// `payload`, so the whole sheet follows the picker.
+    /// The version the sheet shows: `payload.version` until a picker chip is chosen.
+    /// Everything below reads `active`, never `payload`, so the whole sheet follows it.
     private struct ActiveVersion {
         var version: SongVersion
         var song: Song?
@@ -41,10 +38,8 @@ struct SongDescriptionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
-    /// Hosted live in the Mac Details inspector, which renders in the real
-    /// system appearance — contrast has to be judged against that, not against
-    /// a hardcoded dark ground. See
-    /// DECISIONS.md::DesignTokens.swift::scheme-threading.
+    /// Contrast is judged against the Mac inspector's real system appearance: see
+    /// DECISIONS.md::DesignTokens.swift::scheme-parameter.
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var accentColor: Color?
@@ -56,10 +51,8 @@ struct SongDescriptionSheet: View {
     /// picker falls back to just this song's own versions.
     @Environment(ArtistViewModel.self) private var environmentVM: ArtistViewModel?
 
-    /// The environment's view model only when it describes this payload's
-    /// artist. The Favourites sheet gets the *playing* artist's, and resolving
-    /// a Ye favourite against Travis's indexes offered (and played) Travis's
-    /// "Intro" under Ye's name.
+    /// The environment's view model only when it describes this payload's artist
+    /// (the Favourites sheet gets the *playing* artist's).
     private var artistVM: ArtistViewModel? {
         guard let vm = environmentVM, let slug = payload.artistSlug, vm.artist.slug == slug else { return nil }
         return vm
@@ -225,11 +218,8 @@ struct SongDescriptionSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(displayName)
                                 .font(.title.weight(.bold))
-                                // .white, not .primary: a dynamic colour fed
-                                // into the contrast maths resolved to black,
-                                // so ensureReadable brightened the title to
-                                // mid-grey on every open until the artwork
-                                // task landed. A concrete colour is exact.
+                                // .white, not .primary: a dynamic colour resolves to black in the
+                                // contrast maths, greying the title until the artwork task lands.
                                 .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
                             if let sub = subtitle {
                                 Text(sub)
@@ -454,9 +444,8 @@ struct SongDescriptionSheet: View {
 
     @ToolbarContentBuilder
     private var chromeToolbar: some ToolbarContent {
-        // The menu sat in .cancellationAction, the leading slot every other
-        // sheet in the app uses to close — reaching for "back out" opened a
-        // menu instead. Actions go trailing; Done is the confirmation.
+        // Actions go trailing, not in the leading slot other sheets use to close;
+        // Done is the confirmation.
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 overflowItems
@@ -504,15 +493,9 @@ struct SongDescriptionSheet: View {
 
     // MARK: - Version picker
 
-    /// Horizontal chip row of every version of this song — including versions
-    /// from other eras when the song has one (see `pickerVersions`). Tapping a
-    /// chip re-points the whole sheet at that version via `active`, the same
-    /// way tvOS's version picker drives its detail screen.
-    ///
-    /// `pickerVersions` is read exactly once here. The visibility check used to
-    /// sit at the call site, so every body pass ran the cross-era lookup and
-    /// its `flatMap` over every matching era twice — the pattern
-    /// MacArtistView.swift already records fixing.
+    /// Horizontal chip row of every version of this song, including other eras' (see
+    /// `pickerVersions`, read exactly once here: it is a cross-era lookup). A chip
+    /// re-points the whole sheet via `active`.
     @ViewBuilder
     private var versionPicker: some View {
         let versions = pickerVersions
@@ -529,10 +512,8 @@ struct SongDescriptionSheet: View {
         }
     }
 
-    /// Opens scrolled to the version the sheet was opened for. It always
-    /// started at the first chip, so opening a Best Of or playing version deep
-    /// in a 30-version song showed chips for other versions and hid the
-    /// selected one off-screen.
+    /// Opens scrolled to the version the sheet was opened for, so a deep version's
+    /// chip isn't off-screen.
     private func chipRow(
         title: String, entries: [ArtistViewModel.CrossEraVersion], showsTitle: Bool
     ) -> some View {
@@ -578,9 +559,7 @@ struct SongDescriptionSheet: View {
                     Text(showsTitle ? entry.version.name : (entry.version.versionTag ?? entry.version.name))
                         .font(.caption.weight(.bold))
                         .lineLimit(1)
-                    // The chip's own badge, same as VersionRowView: without it
-                    // the picker showed only quality/availability, so the ⭐
-                    // version was indistinguishable from its siblings.
+                    // The chip's own badge, as in VersionRowView, so the ⭐ version stands out.
                     if let b = entry.version.badge, let badge = Badge(rawValue: b) {
                         Text(badge.emoji)
                             .font(.caption2)
@@ -653,9 +632,8 @@ struct SongDescriptionSheet: View {
 
     @ViewBuilder
     private var detailGrid: some View {
-        // Date cells are shown verbatim, digits or not: trackers legitimately
-        // write "Spring", "Late 2004 sessions", "Ooc" — the web reference
-        // renders them, and hiding them silently loses tracker information.
+        // Date cells are shown verbatim, digits or not: trackers write "Spring" or
+        // "Late 2004 sessions", and hiding them loses information.
         let items: [(String, String)] = [
             ("Version", active.version.versionTag),
             ("Duration", active.version.trackLength),

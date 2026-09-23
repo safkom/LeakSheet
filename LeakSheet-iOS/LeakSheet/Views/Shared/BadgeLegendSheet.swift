@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// A glossary of the quality / availability / badge vocabulary a tracker uses.
-/// The terms ("Stem Bounce", "OG File", …) are opaque to newcomers — this
-/// makes the color-coded pills legible without prior knowledge.
+/// A glossary of the quality / availability / badge vocabulary a tracker uses, so
+/// the colour-coded pills are legible without prior knowledge.
 struct BadgeLegendSheet: View {
     @Environment(\.dismiss) private var dismiss
 

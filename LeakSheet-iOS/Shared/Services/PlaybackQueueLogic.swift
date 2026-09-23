@@ -2,13 +2,11 @@ import Foundation
 
 /// Pure decision logic for playback ordering: the user queue, an era context
 /// with artist-level rollover, and ad-hoc ordered lists (recents, search
-/// results, a song's versions). Value type with no AVPlayer and no side
-/// effects, so the ordering rules are unit-testable.
+/// results, a song's versions). No AVPlayer and no side effects, so the rules
+/// are unit-testable.
 ///
-/// Positions are tracked with cursors rather than identity searches:
-/// duplicate (name, versionTag) pairs — e.g. two distinct '???' mystery
-/// tracks — previously matched the first occurrence and reset advancement,
-/// and playing a queued interlude lost the era position entirely.
+/// Positions are cursors, not identity searches: duplicate (name, versionTag)
+/// pairs (two distinct '???' tracks) must not reset advancement.
 nonisolated struct PlaybackQueueLogic {
     /// What the engine should load next, with the display metadata that
     /// travels along.
@@ -29,14 +27,11 @@ nonisolated struct PlaybackQueueLogic {
     private(set) var queue: [QueueItem] = []
     private(set) var eraSongs: EraSongContext?
     private(set) var playbackList: [PlaybackListItem]?
-    /// Ordered era lists, one per artist. Keyed rather than kept in a single
-    /// slot because `ArtistView` registers on every appearance: browsing B
-    /// while A plays must not cost A its rollover, and must still leave B's
-    /// list in place for when the user plays something from B.
+    /// Ordered era lists, one per artist: `ArtistView` registers on every appearance,
+    /// and browsing B while A plays must not cost A its rollover.
     private var erasByArtist: [String: [EraSongContext]] = [:]
 
-    /// Slug, not display name: alternate trackers of one artist share a name,
-    /// and browsing one replaced the other's era list mid-playback.
+    /// Slug, not display name: alternate trackers of one artist share a name.
     private static func artistKey(_ context: EraSongContext) -> String {
         if let slug = context.artistSlug, !slug.isEmpty { return slug }
         return context.artistName
@@ -103,18 +98,15 @@ nonisolated struct PlaybackQueueLogic {
         return Self.target(for: items[index])
     }
 
-    /// Register an artist's ordered era list. Filed under that artist, so
-    /// registering one never disturbs another's rollover — and an artist
-    /// browsed mid-playback still has its list ready when the user plays it.
+    /// Register an artist's ordered era list, filed under that artist so it never
+    /// disturbs another's rollover.
     mutating func setArtistEras(_ eras: [EraSongContext]) {
         guard let artist = eras.first.map(Self.artistKey) else { return }
         erasByArtist[artist] = eras
         registrationOrder.removeAll { $0 == artist }
         registrationOrder.append(artist)
-        // Every entry holds every streamable version of every era, so a long
-        // browsing session would otherwise accumulate whole trackers (Ye alone
-        // is ~9k versions). Keep the few that can still matter: the playing
-        // artist, plus the most recent registrations.
+        // Every entry holds every streamable version of every era, so keep only the
+        // playing artist plus the most recent registrations.
         while registrationOrder.count > Self.maxRetainedArtists {
             let evicted = registrationOrder.removeFirst()
             if evicted != eraSongs.map(Self.artistKey) {

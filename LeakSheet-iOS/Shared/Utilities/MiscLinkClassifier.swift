@@ -1,10 +1,8 @@
 import Foundation
 
-/// Content kind for one Misc/Music-Video entry link. The sheet's Link(s)
-/// column mixes audio streams, direct images, videos, and zip/archive
-/// downloads with no structured type field — the URL itself (host, path
-/// extension) is the only reliable signal, so this drives which affordance
-/// a row shows for each link.
+/// Content kind for one Misc/Music-Video entry link. The Link(s) column has no
+/// type field, so the URL (host, path extension) is the only signal for which
+/// affordance a row shows.
 nonisolated enum MiscLinkKind: Sendable, Equatable {
     case stream   // playable via the existing StreamResolver hosts
     case image    // direct image file or a known image-hosting host
@@ -56,14 +54,9 @@ nonisolated enum MiscLinkClassifier {
         "i.imgur.com", "ibb.co", "i.ibb.co", "postimg.cc", "i.postimg.cc",
     ]
 
-    /// Classifies a raw link URL. A video file extension wins over the
-    /// streamable-host shortcut below — a .mp4/.mov/.m4v/.webm/.mkv/.avi
-    /// file hosted on e.g. pillows.su is still a video, not an audio stream,
-    /// and must not be silently routed into the audio-only player. Only
-    /// after that check do we fall back to the streamable-host list —
-    /// pillows.su/imgur.gg/froste.lol/krakenfiles links with no video
-    /// extension always play through the app's audio player regardless of
-    /// what they actually host.
+    /// Classifies a raw link URL. A video file extension wins over the streamable-host
+    /// shortcut: a .mp4 on pillows.su is a video, not an audio stream. Other links on
+    /// a streamable host play through the audio player.
     static func classify(_ urlString: String) -> MiscLinkKind {
         guard let url = URL(string: urlString), let host = normalizedHost(url) else { return .link }
         let ext = url.pathExtension.lowercased()

@@ -47,9 +47,8 @@ struct TVFavouritesView: View {
             .toolbar {
                 if !favourites.entries.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        // Confirmed, like iOS: favourites are the only
-                        // user-authored data the app holds — everything else
-                        // re-downloads — and this was one click from gone.
+                        // Confirmed, as on iOS: favourites are the only
+                        // user-authored data the app holds.
                         Button("Clear All", role: .destructive) { showClearConfirm = true }
                     }
                 }

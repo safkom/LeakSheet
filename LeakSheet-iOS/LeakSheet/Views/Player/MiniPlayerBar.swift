@@ -16,9 +16,8 @@ struct MiniPlayerBar: View {
     #endif
 
     var body: some View {
-        // The sheet hangs off this Group, not the bar: when the track ends and
-        // `currentTrack` goes nil, a sheet attached inside the `if` was torn
-        // down in the user's face.
+        // The sheet hangs off this Group, not the bar: attached inside the `if`, it is
+        // torn down when the track ends and `currentTrack` goes nil.
         Group {
         if let track = player.currentTrack {
             VStack(spacing: 0) {
@@ -69,12 +68,8 @@ struct MiniPlayerBar: View {
                                 }
                             }
 
-                            // Claims the empty space beside the labels: a .plain
-                            // Button hit-tests only its drawn content, so the
-                            // padding around the art and text was dead and taps
-                            // there did nothing. Inside the label, not outside —
-                            // the gesture is attached to the label, not the
-                            // modified Button (see DECISIONS.md::contentShape).
+                            // Claims the empty space beside the labels, inside the label rather than
+                            // outside the Button (DECISIONS.md::contentShape).
                             Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())
@@ -97,10 +92,8 @@ struct MiniPlayerBar: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Previous track")
 
-                        // Spinner overlays the button rather than replacing it:
-                        // swapping the Button out removed the tap target for
-                        // the whole load, so pausing a slow stream was
-                        // impossible until it started.
+                        // Spinner overlays the button rather than replacing it, so a slow stream can
+                        // still be paused while it loads.
                         Button {
                             player.togglePlay()
                         } label: {

@@ -18,9 +18,8 @@ struct NowPlayingView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
 
-    /// The Mac window renders in the real system appearance (the scenes no
-    /// longer force dark), so contrast has to be judged against the appearance
-    /// actually on screen — see DECISIONS.md::DesignTokens.swift::scheme-threading.
+    /// Contrast is judged against the appearance actually on screen (the Mac renders
+    /// in the system appearance): see DECISIONS.md::DesignTokens.swift::scheme-parameter.
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var accentColor: Color?
@@ -33,9 +32,7 @@ struct NowPlayingView: View {
     @State private var showFullScreenVideo = false
 
     /// Era accent brightened until it reads against the actual backdrop at the
-    /// controls' position — the gradient there is roughly the accent fading
-    /// well into the black background, so very dark accents (navy, deep green)
-    /// would otherwise render illegible tints.
+    /// controls, where the gradient fades into the background.
     private var readableAccent: Color? {
         guard let accent = accentColor else { return nil }
         let backdrop = accent.blended(with: .lsBackground, fraction: 0.7, in: colorScheme)
@@ -78,8 +75,8 @@ struct NowPlayingView: View {
     }
 
     private var content: some View {
-        // Scrolls once the controls outgrow the screen (accessibility text
-        // sizes); otherwise it fills the screen and centres like before.
+        // Scrolls once the controls outgrow the screen (accessibility text sizes);
+        // otherwise it fills the screen and centres.
         GeometryReader { proxy in
             ScrollView {
                 controls
@@ -163,10 +160,8 @@ struct NowPlayingView: View {
                         player.togglePlay()
                     } label: {
                         if player.loading {
-                            // .tint below applies to the whole button subtree,
-                            // so an untinted indicator drew in the era colour
-                            // on a glass button filled with that same colour —
-                            // invisible. Same treatment the Image branch uses.
+                            // .tint below applies to the whole button subtree, so an untinted indicator would
+                            // draw in the era colour on a glass button filled with it. Same as the Image branch.
                             ProgressView()
                                 .controlSize(.regular)
                                 .tint(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
@@ -195,13 +190,8 @@ struct NowPlayingView: View {
                     .accessibilityLabel("Next track")
                 }
 
-                // Secondary controls row.
-                // Spacing reduced from 28 and horizontal padding added: every
-                // child here is incompressible (a fixed-size label plus three
-                // 44pt frames, each in a glass capsule), and unlike the track
-                // info and progress rows this one had no padding at all — so
-                // on a non-Max iPhone the row overflowed and the widest,
-                // leftmost child (the quality button) ran off the left edge.
+                // Secondary controls row. Every child is incompressible, so tight spacing plus
+                // horizontal padding keeps it inside a non-Max iPhone's width.
                 HStack(spacing: 16) {
                     // Quality toggle
                     if player.currentTrack != nil {
@@ -218,12 +208,8 @@ struct NowPlayingView: View {
                             )
                             .font(.caption.weight(.medium))
                             .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
-                            // lineLimit(1) still prevents the two-line wrap
-                            // that DECISIONS.md::NowPlayingView.swift::original-label-width
-                            // records, but without fixedSize — which turned
-                            // that wrap into an off-screen overflow. The label
-                            // may now truncate on the narrowest devices
-                            // instead of pushing the row past the bezel.
+                            // lineLimit(1) without fixedSize: the label may truncate on the narrowest devices
+                            // rather than push the row past the bezel (DECISIONS.md::NowPlayingView.swift::original-label-width).
                             .lineLimit(1)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -401,11 +387,8 @@ struct NowPlayingView: View {
                     )
                 )
         } else if !player.artUrl.isEmpty {
-            // Width matches maxPixelSize, as every other call site does: asking
-            // for 1600 while CachedImage capped the decode at its 1280 default
-            // downloaded bytes that were then thrown away. 1280 covers the
-            // artwork's 340pt cap at 3x; 640 did only while the frame was 280pt.
-            // 1600, the size the lock-screen artwork loads, so both share one download and cache entry.
+            // 1600, as the lock-screen artwork loads, so both share one download and cache
+            // entry; width matches maxPixelSize, as at every other call site.
             CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 1600), maxPixelSize: 1600) {
                 artPlaceholder
             }
@@ -422,13 +405,8 @@ struct NowPlayingView: View {
     }
 }
 
-/// Square artwork frame, sized to the space it gets.
-///
-/// On iOS it was a fixed 280pt square: three quarters of an iPhone SE's width,
-/// and incompressible, so at accessibility text sizes the controls below it had
-/// nowhere to go. It now fills the width up to a cap and, being aspect-fit,
-/// gives way vertically when the controls need the room. On the Mac it tracks
-/// the resizable window, where a hard square left the rest of it empty.
+/// Square artwork frame, sized to the space it gets: fills the width up to a cap
+/// and, being aspect-fit, gives way vertically when the controls need room.
 private struct ArtworkSquare: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)

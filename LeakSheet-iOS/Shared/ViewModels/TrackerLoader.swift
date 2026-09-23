@@ -1,12 +1,8 @@
 import SwiftUI
 
-/// Owns the tracker-loading pipeline: conditional fetch, ETag/304 replay from
-/// the local cache, recents bookkeeping, and friendly error mapping.
-///
-/// Extracted from `LandingView` so the iOS landing screen and the macOS sidebar's
-/// Browse and Recents panes share one implementation — the panes are laid out
-/// differently per platform, but the loading behaviour must not diverge.
-/// See DECISIONS.md::TrackerLoader.swift::extraction.
+/// Owns the tracker-loading pipeline: conditional fetch, ETag/304 replay from the
+/// local cache, recents bookkeeping, and friendly error mapping. Shared by the iOS
+/// landing screen and the macOS sidebar panes so loading behaviour can't diverge.
 @MainActor
 @Observable
 final class TrackerLoader {
@@ -14,19 +10,15 @@ final class TrackerLoader {
     private(set) var loading = false
     private(set) var loadPhase: APIClient.LoadPhase?
     private(set) var error: String?
-    /// Set when the returned tracker came from the local cache because the
-    /// server was unreachable. Non-blocking — the content IS usable — but a
-    /// silent fall back to cache made a failed pull-to-refresh look like a
-    /// successful one, so the UI has to be able to say so.
+    /// Set when the returned tracker came from the local cache because the server was
+    /// unreachable: the content is usable, but a failed refresh must not look successful.
     private(set) var staleNotice: String?
 
-    /// Loads and parses a tracker. Returns the parsed artist, or nil if the
-    /// load failed (in which case `error` carries a user-facing message).
+    /// Loads and parses a tracker. Returns the parsed artist, or nil if the load
+    /// failed (`error` then carries a user-facing message).
     ///
-    /// `forceRefresh` skips the conditional request so the backend re-parses
-    /// rather than answering 304 — the "refresh this tracker" path. The result
-    /// is still cached, so a refresh never leaves the tracker without a local
-    /// copy for next time.
+    /// `forceRefresh` skips the conditional request so the backend re-parses rather
+    /// than answering 304. The result is still cached.
     func load(
         _ urlString: String,
         artistName: String? = nil,
@@ -35,17 +27,11 @@ final class TrackerLoader {
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        // A tracker keeps the name it was first opened under, whichever entry
-        // point reopens it — the backend recomputes the slug from the name and
-        // favourites are keyed on that slug. See
-        // DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
+        // A tracker keeps the name it was first opened under, whichever entry point
+        // reopens it: see DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
         let resolvedName = artistName ?? recents.savedName(forSourceUrl: trimmed)
-        // `loading` drove a spinner but gated nothing, and only the Parse
-        // button was ever disabled — so tapping several recents/browse rows
-        // started that many loads. They raced into multiple path.append calls,
-        // and whichever finished first cleared `loading` via the defer below
-        // while the others were still running. One guard here covers all six
-        // call sites (iOS landing, recents, browse, macOS, tvOS ×2).
+        // One load at a time, across every call site: concurrent loads raced into
+        // multiple navigation pushes.
         guard !loading else { return nil }
         withAnimation { error = nil }
         staleNotice = nil
@@ -56,10 +42,8 @@ final class TrackerLoader {
             loadPhase = nil
         }
 
-        // Conditional request: send the cached ETag so an unchanged tracker
-        // comes back as a bodyless 304 and we reopen the local copy instead
-        // of re-downloading and re-decoding the full multi-MB payload.
-        // Reads the sidecar, not the payload — see CacheService.getCachedMeta.
+        // Conditional request: send the cached ETag (a sidecar read) so an unchanged
+        // tracker comes back as a bodyless 304 and the local copy reopens.
         var cachedEtag: String?
         if !forceRefresh {
             loadPhase = .readingCache
@@ -73,9 +57,7 @@ final class TrackerLoader {
                 forceRefresh: forceRefresh,
                 cachedEtag: cachedEtag,
                 onProgress: { @Sendable phase in
-                    // Hopped through one MainActor.assumeIsolated-free Task per
-                    // callback before; that gave no ordering guarantee between
-                    // a late .downloading and .preparing. `publish` serialises.
+                    // `publish` serialises phases, so a late .downloading can't follow .preparing.
                     Self.publish(phase, to: self)
                 }
             )
@@ -89,10 +71,8 @@ final class TrackerLoader {
             case .notModified:
                 return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
             case .httpError(let status, let msg):
-                // 5xx only. A 4xx is the server answering ABOUT this tracker —
-                // 404/410 is the tracker being gone (an untracked sheet, a DMCA
-                // removal), 403 is it being refused — and quietly serving the
-                // cached copy would hide that forever.
+                // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403
+                // refused); serving the cached copy would hide that forever.
                 if status >= 500,
                    let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                     return cached
@@ -115,9 +95,8 @@ final class TrackerLoader {
             }
             withAnimation { error = "This tracker's data couldn't be read. The app may need an update." }
         } catch is CancellationError {
-            // The user navigated away. Not a failure to recover from — falling
-            // back here would also write a recents entry for a tracker they
-            // abandoned.
+            // The user navigated away: not a failure to recover from, and a fallback would
+            // write a recents entry for an abandoned tracker.
             return nil
         } catch let urlError as URLError where urlError.code == .cancelled {
             return nil
@@ -145,11 +124,9 @@ final class TrackerLoader {
         return cached
     }
 
-    /// A previously-cached tracker stays usable when the network is down —
-    /// only a *hard* failure needs this; the 304 path (`replayFromCache`)
-    /// already gets a fresh-enough cache hit for free. Same name-match rule:
-    /// a copy cached under a different name carries a different slug (see
-    /// `replayFromCache`), so it's not returned as this load's result.
+    /// A previously-cached tracker stays usable when the network is down (hard
+    /// failures only; the 304 path has `replayFromCache`). A copy cached under a
+    /// different name carries a different slug, so it is not returned.
     private func cachedFallback(
         _ trimmed: String,
         artistName: String?,
@@ -161,13 +138,8 @@ final class TrackerLoader {
         return cachedArtist
     }
 
-    /// Hold the loading state up while the caller finishes the job — building
-    /// the view model and warming the first era covers.
-    ///
-    /// `load` clears `loading` on return, so that work (the slowest part of a
-    /// big tracker) previously ran with no indicator at all, and the artist
-    /// screen answered with its own second "Preparing…" spinner. Keeping
-    /// `loading` true here also keeps the concurrent-load guard armed.
+    /// Hold the loading state up while the caller finishes the job: building the view
+    /// model and warming the first era covers. Keeps the concurrent-load guard armed.
     func preparing<T>(_ body: () async -> T) async -> T {
         loading = true
         loadPhase = .preparing
@@ -178,11 +150,8 @@ final class TrackerLoader {
         return await body()
     }
 
-    /// Ordered hand-off of a progress phase onto the main actor.
-    ///
-    /// Each callback used to spawn its own unstructured `Task { @MainActor }`,
-    /// one per 256KB chunk, with no ordering between them — a late
-    /// `.downloading` could land after `.preparing` and rewind the label.
+    /// Ordered hand-off of a progress phase onto the main actor, so a late
+    /// `.downloading` can't land after `.preparing` and rewind the label.
     private nonisolated static func publish(_ phase: APIClient.LoadPhase, to loader: TrackerLoader) {
         Task { @MainActor in loader.apply(phase) }
     }
@@ -213,24 +182,16 @@ final class TrackerLoader {
         }
     }
 
-    /// 304 path: reopen the local copy, or refetch unconditionally if the ETag
-    /// matched but the cached payload is gone.
-    ///
-    /// This is the *common* path for a returning user, and it used to report
-    /// nothing at all: parseSheet throws before reaching `.preparing`, so the
-    /// UI sat on "Contacting server…" through a multi-MB decode and the whole
-    /// view-model build. Both are announced now.
+    /// 304 path: reopen the local copy, or refetch unconditionally if the ETag matched
+    /// but the cached payload is gone. Reports progress through the decode and build.
     private func replayFromCache(
         _ trimmed: String,
         artistName: String?,
         recents: RecentTrackersManager
     ) async -> Artist? {
         loadPhase = .preparing
-        // The cached bytes are the response, so they already carry whatever
-        // name was applied when they were written. A copy cached under a
-        // DIFFERENT name carries a different slug too, and favourites are keyed
-        // on that slug — so drop it and refetch under the resolved name rather
-        // than handing back a second identity for the same tracker.
+        // A copy cached under a DIFFERENT name carries a different slug (the favourites
+        // key), so drop it and refetch under the resolved name.
         if let cachedArtist = await cachedFallback(trimmed, artistName: artistName, recents: recents) {
             return cachedArtist
         }
@@ -248,15 +209,11 @@ final class TrackerLoader {
         }
     }
 
-    /// Maps a backend HTTP failure to a plain, actionable message. Big trackers
-    /// (e.g. Ye) can exceed the gateway timeout on a cold parse and return 5xx —
-    /// a raw "HTTP 504" means nothing to a user, so say what to do instead.
+    /// Maps a backend HTTP failure to a plain, actionable message: a big tracker can
+    /// hit the gateway timeout on a cold parse, and "HTTP 504" means nothing to a user.
     ///
-    /// A 502/503 that carries the server's own message shows that message: the
-    /// backend answers 503 "Could not reach the tracker source." when Google or
-    /// the tracker host is down, which is not a timeout. `fallback` is
-    /// `APIClient.bareStatusMessage` when the body had no message (a gateway's
-    /// error page).
+    /// A 502/503 carrying the server's own message ("Could not reach the tracker
+    /// source.") shows it. `fallback` is `APIClient.bareStatusMessage` otherwise.
     nonisolated static func friendlyLoadError(status: Int, fallback: String) -> String {
         if status == 502 || status == 503, fallback != APIClient.bareStatusMessage(status) {
             return fallback

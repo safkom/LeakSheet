@@ -4,11 +4,8 @@ import SwiftUI
 struct CreditTagsView: View {
     let version: SongVersion
 
-    /// Lay the tags out in one flowing line instead of stacking them.
-    ///
-    /// The stacked column is right in a phone row, where width is the scarce
-    /// axis. In a desktop row it left badges on one line and credits ragged
-    /// down the side of a row with 1000pt of empty space to its right.
+    /// Lay the tags out in one flowing line instead of stacking them (desktop rows,
+    /// where width isn't the scarce axis).
     var inline = false
 
     var body: some View {
@@ -47,10 +44,8 @@ struct CreditTagsView: View {
         HStack(alignment: .top, spacing: 4) {
             Text(type.label)
                 .font(.caption2.weight(.semibold))
-                // Full opacity, and the wash below is 15%: the same composite
-                // BadgePill uses. At 0.8 over a 10% wash `director` could not
-                // clear AA at any brightness — the composite was the defect,
-                // not the hue.
+                // Full opacity over a 15% wash, the same composite as BadgePill, so every
+                // credit colour clears AA.
                 .foregroundStyle(type.color)
                 .fixedSize()
             Text(text)
@@ -72,9 +67,8 @@ struct CreditTagsView: View {
     }
 }
 
-/// A version's credits as one line of text — "feat. X · prod. Y" — for list
-/// rows. Wraps like prose at large text sizes, where a pill per credit gave
-/// every credit its own line and made rows several times taller.
+/// A version's credits as one line of text — "feat. X · prod. Y" — for list rows;
+/// it wraps like prose at large text sizes instead of taking a line per pill.
 struct CreditLineView: View {
     let version: SongVersion
 

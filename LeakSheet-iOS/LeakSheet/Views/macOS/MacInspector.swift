@@ -2,12 +2,7 @@
 import SwiftUI
 
 /// The trailing rail: Details and Queue in one panel, switched by a segmented
-/// control.
-///
-/// Both used to be modal sheets *and* — for the queue — a second, separate
-/// inspector, so the same content had two surfaces that could disagree. Here
-/// there is one of each, neither of them modal: reading a song's details or
-/// reordering the queue never blocks the window behind it.
+/// control. Neither is modal, so reading details or reordering never blocks the window.
 struct MacInspector: View {
     @State private var ui = MacUIState.shared
     @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?

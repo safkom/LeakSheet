@@ -9,9 +9,8 @@ struct LeakSheetTVApp: App {
     private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
     init() {
-        // tvOS has the full AVAudioSession API, so this matches iOS exactly.
-        // Category only — AudioEngine activates the session right before
-        // playback so we never interrupt another app's audio at launch.
+        // Category only, as on iOS: AudioEngine activates the session right before
+        // playback so launch never interrupts another app's audio.
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         } catch {
@@ -26,10 +25,7 @@ struct LeakSheetTVApp: App {
                 .environment(FavouritesManager.shared)
                 .environment(RecentTrackersManager.shared)
         }
-        // tvOS had no scenePhase observer at all, so handleBackgrounding()
-        // never ran here: favourites and extracted era colours were lost
-        // inside their debounce windows on every backgrounding, which is the
-        // data loss the iOS side already fixed.
+        // Flush debounced writes (favourites, era colours) on backgrounding, as on iOS.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
                 AudioEngine.shared.handleBackgrounding()

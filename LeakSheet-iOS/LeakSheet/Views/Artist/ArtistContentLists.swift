@@ -1,22 +1,13 @@
 import SwiftUI
 
-/// The artist screen's content branches — one `View` type per mode
-/// (filters, search, eras, content tabs, recents).
-///
-/// Split out of ArtistView.swift (2026-07-25). They were already
-/// separate types on purpose: each takes narrow inputs so toggling one
-/// mode doesn't share a SwiftUI invalidation boundary with the others
-/// or with the screen's own @State. Only the file boundary is new.
+/// The artist screen's content branches — one `View` type per mode (filters,
+/// search, eras, content tabs, recents), each with narrow inputs so toggling one
+/// mode doesn't share an invalidation boundary with the others.
 
 // MARK: - Content tabs
 
-/// The tracker's pages — the song tree plus one tab per parsed content tab —
-/// with the filters for the page you are on in one menu at the end.
-///
-/// Tabs and filters used to be two rows of identical glass chips, so a page
-/// switch ("Released") and a filter ("Grails") looked like the same control.
-/// Now a page is a tab with an underline, and filters are one button that
-/// says how many are on.
+/// The tracker's pages — the song tree plus one tab per parsed content tab — with
+/// the page's filters in one menu at the end, so pages and filters look different.
 struct ContentTabsView: View {
     let vm: ArtistViewModel
 
@@ -90,8 +81,7 @@ private struct TabButton: View {
 }
 
 /// Every filter for the current page, behind one button that shows how many
-/// are on. On a content tab only No Snippets applies — it used to stay on,
-/// invisible, while the filter row was hidden.
+/// are on. On a content tab only No Snippets applies.
 struct FilterMenu: View {
     let vm: ArtistViewModel
 
@@ -175,9 +165,7 @@ struct SearchResultsListView: View {
                     eraName: result.era.name,
                     eraArt: result.era.artUrl,
                     showVersionBadge: true,
-                    // Swipe-to-play must continue down the list like tap does,
-                    // not stop after one track (missing onPlay fell back to a
-                    // single-track play).
+                    // Swipe-to-play continues down the list like tap does.
                     onPlay: { _ in
                         playWithinList(
                             results.map { (version: $0.version, era: $0.era, id: $0.id) },
@@ -196,9 +184,7 @@ struct SearchResultsListView: View {
                         eraName: result.era.name, eraArt: result.era.artUrl
                     ))
                 }
-                // Same tinted panel the eras branch uses, so a search result
-                // reads as the same kind of object as the row it came from.
-                // The tail rounds where the era changes.
+                // Same tinted panel the eras branch uses; the tail rounds where the era changes.
                 .songPanel(
                     vm.eraDisplay[result.era.name],
                     isLast: idx == results.count - 1
@@ -209,8 +195,7 @@ struct SearchResultsListView: View {
     }
 
     /// Start playback of the tapped entry inside its visible ordered list, so
-    /// auto-advance continues down the list (search results) instead of
-    /// stopping after one track.
+    /// auto-advance continues down the search results.
     private func playWithinList(_ entries: [(version: SongVersion, era: Era, id: String)], tappedId: String) {
         let streamable = entries.filter { $0.version.isStreamable }
         guard let idx = streamable.firstIndex(where: { $0.id == tappedId }) else { return }
@@ -241,17 +226,14 @@ struct ErasListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasActiveFilters: Bool {
-        // Must list EVERY chip that can empty the list, or the empty state
-        // claims "No Songs" (tracker is empty) when the truth is "No Matches"
-        // (your filter hid everything) — grails was missing.
+        // Must list EVERY chip that can empty the list, or the empty state claims
+        // "No Songs" when the truth is "No Matches".
         vm.bestOf || vm.worstOf || vm.grails || vm.noSnippets
     }
 
     var body: some View {
         if vm.eraRows.isEmpty {
-            // Every other content branch (search/recents/misc) shows an empty
-            // state; without this the eras branch rendered a blank void when a
-            // filter (e.g. Best Of) removed every era.
+            // An empty state when a filter removed every era, like the other branches.
             ContentUnavailableView {
                 Label(
                     hasActiveFilters ? "No Matches" : "No Songs",
@@ -289,12 +271,8 @@ struct ErasListView: View {
         }
     }
 
-    /// Multi-version songs expand/collapse; single-version songs open Details.
-    ///
-    /// Tap used to start playback, which made an accidental brush of the list
-    /// hijack whatever was playing. Play is still one gesture away: swipe from
-    /// the leading edge, long-press → Play, the three-dot menu, or the Play
-    /// button inside Details.
+    /// Multi-version songs expand/collapse; single-version songs open Details. Tap
+    /// never plays: Play is a swipe, long-press, menu, or Details button away.
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
@@ -310,7 +288,7 @@ struct ErasListView: View {
     }
 
     /// Era-scoped playback: the filtered era's streamable versions are the
-    /// auto-advance context (filtered-out versions are excluded, as before).
+    /// auto-advance context.
     private func playWithEraContext(_ version: SongVersion, eraName: String) {
         guard let filtered = vm.filteredEra(named: eraName) else { return }
         player.playInEra(
@@ -349,21 +327,14 @@ struct MiscListView: View {
         vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
-    /// Normalised key for `vm.eraDisplay`.
-    ///
-    /// The card renders "Other" for an empty era name and matches its art
-    /// case-insensitively, but colours were stored and read under the RAW
-    /// name — so an empty-named group loaded its cover and then rendered
-    /// uncoloured, and any casing difference against the main-tab era did the
-    /// same. Reads and writes now agree on one key.
+    /// Normalised key for `vm.eraDisplay`, used for reads and writes alike (the card
+    /// shows "Other" for an empty name and matches art case-insensitively).
     private func colorKey(_ eraName: String) -> String {
         eraName.isEmpty ? "Other" : eraName
     }
 
-    /// A minimal `Era` so a content-tab group renders through the same
-    /// `EraCardView` as the main list. Only name and art matter here — the
-    /// card reads nothing else, and the group's own entries are rendered
-    /// below the card rather than from `sections`.
+    /// A minimal `Era` so a content-tab group renders through the same `EraCardView`
+    /// as the main list; the card reads only name and art.
     private func eraForGroup(_ group: MiscEraGroup) -> Era {
         Era(
             name: group.eraName.isEmpty ? "Other" : group.eraName,
@@ -386,9 +357,7 @@ struct MiscListView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
             } else {
-                // Name the page the user is actually on: this branch renders
-                // every content tab, so a filtered-empty Stems page announced
-                // "No Misc Entries".
+                // Name the page the user is on: this branch renders every content tab.
                 ContentUnavailableView(
                     "No \(vm.selectedTabName ?? "Misc") Entries",
                     systemImage: "film.stack",
@@ -403,9 +372,8 @@ struct MiscListView: View {
             }
         } else {
             // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
-            // One flat row per card, section label and entry, each a direct
-            // child of the screen's LazyVStack: a VStack per era group built
-            // every row of an expanded group at once (~1,900 on Ye's Stems).
+            // One flat row per card, section label and entry, each a direct LazyVStack
+            // child, so an expanded group doesn't build every row at once.
             let groups = vm.content.miscEraGroups
             let playOrder = groups.flatMap(\.entries)
             ForEach(rows(for: groups)) { row in
@@ -439,8 +407,7 @@ struct MiscListView: View {
                         artistName: artistName,
                         artistSlug: artistSlug,
                         eraArt: eraArtUrl(for: entry.eraName),
-                        // Auto-advance follows the order on screen (grouped
-                        // by era), not the sheet order it used to jump through.
+                        // Auto-advance follows the order on screen (grouped by era).
                         onPlay: { _ in playEntry(entry, in: playOrder) },
                         onShowDescription: onShowDescription,
                         onSelectLink: onOpenLink
@@ -486,12 +453,8 @@ struct MiscListView: View {
         return rows
     }
 
-    /// Tap always opens Details, whatever the link count.
-    ///
-    /// A single link used to be performed directly, so a stray tap started a
-    /// stream or bounced the user into Safari. The row's own affordances (the
-    /// trailing link control, the menu built from `entry.mediaLinks`) and the
-    /// sheet itself still reach every link explicitly.
+    /// Tap always opens Details, whatever the link count; the row's own affordances
+    /// still reach every link explicitly.
     private func handleRowTap(_ entry: MiscEntry) {
         onShowDescription(DescriptionSheet.Payload(
             song: nil, version: entry.asSongVersion,
@@ -500,13 +463,9 @@ struct MiscListView: View {
         ))
     }
 
-    /// Play an entry with continuation across every other streamable entry in
-    /// the visible list, the same context an era or a search result gets.
-    ///
-    /// Non-audio links (image, video, archive, embed, generic) go straight to
-    /// `onOpenLink`, which the row hands to the shared context menu — they are
-    /// content-tab-only data, so they live inside the same menu a song row
-    /// shows rather than in a control only these rows have.
+    /// Play an entry with continuation across every other streamable entry in the
+    /// visible list. Non-audio links go straight to `onOpenLink`, which the row hands
+    /// to the shared context menu.
     private func playEntry(_ entry: MiscEntry, in entries: [MiscEntry]) {
         Haptics.light()
         let streamable = entries.filter(\.isStreamable)
@@ -558,10 +517,8 @@ struct RecentsListView: View {
             }
         } else {
             ForEach(visible.enumerated(), id: \.element.id) { idx, result in
-              // Single root: LazyVStack can only template row identity from
-              // the ForEach ids when the body is unary — the eras branch was
-              // restructured for exactly this (see ArtistRowViews.swift), and
-              // this branch never was.
+              // Single root: LazyVStack can only template row identity from the ForEach ids
+              // when the body is unary (see ArtistRowViews.swift).
               VStack(spacing: 0) {
                 // Era group header — show when era changes
                 if idx == 0 || visible[idx - 1].era.name != result.era.name {
@@ -630,10 +587,8 @@ struct RecentsListView: View {
                         || visible[idx + 1].era.name != result.era.name
                 )
                 .onAppear {
-                    // Against the LIVE count, not the `visible` snapshot this
-                    // body closed over — a fast scroll fired several appends
-                    // off one stale count. Eight rows early so the next page
-                    // is in place before the user reaches the end.
+                    // Against the LIVE count, not the `visible` snapshot a fast scroll would append
+                    // from repeatedly. Eight rows early so the next page lands in time.
                     if idx >= vm.visibleRecents.count - 8 {
                         vm.loadMoreRecents()
                     }

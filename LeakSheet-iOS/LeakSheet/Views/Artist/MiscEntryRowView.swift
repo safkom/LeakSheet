@@ -3,21 +3,9 @@ import SwiftUI
 /// Row for one entry on a content tab (Misc / Music Videos / Released / Stems /
 /// Fakes).
 ///
-/// Deliberately identical to `SongRowView` in every visual respect — same
-/// leading slot, typography, pill component, secondary line, trailing control,
-/// now-playing wash, padding, swipe actions and context menu. It cannot simply
-/// *be* SongRowView, which requires a `Song`; a content-tab entry has only a
-/// version's worth of data. So it composes the same shared pieces instead, and
-/// differs only where the underlying data does.
-///
-/// It used to look like a different row family: a 44pt thumbnail against the
-/// song row's 24pt icon slot, a heavier title, a bespoke pill for the type
-/// column, a metadata line of calendar / clock / antenna glyphs, and a
-/// trailing icon that looked like a play button but was a bare `Image` — the
-/// row's tap opened Details, so nothing happened when you pressed it. There
-/// were no swipe actions and no context menu at all, which on the Ye Stems tab
-/// left 1,642 streamable entries with no way to play, queue or favourite them
-/// short of opening the detail sheet.
+/// Deliberately identical to `SongRowView` in every visual respect, and composed
+/// from the same shared pieces: it can't *be* SongRowView, which requires a `Song`,
+/// so it differs only where the underlying data does.
 struct MiscEntryRowView: View {
     let entry: MiscEntry
     let artistName: String
@@ -38,11 +26,8 @@ struct MiscEntryRowView: View {
     @Environment(PlayerViewModel.self) private var player
     @Environment(FavouritesManager.self) private var favourites
 
-    /// Computed ONCE per row, not per access. `entry.mediaLinks` runs
-    /// MiscLinkClassifier.classify (a URLComponents parse plus a
-    /// StreamResolver.target parse) and label(for:) per link, and this view
-    /// read it five times per body evaluation on a tab that can carry ~1,900
-    /// entries. `asSongVersion` is likewise rebuilt on every access.
+    /// Computed ONCE per row: `entry.mediaLinks` classifies every link (URL parses) and
+    /// `asSongVersion` rebuilds on each access, on tabs of ~1,900 entries.
     private let version: SongVersion
     private let previewURL: URL?
     private let hasVideoLink: Bool
@@ -80,12 +65,8 @@ struct MiscEntryRowView: View {
 
     private var canStream: Bool { version.isStreamable }
 
-    /// Date, length and streaming state on one secondary line.
-    ///
-    /// Occupies the slot the song row gives its "also known as" line and reads
-    /// the same way: caption2, secondary, one line. The old version drew each
-    /// value behind its own SF Symbol — a calendar, a clock, an antenna —
-    /// which is chrome no song row has.
+    /// Date, length and streaming state on one secondary line, in the slot (and
+    /// style) the song row gives its "also known as" line.
     private var metaLine: String? {
         var parts: [String] = []
         if let date = entry.date, !date.isEmpty, date.lowercased() != "n/a" {
@@ -116,10 +97,8 @@ struct MiscEntryRowView: View {
                         .truncationMode(.tail)
                 }
 
-                // One flowing pill row, the same capsules a song row shows.
-                // The type column ("Music Video", "Freestyle") is data a song
-                // row has no equivalent of, so it rides along as another pill
-                // rather than as a shape of its own.
+                // One flowing pill row, the same capsules a song row shows; the type column
+                // ("Music Video") rides along as another pill.
                 FlowLayout(spacing: 5) {
                     if let type = entry.entryType, !type.isEmpty {
                         BadgePill(text: type, variant: .entryType, accessibilityPrefix: "Type")
@@ -236,10 +215,8 @@ struct MiscEntryRowView: View {
         }
     }
 
-    /// Through the proxy like every other CachedImage call site: the raw
-    /// third-party URL meant no backend downscale (a 1280px YouTube thumbnail
-    /// decoded for a tiny cell), no 429/Retry-After handling, and exposure to
-    /// hotlink blocking.
+    /// Through the proxy like every other CachedImage call site: backend downscale,
+    /// 429/Retry-After handling, and no hotlink blocking.
     private func thumbnail(url: URL) -> some View {
         CachedImage(
             url: APIClient.shared.imageProxyURL(for: url.absoluteString, width: 64) ?? url,

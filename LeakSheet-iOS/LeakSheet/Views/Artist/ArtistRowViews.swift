@@ -2,8 +2,6 @@ import SwiftUI
 
 /// Leaf views for the artist screen: the flattened era/song/version
 /// row, the filter chip, and the notice banner.
-///
-/// Split out of ArtistView.swift (2026-07-25); behaviour unchanged.
 
 // MARK: - Era row (flattened list)
 
@@ -57,11 +55,8 @@ struct EraRowView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(name)
                             .font(.subheadline.weight(.semibold))
-                            // readableHeader, not dominant: the raw median-cut
-                            // colour of a dark cover lands near-black on the
-                            // black background, so sub-era headers rendered
-                            // invisible. EraDisplayColors already guarantees
-                            // contrast — this was the one text site not using it.
+                            // readableHeader, not dominant: a dark cover's raw colour is near-black on the
+                            // black background. EraDisplayColors guarantees contrast.
                             .foregroundStyle(displayColors?.readableHeader ?? .secondary)
                             .textCase(.uppercase)
                             .tracking(0.5)
@@ -85,14 +80,8 @@ struct EraRowView: View {
                 panel(isLast: isLast) {
                     SongRowView(
                         song: song,
-                        // bestPlayableVersion, not versions.first and not
-                        // bestVersion: the row renders this version's badges
-                        // AND acts on it, so the two must agree. versions.first
-                        // made a row reading "Lossless · OG File" play the Low
-                        // Quality snippet; plain bestVersion ignores whether a
-                        // version has a link, which on 457 corpus songs picked
-                        // an unplayable one and removed the play affordance
-                        // while playable siblings sat underneath.
+                        // bestPlayableVersion: the row renders this version's badges AND acts on it, so
+                        // the two must agree, and it must be playable whenever any version is.
                         version: song.bestPlayableVersion ?? song.versions.first,
                         artistName: artistName,
                         artistSlug: artistSlug,

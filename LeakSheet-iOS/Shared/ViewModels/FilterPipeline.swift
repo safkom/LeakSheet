@@ -1,15 +1,8 @@
 import Foundation
 
-/// The pure, off-main half of the artist screen's filter pipeline.
-///
-/// Split out of `ArtistViewModel` (2026-07-25): the view model is the
-/// MainActor-isolated state holder, while everything here is `nonisolated
-/// static` — it takes an `Artist` plus a `FilterState` and returns computed
-/// values, touching no instance state. Keeping it in its own file makes that
-/// boundary obvious and keeps the view model readable.
-///
-/// Declared as an extension so every call site and test keeps using
-/// `ArtistViewModel.computeContent(...)` / `.parseLeakDate(...)` unchanged.
+/// The pure, off-main half of the artist screen's filter pipeline: `nonisolated
+/// static` functions over an `Artist` and a `FilterState`, touching no instance
+/// state. An extension, so call sites keep using `ArtistViewModel.computeContent(...)`.
 extension ArtistViewModel {
     // MARK: - Content computation (pure, runs off-main)
 
@@ -136,15 +129,11 @@ extension ArtistViewModel {
         let version: SongVersion
         let era: Era
         let score: Int
-        /// Position of the song within its era's flattened list. Disambiguates
-        /// same-`baseName` songs (leak trackers emit several distinct "???"
-        /// placeholders per era with an identical single version) whose ids
-        /// would otherwise collide and be silently dropped by ForEach — the
-        /// same fix EraRow.id applies with its ordinal.
+        /// Position of the song within its era's flattened list: disambiguates
+        /// same-`baseName` songs ("???" placeholders), as EraRow's ordinal does.
         let songOrdinal: Int
 
-        // Stable id derived from content so SwiftUI's ForEach can diff results
-        // across queries instead of rebuilding every row on each keystroke.
+        // Stable content-derived id — see DECISIONS.md::FilterPipeline.swift::stable-row-id
         var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
@@ -181,10 +170,8 @@ extension ArtistViewModel {
             }
         }
         results.sort { $0.score > $1.score }
-        // One result per *version*, uncapped, meant a 1-2 character query on a
-        // large tracker built tens of thousands of rows — each copying a Song,
-        // SongVersion and Era — and handed them all to a ForEach. Nobody
-        // scrolls past a few hundred; the sort above keeps the best ones.
+        // Capped: a 1-2 character query on a large tracker matches tens of thousands of
+        // versions, and the sort above keeps the best ones.
         return Array(results.prefix(Self.maxSearchResults))
     }
 
@@ -195,9 +182,8 @@ extension ArtistViewModel {
         let version: SongVersion
         let era: Era
         let timestamp: TimeInterval
-        /// Position of the song within its era's flattened list — disambiguates
-        /// same-`baseName` songs (e.g. several "???" placeholders per era) whose
-        /// ids would otherwise collide and be dropped by ForEach. See SearchResult.
+        /// Position of the song within its era's flattened list; disambiguates
+        /// same-`baseName` songs. See SearchResult.
         let songOrdinal: Int
 
         // Stable content-derived id — see DECISIONS.md::FilterPipeline.swift::stable-row-id
@@ -226,9 +212,8 @@ extension ArtistViewModel {
                     if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.grails && !isGrailOrWantedVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
-                    // previewDate last: a leak/file date is the real event,
-                    // but a preview-only version has nothing else, and those
-                    // were invisible to Recents entirely.
+                    // previewDate last: a leak/file date is the real event, but a preview-only
+                    // version has nothing else.
                     let dateStr = [version.leakDate, version.fileDate, version.previewDate]
                         .compactMap { $0 }
                         .first { !$0.isEmpty }
@@ -246,23 +231,9 @@ extension ArtistViewModel {
 
     // MARK: - Misc entries
 
-    /// Misc entries after in-mode filters: No Snippets drops unavailable
-    /// entries, Recent sorts by date descending, search matches name /
-    /// notes / era / type. Best Of restricts to badge-marked names when any
-    /// exist (misc entries usually carry no badges — then it's a no-op).
-    /// Group a content tab's entries by era, in the artist's own era order.
-    ///
-    /// `eraOrder` is the era tree's ordering. Grouping alone used to emit
-    /// groups in sheet-row order, which put whatever the tab happened to list
-    /// first at the top: on the Ye Misc tab that was "Opt Archive", "Twitter"
-    /// and "Pierre-Louis Auvray" — 4 entries out of 747, each a source name
-    /// the sheet put in its Era column — sitting above every real era with a
-    /// placeholder cover. Ordering by the era tree makes a content tab read in
-    /// the same sequence as the Unreleased list.
-    ///
-    /// Groups whose name matches no era keep their relative order and go last:
-    /// they are real content, so they must not be dropped, but they are also
-    /// not eras and should not lead.
+    /// Group a content tab's entries by era, in the artist's own era order
+    /// (`eraOrder`), so a tab reads in the same sequence as the Unreleased list.
+    /// Groups matching no era keep their relative order and go last.
     nonisolated static func groupMiscByEra(
         _ entries: [MiscEntry], eraOrder: [String] = []
     ) -> [MiscEraGroup] {
@@ -301,6 +272,10 @@ extension ArtistViewModel {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    /// Misc entries after in-mode filters: No Snippets drops unavailable
+    /// entries, Recent sorts by date descending, search matches name /
+    /// notes / era / type. Best Of restricts to badge-marked names when any
+    /// exist (misc entries usually carry no badges — then it's a no-op).
     private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
         // A selected tab sources that tab's entries; the legacy misc mode
         // reads the flat misc/MV list (older cached payloads have no tabs).
@@ -314,9 +289,7 @@ extension ArtistViewModel {
             entries = entries.filter { !isSnippetLike(available: $0.available, quality: $0.quality) }
         }
         if state.bestOf {
-            // Match only best/special emojis — the same set the song-version
-            // Best Of uses (isBestOfVersion). Matching every Badge case here
-            // wrongly surfaced worst-of (🗑️) and AI (🤖) entries under Best Of.
+            // Match only best/special emojis, the same set as isBestOfVersion (not 🗑️ or 🤖).
             let starred = entries.filter { e in
                 Badge.allCases.contains { $0.isBestOf && e.name.contains($0.emoji) }
             }
@@ -327,8 +300,6 @@ extension ArtistViewModel {
             if !flagged.isEmpty { entries = flagged }
         }
         if state.grails {
-            // The chip was doing nothing at all on a content tab: every other
-            // badge filter was honoured here and this one was simply missing.
             // Grail + wanted, matching the eras branch's combined chip.
             let sought = entries.filter { e in
                 e.name.contains(Badge.grail.emoji) || e.name.contains(Badge.wanted.emoji)
@@ -363,11 +334,8 @@ extension ArtistViewModel {
         let fullHQ: Int
     }
 
-    /// Same shape as `computeEraStats`, over a content tab's entries.
-    ///
-    /// Without this the stats bar kept showing the era tree's totals while a
-    /// content tab was on screen, so the header claimed 9,368 tracks over a
-    /// list of 747 released entries.
+    /// Same shape as `computeEraStats`, over a content tab's entries, so the stats
+    /// bar describes the tab on screen.
     nonisolated static func computeTabStats(_ entries: [MiscEntry]) -> Stats {
         tally(entries, available: \.available, quality: \.quality, streamable: \.isStreamable)
     }
@@ -539,8 +507,7 @@ extension ArtistViewModel {
         return f
     }()
 
-    // "20 Mar 2023" / "20 March 2023" — day-first ordering, which none of the
-    // month-first formatters accept (it degraded to year-only).
+    // "20 Mar 2023" / "20 March 2023": day-first, which no month-first formatter accepts.
     private nonisolated static let _dayFirstFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

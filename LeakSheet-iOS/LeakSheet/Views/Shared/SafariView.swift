@@ -13,13 +13,9 @@ struct SafariItem: Identifiable {
 }
 
 extension View {
-    /// Opens a web link the way the platform expects.
-    ///
-    /// iOS presents `SFSafariViewController` in a sheet so the user stays in
-    /// the app (Reader, share sheet, "Open in Safari" all come free). macOS has
-    /// no such controller and the platform convention is the user's own
-    /// browser, so it hands off to `NSWorkspace` and clears the binding.
-    /// See DECISIONS.md::SafariView.swift::web-sheet.
+    /// Opens a web link the way the platform expects: iOS presents
+    /// `SFSafariViewController` in a sheet; macOS hands off to the user's browser
+    /// via `NSWorkspace` and clears the binding.
     func webSheet(item: Binding<SafariItem?>) -> some View {
         modifier(WebSheet(item: item))
     }

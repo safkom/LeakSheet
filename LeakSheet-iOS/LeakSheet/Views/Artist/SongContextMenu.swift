@@ -11,11 +11,8 @@ struct SongContextMenu: View {
     let eraArt: String?
     var onPlay: ((SongVersion) -> Void)?
     var onShowDescription: (DescriptionSheet.Payload) -> Void
-    /// Classified links a content-tab entry carries beyond its audio stream —
-    /// images, videos, archives, embeds. Songs have none, so this is empty for
-    /// them and the section disappears. It lives in the shared menu rather
-    /// than in a second trailing control, because a content-tab row is meant
-    /// to be indistinguishable from a song row.
+    /// Classified links a content-tab entry carries beyond its audio stream (images,
+    /// videos, archives, embeds); empty for songs, so the section disappears.
     var extraLinks: [MiscLink] = []
     var onSelectLink: ((MiscLink) -> Void)?
 
@@ -46,10 +43,8 @@ struct SongContextMenu: View {
                 Label("Add to Queue", systemImage: "text.append")
             }
         }
-        // A payload with no Song is still favouritable — Now Playing, the
-        // description sheet opened from the player, and content-tab rows all
-        // carry a bare version, and every one of them silently lost the
-        // Favourite item.
+        // A payload with no Song is still favouritable: Now Playing, the player's
+        // description sheet and content-tab rows all carry a bare version.
         Button {
             if let song {
                 favourites.toggle(

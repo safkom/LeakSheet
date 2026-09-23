@@ -9,8 +9,7 @@ struct QueueSheet: View {
     /// sheet — the host supplies the navigation chrome.
     var embedded = false
 
-    /// Clearing drops every queued track with no undo, so it asks first — the
-    /// same as Favourites' Remove All and Recents' Clear already did.
+    /// Clearing drops every queued track with no undo, so it asks first.
     @State private var confirmingClear = false
 
     private static let emptyHint: String = {
@@ -24,10 +23,7 @@ struct QueueSheet: View {
     var body: some View {
         Group {
             if embedded {
-                // The inspector this is hosted in sits OUTSIDE the detail column's
-                // navigation container, so `navigationTitle`/`toolbar` here would
-                // not label the panel — they would overwrite the window's own title
-                // and drop Clear into the main toolbar. Inline header instead.
+                // Inline header: see DECISIONS.md::QueueSheet.swift::embedded-chrome
                 VStack(spacing: 0) {
                     HStack {
                         Text("Queue (\(player.queue.count))")
@@ -84,10 +80,7 @@ struct QueueSheet: View {
                         ForEach(player.queue) { item in
                             row(item)
                         }
-                        // Drag to reorder, with no edit mode. `.onMove` needed
-                        // one on iOS, so an EditButton existed only to make
-                        // reordering reachable; iOS 27's reorderable container
-                        // does it directly, as the Music app's queue does.
+                        // Drag to reorder with no edit mode (iOS 27's reorderable container).
                         .reorderable()
                     }
                     .reorderContainer(for: QueueItem.self) { difference in
@@ -151,8 +144,7 @@ struct QueueSheet: View {
             } label: {
                 Image(systemName: "play.circle")
                     .foregroundStyle(.secondary)
-                    // The bare glyph was a ~20 pt target. Metrics.hitTarget is
-                    // 44 pt on touch, the HIG minimum, and smaller for a pointer.
+                    // Metrics.hitTarget: 44 pt on touch (the HIG minimum), smaller for a pointer.
                     .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                     .contentShape(Rectangle())
             }
@@ -167,9 +159,8 @@ struct QueueSheet: View {
             }
             .accessibilityLabel("Remove from queue")
         }
-        // macOS ignores swipeActions, so the inspector's
-        // queue had no per-item remove at all — Clear was
-        // the only way to take one track out.
+        // macOS ignores swipeActions, so per-item remove
+        // lives in the context menu too.
         .contextMenu {
             Button("Remove from Queue", systemImage: "trash", role: .destructive) {
                 if let index = index(of: item) { player.removeFromQueue(at: index) }
@@ -181,10 +172,8 @@ struct QueueSheet: View {
         .accessibilityAction(named: "Move Down") { move(item, by: 1) }
     }
 
-    /// The item's CURRENT position. Resolved at tap time rather than captured
-    /// when the row rendered: a row's index goes stale the moment the queue
-    /// advances or is reordered, and acting on it removed or played the wrong
-    /// track.
+    /// The item's CURRENT position, resolved at tap time: a captured row index goes
+    /// stale as soon as the queue advances or is reordered.
     private func index(of item: QueueItem) -> Int? {
         player.queue.firstIndex { $0.id == item.id }
     }
@@ -218,12 +207,8 @@ struct QueueSheet: View {
 
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
-        // Clear used to sit in .cancellationAction — the leading slot where
-        // every other sheet in the app puts Cancel or Close — so reaching for
-        // "back out" wiped the queue. .destructiveAction is the placement meant
-        // for it; it also asks before clearing.
-        // The condition sits outside the item: an item with no content can
-        // still leave an empty glass capsule beside Done.
+        // .destructiveAction, not the leading slot where Cancel lives; it also asks first.
+        // The condition sits outside the item, or an empty glass capsule would remain.
         if !player.queue.isEmpty {
             ToolbarItem(placement: .destructiveAction) {
                 // role alone renders neutral text in the glass toolbar.
