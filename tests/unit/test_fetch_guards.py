@@ -15,7 +15,9 @@ async def test_a_body_over_the_cap_is_refused(monkeypatch):
         lambda r: httpx.Response(200, content=bomb, headers={"content-encoding": "gzip"})
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        with pytest.raises(fetcher.NetworkError):
+        # An httpx error, so a tab loop skips this one tab; the base-page
+        # path maps it to NetworkError like any other upstream failure.
+        with pytest.raises(fetcher.ResponseTooLarge):
             await fetcher._get_capped(client, "https://example.com/")
 
 
@@ -51,3 +53,13 @@ async def test_concurrent_unknown_hosts_share_one_feed_refresh(monkeypatch):
     monkeypatch.setattr(fetcher, "_host_refresh", None)
     await asyncio.gather(*(fetcher._refresh_tracker_hosts() for _ in range(5)))
     assert calls == [1]
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://h:80/x", "https://h:80/x"),     # 80 is not https's default
+    ("http://h:443/x", "http://h:443/x"),
+    ("http://H:80/x", "http://h/x"),
+    ("https://[::1]:8080/x", "https://[::1]:8080/x"),
+])
+def test_only_the_schemes_own_default_port_is_dropped(url, expected):
+    assert fetcher._normalize_url(url) == expected

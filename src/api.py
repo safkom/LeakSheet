@@ -713,6 +713,12 @@ async def parse_sheet(
     while a background refresh is triggered.
     """
     use_cache = req.use_cache and not req.force_refresh
+    # Up front: every path below normalizes the URL, and an invalid one
+    # raised out of the cache lookups as a 500.
+    try:
+        _normalize_url(req.url)
+    except InvalidURLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {e}") from e
 
     # --- ETag-based 304 fast path ---
     if use_cache:
@@ -831,6 +837,36 @@ def _display_etag(etag: str, artist_name: str | None) -> str:
     return content_hash(f"{etag}:{artist_name}".encode()) if artist_name else etag
 
 
+def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
+    """(name, slug) from the start of a payload, and where the slug ends.
+
+    Raises ValueError unless the object opens with exactly those two keys.
+    """
+    if not head.startswith("{"):
+        raise ValueError("unexpected payload head")
+    decoder = json.JSONDecoder()
+    values = []
+    i = 0
+    for key in ("name", "slug"):
+        i = _skip_json_ws(head, i + 1)  # past "{" or ","
+        found, i = decoder.raw_decode(head, i)
+        i = _skip_json_ws(head, i)
+        if found != key or head[i:i + 1] != ":":
+            raise ValueError("unexpected payload head")
+        value, i = decoder.raw_decode(head, _skip_json_ws(head, i + 1))
+        values.append(value)
+        i = _skip_json_ws(head, i)
+        if head[i:i + 1] != ",":
+            raise ValueError("unexpected payload head")
+    return (values[0], values[1]), i
+
+
+def _skip_json_ws(text: str, i: int) -> int:
+    while i < len(text) and text[i] in " \t\n\r":
+        i += 1
+    return i
+
+
 def _with_display_name(raw: bytes, etag: str, artist_name: str) -> tuple[bytes, str]:
     """The cached payload renamed for one caller, and its ETag. Blocking.
 
@@ -840,12 +876,22 @@ def _with_display_name(raw: bytes, etag: str, artist_name: str) -> tuple[bytes, 
     path flipped the slug (iOS favourites key material) between requests.
     """
     tagged = _display_etag(etag, artist_name)
-    data = json.loads(raw)
     slug = slugify(artist_name)
-    if data.get("name") == artist_name and data.get("slug") == slug:
+    # The payload opens with name then slug (Artist field order), so splice
+    # those two instead of round-tripping an ~11 MB document through json on
+    # every warm hit (0.5 s and ~100 MB for Ye).
+    head = raw[:4096].decode("utf-8", errors="ignore")
+    try:
+        (name, old_slug), end = _leading_name_and_slug(head)
+    except ValueError:
+        data = json.loads(raw)
+        data["name"], data["slug"] = artist_name, slug
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(), tagged
+    if (name, old_slug) == (artist_name, slug):
         return raw, tagged
-    data["name"], data["slug"] = artist_name, slug
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(), tagged
+    rest = raw[len(head[:end].encode("utf-8")):]
+    new_head = f'{{"name": {json.dumps(artist_name, ensure_ascii=False)}, "slug": {json.dumps(slug, ensure_ascii=False)}'
+    return new_head.encode("utf-8") + rest, tagged
 
 
 def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:

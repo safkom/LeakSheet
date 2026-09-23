@@ -201,6 +201,11 @@ async def close_sheets_client() -> None:
 _MAX_SHEET_BYTES = 64 * 1024 * 1024
 
 
+class ResponseTooLarge(httpx.HTTPError):
+    """A body over _MAX_SHEET_BYTES. An httpx error, so a tab loop skips the
+    one oversized tab instead of failing the whole parse."""
+
+
 async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
     """client.get, but the decoded body stops at _MAX_SHEET_BYTES."""
     request = client.build_request("GET", url, **kwargs)
@@ -210,7 +215,7 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
         async for chunk in resp.aiter_bytes():
             body.extend(chunk)
             if len(body) > _MAX_SHEET_BYTES:
-                raise NetworkError(f"{urlparse(url).hostname} sent more than {_MAX_SHEET_BYTES} bytes")
+                raise ResponseTooLarge(f"{urlparse(url).hostname} sent more than {_MAX_SHEET_BYTES} bytes")
     finally:
         await resp.aclose()
     # Already decoded, so the encoding headers no longer describe the body.
@@ -449,14 +454,18 @@ def _normalize_url(url: str) -> str:
     # fragment never change what is fetched, but each used to mint its own
     # cache and single-flight key — N spellings of Ye meant N cold parses.
     host = (parsed.hostname or "").lower()
-    netloc = host if port in (None, 80, 443) else f"{host}:{port}"
+    if ":" in host:
+        host = f"[{host}]"  # IPv6 literal
+    scheme = parsed.scheme.lower()
+    default = port is None or (scheme, port) in (("https", 443), ("http", 80))
+    netloc = host if default else f"{host}:{port}"
 
     # Normalize Google Sheets URLs to /htmlview for reliable GID discovery
     if host == "docs.google.com":
         sheet_id = _extract_sheet_id(f"docs.google.com{parsed.path}")
         if sheet_id:
             return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
-    url = parsed._replace(scheme=parsed.scheme.lower(), netloc=netloc, fragment="").geturl()
+    url = parsed._replace(scheme=scheme, netloc=netloc, fragment="").geturl()
     # 'host' and 'host/' are the same resource.
     if not parsed.path and not parsed.query:
         url += "/"
@@ -857,7 +866,7 @@ def _evict_sheet_cache() -> None:
         # img_* is the image cache (own cap); imgalias_* are the tiny pointers
         # clients' old cover URLs resolve through — evicting them brings back
         # the expired-token failures they exist to prevent.
-        if not path.is_file() or path.name.startswith(("img_", "imgalias_")):
+        if not path.is_file() or path.name.startswith(("img_", "imgalias_")) or path.name.endswith(".lock"):
             continue
         # Skip in-flight atomic writes. `abc.html.tmpQ7z1`.split(".", 1)[0] is
         # "abc", so temp files grouped with the real entry and got unlinked
@@ -948,22 +957,33 @@ def _read_meta(key: str) -> dict:
         return {}
 
 
-def _write_meta(key: str, updates: dict) -> None:
-    """Merge `updates` into the entry's metadata and write it atomically.
+@contextmanager
+def _entry_lock(key: str):
+    """Exclusive across the gunicorn workers, which share this cache.
 
-    The read-modify-write runs under an flock on a sidecar file: the gunicorn
-    workers share this cache, and two revalidations of one tracker could
-    otherwise put back an older content_hash over newer parsed bytes (a false
-    304 for every client holding the old ones).
+    Held around every meta read-modify-write, and around a parsed body plus
+    the content_hash describing it: two revalidations of one tracker could
+    otherwise leave one's hash over the other's bytes (a false 304 for every
+    client holding the old ones). Not re-entrant — flock on a second fd of
+    the same file blocks even within one process.
     """
     CACHE_DIR.mkdir(exist_ok=True)
     with open(CACHE_DIR / f"{key}.meta.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        meta = _read_meta(key)
-        meta.update(updates)
-        _atomic_write_text(
-            CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False)
-        )
+        yield
+
+
+def _merge_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata. Caller holds _entry_lock."""
+    meta = _read_meta(key)
+    meta.update(updates)
+    _atomic_write_text(CACHE_DIR / f"{key}.meta.json", json.dumps(meta, ensure_ascii=False))
+
+
+def _write_meta(key: str, updates: dict) -> None:
+    """Merge `updates` into the entry's metadata and write it atomically."""
+    with _entry_lock(key):
+        _merge_meta(key, updates)
 
 
 def _parsed_timestamp(meta: dict) -> float:
@@ -1084,21 +1104,22 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
             )
             return
         body, etag = serialize_artist(artist)
-        _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
         # parsed_timestamp, not timestamp: the parse's freshness is its own
         # signal. Under force_refresh the caller skips _set_cache entirely
         # while still writing the parse, so without a write here a
         # pull-to-refresh either inherited the OLD timestamp — fresh data
         # considered stale immediately — or, on a first-ever fetch, wrote a
         # parsed cache that could never be read.
-        _write_meta(key, {
-            "content_hash": etag,
-            "parsed_timestamp": time.time(),
-            # Read back by _collapse_reason, so the collapse check costs a
-            # small sidecar read instead of re-parsing the whole entry.
-            "total_versions": artist.total_versions,
-            "era_count": len(artist.eras),
-        })
+        with _entry_lock(key):
+            _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
+            _merge_meta(key, {
+                "content_hash": etag,
+                "parsed_timestamp": time.time(),
+                # Read back by _collapse_reason, so the collapse check costs a
+                # small sidecar read instead of re-parsing the whole entry.
+                "total_versions": artist.total_versions,
+                "era_count": len(artist.eras),
+            })
         artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
     except (OSError, TypeError) as e:

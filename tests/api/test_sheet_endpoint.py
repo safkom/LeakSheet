@@ -477,3 +477,22 @@ class TestRevalidationBackoff:
         await api._background_revalidate(URL)
         await api._background_revalidate(URL)
         assert calls == [URL]
+
+
+class TestInvalidURL:
+    @pytest.mark.parametrize("headers", [{}, {"If-None-Match": '"x"'}, {"Accept": "application/x-ndjson"}])
+    def test_a_bad_port_is_a_400_on_every_path(self, api_client, headers):
+        r = api_client.post("/sheet", json={"url": "https://example.com:99999/"}, headers=headers)
+        assert r.status_code == 400
+
+
+def test_the_rename_splice_matches_a_full_rewrite(artist):
+    from src.fetcher import serialize_artist
+
+    raw, etag = serialize_artist(artist)
+    for name in ("Renamed", 'Kanye "Ye" West', "Beyoncé", artist.name):
+        body, tagged = api._with_display_name(raw, etag, name)
+        data = json.loads(body)
+        expected = {**json.loads(raw), "name": name, "slug": api.slugify(name)}
+        assert data == expected
+        assert tagged == api._display_etag(etag, name)

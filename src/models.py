@@ -1106,6 +1106,8 @@ _SAMPLE_TITLE_PATTERN = re.compile(r'"([^"\n]+)"')
 
 # Pattern 2: "Samples Rufus & Chaka Khan's 'Ain't Nobody'". The closing single
 # quote must sit on a word boundary so apostrophes inside the title survive.
+# "Samples" + artist (<=60) + 's + a title (<=80), with room to spare.
+_POSSESSIVE_MAX_CHARS = 300
 _SAMPLE_POSSESSIVE_PATTERN = re.compile(
     r"Samples\s+([^\"'\n]+?)'s\s+'(.+?)'(?=[\s,.;)!?]|$)",
     re.IGNORECASE,
@@ -1314,8 +1316,9 @@ def extract_samples(notes: str) -> list[str]:
                 i += 1
         else:
             # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and
-            # bounded by the next one, which gets its own turn.
-            stop = min(end, leads[i_lead + 1].start()) if i_lead + 1 < len(leads) else end
+            # bounded to a sane length (a title may itself say "Samples"), so
+            # a line of many leads is not rescanned from each one.
+            stop = min(end, lead.start() + _POSSESSIVE_MAX_CHARS)
             possessive = _SAMPLE_POSSESSIVE_PATTERN.match(text[lead.start():stop])
             if possessive:
                 artist = possessive.group(1).strip()

@@ -57,7 +57,23 @@ def _ip_is_public(ip_str: str) -> bool:
     (100.64.0.0/10 — CGNAT, Tailscale, some cloud metadata endpoints).
     """
     ip = ipaddress.ip_address(ip_str)
-    return ip.is_global and not ip.is_multicast
+    if ip.version == 6:
+        # IPv6 forms that carry an IPv4 address the IPv6 flags don't judge:
+        # IPv4-mapped, deprecated IPv4-compatible (::a.b.c.d) and NAT64.
+        embedded = ip.ipv4_mapped
+        if embedded is None and int(ip) >> 32 == 0:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is None and ip in _NAT64:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is not None:
+            return _ip_is_public(str(embedded))
+    return ip.is_global and not (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 
 def _assert_public_host(host: str, *, source: str) -> None:

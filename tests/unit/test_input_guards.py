@@ -13,6 +13,9 @@ from src.streaming import _ip_is_public
     ("10.0.0.1", False), ("127.0.0.1", False), ("169.254.169.254", False),
     ("100.64.0.1", False), ("100.100.100.200", False),  # CGNAT / shared space
     ("::1", False), ("fc00::1", False), ("::ffff:10.0.0.1", False), ("224.0.0.1", False),
+    # IPv6 forms wrapping an IPv4 address: judged by the address inside.
+    ("::a00:1", False), ("::127.0.0.1", False), ("64:ff9b::a00:1", False),
+    ("64:ff9b::a9fe:a9fe", False), ("64:ff9b::808:808", True), ("::ffff:8.8.8.8", True),
 ])
 def test_only_global_unicast_is_public(ip, public):
     assert _ip_is_public(ip) is public
