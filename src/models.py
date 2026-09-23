@@ -30,11 +30,10 @@ _BADGE_PRIORITY: dict[Badge, int] = {
     Badge.AI: 5,
 }
 
-# Mapping from emoji characters → Badge enum
 EMOJI_TO_BADGE: dict[str, Badge] = {
     "⭐": Badge.BEST,
     "⭐️": Badge.BEST,
-    "💎": Badge.BEST,             # 💎 (gem stone)
+    "💎": Badge.BEST,
     "✨": Badge.SPECIAL,
     "🗑️": Badge.WORST,
     "🗑": Badge.WORST,
@@ -45,9 +44,7 @@ EMOJI_TO_BADGE: dict[str, Badge] = {
     "🤖": Badge.AI,
 }
 
-# Regex to detect and strip leading badge emojis from song names
-# Non-badge decorative emojis that precede the actual badge emoji.
-# 💿 = disc indicator (e.g. "💿🥉 WOD Tape") — strip before badge detection.
+# Decorative non-badge emojis that can precede the badge ("💿🥉 WOD Tape").
 _DECORATIVE_EMOJI = r"[💿🎵🎶🔥]*"
 
 BADGE_EMOJI_PATTERN = re.compile(
@@ -71,11 +68,8 @@ VERSION_TAG_PATTERN = re.compile(
     r"|Album"
     r"|Clean"
     r"|Song \d+"                         # Song 1, Song 2
-    # Added 2026-08: the families below account for ~2,400 rows across the
-    # cached trackers. Leaving them out did two things, not one — the tag
-    # stayed in the displayed title AND, because _add_version_to_era groups on
-    # the tag-stripped name, "90210 [Demo 8]" and "90210 [Demo 9]" became two
-    # separate songs instead of two versions of one.
+    # Without these families the tag stays in the title, and since versions group on
+    # the tag-stripped name, "X [Demo 8]" and "X [Demo 9]" would become two songs.
     r"|Demo(?:\s+\d+)?"                  # Demo, Demo 1 … Demo 45
     r"|OG File"
     r"|Instrumental"
@@ -89,10 +83,8 @@ VERSION_TAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Version-tag ordering. Sheet order is row order, which puts [Demo 10] next to
-# [Demo 1] and scatters an era's numbered takes; there was no sort at all
-# before. Rank groups the families, the number orders within one, and the
-# original index keeps everything else stable.
+# Version-tag ordering: rank groups the families, the number orders within one,
+# and the sheet index keeps everything else stable.
 _VERSION_FAMILY_ORDER: list[tuple[str, "re.Pattern[str]"]] = [
     ("v", re.compile(r"^v\s*(\d+)", re.IGNORECASE)),
     ("demo", re.compile(r"^demo(?:\s+(\d+))?$", re.IGNORECASE)),
@@ -184,11 +176,8 @@ class Song(BaseModel):
     def badge(self) -> Badge | None:
         """Return the song's badge — the most significant one across versions.
 
-        A big tracker can badge several versions of one song differently (Ye's
-        "Hurricane" has best, special AND worst versions). Taking the first
-        badged version made the result depend on row order, so a song with a
-        ⭐ version could be labelled 🗑️. Positive badges outrank negative ones;
-        the iOS client mirrors this ordering in `Badge.displayPriority`.
+        Versions can carry different badges; positive outrank negative
+        (_BADGE_PRIORITY, mirrored by iOS `Badge.displayPriority`).
         """
         best: Badge | None = None
         for v in self.versions:
@@ -245,13 +234,8 @@ class EraStats(BaseModel):
     stem_bounces: int = Field(0, description="Number of stem bounces")
     unavailable: int = Field(0, description="Number of unavailable songs")
 
-    # Discography-style trackers count releases, not leak states:
-    #   "18 Total / 4 Singles / 7 Album Track(s) / 2 Feature(s) / 3 Other"
-    # None of those map onto the leak-status fields above — a Single is not a
-    # Full. They are kept verbatim as {label: count} rather than as ~20 typed
-    # fields that would be zero for every leak-status tracker (and would need
-    # extending again the first time a tracker invents another label). Clients
-    # render the tracker's own wording, which is also what its readers expect.
+    # Discography-style counts ("4 Singles / 7 Album Track(s)") don't map onto the
+    # leak-status fields; kept verbatim as {label: count} in the sheet's own wording.
     release_types: dict[str, int] = Field(
         default_factory=dict,
         description="Release-type counts from discography-style stat blocks, "
@@ -263,27 +247,16 @@ class EraStats(BaseModel):
                     "to the sum `total` derives from the leak-status fields",
     )
 
-    # computed_field, not a plain @property + model_dump() override. Pydantic
-    # v2 serialises a NESTED model through pydantic-core, which walks the
-    # schema and never calls a Python-level override — so Artist.model_dump()
-    # (what /sheet returns) dropped `total` entirely and no client ever saw
-    # the corrected number.
+    # computed_field, not a model_dump() override: pydantic-core serialises nested
+    # models without calling Python-level overrides, so `total` would be dropped.
     @computed_field
     @property
     def total(self) -> int:
         """Total song count from stats.
 
-        Trackers use one of two wordings for the full count, and they do not
-        mean the same thing. Plain "Full" is a peer of OG File; "Total Full"
-        (the Carti-style header) already *contains* the OG files, so adding
-        both inflated the era total by the OG count — 338 against 207 real
-        versions on Die Lit. Verified against all eight Carti eras that report
-        a non-zero OG File alongside Total Full: excluding og_files makes
-        every one match its parsed version count exactly.
-
-        A discography-style block states its own total outright and populates
-        none of the leak-status fields, so deriving would return 0. Trust the
-        stated number when there is one.
+        "Total Full" (Carti-style) already contains the OG files, unlike plain
+        "Full", so og_files is added only in the latter case. A discography-style
+        block states its own total, which wins when present.
         """
         if self.stated_total:
             return self.stated_total
@@ -296,12 +269,6 @@ class EraStats(BaseModel):
             self.og_files + self.full + self.tagged + self.partial
             + self.snippets + self.stem_bounces + self.unavailable
         )
-
-    # `total` must be a computed_field, not a model_dump() override. Pydantic
-    # v2 serialises a NESTED model through pydantic-core, which walks the
-    # schema and never calls the Python-level override — so Artist.model_dump()
-    # (what /sheet returns) dropped `total` entirely and no client ever saw the
-    # corrected number.
 
 
 class TrackerStats(BaseModel):
@@ -381,17 +348,10 @@ class Era(BaseModel):
         return sum(len(s.versions) for sec in self.sections for s in sec.songs)
 
     def dict(self, **kwargs):
-        # Exclude ``sections`` from the native dump — it's rebuilt below, so
-        # letting the native pass serialize the song/version subtree first is
-        # pure waste (see Artist.dict for the same optimization).
+        # ``sections`` is rebuilt below; excluding it skips a wasted native serialization.
         kwargs = _with_excluded(kwargs, "sections")
-        # See docs/decisions.md: these STAY on the wire even though
-        # no client reads them (2026-07-24 review): the /sheet warm path
-        # serves the parsed-cache file's raw bytes as the response, so cache
-        # and wire are the same serialization — excluding them here would
-        # also strip them from the cache round-trip, silently blinding the
-        # starved-era health check (tests/_health.py) and census has_stats
-        # on every cache hit. Clients just ignore them.
+        # Unread fields stay on the wire: see
+        # docs/decisions.md::models.py — fields kept on the wire with no client reader
         d = super().model_dump(**kwargs)
         d["sections"] = [
             {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}
@@ -516,11 +476,8 @@ class Notice(BaseModel):
 class Artist(BaseModel):
     """Top-level artist with all parsed tracker data."""
 
-    # The exact (JSON bytes, ETag) this artist was written to the parse cache
-    # as. Set by fetcher._set_cached_parsed so the API can serve those bytes
-    # instead of serializing the whole artist a second time. Private: never on
-    # the wire, and model_copy carries it — a caller that changes the artist
-    # after caching must not reuse it (the API's rename path does not).
+    # (JSON bytes, ETag) as written to the parse cache, so the API can serve them
+    # without re-serializing. model_copy carries it: don't reuse after mutating.
     _wire: tuple[bytes, str] | None = PrivateAttr(default=None)
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
@@ -550,9 +507,7 @@ class Artist(BaseModel):
         return sum(e.version_count for e in self.eras)
 
     def dict(self, **kwargs):
-        # Exclude ``eras`` from the native dump so the era subtree isn't
-        # serialized twice (once natively here, then discarded and rebuilt via
-        # ``era.dict()``). On a large tracker that redundant pass was real CPU.
+        # ``eras`` is rebuilt below; excluding it avoids serializing the subtree twice.
         kwargs = _with_excluded(kwargs, "eras")
         d = super().model_dump(**kwargs)
         d["eras"] = [era.dict() for era in self.eras]
@@ -622,16 +577,14 @@ def slugify(text: str) -> str:
 # Stats parsing
 # ---------------------------------------------------------------------------
 
-# Regex to extract "N Label" pairs from stats text.
-# Decorative emoji trackers hang off stat labels ("🔗 616 Total Links",
-# "⭐ 43 Best Of"). Shared with the parser, which has to recognise the same
-# cells to tell an era header from the sheet's global stats footer.
+# Decorative emoji hung off stat labels ("🔗 616 Total Links"). Shared with the
+# parser, which must recognise the same cells to tell era headers from the footer.
 EMOJI_RUN_RE = re.compile(
     r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"
 )
 
-# Handles both concatenated ("1 OG File(s)45 Full") and newline-separated formats.
-# Also handles emoji-prefixed labels ("🔗 616 Total Links").
+# "N Label" pairs, concatenated ("1 OG File(s)45 Full") or newline-separated,
+# optionally emoji-prefixed ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
     r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",
 )
@@ -644,11 +597,8 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
       "1 OG File(s)\\n45 Full\\n1 Tagged..."
       "🔗 616 Total Links\\n❌ 0 Missing Links..."
     """
-    # Strip all emoji characters first
     cleaned = EMOJI_RUN_RE.sub("", raw)
-    # Replace newlines with a separator that won't interfere
     cleaned = cleaned.replace("\n", " ")
-    # Collapse multiple spaces
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     result: dict[str, int] = {}
@@ -668,10 +618,8 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
     return result
 
 
-# Labels consumed by the typed leak-status fields below. Anything else in a
-# stats block is a release-type count and goes to EraStats.release_types
-# verbatim, so a tracker inventing new wording is preserved, not silently
-# dropped the way an exact-key lookup drops it.
+# Labels consumed by the typed leak-status fields. Anything else is a release-type
+# count, kept verbatim in EraStats.release_types so new wording isn't dropped.
 _LEAK_STATUS_LABELS = frozenset({
     "og file", "og files", "full", "total full", "tagged",
     "partial", "partial / cut", "snippet", "snippets",
@@ -763,65 +711,26 @@ def parse_tracker_stats(
 # Song credit parsing
 # ---------------------------------------------------------------------------
 
-# Credits come in either delimiter style, and hand-typed sheets mix them, so
-# the closer need not match the opener. Keyword anchoring is what keeps this
-# off version tags like "[V1]". Why: docs/decisions.md.
+# Delimiters: see docs/decisions.md::models.py::parse_song_credits — credit delimiters
 
 
-# One bracketed group. It spans a newline ONLY where the line ends with a list
-# separator ("," or "&"), because that is a wrapped credit list and nothing
-# else: an alt title is never preceded by a dangling comma inside an open
-# bracket.
-#
-# This used to refuse newlines outright, on the grounds that an unclosed
-# "(prod. " would swallow the alt-title lines below it and only one row on
-# Travis needed it. Measuring the corpus changed the trade: 2,422 of 54,923
-# alt titles (4.4%) were credit strings that leaked in because a long producer
-# or feature list wrapped across <br> lines, so the group never closed. The
-# separator rule recovers those without the swallowing risk — a continuation
-# line that does not follow a comma still terminates the group exactly as
-# before.
-#
-# A dot joins the comma and ampersand for the same reason: the wrap often lands
-# immediately after the keyword rather than inside the list — "(prod. \nLondon
-# On Da Track)" — which left the title reading "… (prod." and the names sitting
-# in alt_titles. 37 name cells corpus-wide. Widening what the group CAN match
-# is safe on its own: take_group hands back any group whose first part is not a
-# credit keyword completely untouched.
+# A group spans a newline only after ",", "&" or "." — a wrapped credit list: see
+# docs/decisions.md::models.py::_CREDIT_GROUP_RE — wrapped credit lists
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-# A wrapped line counts as part of a group only right after a separator. The
-# spaces around that line break are stripped before matching (see
-# parse_song_credits), so each character has exactly one way to match. The
-# earlier form allowed spaces on both sides of the newline inside the repeat,
-# and backtracked exponentially on an unclosed "(" followed by many
-# ", <newline>" lines — 2,000 characters did not finish in 15 s (S5852).
-# Possessive scan plus an optional closer: an opener with no closer consumes up
-# to where its scan stopped, so the openers inside that stretch are never
-# retried (they would stop at the same place). take_group leaves those alone.
+# Must stay linear (S5852): line-break spaces are stripped first (parse_song_credits)
+# so each char matches one way, and the possessive scan never retries inner openers.
 _CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
 
-# field name → the keyword that introduces it, separator included. Order is
-# the match order, so nothing here may be a prefix of a later entry.
-# "dir." sits on music-video and visual rows ("[dir. Dave Meyers]").
+# field name → the keyword that introduces it. Order is the match order, so no
+# entry may be a prefix of a later one.
 _CREDIT_FIELDS: list[tuple[str, str]] = [
-    # "feat. X", "ft. X", "feat.Dc2trill", "featuring X". Same dot-or-space
-    # rule the producers entry uses, so "Feature" and "ftw" cannot match while
-    # a glued "feat.Name" can — 13 name cells carried the glued form and had
-    # their feature credit read as part of the title.
+    # "feat. X", "ft. X", glued "feat.Name", "featuring X". The dot-or-space rule
+    # keeps "Feature" and "ftw" out.
     ("featuring", r"(?:feat|ft)(?:\.\s*|\s+)|featuring\s+"),
-    # "prod. X", "Prod.by Bighead", "prod.SlimeOnTheTRack", "produced by X".
-    # A dot OR whitespace must follow "prod", so a title beginning "Prodigy"
-    # cannot match. "by" is consumed on a word boundary rather than requiring
-    # whitespace after it: a truncated "(prod.by" with no name left the filler
-    # word itself standing as the producer, 443 times across the corpus.
-    # An "add. prod." / "co-prod." group opens with neither keyword, so
-    # take_group handed the whole thing back and the credit stayed inside the
-    # title — 145 cells corpus-wide, A$AP Rocky's entire Purple Swag family
-    # among them. Folded into `producers` rather than given a field of its own:
-    # a new field costs a model change and a decode on every client for a
-    # distinction the sheets themselves make inconsistently.
+    # "prod. X", "Prod.by X", "produced by X"; "add. prod." / "co-prod." fold into
+    # producers. A dot or space must follow "prod", so "Prodigy" cannot match.
     ("producers",
      r"(?:add(?:itional)?\.?\s+|co-?\s*)?prod(?:uced|uction)?(?:\.\s*|\s+)(?:by\b\s*)?"),
     ("collaboration", r"with\s+|w/\s*"),
@@ -829,8 +738,7 @@ _CREDIT_FIELDS: list[tuple[str, str]] = [
     ("director", r"dir(?:ected)?\.?(?:\s+by\b)?\s+"),
 ]
 
-# Anchored at the start of a part: a keyword only counts where a credit can
-# begin (right after the opener, or after a ';'/',' separator). That is what
+# Anchored at the start of a part (after the opener or a ';'/',' separator), which
 # keeps this off version tags like "[V1]" and off "(Remix)".
 _CREDIT_PART_RE = re.compile(
     "|".join(f"(?P<{field}>{pattern})" for field, pattern in _CREDIT_FIELDS),
@@ -844,11 +752,8 @@ _INNER_SPACE_RE = re.compile(r"[^\S\n]{2,}")
 def _split_credit_parts(body: str) -> list[str]:
     """Split a credit-group body at each ';' or ',' that a keyword follows.
 
-    Trackers mix conventions: the Ye sheet writes one group per credit
-    ("(ref. X) (feat. Y)"), Travis packs several into one
-    ("(ref. X; feat. Y & Z)"). Splitting only when a keyword follows keeps a
-    comma inside a name list where it belongs — "(prod. A, B)" is one credit
-    with two producers, not two credits.
+    Splitting only there keeps "(prod. A, B)" one credit with two producers,
+    while "(ref. X; feat. Y & Z)" still yields two credits.
     """
     parts: list[str] = []
     start = 0
@@ -916,10 +821,8 @@ class SongCredits(NamedTuple):
     alt_titles: list[str]
 
 
-# Fields safe to harvest from an UNBRACKETED line. "collaboration" is excluded
-# on purpose: its keyword is "with", and plenty of songs are titled "With Or
-# Without You". Inside brackets "(with Go Getters)" is unambiguous; bare, it is
-# not, and guessing there invents a credit and destroys a title.
+# Fields safe to harvest from an UNBRACKETED line. Not "collaboration": its
+# keyword "with" is ambiguous bare ("With Or Without You").
 _BARE_CREDIT_FIELDS = frozenset({"featuring", "producers", "refs", "director"})
 
 
@@ -931,26 +834,10 @@ _UNCLOSED_OPENER_RE = re.compile(r"^[\(\[]\s*")
 def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
     """Route a credit line no bracketed group claimed into *collected*.
 
-    Returns True if it was a credit.
-
-    Two shapes reach here. Plenty of sheets write the credit as its own line
-    with no brackets at all — "Prod.by Bighead", "ref. MNEK". Requiring
-    brackets left 1,312 of these sitting in alt_titles across the captured
-    corpus, where they read as alternative song titles and the credit was
-    simply lost.
-
-    The second shape is a bracket that was opened and never closed:
-    "(prod.SlimeOnTheTRack", "[Prod.Swagg B", "(prod. BoogzDaBeast, Nascent,
-    RONNY J, MIKE DEAN,". _CREDIT_GROUP_RE needs the closer, so the whole line
-    fell through as an alt title — 1,086 name cells corpus-wide, leaving 608
-    alt_titles that are really credits, 505 of them on one tracker.
-
-    The keyword must OPEN the line, the same rule bracketed groups already
-    follow, so a real title that merely mentions a producer later is untouched.
-    A stripped opener also lifts the "collaboration" exclusion: "with" is
-    ambiguous bare (plenty of songs are titled "With Or Without You") but not
-    after a bracket, which is the same reasoning that lets closed groups
-    harvest it.
+    Returns True if it was a credit. Handles bare credit lines ("Prod.by X") and
+    brackets opened but never closed ("(prod. A, B,"). The keyword must OPEN the
+    line; "collaboration" is harvested only after a stripped opener, since a bare
+    "with" is ambiguous.
     """
     text = line.strip()
     opener = _UNCLOSED_OPENER_RE.match(text)
@@ -964,16 +851,11 @@ def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
         return False
     # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
     # That dangling separator is truncation, not a name.
-    # An unclosed list often ends mid-separator ("A, B, MIKE DEAN," / "X &").
-    # That dangling separator is truncation, not a name.
     value = _WHITESPACE_RUN_RE.sub(" ", text[keyword.end():]).strip().rstrip(")] ,&")
     if value:
         collected.setdefault(keyword.lastgroup, []).append(value)
-    # True even with nothing to store. A line that is only "(prod.by" names no
-    # producer, but it is still a credit line, not an alternative song title —
-    # sending it back would put "(prod.by" in alt_titles and, because a row
-    # with no credit and no other data reads as a section label, drop the song
-    # with it.
+    # True even with nothing to store: a bare "(prod.by" is still a credit line, and
+    # returned as an alt title it could make the row read as a section label.
     return True
 
 
@@ -999,9 +881,8 @@ def parse_song_credits(raw_name: str) -> SongCredits:
             return match.group(0)
         parts = _split_credit_parts(match.group(1))
         opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
-        # The keyword must open the group, exactly as it always had to. Without
-        # that rule "(Some Title, prod. X)" would lose its title half, and
-        # "(Remix)" / "[V1]" would have to be special-cased out.
+        # The keyword must open the group, or "(Some Title, prod. X)" would lose its
+        # title half.
         if opener is None:
             return match.group(0)
         for part in parts:
@@ -1040,7 +921,6 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     lines = [ln.strip() for ln in cleaned.split("\n")]
     title = lines[0].strip()
 
-    # Remaining non-empty lines → alt titles
     alt_titles: list[str] = []
     for line in lines[1:]:
         line = line.strip()
@@ -1131,8 +1011,8 @@ _SAMPLE_POSSESSIVE_PATTERN = re.compile(
 _SAMPLE_ARTIST_PATTERN = re.compile(r"^\s*by\s+(.+)$", re.IGNORECASE | re.DOTALL)
 
 _SMART_QUOTES = {
-    "\u201c": '"', "\u201d": '"',   # \u201c \u201d
-    "\u2018": "'", "\u2019": "'",   # \u2018 \u2019
+    "\u201c": '"', "\u201d": '"',   # “ ”
+    "\u2018": "'", "\u2019": "'",   # ‘ ’
 }
 
 
@@ -1149,14 +1029,8 @@ def _clean_og_name(name: str) -> str:
 def _is_og_listing(match: "re.Match[str]", rest: str) -> bool:
     """True when an OG lead-in actually introduces a filename.
 
-    The lead-in accepts a bare space as its separator, because
-    "OG Filename KW - Where Are We Ref (1.15.13)" is a real observed form. But
-    that also matched prose — "OG Filenames are unknown for this track" —
-    which was then stored as a filename AND deleted from the notes.
-
-    An explicit ':' or '-' separator is always a listing. After a bare space,
-    a filename starts like a filename: never with a lowercase word, which is
-    what every prose continuation ("are…", "is…", "were…", "not…") does.
+    An explicit ':' or '-' separator always does. After a bare space, prose
+    ("OG Filenames are unknown…") starts with a lowercase word; a filename doesn't.
     """
     if not rest:
         return False
@@ -1191,7 +1065,7 @@ def _walk_og_lines(notes: str):
         quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
         names = [quoted.group(1)] if quoted else ([rest] if rest else [])
         indices = [i]
-        # '&' continuation: the next line holds another filename \u2014 unless it
+        # '&' continuation: the next line holds another filename — unless it
         # is itself a labelled OG line, which the outer loop handles.
         while names and names[-1].rstrip().endswith("&") and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
@@ -1216,8 +1090,8 @@ def extract_og_filenames(notes: str) -> list[str]:
     names: list[str] = []
     for _, is_og, line_names in _walk_og_lines(notes):
         names.extend(line_names)
-    # Quoted filenames mentioned mid-sentence ("\u2026 the file included it's
-    # OG Filename: \"X.mp3\" \u2026") \u2014 extract the quoted token only.
+    # Quoted filenames mentioned mid-sentence ("… the file included it's
+    # OG Filename: "X.mp3" …") — extract the quoted token only.
     for m in _OG_LEADIN_PATTERN.finditer(notes):
         line_start = notes.rfind("\n", 0, m.start()) + 1
         if notes[line_start:m.start()].strip():  # lead-in is mid-line
@@ -1228,12 +1102,11 @@ def extract_og_filenames(notes: str) -> list[str]:
 
 
 def strip_og_filename_lines(notes: str) -> str:
-    """Remove standalone 'OG Filename\u2026' lines (and their '&' continuation
+    """Remove standalone 'OG Filename…' lines (and their '&' continuation
     lines) from notes.
 
-    The filenames are extracted into a structured field; leaving the lines in
-    the notes text makes every client display them twice. Prose sentences
-    that merely mention an OG filename are left intact.
+    The filenames live in a structured field, so leaving them would show them
+    twice. Prose sentences that merely mention an OG filename are left intact.
     """
     lines = notes.split("\n")
     og_indices = {i for i, is_og, _ in _walk_og_lines(notes) if is_og}
@@ -1243,13 +1116,12 @@ def strip_og_filename_lines(notes: str) -> str:
 
 def _clean_sample_artist(artist: str) -> str | None:
     """Trim enumeration/sentence noise from a captured artist string."""
-    # Stop at a sentence boundary: a period after a word of 3+ letters
-    # ('Chaka Khan. Leaked in\u2026'), so honorifics like 'Dr.' or initials like
-    # 'J.' don't split the name. Commas/semicolons always end the artist.
+    # Stop at a sentence boundary: a period after a 3+ letter word ('Chaka Khan. Leaked
+    # in…'), so 'Dr.' and initials like 'J.' survive. Commas/semicolons always end it.
     artist = re.split(r"(?<=\w\w\w)\.\s", artist)[0]
     artist = re.split(r"[,;]", artist)[0]
     # Drop trailing separators and dangling conjunctions left by slicing at
-    # the next quoted title ('Mobb Deep and ' \u2192 'Mobb Deep').
+    # the next quoted title ('Mobb Deep and ' → 'Mobb Deep').
     artist = artist.strip().rstrip(",;.").strip()
     artist = _ARTIST_TRAILING_AND_RE.sub("", artist)
     # Trailing sentence-noise heuristic — see docs/decisions.md::models.py::artist-cleanup
@@ -1283,7 +1155,7 @@ def extract_samples(notes: str) -> list[str]:
 
     Handles multiple samples per enumeration ('Samples "A" by X and "B" by Y,
     "C" by Z.') and smart quotes. Returns clean strings without quote
-    characters, e.g. ['Got Money \u2014 Lil Wayne'].
+    characters, e.g. ['Got Money — Lil Wayne'].
     """
     text = _normalize_quotes(notes)
     results: list[str] = []
@@ -1295,18 +1167,16 @@ def extract_samples(notes: str) -> list[str]:
         end = end if end != -1 else len(text)
         segment = text[lead.end():end]
 
-        # Lazily, with one title of lookahead: an enumeration stops at its
-        # first gap, so materialising every later title on the line made a
-        # line of many "Samples" quadratic.
+        # Lazily, with one title of lookahead: materialising every later title would
+        # make a line of many "Samples" quadratic.
         titles = _SAMPLE_TITLE_PATTERN.finditer(segment)
         title_match = next(titles, None)
         if title_match:
             prev_end = 0
             i = 0
             while title_match:
-                # The lead-in and each further title must sit close to the
-                # previous one — quoted phrases later in a prose sentence are
-                # quotations, not sample titles.
+                # The lead-in and each further title must sit close to the previous one; quoted
+                # phrases later in a sentence are quotations, not sample titles.
                 gap = segment[prev_end:title_match.start()]
                 if i == 0:
                     if len(gap) > 50:
@@ -1316,9 +1186,8 @@ def extract_samples(notes: str) -> list[str]:
                 song = title_match.group(1).strip()
                 if len(song) > 80:
                     break
-                # Text between this title and the next holds the optional
-                # "by Artist" clause — slicing here is what keeps one
-                # sample's artist from swallowing the next sample.
+                # The text up to the next title holds the optional "by Artist" clause; slicing
+                # there keeps one sample's artist from swallowing the next sample.
                 following = next(titles, None)
                 tail_end = following.start() if following else len(segment)
                 tail = segment[title_match.end():tail_end]
@@ -1329,9 +1198,8 @@ def extract_samples(notes: str) -> list[str]:
                 title_match = following
                 i += 1
         else:
-            # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and
-            # bounded to a sane length (a title may itself say "Samples"), so
-            # a line of many leads is not rescanned from each one.
+            # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and length-bounded
+            # (a title may itself say "Samples"), so a line of many leads isn't rescanned.
             stop = min(end, lead.start() + _POSSESSIVE_MAX_CHARS)
             possessive = _SAMPLE_POSSESSIVE_PATTERN.match(text[lead.start():stop])
             if possessive:

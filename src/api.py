@@ -105,9 +105,8 @@ def _sniff_audio_format(header: bytes) -> str | None:
     # Ogg container (Vorbis, Opus, FLAC-in-Ogg) — "OggS"
     if header[:4] == b"OggS":
         return "audio/ogg"
-    # Partial Ogg: a short read (e.g. Safari's bytes=0-1 probe) that is a
-    # genuine prefix of the "OggS" signature — not just any byte starting 'O',
-    # which would misclassify tiny non-Ogg bodies.
+    # Partial Ogg: a short read (Safari's bytes=0-1 probe) that is a genuine prefix of
+    # "OggS", not any byte starting 'O', which would misclassify tiny bodies.
     if 0 < len(header) < 4 and b"OggS".startswith(header):
         return "audio/ogg"
 
@@ -186,14 +185,12 @@ def _fix_audio_mime(
     """Return a corrected MIME type suitable for browser <audio> playback.
 
     Resolution order for generic binary types (application/octet-stream etc.):
-    1. Content-Disposition filename extension (most reliable — file hosts always
-       include the real filename even when the URL path has no extension, e.g.
-       api.pillows.su/api/get/{id} serves m4a directly with no redirect).
+    1. Content-Disposition filename extension (file hosts include the real
+       filename even when the URL path has none, e.g. api.pillows.su/api/get/{id}).
     2. URL path extension (works when upstream redirects to a CDN URL with ext).
     3. Fall back to audio/mpeg.
 
-    This is critical for Safari, which strictly validates Content-Type and
-    rejects m4a data served as audio/mpeg with "Source not supported".
+    Safari strictly validates Content-Type, so m4a served as audio/mpeg fails.
     """
     if not ct:
         base = ""
@@ -243,9 +240,8 @@ _CC_TRACKERS_STALE = "public, max-age=600"  # /trackers stale fallback — retry
 # ---------------------------------------------------------------------------
 
 _IMAGE_ALLOWED_DOMAINS = {
-    # Misc-tab thumbnails. MiscLinkClassifier.thumbnailURL derives these two
-    # for YouTube embeds, and the client routes every thumbnail through this
-    # proxy — without them every misc row 403'd and showed a placeholder.
+    # Misc-tab YouTube thumbnails (MiscLinkClassifier.thumbnailURL); the client
+    # routes every thumbnail through this proxy.
     "img.youtube.com",
     "i.ytimg.com",
     # Exact hostnames allowed for image proxy
@@ -280,14 +276,9 @@ def _image_host_allowed(url: str) -> bool:
     """Hosts the image proxy may fetch from.
 
     Google's image CDNs, plus the curated tracker seed and
-    LEAKSHEET_EXTRA_SHEET_HOSTS. Self-hosted trackers serve era covers from
-    their own origin as "/assets/<sha>.jpg", so their hosts have to be here.
-
-    Deliberately NOT the ArtistGrid-harvested hosts that /sheet accepts. That
-    feed is third-party: anyone who lands a row in it would otherwise add a host
-    to an endpoint that returns bytes to any origin. /sheet still auto-accepts
-    feed trackers; a feed-only tracker whose covers are self-hosted needs its
-    host added to the seed in src/config.py (or the env var) for art to load.
+    LEAKSHEET_EXTRA_SHEET_HOSTS (self-hosted trackers serve covers from their own
+    origin). Deliberately NOT the ArtistGrid-harvested hosts /sheet accepts: see
+    docs/decisions.md::config.py::curated_host_allowed.
     """
     if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
         return True
@@ -330,10 +321,8 @@ def _get_proxy_client() -> httpx.AsyncClient:
         _proxy_client = httpx.AsyncClient(
             timeout=15,
             follow_redirects=True,
-            # SSRF guard: reject connecting to a non-public host on any hop, so
-            # an allow-listed image URL that 30x-redirects to an internal
-            # address (169.254.169.254, localhost, RFC1918) is refused at
-            # connect rather than proxied back.
+            # SSRF guard: refuse non-public hosts on every hop, so an allow-listed image
+            # URL that redirects to an internal address is refused at connect.
             transport=PublicOnlyAsyncTransport(),
             headers={
                 # Deliberately browser-like (not the shared LeakSheet UA):
@@ -348,11 +337,8 @@ def _get_proxy_client() -> httpx.AsyncClient:
 class _StreamSafeGZipMiddleware(GZipMiddleware):
     """GZipMiddleware that skips compression for the /stream audio proxy endpoint.
 
-    GZip compression on streaming audio responses removes Content-Length
-    (gzip can't know the compressed size upfront for a streaming body), which
-    causes audio.duration to become Infinity on iOS Safari and makes Range-based
-    seeking completely broken — byte offsets in Range headers refer to the raw
-    audio stream, not the gzip-compressed one.
+    Gzip drops Content-Length on a streaming body, which breaks audio duration and
+    Range seeking on iOS Safari (Range offsets refer to the raw bytes).
     """
 
     # /image-proxy is skipped too: image bytes are already compressed, so
@@ -368,10 +354,7 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Prewarm loop — keeps hot trackers out of the stale-first window.
-    # LEAKSHEET_PREWARM=0 disables. It sleeps BEFORE its first pass, so
-    # startup and TestClient contexts never fire network work.
-    # Why: docs/decisions.md.
+    # Prewarm loop (LEAKSHEET_PREWARM=0 disables): see docs/decisions.md::api.py — prewarm loop
     prewarm_task: asyncio.Task | None = None
     if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
         prewarm_task = asyncio.create_task(_prewarm_loop())
@@ -396,26 +379,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# compresslevel 6 ≈ level 9's ratio on JSON at a fraction of the CPU —
-# level 9 spent ~0.5s gzipping a 6.5MB artist on every warm request.
+# compresslevel 6 ≈ level 9's ratio on JSON at a fraction of the CPU.
 app.add_middleware(_StreamSafeGZipMiddleware, minimum_size=1000, compresslevel=6)
 
 
 # Expensive endpoints worth throttling: cold sheet fetches and the upstream
 # proxies. Cheap/cached endpoints (/trackers) are left alone.
 _RATE_LIMIT_PATHS = ("/sheet", "/stream", "/metadata")
-# /image-proxy is throttled in its OWN bucket at a much higher ceiling. Sharing
-# the bucket above cost 25% of all cover art: one artist screen fires 40-120
-# image requests in a burst, which drained the whole per-minute budget and
-# 429'd the rest (131 of 521 requests in a single day's access log). It is also
-# the least abusable of the four — disk-cached, 25MB download cap, 20MP decode
-# cap, SSRF allowlist.
+# /image-proxy gets its OWN bucket at a higher ceiling: one artist screen bursts
+# 40-120 image requests, and the endpoint is disk-cached and size-capped.
 _IMAGE_RATE_LIMIT_MULTIPLIER = 10
-# POST /cache/clear is the one privileged endpoint, and it was throttled by
-# nothing: the guard above is opt-in via LEAKSHEET_RATE_LIMIT_PER_MIN, which is
-# off by default, so token guessing was unbounded. This ceiling is fixed rather
-# than derived from that variable — an operator flushing the cache does not
-# approach it, and brute force must not depend on an optional setting.
+# Fixed admin ceiling, independent of the opt-in LEAKSHEET_RATE_LIMIT_PER_MIN, so
+# token brute force is always throttled.
 _ADMIN_RATE_LIMIT_PER_MIN = 10
 _RATE_LIMIT_WINDOW_S = 60.0
 _rate_hits: dict[str, list[float]] = {}
@@ -425,13 +400,8 @@ _rate_last_prune = 0.0
 def _client_ip(scope) -> str:
     """The address to bucket a request under.
 
-    In prod the app sits behind a platform router, so ``scope["client"]`` is
-    that router for EVERY request — bucketing on it puts the whole internet in
-    one bucket and the limiter throttles all users at once. X-Forwarded-For
-    fixes that but is caller-controlled, so it is only consulted when the
-    operator states how many proxies to trust via
-    ``LEAKSHEET_TRUSTED_PROXY_HOPS``: the value is counted from the RIGHT,
-    which is the part a client cannot forge.
+    X-Forwarded-For is consulted only when LEAKSHEET_TRUSTED_PROXY_HOPS is set,
+    counted from the right: see docs/decisions.md::api.py::_client_ip.
     """
     client = scope.get("client")
     peer = client[0] if client else "unknown"
@@ -452,14 +422,10 @@ class _RateLimitMiddleware:
     """Opt-in sliding-window per-IP rate limiter (pure ASGI so it never buffers
     the streaming response body).
 
-    Off by default — set ``LEAKSHEET_RATE_LIMIT_PER_MIN`` to a positive integer
-    to cap requests-per-minute-per-IP on the expensive endpoints. Counters are
-    per worker process (the Dockerfile runs 3), so the effective limit is up to
-    3x the setting and resets when a worker recycles; Cloudflare's rate rule on
-    /api/sheet is the real limit. The value is read per request.
-
-    Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` — see
-    :func:`_client_ip`, without which every caller shares one bucket.
+    Off unless ``LEAKSHEET_RATE_LIMIT_PER_MIN`` is a positive integer (read per
+    request). Counters are per worker process, so the effective limit is up to
+    workers x the setting; Cloudflare's rate rule on /api/sheet is the real limit.
+    Behind a proxy, also set ``LEAKSHEET_TRUSTED_PROXY_HOPS`` (see :func:`_client_ip`).
     """
 
     def __init__(self, app):
@@ -506,9 +472,8 @@ class _RateLimitMiddleware:
         if len(hits) >= limit:
             return True
         hits.append(now)
-        # After the append: the prune drops keys whose list is empty, and
-        # running it first popped the entry `setdefault` had just created —
-        # leaving `hits` an orphan, so that request went uncounted.
+        # After the append: pruning first would pop the entry `setdefault` just created,
+        # leaving this request uncounted.
         self._maybe_prune(now, cutoff)
         return False
 
@@ -539,9 +504,8 @@ app.add_middleware(
 # POST /api/sheet — parse a tracker URL → full Artist JSON
 # ---------------------------------------------------------------------------
 
-# A whole cold parse, every tab included. Per-request timeouts alone let a
-# slow-drip host hold a parse (and everyone joined to it) indefinitely; this
-# stays under Cloudflare's 125 s edge timeout so the client gets our message.
+# Bounds a whole cold parse, every tab included, so a slow-drip host can't hold it
+# (and every joiner) forever. Stays under Cloudflare's 125 s edge timeout.
 _PARSE_DEADLINE_S = 110.0
 
 # Normalized tracker URL → the parse running for it: (task, progress listeners,
@@ -559,21 +523,13 @@ async def _parse_once(
 ) -> tuple[Artist, asyncio.Task]:
     """Fetch and parse *url*, joining the parse already running for it if any.
 
-    Returns the artist and the task warming its era covers, which starts once
-    per parse. One parse per tracker at a time: a client retrying a stream it
-    lost, a second device and the prewarm loop all used to start their own.
-    Per worker process: with 3 workers the same tracker can still parse up to
-    3 times at once.
+    Returns the artist and the task warming its era covers. One parse per
+    tracker per worker process. The first caller's cache flags decide; shielded,
+    so a caller that goes away never cancels a parse others await.
 
-    The first caller's cache flags decide. A joiner gets the same fresh parse
-    its own flags would have produced from the cache miss that brought it here.
-    Shielded, so a caller that goes away never cancels a parse others await.
-
-    NEVER passes an artist name: the parse is written to a cache keyed by URL
-    alone and shared with every other client, so a request-body field reaching
-    it let anyone rename any tracker (and its slug, iOS favourites key
-    material) for everyone. _parse_for_response applies the override to its
-    own response only.
+    NEVER passes an artist name: the parse is cached by URL alone and shared, so
+    a request field reaching it would rename the tracker for everyone.
+    _parse_for_response applies the override to its own response only.
     """
     key = _normalize_url(url)
     entry = _parses.get(key)
@@ -620,7 +576,7 @@ async def _background_revalidate(url: str) -> None:
 
     A revalidation already running for the URL is joined, not repeated. One
     that failed, or whose result the cache refused, is not retried for
-    _REVALIDATE_BACKOFF_S: every stale hit used to start another full parse.
+    _REVALIDATE_BACKOFF_S.
     """
     key = _normalize_url(url)
     if time.monotonic() < _revalidate_backoff.get(key, 0.0):
@@ -713,8 +669,8 @@ async def parse_sheet(
     while a background refresh is triggered.
     """
     use_cache = req.use_cache and not req.force_refresh
-    # Up front: every path below normalizes the URL, and an invalid one
-    # raised out of the cache lookups as a 500.
+    # Up front: every path below normalizes the URL, and an invalid one must be a
+    # 400, not a 500 out of the cache lookups.
     try:
         _normalize_url(req.url)
     except InvalidURLError as e:
@@ -775,10 +731,8 @@ async def parse_sheet(
             )
 
     # --- Cache miss: full fetch + parse ---
-    # A client that sends Accept: application/x-ndjson gets the cold path as a
-    # stream of real progress events followed by the artist. Hits, stale hits
-    # and 304s above stay plain JSON for everyone: they are instant, and it
-    # keeps ETag and cache semantics exactly as they were.
+    # Accept: application/x-ndjson streams progress events, then the artist. Hits,
+    # stale hits and 304s stay plain JSON: they are instant.
     if _NDJSON in request.headers.get("accept", ""):
         return _stream_sheet(req)
 
@@ -819,9 +773,8 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         timer=timer,
     )
 
-    # The cache write already serialized this artist; serve those bytes.
-    # Serialize only when there are none (use_cache false, or the collapse
-    # guard refused the write) — off the event loop either way.
+    # Serve the bytes the cache write already serialized; serialize (off the event
+    # loop) only when there are none: use_cache false, or the collapse guard refused.
     wire = artist._wire
     if wire is None:
         with timer.phase("serialize"):
@@ -871,15 +824,13 @@ def _with_display_name(raw: bytes, etag: str, artist_name: str) -> tuple[bytes, 
     """The cached payload renamed for one caller, and its ETag. Blocking.
 
     The shared cache always holds the page-inferred name (see _parse_once), so
-    every path — cold, warm and 304 — applies the override the same way and
-    derives the same ETag from the cached one. Applying it only on the cold
-    path flipped the slug (iOS favourites key material) between requests.
+    cold, warm and 304 paths apply the override the same way and derive the same
+    ETag, keeping the slug (iOS favourites key material) stable.
     """
     tagged = _display_etag(etag, artist_name)
     slug = slugify(artist_name)
-    # The payload opens with name then slug (Artist field order), so splice
-    # those two instead of round-tripping an ~11 MB document through json on
-    # every warm hit (0.5 s and ~100 MB for Ye).
+    # The payload opens with name then slug (Artist field order): splice those two
+    # rather than round-tripping a multi-MB document through json on every warm hit.
     head = raw[:4096].decode("utf-8", errors="ignore")
     try:
         (name, old_slug), end = _leading_name_and_slug(head)
@@ -918,9 +869,8 @@ def _sheet_http_error(req: SheetRequest, e: Exception) -> HTTPException:
         logger.warning("sheet parse exceeded %ss for %s", _PARSE_DEADLINE_S, req.url[:120])
         return HTTPException(status_code=503, detail="This tracker took too long to load. Please try again.")
     if isinstance(e, NetworkError):
-        # NEVER interpolate: NetworkError wraps the SSRF guard's message,
-        # which names the resolved address ("blocked non-public address
-        # 10.0.0.5 for host …"). Same rule /stream and /image-proxy follow.
+        # NEVER interpolate: NetworkError wraps the SSRF guard's message, which names the
+        # resolved address. Same rule /stream and /image-proxy follow.
         logger.warning("sheet network error for %s: %s", req.url[:120], e)
         # 503, not 502: Cloudflare replaces an origin's 502 (and 504) with its
         # own error page, so this detail never reached a client in production.
@@ -972,7 +922,7 @@ def _stream_sheet(req: SheetRequest) -> StreamingResponse:
                 "bytes": len(body),
                 "timing": timer.server_timing_header(),
             })
-            # Separately: `body + b"\n"` copied the whole multi-MB payload.
+            # Newline queued separately: `body + b"\n"` would copy the multi-MB payload.
             queue.put_nowait(body)
             queue.put_nowait(b"\n")
             logger.info("sheet_timing url=%s status=miss stream %s", req.url[:80], timer.log_line())
@@ -1009,13 +959,9 @@ def _stream_sheet(req: SheetRequest) -> StreamingResponse:
 async def clear_fetch_cache(request: Request):
     """Clear the URL fetch cache (privileged).
 
-    This mutates shared server state, so an unauthenticated endpoint would
-    let anyone flush the cache and force cold refetches for everyone
-    (CORS only gates browser JS, not direct requests). Requires the admin
-    token: set
-    ``LEAKSHEET_ADMIN_TOKEN`` and send it as the ``X-Admin-Token`` header. When
-    the token is unset the endpoint is disabled (fail closed — behind a reverse
-    proxy the client IP is the proxy, so loopback checks aren't trustworthy).
+    Requires ``LEAKSHEET_ADMIN_TOKEN``, sent as the ``X-Admin-Token`` header. With
+    the token unset the endpoint is disabled (fail closed: behind a reverse proxy
+    the client IP is the proxy, so loopback checks aren't trustworthy).
     """
     admin_token = os.environ.get("LEAKSHEET_ADMIN_TOKEN")
     if not admin_token:
@@ -1037,14 +983,13 @@ async def clear_fetch_cache(request: Request):
 # ---------------------------------------------------------------------------
 
 # Width buckets bound the cache cardinality; clients snap to the next bucket.
-# The top bucket must stay above iPhone full-screen width. Why: docs/decisions.md.
+# See docs/decisions.md::api.py — image width buckets
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
-# Concurrent Pillow decodes. Each can hold a 15MB input plus a 20MP decode
-# (~80MB as RGBA), and an artist screen fires 40-120 image requests at once.
-# At least 1: a Semaphore(0) would hang every resize forever.
+# Concurrent Pillow decodes: each can hold a 15MB input plus a 20MP decode (~80MB
+# RGBA). At least 1: a Semaphore(0) would hang every resize forever.
 _IMAGE_RESIZE_CONCURRENCY = max(1, int(os.environ.get("LEAKSHEET_IMAGE_RESIZE_CONCURRENCY") or 3))
 _resize_sem: asyncio.Semaphore | None = None
 
@@ -1055,19 +1000,15 @@ def _resize_slot() -> asyncio.Semaphore:
     if _resize_sem is None:
         _resize_sem = asyncio.Semaphore(_IMAGE_RESIZE_CONCURRENCY)
     return _resize_sem
-# Hard ceiling on what /image-proxy will pull into memory, checked while
-# streaming so an oversized body is abandoned instead of buffered. Above the
-# decode cap so a legitimately large source still reaches the resize path and
-# fails there with a clear error rather than being silently truncated here.
+# Hard ceiling on what /image-proxy pulls into memory, checked while streaming.
+# Above the decode cap, so a large source fails in the resize path with a clear error.
 _IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
-# Compressed-byte size says nothing about decoded size (a small, highly
-# compressible image can unpack to hundreds of MB) — cap decoded pixels too,
+# Compressed size says nothing about decoded size, so cap decoded pixels too,
 # checked from the header before the full-frame load() below.
 _IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA
 
-# Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and
-# docs.google.com/sheets-images 302s to login for N>0 (see web
-# enhanceGoogleImageUrl) — those fall through to the Pillow path.
+# Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
+# sheets-images 302s to login for N>0, so those take the Pillow path.
 _GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
@@ -1115,9 +1056,8 @@ def _image_cache_paths(key: str):
 def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
     """Blocking read of a cached resized image — call via asyncio.to_thread.
 
-    Returns (bytes, content_type, etag). The ETag is the one _write_image_cache
-    stored. Entries written before it stored one fall back to the old
-    key-plus-write-second form, which is what those clients were handed.
+    Returns (bytes, content_type, etag). Entries without a stored ETag fall back
+    to the legacy key-plus-write-second form.
     """
     bin_path, meta_path = _image_cache_paths(key)
     try:
@@ -1133,15 +1073,9 @@ def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
 def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
     """Blocking write + size-cap eviction — call via asyncio.to_thread.
 
-    Returns the entry's ETag, so the response that just populated the cache
-    advertises the SAME tag a later cache hit will — otherwise the first
-    request's tag never matched and never 304'd.
-
-    The tag is the key plus a digest of the bytes. The key alone is a hash of
-    the REQUEST, so a post-TTL refetch with different content kept the same tag
-    and a client holding the old bytes was told its copy was current. Mixing in
-    the whole-second write time fixed that except within a second, and made the
-    test for it sleep; the bytes themselves are what the tag must identify.
+    Returns the entry's ETag (key plus a digest of the bytes), so the response that
+    populated the cache advertises the same tag a later hit will. See
+    docs/decisions.md::api.py::image-proxy-etag.
     """
     try:
         CACHE_DIR.mkdir(exist_ok=True)
@@ -1161,17 +1095,8 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
         return None
 
 
-# A cover's Google URL is a one-time token: `sheets-images-rt/<token>` is
-# reminted on every parse, so nothing in it is stable. Keying the image cache
-# on it filed the same bytes under a fresh name every hour and left the LRU to
-# evict the previous name — so a client holding a payload a few hours old asked
-# for an entry that had been evicted, went upstream, and got Google's 403 on
-# the expired token. That was 16% of all /image-proxy traffic on 2026-09-21.
-#
-# (tracker_url, era_name) IS stable, so derive a slot from it, store the bytes
-# under the slot, and leave a tiny alias behind for every URL that has ever
-# pointed at it. Old payloads keep resolving; one entry per era replaces one
-# per era per parse.
+# Covers are keyed by the stable (tracker_url, era_name), with an alias per token URL:
+# see docs/decisions.md::api.py::_era_art_base — covers keyed by tracker and era
 def _era_art_base(tracker_url: str, era_name: str) -> str:
     """The stable cache identity of one era's cover, as a synthetic URL.
 
@@ -1209,9 +1134,8 @@ def _write_image_alias(url: str, base: str) -> None:
 def _touch_image_cache(key: str) -> bool:
     """True if *key* has a live entry, which is then marked recently used.
 
-    Eviction drops the oldest mtime first. A cover the current parse still
-    points at was otherwise dated to its first download and went before the
-    copies left behind by later token refreshes.
+    Eviction drops the oldest mtime first, so touching a cover still in use keeps
+    it ahead of copies left behind by earlier tokens.
     """
     bin_path, meta_path = _image_cache_paths(key)
     try:
@@ -1230,11 +1154,9 @@ _last_image_evict = 0.0
 def _maybe_evict_image_cache() -> None:
     """Throttle the eviction scan.
 
-    `_evict_image_cache` globs every `img_*.bin` and stats each one. Running
-    that on EVERY cached image meant a full-directory scan per thumbnail — at
-    200MB of ~50KB entries that is thousands of stats per write, on the one
-    path an artist screen hits 40-120 times in a burst. Mirrors the identical
-    throttle the sheet cache already uses (`_maybe_evict_sheet_cache`).
+    `_evict_image_cache` stats every `img_*.bin`; running it on every write is
+    thousands of stats per thumbnail on a bursty path. Same throttle as
+    `_maybe_evict_sheet_cache`.
     """
     global _last_image_evict
     now = time.time()
@@ -1307,10 +1229,8 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
 
 
 def _image_request_headers(url: str) -> dict[str, str]:
-    # Matched on the parsed hostname, not as a substring of the whole URL:
-    # "https://attacker.tld/?x=google.com" contains the string and was being
-    # handed a docs.google.com Referer. _is_allowed_domain is the check this
-    # file already uses correctly everywhere else.
+    # Matched on the parsed hostname, not as a substring:
+    # "https://attacker.tld/?x=google.com" must not get a docs.google.com Referer.
     if _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS):
         return {"Referer": "https://docs.google.com/"}
     return {}
@@ -1330,15 +1250,8 @@ def _spawn_detached(coro) -> asyncio.Task:
 async def _warm_era_art(artist, tracker_url: str) -> None:
     """Download each era cover now, while its URL still works, and keep it.
 
-    See docs/decisions.md::api.py::_warm_era_art. Google's
-    `sheets-images-rt` cover URLs carry a token that expires within minutes to
-    tens of minutes, but a parse is served for hours and clients keep it for
-    days — so covers loaded only while the parse was young. The original is
-    stored in the image cache under the exact URL the payload carries (width
-    0), which /image-proxy reads before going upstream.
-
-    A URL that is already dead here (yetracker.net serves Cloudflare copies up
-    to an hour old) keeps the era's last good cover.
+    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead
+    here keeps the era's last good cover.
     """
     covers: dict[str, str] = {}
     for era in artist.eras:
@@ -1353,9 +1266,8 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
 
     async def warm(era_name: str, url: str) -> None:
-        # Keyed on (tracker, era), NOT on the URL — see _era_art_base. The
-        # alias is what lets /image-proxy find this entry again when the client
-        # asks for it under whatever token URL its own payload happens to hold.
+        # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
+        # /image-proxy find it under whatever token URL a client's payload holds.
         base = _era_art_base(tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
@@ -1369,9 +1281,8 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
             except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
                 logger.info("era art warm: %s failed: %s", url[:80], exc)
         if not data:
-            # The URL was already dead when we got here (yetracker.net serves
-            # Cloudflare copies up to an hour old). Anything already under the
-            # slot is this era's last good cover, so keep serving that.
+            # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
+            # keep serving the era's last good cover from the slot.
             stored = await asyncio.to_thread(_read_image_cache, key)
             if not stored:
                 return
@@ -1406,22 +1317,15 @@ async def proxy_image(
     width = _snap_image_width(w) if w else None
     base_headers = {
         "Cache-Control": _CC_IMAGE,
-        # Deliberately wider than the app-wide CORS allowlist. Era colours are
-        # extracted by reading proxied covers through a canvas, so the clients
-        # request them with crossorigin="anonymous" (web/src/App.vue,
-        # EraCard.vue) — and in local dev that request carries a localhost
-        # Origin the allowlist does not name. What this can serve is bounded by
-        # _image_host_allowed, re-checked after redirects, so the reach is
-        # public tracker art and nothing else.
+        # Wider than the app CORS allowlist: web clients read covers through a canvas
+        # (crossorigin="anonymous"). Reach is bounded by _image_host_allowed.
         "Access-Control-Allow-Origin": "*",
         # Served from the app's own origin: an image must never run script.
         "Content-Security-Policy": "sandbox; default-src 'none'",
     }
 
-    # The URL the client holds may be an expired cover token; the bytes are
-    # filed under the (tracker, era) slot it was warmed into. Resolve that
-    # first, so both the original and the width-keyed thumbnail are looked up
-    # under a name that survives the next reparse. One small file read.
+    # The client's URL may be an expired cover token: resolve the (tracker, era) slot
+    # it was warmed into, so original and thumbnail survive the next reparse.
     cache_base = await asyncio.to_thread(_read_image_alias, url) or url
 
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
@@ -1446,9 +1350,8 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": "hit"},
             )
 
-        # A cover downloaded by _warm_era_art while its token still worked.
-        # Read before any upstream request (the URL may have expired since),
-        # but after the thumbnail hit, which never needs the original.
+        # A cover _warm_era_art downloaded while its token worked. Read before any
+        # upstream request, but after the thumbnail hit, which never needs the original.
         stored = await asyncio.to_thread(
             _read_image_cache, _image_cache_key(cache_base, None)
         )
@@ -1460,11 +1363,7 @@ async def proxy_image(
             google_url = _rewrite_google_size(url, width)
             if google_url is not None and stored is None:
                 try:
-                    # Capped, like the fallback path below. A plain .get() here
-                    # buffered the whole body before the content-type check —
-                    # the same shape that was "enough to OOM the worker" and
-                    # prompted _get_image_capped, which was then only wired
-                    # into the other branch.
+                    # Capped, like the fallback path below: a plain .get() buffers the whole body.
                     resp, gdata = await _get_image_capped(google_url, headers)
                     ct = resp.headers.get("content-type", "")
                     if resp.status_code == 200 and _is_raster_image(ct):
@@ -1476,13 +1375,8 @@ async def proxy_image(
                     # Fall through to the original URL + Pillow path.
                     logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
 
-        # Streamed with a byte cap rather than a plain .get(). A non-streaming
-        # get() buffers the WHOLE body before the content-type check below,
-        # and the size caps only apply inside _resize_image_bytes — i.e. after
-        # the bytes are already resident, and only when `width` is given. The
-        # allowlist admits any *.google.com host, including
-        # drive.usercontent.google.com, so an arbitrarily large user-uploaded
-        # file was enough to OOM the worker and drop every in-flight request.
+        # Streamed with a byte cap: the allowlist admits drive.usercontent.google.com, so
+        # a plain .get() of a huge user upload could OOM the worker before any check.
         if stored is not None:
             data, ct = stored[0], stored[1]
             upstream_status = 200
@@ -1497,11 +1391,8 @@ async def proxy_image(
                     data, ct = await asyncio.to_thread(
                         _resize_image_bytes, data, width, ct
                     )
-                # _resize_image_bytes returns the input untouched when it
-                # refuses to decode (over _IMAGE_RESIZE_INPUT_CAP, over
-                # _IMAGE_MAX_DECODE_PIXELS, or undecodable). Caching that under
-                # the WIDTH-keyed entry filed a 20MB original as a thumbnail —
-                # one entry being 10% of the 200MB budget, evicting real ones.
+                # _resize_image_bytes returns the input untouched when it refuses to decode;
+                # never file an original under the width-keyed thumbnail entry.
                 if len(data) < original_len:
                     written_etag = await asyncio.to_thread(
                         _write_image_cache, cache_key, data, ct
@@ -1518,16 +1409,8 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": status},
             )
 
-        # Never relay the upstream STATUS here: a non-image 200 (an error page,
-        # an interstitial) turned into a 200 whose body was JSON, so <img> and
-        # CachedImage saw success and rendered nothing — and heuristic caches
-        # stored that as the image. 502 says "upstream gave us something we
-        # can't serve", which is what happened.
-        # 403 joins the 200 case rather than being relayed: Google answers 403
-        # to an expired `sheets-images-rt` token, and that is us holding a
-        # stale URL, not the caller being forbidden anything. Relaying it told
-        # every client the cover was off-limits forever. 404 still passes
-        # through — there the image really is gone.
+        # A non-image 200 becomes 502, never a 200 <img> would render as empty. So does
+        # 403: Google's answer to an expired cover token, not a real denial. 404 relays.
         raise HTTPException(
             status_code=502 if upstream_status in (200, 403) else upstream_status,
             detail="Upstream image fetch failed",
@@ -1542,15 +1425,8 @@ async def proxy_image(
 def _parse_content_length(raw: str | None) -> int | None:
     """Upstream Content-Length as an int, or None when absent or unusable.
 
-    This used to be a bare int() sitting outside the try that guards the rest
-    of proxy_stream, so a malformed header raised ValueError, returned 500, and
-    leaked the streamed response — every other early exit in that handler
-    aclose()s it. A length we cannot read is not a fatal condition: it only
-    means the client gets no Content-Length.
-
-    httpx joins repeated headers with ", ", so a duplicated Content-Length
-    arrives as "123, 123". Identical values still describe one length;
-    conflicting ones do not.
+    An unreadable length only means the client gets no Content-Length. httpx joins
+    repeated headers with ", ", so "123, 123" is one length; conflicting ones are not.
     """
     if not raw:
         return None
@@ -1576,15 +1452,8 @@ async def _get_image_capped(
     req = _get_proxy_client().build_request("GET", url, headers=headers)
     resp = await _get_proxy_client().send(req, stream=True)
 
-    # The allowlist was checked on the URL we were GIVEN. follow_redirects=True
-    # means an allow-listed host can still 30x anywhere, so re-check the url we
-    # LANDED on. PublicOnlyAsyncTransport already refuses private targets at
-    # connect time, which is why this is an allowlist check and not
-    # assert_public_redirect_target: that one re-resolves the host over DNS to
-    # redo work the transport has done, and the image proxy serves dozens of
-    # thumbnails per screen.
-    #
-    # Runs before any body byte is read, so nothing off-host is ever relayed.
+    # Re-check the allowlist on the URL we LANDED on, before reading any body. Not
+    # assert_public_redirect_target: the transport already refuses private IPs.
     final_url = str(resp.url)
     if final_url != url and not _image_host_allowed(final_url):
         await resp.aclose()
@@ -1611,12 +1480,9 @@ async def _get_image_capped(
 # GET /api/metadata — fetch audio file metadata from provider APIs
 # ---------------------------------------------------------------------------
 
-_METADATA_USER_AGENT = USER_AGENT  # shared backend UA from src.config
+_METADATA_USER_AGENT = USER_AGENT
 
-# Provider metadata rarely changes for a given file — cache parsed results so
-# repeated description-sheet opens don't re-hit provider APIs.
-# TTLCache lives in src.streaming (the lower-level module) so the CDN-resolve
-# cache there can use the same primitive.
+# Provider metadata rarely changes for a given file, so parsed results are cached.
 _metadata_cache = TTLCache(ttl=3600.0, max_entries=500)
 
 
@@ -1734,10 +1600,7 @@ def _parse_froste_metadata(data: dict) -> dict:
 def _parse_imgur_metadata(data: dict) -> dict:
     """Extract useful fields from imgur.gg file API response."""
     result: dict = {"provider": "imgur"}
-    # The live API returns the mime under "type"; "mimeType" is accepted too
-    # because the old tests pinned that spelling and it may be a legacy form.
-    # Reading only "mimeType" meant every real response lost its mime and
-    # reported media_kind "unknown", so video files never got a video surface.
+    # The live API returns the mime under "type"; "mimeType" is a possible legacy form.
     mime = data.get("type") or data.get("mimeType")
     if data.get("size"):
         result["file_size"] = data["size"]
@@ -1903,10 +1766,8 @@ _SEED_PAYLOAD = json.dumps([
 async def health() -> Response:
     """Liveness probe for the container HEALTHCHECK.
 
-    Deliberately does no I/O — it answers "the event loop is running and can
-    serve a request", which is exactly what the watchdog needs to know. The
-    probe used to hit /docs, which rendered the whole Swagger page and tied
-    liveness to docs staying enabled.
+    Deliberately does no I/O: it answers "the event loop can serve a request",
+    which is exactly what the watchdog needs to know.
     """
     return Response(
         content='{"status":"ok"}',
@@ -1924,10 +1785,8 @@ async def list_trackers():
     """
     global _trackers_stale, _trackers_fail_until
 
-    # Back off after a failure. Only SUCCESS populated the cache, so during an
-    # ArtistGrid outage every single request re-hit upstream — the endpoint is
-    # also outside the rate limiter, so a burst of clients turned one outage
-    # into sustained amplification against a third party.
+    # Back off after a failure: this endpoint is outside the rate limiter, so retrying
+    # per request would amplify an ArtistGrid outage against a third party.
     if time.monotonic() < _trackers_fail_until:
         return _trackers_fallback_response()
 
@@ -2003,11 +1862,8 @@ class _RangePlan:
     end: int | None = None
 
 
-# Digit runs are BOUNDED. Python >= 3.11 (the production image) caps
-# string->int at 4300 digits and raises ValueError past it, and the int() calls
-# on these captures sit outside the /stream try block — so an unbounded `\d+`
-# turned a crafted Range header into an uncaught 500. 19 digits covers any
-# real offset (max int64 is 19).
+# Digit runs are BOUNDED: Python caps str->int at 4300 digits, and these int() calls
+# sit outside /stream's try block. 19 digits covers any int64 offset.
 _RANGE_SPEC = re.compile(r"^bytes=(?:(\d{1,19})-(\d{0,19})|-(\d{1,19}))$")
 
 # Discarding more than this to synthesise a 206 is worth a log line.
@@ -2047,9 +1903,8 @@ def _plan_synthesized_range(range_header: str | None, total_size: int | None) ->
     if not last:
         # Open-ended 'bytes=start-'
         if total_size is None:
-            # Unknown total: a synthesised 206 needs a Content-Range end.
-            # Serve 200 from byte 0 — signals "Range unsupported" without
-            # corrupting Safari's byte→timestamp mapping.
+            # Unknown total: a synthesised 206 needs a Content-Range end. Serve 200 from byte 0
+            # (docs/decisions.md::api.py::range-fallback).
             return _RangePlan("full")
         return _RangePlan("partial", start, total_size - 1)
 
@@ -2057,11 +1912,8 @@ def _plan_synthesized_range(range_header: str | None, total_size: int | None) ->
     if end < start:
         return _RangePlan("full")  # malformed → ignore the header
     if total_size is None:
-        # We can't clamp, so we can't promise a Content-Length. Serving the
-        # full body signals "Range unsupported"; a synthesised 206 here
-        # advertised the client's requested length (`bytes=0-999999999` →
-        # Content-Length: 1000000000) and then delivered a much shorter body.
-        # Same reasoning as the suffix and open-ended branches above.
+        # Unknown total: we can't clamp, so can't promise a Content-Length. Serve the full
+        # body rather than a 206 advertising the requested length.
         return _RangePlan("full")
     end = min(end, total_size - 1)
     return _RangePlan("partial", start, end)
@@ -2072,11 +1924,7 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
 
     Used to synthesise HTTP 206 responses when the upstream host ignores
     Range requests. Stops consuming the source once the range is served.
-
-    Everything before `range_start` is downloaded and thrown away — a seek into
-    the middle of a large file costs that many bytes of upstream traffic. Hosts
-    that honour Range never reach here; the ones that don't are logged below so
-    the cost stops being invisible.
+    Everything before `range_start` is downloaded and discarded.
     """
     if range_start > _DISCARD_WARN_BYTES:
         logger.warning(
@@ -2122,9 +1970,8 @@ async def proxy_stream(
     if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
 
-    # Forward Range header from client if present. Malformed or multi-part
-    # headers are ignored per RFC 7233 (serve 200 full) rather than being
-    # forwarded — upstreams turn garbage Range values into hard errors.
+    # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
+    # not forwarded: upstreams turn garbage Range values into hard errors.
     range_header = request.headers.get("range")
     if range_header and not _RANGE_SPEC.match(range_header.strip()):
         range_header = None
@@ -2146,9 +1993,8 @@ async def proxy_stream(
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
-        # Relay what upstream actually said, so a client can tell "this file is
-        # gone" from "the host is throttling us". Everything else stays 502.
-        # Only the status code crosses over — see UpstreamStatusError.
+        # Relay upstream's status so a client can tell "gone" from "throttled"; only the
+        # code crosses over (see UpstreamStatusError). Everything else stays 502.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
         if e.status_code in (404, 410):
             raise HTTPException(status_code=404, detail="Upstream file not found")
@@ -2160,9 +2006,8 @@ async def proxy_stream(
             )
         raise HTTPException(status_code=502, detail="Upstream error")
     except ValueError as e:
-        # The message names internal hosts and SSRF-check internals (a DNS
-        # failure surfaced as "imgur.gg cdnUrl host does not resolve:
-        # i.imgur.gg" to the client). Log it; return something generic.
+        # The message can name internal hosts and SSRF-check internals: log it, return
+        # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
     except Exception as e:
@@ -2194,9 +2039,8 @@ async def proxy_stream(
     _stream_iter = resp.aiter_bytes(chunk_size=65536)
     _prepend_chunk: bytes = b""
 
-    # The first body byte is file byte 0 when upstream ignored the Range
-    # (200), or honored a range that starts at 0. A 206 to a suffix range
-    # ('bytes=-N') starts at the file TAIL — never sniff those bytes.
+    # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
+    # A 206 to a suffix range ('bytes=-N') starts at the file TAIL: never sniff it.
     _body_starts_at_zero = resp.status_code == 200 or (
         _range_start == 0 and not _is_suffix_range
     )
@@ -2206,9 +2050,8 @@ async def proxy_stream(
         except StopAsyncIteration:
             _prepend_chunk = b""
         except Exception as exc:
-            # A read error (upstream stall/reset) while sniffing the first chunk
-            # would otherwise escape without closing `resp`, leaking its pooled
-            # connection until it times out. Close it and surface a 502.
+            # A read error while sniffing would leak `resp`'s pooled connection: close it and
+            # surface a 502.
             await resp.aclose()
             logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
             raise HTTPException(status_code=502, detail="Upstream read error") from exc
@@ -2231,11 +2074,7 @@ async def proxy_stream(
             yield chunk
 
     async def _closing(iterator):
-        """Relay *iterator*, guaranteeing the upstream response is closed.
-
-        Every response path below wraps its byte source in this — previously
-        each branch had its own near-identical generator.
-        """
+        """Relay *iterator*, guaranteeing the upstream response is closed."""
         try:
             async for chunk in iterator:
                 yield chunk
@@ -2252,10 +2091,8 @@ async def proxy_stream(
         cr = resp.headers.get("content-range")
         if cr:
             headers["Content-Range"] = cr
-            # Derive Content-Length from Content-Range — some upstreams
-            # (e.g. pillows.su) return the *total* file size in
-            # Content-Length even for 206 responses, which breaks iOS Safari.
-            # Bounded digits: int() refuses >4300, which was a 500 and a leaked response.
+            # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
+            # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
             cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
             if cr_match:
                 headers["Content-Length"] = str(
@@ -2292,8 +2129,6 @@ async def proxy_stream(
         )
 
     # Client requested Range but upstream ignored it — plan the response.
-    # (Suffix ranges resolve against total size; malformed headers are
-    # ignored per RFC 7233; unsatisfiable starts get a proper 416.)
     plan = _plan_synthesized_range(range_header, total_size)
 
     if plan.kind == "unsatisfiable":

@@ -81,6 +81,25 @@ next line (`[prod. A,\nB]`) remains an alt title: letting the pattern span newli
 would let an unclosed `(prod. ` swallow real alt-title lines, and it buys exactly
 one row across the whole corpus.
 
+## models.py::_CREDIT_GROUP_RE — wrapped credit lists
+
+This refines the multi-line rule above. A bracketed group spans a newline only where
+the line ends with a list separator (`,` or `&`) or the keyword's own dot: that is a
+credit list wrapped across `<br>` lines, and an alt title is never preceded by a
+dangling separator inside an open bracket. Refusing newlines outright left 2,422 of
+54,923 alt titles (4.4%) as credit strings whose long producer or feature list had
+wrapped, plus 37 name cells wrapped right after the keyword
+(`(prod. \nLondon On Da Track)`). A continuation line that does not follow a separator
+still ends the group, so an unclosed `(prod. ` cannot swallow the alt titles below it,
+and widening what a group can match is safe because `take_group` hands back untouched
+any group whose first part is not a credit keyword.
+
+The spaces around each line break are stripped before matching (`parse_song_credits`),
+so every character has exactly one way to match. The earlier form allowed spaces on
+both sides of the newline inside the repeat and backtracked exponentially on an
+unclosed `(` followed by many `, <newline>` lines (2,000 characters did not finish in
+15 s, S5852).
+
 ## parser.py::_reconcile_title_misreads — song identity from titles and alt titles
 
 Decided with the user, 2026-09-13, after the iOS version picker showed split songs.
@@ -270,6 +289,18 @@ backend fetch a public URL someone else chose. Only the parsed tracker is return
 never the raw body. Revisit if the image proxy's per-hop check is ever moved into the
 transport and can be shared. Decided 2026-09-13, after the branch review.
 
+## fetcher.py::_build_sheet_html_url — advertised tab paths
+
+Some custom tracker hosts (deftonestracker.net, franktracker.net, tylertracker.net)
+answer the `?gid=` query form with a ~52 KB shell page that has no `<table>`, so every
+tab failed with `NoTablesError` until the fetcher followed the URL the page's own
+switcher advertises (`items.push({name: "Unreleased", pageUrl:
+"\/htmlview\/sheet\/554276433.html"})`). `_build_sheet_html_url` prefers that path.
+
+Those hosts do emit `gid:` on every switcher entry too, so merging names from the
+pageUrl-keyed switcher is a no-op for them. It stays as a cheap fallback for a host
+that omits `gid`, which has not been observed.
+
 ## models.py — fields kept on the wire with no client reader
 
 `stats` / `stats_raw` / `highlighted_producers` stay in the payload even though no
@@ -324,6 +355,20 @@ often dead before we ever parse: a 208-second-old copy worked, a 19-minute-old o
 not. So a cover that fails to download gets the era's last good copy, remembered in a
 small index per tracker (`eraart_<tracker hash>.json`, never shared between trackers).
 Ye's covers fill in once any parse lands on a young Cloudflare copy, and stay.
+
+## api.py::_era_art_base — covers keyed by tracker and era
+
+A cover's `sheets-images-rt/<token>` URL is reminted on every parse, so nothing in it
+is stable. Keying the image cache on it filed the same bytes under a fresh name every
+hour and left the LRU to evict the previous one, so a client holding a payload a few
+hours old asked for an evicted entry, went upstream, and got Google's 403 on the
+expired token — 16% of all `/image-proxy` traffic on 2026-09-21.
+
+`(tracker_url, era_name)` is stable, so the bytes live under a slot derived from it,
+with a tiny `imgalias_*` pointer left behind for every URL that has ever named it. Old
+payloads keep resolving, and one entry per era replaces one per era per parse. The
+sheet-cache eviction skips `imgalias_*` for the same reason, and a cache hit touches
+the entry's mtime so a cover still in use is not evicted before stale copies.
 
 ## api.py::image-proxy-etag — ETag is scoped to the disk cache
 
@@ -470,6 +515,46 @@ Matches "0 OG File(s)1 Full0 Tagged2 Partial..." and "1 Total Full0 OG File0 Par
 trackers: "3 of Leaks\n0 of Snippets" (Billie Eilish), "0 Streaming | 1
 Off-Streaming" (Joji), "27 tracks" (Gucci Mane, Chief Keef), "0 Released | 1 Deleted
 | 5 Lost" (XXXTENTACION), "5 Leaks\n2 Snippets" (common template variant).
+
+## parser.py::_DISCOGRAPHY_STATS_PATTERN — discography stats need two pairs
+
+Two unrelated vocabularies appear in the era-stats cell, and a tracker uses one or the
+other: leak-status (`45 Full / 3 Partial / 70 Unavailable`) and discography
+(`18 Total / 4 Singles / 7 Album Track(s)`). With only the first recognised, every
+discography-style era header failed `_is_era_header` and the era — cover art, timeline,
+description — was dropped, its songs glued onto the previous era: 267 era headers
+across 34 of 400 cached tabs.
+
+They are not matched the same way. One leak-status pair identifies a stats cell ("5
+Full" is never anything else). Discography words are ordinary English that appears in
+era NAMES ("2009 Album", "1977 Sessions", "38 Special Sessions"); matching those on one
+pair turned 86 Bonnie McKee song rows into empty eras. A real discography block always
+states several counts, so it needs `_MIN_DISCOGRAPHY_PAIRS` (two).
+
+## parser.py::broken-stats-formula — spreadsheet errors are never content
+
+A broken formula shows as `#REF!`, `#N/A` and the like. A `#REF!` in the era-stats
+column hid every era header on the Future tracker (2026-08), collapsing it into one era
+literally named "#REF!". `_is_era_header` therefore still accepts a stats cell holding
+an error — it carries no evidence either way — when another cell supplies the era name
+or art, and `_looks_like_era_name` rejects an error value as a name: as an era, the
+abbreviated-era-name rule would absorb every later era into it.
+
+## parser.py::is_song_tab — reject tabs on positive signatures only
+
+Glossaries, artwork indexes, interview logs, setlists and BPM/key references are
+ordinary tabs, and the song parser does not fail on them — it emits plausible junk. The
+Car Seat Headrest interview tab produced 146 "songs" titled with interview headlines,
+because no Name column was detected and `name` fell back to positional index 1.
+
+Rejection needs a POSITIVE signature (artwork or interview columns, or a header that
+resolves to exactly `{available_length, quality}`, the glossary every template ships).
+Absence is not evidence: "no Name column" destroyed De La Soul (205 songs under an
+unlabelled header) and Overlord's Lil Uzi Vert discography (283 songs under "Project &
+Track Title"); "neither Name nor Era" then destroyed headerless tabs — BIG L (21) and
+Labrinth (169) start with data at row 0, resolve to an empty map, and parse correctly
+through the positional fallback. Artwork needs two column signs because a lone "Image"
+column also appears on physical-release tabs, which are real song content.
 
 ## parser.py::digit-leading-era-names — stats vs. real era names
 
@@ -637,6 +722,25 @@ column fills `SongVersion.producers` only when the name-cell `(prod. …)` credi
 didn't already set it (the name-cell credit wins on conflict). Dedicated `artist`
 columns land in the additive `credited_artists` field — the row's performer, not a
 feature — so they never overwrite the primary artist.
+
+## config.py::COLUMN_ALIASES — unmapped headers
+
+Headers seen in the 2026-08-26 corpus sweep and deliberately left unmapped, recorded so
+the next sweep does not re-litigate them (counts are workbooks):
+
+- `Image`, `Project Type`, `Art Type`, `Use`, `Designer`, `Cover Art` — art-tab
+  headers. `is_song_tab` already rejects those tabs; they show up only because the tab
+  is scanned before it is rejected.
+- `Engineer` (6), `Recording Location` (4), `Creator` (5), `Platform` (3),
+  `File Type` (3), `Origin` (2), `Price` (2) — real data with no field to hold it. Each
+  costs a model field plus a decode on every client for a handful of workbooks; revisit
+  if a sweep shows them spreading.
+- `#` (3), `#:` (3) — track-number columns. Binding one to `name` is how Overlord's Lil
+  Uzi Vert tracker came to have 281 songs called "1", "2", "3" (see
+  `parser._infer_name_column`).
+- `Tracklist` (12), `Album` (5), `Release` (5), `Category` (8) — ambiguous. "Album" is
+  an era on a discography tracker and a track's parent release elsewhere, and binding
+  `era` wrongly is expensive; unmapped until one meaning is shown to dominate.
 
 ---
 
