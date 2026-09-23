@@ -51,12 +51,13 @@ logger = logging.getLogger(__name__)
 
 # imgur cdnUrl SSRF guard — see docs/decisions.md::streaming.py::imgur-cdnurl-guard
 def _ip_is_public(ip_str: str) -> bool:
-    """True unless *ip_str* is a private/loopback/link-local/reserved/etc. address."""
+    """True only for globally routable unicast addresses.
+
+    is_global, not a deny-list: the deny-list missed shared address space
+    (100.64.0.0/10 — CGNAT, Tailscale, some cloud metadata endpoints).
+    """
     ip = ipaddress.ip_address(ip_str)
-    return not (
-        ip.is_private or ip.is_loopback or ip.is_link_local
-        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-    )
+    return ip.is_global and not ip.is_multicast
 
 
 def _assert_public_host(host: str, *, source: str) -> None:

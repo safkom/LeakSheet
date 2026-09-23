@@ -1017,6 +1017,18 @@ _GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
 
 
+# Raster types only. image/svg+xml is a document that can carry script, and
+# this proxy serves inline from the app's origin with ACAO *.
+_RASTER_IMAGE_TYPES = frozenset({
+    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
+    "image/avif", "image/heic", "image/heif", "image/bmp",
+})
+
+
+def _is_raster_image(content_type: str) -> bool:
+    return content_type.split(";", 1)[0].strip().lower() in _RASTER_IMAGE_TYPES
+
+
 def _snap_image_width(w: int) -> int:
     for bucket in _IMAGE_SIZE_BUCKETS:
         if w <= bucket:
@@ -1385,6 +1397,8 @@ async def proxy_image(
         # _image_host_allowed, re-checked after redirects, so the reach is
         # public tracker art and nothing else.
         "Access-Control-Allow-Origin": "*",
+        # Served from the app's own origin: an image must never run script.
+        "Content-Security-Policy": "sandbox; default-src 'none'",
     }
 
     # The URL the client holds may be an expired cover token; the bytes are
@@ -1436,7 +1450,7 @@ async def proxy_image(
                     # into the other branch.
                     resp, gdata = await _get_image_capped(google_url, headers)
                     ct = resp.headers.get("content-type", "")
-                    if resp.status_code == 200 and ct.startswith("image/"):
+                    if resp.status_code == 200 and _is_raster_image(ct):
                         return Response(
                             content=gdata, media_type=ct,
                             headers={**base_headers, "X-Cache-Status": "origin"},
@@ -1459,7 +1473,7 @@ async def proxy_image(
             resp, data = await _get_image_capped(url, headers)
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
-        if upstream_status == 200 and ct.startswith("image/"):
+        if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
                 async with _resize_slot():
@@ -1561,7 +1575,7 @@ async def _get_image_capped(
         raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
-        if resp.status_code != 200 or not ct.startswith("image/"):
+        if resp.status_code != 200 or not _is_raster_image(ct):
             return resp, b""
 
         chunks: list[bytes] = []

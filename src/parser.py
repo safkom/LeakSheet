@@ -2245,15 +2245,15 @@ def _disambiguate_era_names(eras: list[Era]) -> list[Era]:
     Renaming here rather than client-side fixes every client at once, and
     fixes the lookup keys as well as the ids.
     """
-    seen: dict[str, int] = {}
+    taken: set[str] = set()
     out: list[Era] = []
     for i, era in enumerate(eras, start=1):
-        name = (era.name or "").strip() or f"Untitled Era {i}"
-        count = seen.get(name, 0) + 1
-        seen[name] = count
-        if count > 1:
-            name = f"{name} ({count})"
-            seen[name] = 1  # so a real "Foo (2)" later doesn't collide either
+        base = (era.name or "").strip() or f"Untitled Era {i}"
+        name, n = base, 1
+        while name in taken:  # also skips a real "Foo (2)" seen earlier
+            n += 1
+            name = f"{base} ({n})"
+        taken.add(name)
         out.append(era.model_copy(update={"name": name}) if name != era.name else era)
     return out
 
