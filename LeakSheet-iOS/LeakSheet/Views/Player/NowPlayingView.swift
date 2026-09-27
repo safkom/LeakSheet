@@ -21,6 +21,7 @@ struct NowPlayingView: View {
     /// Contrast is judged against the appearance actually on screen (the Mac renders
     /// in the system appearance): see DECISIONS.md::DesignTokens.swift::scheme-parameter.
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var accentColor: Color?
     #if !os(macOS)
@@ -74,15 +75,14 @@ struct NowPlayingView: View {
         #endif
     }
 
+    @ViewBuilder
     private var content: some View {
-        // Scrolls once the controls outgrow the screen (accessibility text sizes);
-        // otherwise it fills the screen and centres.
-        GeometryReader { proxy in
-            ScrollView {
-                controls
-                    .frame(minHeight: proxy.size.height)
-            }
-            .scrollBounceBehavior(.basedOnSize)
+        // Fixed at standard text sizes: the artwork gives way to the controls. Only
+        // accessibility sizes, where the text alone can outgrow the screen, scroll.
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView { controls }
+        } else {
+            controls
         }
     }
 
