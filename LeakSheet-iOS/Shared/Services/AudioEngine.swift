@@ -137,6 +137,7 @@ final class AudioEngine {
             isPlaying = false
             loading = false
             error = "Stream host not supported"
+            Telemetry.report("Unsupported stream host", category: "Playback", attributes: ["host": URL(string: link)?.host ?? "-"])
             updateNowPlayingInfo()
             return
         }
@@ -513,6 +514,8 @@ final class AudioEngine {
                     self.loadingTimeoutTask?.cancel()
                     self.loadingTimeoutTask = nil
                     self.error = errDesc ?? "Playback failed"
+                    Telemetry.report("Playback failed: \(errDesc ?? "unknown")", category: "Playback",
+                                     attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
                 default:
                     break
                 }
@@ -726,6 +729,8 @@ final class AudioEngine {
             self.loading = false
             self.isPlaying = false
             self.error = "Connection timed out — try again"
+            Telemetry.report("Stream timed out", category: "Playback",
+                             attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
             self.player?.pause()
         }
     }

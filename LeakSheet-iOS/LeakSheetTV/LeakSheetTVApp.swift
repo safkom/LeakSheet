@@ -9,6 +9,7 @@ struct LeakSheetTVApp: App {
     private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
     init() {
+        Telemetry.start()
         // Category only, as on iOS: AudioEngine activates the session right before
         // playback so launch never interrupts another app's audio.
         do {

@@ -12,6 +12,7 @@ struct LeakSheetApp: App {
     private static let log = Logger(subsystem: "si.safko.LeakSheet", category: "App")
 
     init() {
+        Telemetry.start()
         configureAudioSession()
     }
 
