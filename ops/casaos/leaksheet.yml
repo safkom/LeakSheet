@@ -1,6 +1,6 @@
 # CasaOS app: the LeakSheet API and its nginx front (sheets.safko.eu via the tunnel).
 # Images are built from the repo with `docker compose build` in ~/LeakSheet; this app
-# runs them. ${...} values come from ~/LeakSheet/.env when the file is installed as
+# runs them. The $-placeholders come from ~/LeakSheet/.env when the file is installed as
 # /var/lib/casaos/apps/leaksheet/docker-compose.yml.
 name: leaksheet
 services:
@@ -27,7 +27,7 @@ services:
       resources:
         limits:
           memory: 6G
-    pids_limit: 512
+          pids: 512
     labels:
       icon: https://cdn.jsdelivr.net/gh/selfhst/icons/png/music-assistant.png
       com.centurylinklabs.watchtower.enable: "false"   # built locally, never pulled
