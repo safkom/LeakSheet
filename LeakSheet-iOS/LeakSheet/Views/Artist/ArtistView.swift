@@ -285,14 +285,10 @@ private struct ArtistContentView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search songs…"
         )
-        #if !SDK_WITHOUT_TOOLBAR_MINIMIZE
-        // SDK 27.0 API that GitHub's Xcode 27 beta 6 image lacks; CI sets the
-        // flag until the runner ships the release SDK. Delete the #if then.
-        .toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+        .toolbarMinimizationBehavior(.onScrollDown, for: .navigationBar)
         // Disabled: with a large title, search drawer and refresh control the
         // safe-area adjustment made the list jump while the bar collapsed.
         .toolbarMinimizationSafeAreaAdjustment(.disabled, for: .navigationBar)
-        #endif
         #else
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
         #endif
