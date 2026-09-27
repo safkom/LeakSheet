@@ -80,6 +80,33 @@ from src.streaming import (
     _get_shared_client,
 )
 
+# gunicorn's UvicornWorker installs no logging config: without this the root logger stays
+# at WARNING and every INFO line (sheet_timing, cover matching) is dropped.
+logging.basicConfig(format="%(levelname)s %(name)s pid=%(process)d %(message)s")  # docker adds the time
+logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper())
+# One line per upstream or client request would drown the rest; nginx logs requests.
+for _noisy in ("httpx", "httpcore", "uvicorn.access"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+if _sentry_dsn := os.environ.get("SENTRY_DSN"):
+    # Errors and INFO+ log lines go to the self-hosted GlitchTip. 502 is an upstream
+    # host being down (pillows), which is logged but is not an issue of ours.
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    _failed = set(range(500, 600)) - {502}
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        enable_logs=True,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[
+            StarletteIntegration(failed_request_status_codes=_failed),
+            FastApiIntegration(failed_request_status_codes=_failed),
+        ],
+    )
+
 logger = logging.getLogger(__name__)
 
 
