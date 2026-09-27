@@ -1,0 +1,52 @@
+# CasaOS app: Dozzle, live stdout of every container (gunicorn, nginx access lines,
+# cloudflared). LAN only and never tunnelled: it holds the Docker socket.
+name: dozzle
+services:
+  dozzle:
+    container_name: dozzle
+    hostname: dozzle
+    image: amir20/dozzle:v11
+    restart: unless-stopped
+    environment:
+      DOZZLE_ENABLE_MCP: "true"
+      DOZZLE_NO_ANALYTICS: "true"
+    ports:
+      - target: 8080
+        published: "8082"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/amir20/dozzle@master/assets/favicon.svg
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    network_mode: bridge
+    x-casaos:
+      ports:
+        - container: "8080"
+          description: { en_us: WebUI and MCP (/api/mcp) }
+      volumes:
+        - container: /var/run/docker.sock
+          description: { en_us: Docker socket, read-only }
+networks:
+  default:
+    name: dozzle_default
+x-casaos:
+  architectures: [ amd64, arm64 ]
+  main: dozzle
+  author: self
+  developer: amir20
+  category: Developer
+  title: { en_us: Dozzle }
+  tagline: { en_us: Container logs }
+  description: { en_us: Live logs of every container on this box. }
+  icon: https://cdn.jsdelivr.net/gh/amir20/dozzle@master/assets/favicon.svg
+  index: /
+  port_map: "8082"
+  scheme: http

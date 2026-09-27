@@ -1,0 +1,109 @@
+# CasaOS app: GlitchTip (errors, crashes and log lines from the API and iOS app).
+# Installed as /var/lib/casaos/apps/glitchtip/docker-compose.yml with ${GT_DB_PASS} and
+# ${GT_SECRET_KEY} filled in; served at https://glitchtip.safko.eu through the tunnel.
+name: glitchtip
+services:
+  glitchtip:
+    container_name: glitchtip
+    hostname: glitchtip
+    image: glitchtip/glitchtip:6
+    restart: unless-stopped
+    depends_on: [ glitchtip-db, glitchtip-valkey ]
+    environment:
+      DATABASE_URL: postgres://glitchtip:${GT_DB_PASS}@glitchtip-db:5432/glitchtip
+      VALKEY_URL: redis://glitchtip-valkey:6379/0
+      SECRET_KEY: ${GT_SECRET_KEY}
+      SERVER_ROLE: all_in_one
+      # HTTPS: the MCP server refuses a non-HTTPS issuer, and the iOS app posts from anywhere.
+      GLITCHTIP_DOMAIN: https://glitchtip.safko.eu
+      CSRF_TRUSTED_ORIGINS: https://glitchtip.safko.eu
+      DEFAULT_FROM_EMAIL: glitchtip@safko.eu
+      EMAIL_URL: consolemail://
+      ENABLE_USER_REGISTRATION: "False"
+      GLITCHTIP_ENABLE_MCP: "True"
+      GLITCHTIP_ENABLE_UPTIME: "False"
+      GLITCHTIP_RETENTION_DAYS: "30"
+      GLITCHTIP_LOG_RETENTION_DAYS: "14"
+    ports:
+      - target: 8000
+        published: "8000"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /DATA/AppData/glitchtip/uploads
+        target: /code/uploads
+        bind:
+          create_host_path: true
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    labels:
+      icon: https://glitchtip.com/assets/logo-again.svg
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    networks:
+      glitchtip_network: null
+    x-casaos:
+      ports:
+        - container: "8000"
+          description: { en_us: WebUI and event ingest }
+      volumes:
+        - container: /code/uploads
+          description: { en_us: Uploaded debug symbols }
+  glitchtip-db:
+    container_name: glitchtip-db
+    hostname: glitchtip-db
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: glitchtip
+      POSTGRES_PASSWORD: ${GT_DB_PASS}
+      POSTGRES_DB: glitchtip
+    volumes:
+      - type: bind
+        source: /DATA/AppData/glitchtip/postgres
+        target: /var/lib/postgresql
+        bind:
+          create_host_path: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    networks:
+      glitchtip_network: null
+    x-casaos:
+      volumes:
+        - container: /var/lib/postgresql
+          description: { en_us: GlitchTip database }
+  glitchtip-valkey:
+    container_name: glitchtip-valkey
+    hostname: glitchtip-valkey
+    image: valkey/valkey:9
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    networks:
+      glitchtip_network: null
+networks:
+  glitchtip_network:
+    name: glitchtip_network
+    driver: bridge
+  default:
+    name: glitchtip_default
+x-casaos:
+  architectures: [ amd64, arm64 ]
+  main: glitchtip
+  author: self
+  developer: GlitchTip
+  category: Developer
+  title: { en_us: GlitchTip }
+  tagline: { en_us: Errors and logs for LeakSheet }
+  description: { en_us: Errors, crashes and log lines from the LeakSheet API and iOS app. }
+  icon: https://glitchtip.com/assets/logo-again.svg
+  index: /
+  port_map: "8000"
+  scheme: http
