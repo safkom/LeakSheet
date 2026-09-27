@@ -2837,7 +2837,7 @@ class ArtMap(dict):
 
     A *synthetic* key is a version-stripped alias ("donda" for "Donda [V1]"). It
     names one version's cover, so it must never serve a DIFFERENT version (see
-    _apply_era_art).
+    _era_art_candidate).
     """
 
     __slots__ = ("synthetic",)
@@ -2877,9 +2877,8 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
 def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     """Parse an Art tab HTML export → {era_match_key: image_url} mapping.
 
-    *source_url* resolves relative image sources, as in parse_sheet. It must happen
-    here: apply_art_tab_images OVERWRITES era.art_url after parse_sheet's own
-    resolution.
+    *source_url* resolves relative image sources, as in parse_sheet: the fetcher
+    compares these URLs against parse_sheet's already-resolved covers.
 
     Prefers an image whose **Project Type** column says "cover" (see
     docs/decisions.md::parser.py::art-cover-column), else the era's first image.
@@ -2959,42 +2958,40 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     return result
 
 
-def apply_art_tab_images(artist: Artist, art_map: dict[str, str]) -> None:
-    """Replace era.art_url with higher-quality Art tab images where available.
+def art_tab_candidates(artist: Artist, art_map: dict[str, str]) -> dict[str, str]:
+    """{era name: Art-tab image} for eras whose main-tab cover it might upgrade.
 
-    Matches eras by their normalised name key (via _era_match_key) and falls
-    back to alt_names when the primary name doesn't match.  Eras with no
-    match in art_map are left unchanged.
+    Only a candidate: the Art tab can hold a single's or a sibling era's art under
+    the same name, so the fetcher adopts one only when it is the same picture as the
+    main-tab cover (docs/decisions.md::fetcher.py::art-tab-identity). An era without
+    a main-tab cover has nothing to compare against and gets no candidate.
     """
+    candidates = {}
     for era in artist.eras:
-        _apply_era_art(era, art_map)
+        url = _era_art_candidate(era, art_map) if era.art_url else None
+        if url and url != era.art_url:
+            candidates[era.name] = url
+    return candidates
 
 
-def _apply_era_art(era: Era, art_map: dict[str, str]) -> None:
-    """Give *era* its Art-tab cover, if the tab names one for this version.
+def _era_art_candidate(era: Era, art_map: dict[str, str]) -> str | None:
+    """The Art-tab image filed under *era*'s version-aware key, else its stripped key.
 
-    Version-aware key first, then the stripped key. A SYNTHETIC stripped key is a
-    sibling's cover, so it is a last resort: taken only after every other name
-    and key has missed, and only for an era that has no artwork at all.
+    A SYNTHETIC stripped key is a sibling version's cover, so it never stands in for
+    a versioned era.
     """
     synthetic = getattr(art_map, "synthetic", frozenset())
-    stand_in: str | None = None
     for name in (era.name, *era.alt_names):
         exact = _era_match_key(name, keep_discriminators=True)
         if exact and exact in art_map:
-            era.art_url = art_map[exact]
-            return
+            return art_map[exact]
         stripped = _era_match_key(name)
         if not stripped or stripped not in art_map:
             continue
         if stripped in synthetic and VERSION_TAG_PATTERN.search(name):
-            if stand_in is None:
-                stand_in = art_map[stripped]
             continue
-        era.art_url = art_map[stripped]
-        return
-    if stand_in is not None and not era.art_url:
-        era.art_url = stand_in
+        return art_map[stripped]
+    return None
 
 
 # ---------------------------------------------------------------------------

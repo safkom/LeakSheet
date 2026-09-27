@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
+import io
 import json
 import logging
 import os
@@ -46,8 +47,8 @@ from src.config import (
 from src.models import Artist, Section, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
-    apply_art_tab_images,
     apply_badge_tabs,
+    art_tab_candidates,
     parse_art_tab,
     parse_artistgrid_csv,
     parse_misc_tab,
@@ -1513,8 +1514,10 @@ async def _load_secondary_tabs(
                 _, art_html = art_result
                 with t.phase("art_parse"):
                     art_map = await asyncio.to_thread(parse_art_tab, art_html, url_norm)
-                if art_map:
-                    apply_art_tab_images(artist, art_map)
+                candidates = art_tab_candidates(artist, art_map) if art_map else {}
+                if candidates:
+                    with t.phase("art_compare"):
+                        await _adopt_matching_art(artist, candidates)
         except Exception as e:
             # Art tab optional — keep existing art_url on failure. WARNING so
             # a systematically broken tab is visible at default log level.
@@ -1567,6 +1570,73 @@ async def _load_secondary_tabs(
             "Badge tabs %s: %d entries matched songs",
             [k for k, _ in badge_tabs], applied,
         )
+
+
+# Largest 16x16 dHash distance (of 256 bits) still counted as the same artwork. On 91
+# main-tab/Art-tab cover pairs from 5 trackers, same art measured 0-27 and different art
+# 65+: docs/decisions.md::fetcher.py::art-tab-identity.
+_SAME_ART_MAX_DISTANCE = 40
+_ART_COMPARE_CONCURRENCY = 8
+_ART_FETCH_TIMEOUT = 10.0
+# Same ceiling as the image proxy: the decode runs in a worker thread, not unbounded.
+_ART_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _dhash(data: bytes, size: int = 16) -> int | None:
+    """Difference hash of an image's grayscale gradient; None if it will not decode."""
+    from PIL import Image  # noqa: PLC0415 — Pillow only loads for trackers with an Art tab
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.draft("L", (size * 4, size * 4))
+            pixels = img.convert("L").resize((size + 1, size)).tobytes()
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+    bits = 0
+    for row in range(size):
+        for col in range(size):
+            left = pixels[row * (size + 1) + col]
+            bits = (bits << 1) | (left > pixels[row * (size + 1) + col + 1])
+    return bits
+
+
+def same_artwork(a: bytes, b: bytes) -> bool:
+    """True when two images are the same picture, whatever their size or encoding."""
+    ha, hb = _dhash(a), _dhash(b)
+    return ha is not None and hb is not None and (ha ^ hb).bit_count() <= _SAME_ART_MAX_DISTANCE
+
+
+async def _fetch_art(url: str, slots: asyncio.Semaphore) -> bytes | None:
+    if not url.startswith(("http://", "https://")):
+        return None
+    async with slots:
+        try:
+            resp = await _get_capped(
+                _get_sheets_client(), url,
+                headers={"Referer": "https://docs.google.com/"}, timeout=_ART_FETCH_TIMEOUT,
+            )
+        except httpx.HTTPError:
+            return None
+    ok = resp.status_code == 200 and len(resp.content) <= _ART_MAX_BYTES
+    return resp.content if ok else None
+
+
+async def _adopt_matching_art(artist: Artist, candidates: dict[str, str]) -> None:
+    """Swap a main-tab cover for its Art-tab candidate only when both show the same
+    picture (the Art tab's copy is larger). Either image failing to load keeps the
+    main-tab cover."""
+    slots = asyncio.Semaphore(_ART_COMPARE_CONCURRENCY)
+    eras = [era for era in artist.eras if era.name in candidates]
+    pairs = await asyncio.gather(*(
+        asyncio.gather(_fetch_art(era.art_url, slots), _fetch_art(candidates[era.name], slots))
+        for era in eras
+    ))
+    adopted = 0
+    for era, (main, art) in zip(eras, pairs):
+        if main and art and await asyncio.to_thread(same_artwork, main, art):
+            era.art_url = candidates[era.name]
+            adopted += 1
+    logger.info("Art tab: %d of %d candidate covers matched the main tab", adopted, len(eras))
 
 
 def _hub_workbook_candidates(

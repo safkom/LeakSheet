@@ -1105,7 +1105,8 @@ def _era_art_base(tracker_url: str, era_name: str) -> str:
     """
     tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
     era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
-    return f"leaksheet:art/{tracker}/{era}"
+    # v2: v1 slots hold Art-tab images adopted by name alone, often another era's art.
+    return f"leaksheet:art/v2/{tracker}/{era}"
 
 
 def _image_alias_path(url: str):
@@ -1131,20 +1132,11 @@ def _write_image_alias(url: str, base: str) -> None:
         logger.warning("image alias write failed: %s", e)
 
 
-def _touch_image_cache(key: str) -> bool:
-    """True if *key* has a live entry, which is then marked recently used.
-
-    Eviction drops the oldest mtime first, so touching a cover still in use keeps
-    it ahead of copies left behind by earlier tokens.
-    """
-    bin_path, meta_path = _image_cache_paths(key)
-    try:
-        if time.time() - json.loads(meta_path.read_text())["timestamp"] > _IMAGE_CACHE_TTL:
-            return False
-        os.utime(bin_path)
-        return True
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
+def _drop_image_thumbnails(base: str) -> None:
+    """Delete every width bucket cached for *base*. Blocking."""
+    for width in _IMAGE_SIZE_BUCKETS:
+        for path in _image_cache_paths(_image_cache_key(base, width)):
+            path.unlink(missing_ok=True)
 
 
 _IMAGE_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
@@ -1271,8 +1263,6 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         base = _era_art_base(tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        if await asyncio.to_thread(_touch_image_cache, key):
-            return
         data, content_type = b"", ""
         async with slots:
             try:
@@ -1280,13 +1270,16 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 content_type = resp.headers.get("content-type", "")
             except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
                 logger.info("era art warm: %s failed: %s", url[:80], exc)
+        stored = await asyncio.to_thread(_read_image_cache, key)
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
-            stored = await asyncio.to_thread(_read_image_cache, key)
             if not stored:
                 return
             data, content_type = stored[0], stored[1]
+        elif stored and stored[0] != data:
+            # The sheet changed this era's cover: its thumbnails show the old one.
+            await asyncio.to_thread(_drop_image_thumbnails, base)
         await asyncio.to_thread(_write_image_cache, key, data, content_type)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))

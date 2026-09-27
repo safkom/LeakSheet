@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from src.models import Badge
-from src.parser import apply_art_tab_images, parse_art_tab, parse_misc_tab, parse_sheet
+from src.parser import art_tab_candidates, parse_art_tab, parse_misc_tab, parse_sheet
 from tests._health import assert_healthy
 from tests.conftest import read_synthetic
 
@@ -179,12 +179,16 @@ class TestArtTab:
             "sophomore era": "https://lh3.googleusercontent.com/soph-hq",
         }
 
-    def test_apply_upgrades_era_art(self, art_map):
+    def test_candidates_need_a_main_tab_cover(self, art_map):
         artist = parse_sheet(read_synthetic("main_tab"), "SynthWave")
         assert all(e.art_url is None for e in artist.eras)  # main tab has no art
-        apply_art_tab_images(artist, art_map)
-        assert artist.eras[0].art_url == "https://lh3.googleusercontent.com/debut-hq"
-        assert artist.eras[1].art_url == "https://lh3.googleusercontent.com/soph-hq"
+        assert art_tab_candidates(artist, art_map) == {}
+        for era in artist.eras:
+            era.art_url = "https://lh3.googleusercontent.com/inline"
+        assert art_tab_candidates(artist, art_map) == {
+            artist.eras[0].name: "https://lh3.googleusercontent.com/debut-hq",
+            artist.eras[1].name: "https://lh3.googleusercontent.com/soph-hq",
+        }
 
 
 # ---------------------------------------------------------------------------

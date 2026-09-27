@@ -46,9 +46,8 @@ class TestPrimaryTabSelection:
         assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
         assert artist.total_songs == 4
 
-        # Art tab applied high-quality era images.
-        assert artist.eras[0].art_url == "https://lh3.googleusercontent.com/debut-hq"
-        assert artist.eras[1].art_url == "https://lh3.googleusercontent.com/soph-hq"
+        # The main tab has no covers, so nothing proves the Art tab's images are them.
+        assert [e.art_url for e in artist.eras] == [None, None]
 
         # Misc tab merged into misc_entries, kept out of the era tree.
         assert [m.name for m in artist.misc_entries] == ["Music Video One", "Interview Clip"]

@@ -58,6 +58,7 @@ class _Google:
     def __init__(self):
         self.alive: set[str] = set()
         self.requested: list[str] = []
+        self.content: dict[str, bytes] = {}
 
     def build_request(self, method, url, headers=None):
         return SimpleNamespace(url=url)
@@ -65,7 +66,8 @@ class _Google:
     async def send(self, request, stream=False):
         self.requested.append(request.url)
         ok = request.url in self.alive
-        return _Response(request.url, _png() if ok else b"", 200 if ok else 403)
+        body = self.content.get(request.url, _png()) if ok else b""
+        return _Response(request.url, body, 200 if ok else 403)
 
 
 @pytest.fixture()
@@ -139,6 +141,22 @@ class TestWarmEraArt:
 
         asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
         assert bin_path.stat().st_mtime > 1
+
+    def test_a_changed_cover_replaces_the_slot_and_its_thumbnails(self, google):
+        """The sheet swapped this era's art: the next good download shows, not the old
+        copy or a thumbnail resized from it."""
+        first, second = _cover("old-art"), _cover("new-art")
+        google.alive.add(first)
+        asyncio.run(api._warm_era_art(_artist(("Yandhi", first)), TRACKER))
+        base = api._era_art_base(TRACKER, "Yandhi")
+        api._write_image_cache(api._image_cache_key(base, 320), _png(320, 320), "image/png")
+
+        google.alive = {second}
+        google.content[second] = _png(300, 300)
+        asyncio.run(api._warm_era_art(_artist(("Yandhi", second)), TRACKER))
+
+        assert api._read_image_cache(api._image_cache_key(base, None))[0] == _png(300, 300)
+        assert api._read_image_cache(api._image_cache_key(base, 320)) is None
 
     def test_overlapping_warms_both_store_their_covers(self, google):
         donda, yandhi = _cover("donda"), _cover("yandhi")

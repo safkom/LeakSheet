@@ -334,6 +334,23 @@ etc. all appear with no following digits. So a token is *letters + optional digi
 not *one of {s,w,h} + required digits* — `_GOOGLE_SIZE_SUFFIX_RE` has to match the
 looser grammar or it silently stops resizing.
 
+## fetcher.py::art-tab-identity — an Art-tab cover must be the same picture
+
+The Art tab is a gallery, not a cover list: under an era's name it can hold a single's
+art, a sibling era's cover or a promo. Adopting its image by name alone replaced 42 of
+Ye's 43 main-tab covers, and Yandhi [V2] showed the "Brothers" single instead of its
+lilac CD. The main-tab image is the tracker's own cover but only ~100 px wide; the Art
+tab's copy of the same art is ~340 px.
+
+So `_adopt_matching_art` downloads both and takes the Art-tab image only when a 16x16
+difference hash of the two is within 40 of 256 bits. Across 91 downloadable pairs from
+five trackers (2026-09-27), same artwork measured 0–27 and different artwork 65+; the
+one near miss (Ca$ino, 103) is the same photo recropped to a portrait, which rightly
+stays on the main-tab image. When either download fails (Ye's proxied tokens are often
+already dead) the main-tab cover stays, and an era with no main-tab cover gets no
+Art-tab image. The per-era cover slot moved to `v2` at the same time, so name-matched
+v1 images are not served again.
+
 ## api.py::_warm_era_art — covers are downloaded at parse time
 
 Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
@@ -352,9 +369,13 @@ upstream, so a cover keeps loading for the image cache's 7-day life.
 yetracker.net is a Cloudflare proxy of the Google page with `max-age=3600`, and it
 ignores query strings and `Accept-Encoding` when choosing a cached copy. Its tokens are
 often dead before we ever parse: a 208-second-old copy worked, a 19-minute-old one did
-not. So a cover that fails to download gets the era's last good copy, remembered in a
-small index per tracker (`eraart_<tracker hash>.json`, never shared between trackers).
-Ye's covers fill in once any parse lands on a young Cloudflare copy, and stay.
+not. So a cover that fails to download keeps the era's last good copy in its
+`_era_art_base` slot. Ye's covers fill in once any parse lands on a young Cloudflare
+copy, and stay.
+
+Every parse downloads again and overwrites the slot when it succeeds, so a cover the
+sheet changes shows up on the next good parse instead of after the 7-day TTL; the
+slot's width thumbnails are dropped when the bytes differ.
 
 ## api.py::_era_art_base — covers keyed by tracker and era
 
@@ -779,13 +800,14 @@ On Ye that was 6 eras (Donda V2/V3, Yandhi V2, DONDA 2 V2, BULLY V2, Good Ass Jo
 orange artwork instead.
 
 `parse_art_tab` files every entry under BOTH the discriminating key and the
-stripped one (first versioned entry wins the stripped slot), and `_apply_era_art`
+stripped one (first versioned entry wins the stripped slot), and `_era_art_candidate`
 tries the discriminating key first, then the stripped one, for the era name and
 then each alt name. That keeps two older shapes working: an Art tab that tags its
 rows serving an era that doesn't (`Donda` → V1's cover), and an era that tags
-itself against an Art tab that doesn't. An era whose sibling is tagged but which
-has no row of its own still inherits — `Cruel Winter [V1]` has no Art tab row and
-takes `[V2]`'s image rather than losing its art.
+itself against an Art tab that doesn't. A stripped key standing in for a sibling
+version is never a candidate for a versioned era. Every candidate is still only
+adopted when it is the same picture as the main-tab cover
+(fetcher.py::art-tab-identity).
 
 ---
 
