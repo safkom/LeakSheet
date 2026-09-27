@@ -434,6 +434,16 @@ the pinned literal tests keep their meaning.
 crossover is near 0.179, so every mid-tone backdrop in between got white text
 where black reads better. It compares both candidates now.
 
+## EraDisplayColors.swift::panel-tint — fixed lightness, not fixed opacity
+
+The songs panel used to be the cover's dominant colour at 8% over the page. Over OLED
+black that is 0.08 × cover, so the panel was as bright as the cover: light covers
+(808s, Watch The Throne) showed a grey or gold panel and dark or blue ones (JESUS IS
+KING, WAR) were black. `panel` now takes `lsCard`'s OKLab lightness and keeps only the
+cover's hue. Chroma is capped at 0.028 (dark) / 0.018 (light), just under the sRGB gamut
+edge at that lightness for every hue, so no hue clips and every era tints equally.
+`readableHeader` is checked against the panel, the surface it is drawn on.
+
 ## EraDisplayColors.swift::adaptive-dimming — dark dimming scales with the cover
 
 The dark card is the cover colour multiplied down toward black. A fixed 0.55/0.40
