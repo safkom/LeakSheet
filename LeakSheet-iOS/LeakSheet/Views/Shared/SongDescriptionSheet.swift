@@ -122,6 +122,11 @@ struct SongDescriptionSheet: View {
         active.version.isStreamable
     }
 
+    /// The active version's id without a chosen source, as song lists and picker chips carry it.
+    private var activeBaseID: String {
+        active.version.playing(nil).id
+    }
+
     /// Play the sheet's version. When the full song is known, hand the player
     /// the song's streamable versions as a list so playback continues instead
     /// of stopping after this one track.
@@ -131,10 +136,11 @@ struct SongDescriptionSheet: View {
             // allVersions: a filtered copy would queue only the versions that
             // matched the badge filter, so playback stopped after one track.
             let streamable = song.allVersions.filter(\.isStreamable)
-            if let idx = streamable.firstIndex(where: { $0.id == active.version.id }) {
-                let items = streamable.map {
+            if let idx = streamable.firstIndex(where: { $0.id == activeBaseID }) {
+                let items = streamable.enumerated().map { i, version in
                     PlaybackListItem(
-                        version: $0,
+                        // The sheet's version keeps its chosen source.
+                        version: i == idx ? active.version : version,
                         artistName: payload.artistName,
                         eraName: active.eraName,
                         artUrl: active.eraArt ?? "",
@@ -275,6 +281,18 @@ struct SongDescriptionSheet: View {
                         // metadata API with live-player fallback.
                         if active.version.streamableLink != nil {
                             FileInfoSection(version: active.version)
+                        }
+
+                        if active.version.streamableLinks.count > 1 {
+                            SourcesSection(
+                                version: active.version,
+                                playingLink: player.isNowPlaying(active.version, inEra: active.eraName)
+                                    ? player.currentTrack?.streamableLink : nil
+                            ) { link in
+                                // Stays open so sources can be compared.
+                                active.version = active.version.playing(link)
+                                play()
+                            }
                         }
 
                         // Story — the tracker's notes are the main learning
@@ -540,7 +558,7 @@ struct SongDescriptionSheet: View {
     }
 
     private func isActive(_ entry: ArtistViewModel.CrossEraVersion) -> Bool {
-        entry.version.id == active.version.id && entry.eraName == active.eraName
+        entry.version.id == activeBaseID && entry.eraName == active.eraName
     }
 
     private func versionChip(_ entry: ArtistViewModel.CrossEraVersion, showsTitle: Bool) -> some View {

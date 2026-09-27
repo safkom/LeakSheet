@@ -329,6 +329,9 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let sources: [SourceRef]?
     /// Fan star rating 1-5 extracted from the availability cell.
     let rating: Int?
+    /// The source the user (or the recents list) picked to play; nil plays the
+    /// first playable link. Local only: not in CodingKeys.
+    private(set) var chosenLink: String? = nil
 
     /// Memberwise init with every field but `name` defaulted to nil — most
     /// callers (favourites, misc entries) only ever populate a handful.
@@ -389,8 +392,37 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// Name + tag alone is not unique (untagged same-name versions are common);
-    /// the file link tells them apart.
-    var id: String { "\(name)::\(versionTag ?? "")::\(links?.first ?? "")" }
+    /// the file link tells them apart. A chosen source is a different track to the player.
+    var id: String { "\(name)::\(versionTag ?? "")::\(chosenLink ?? links?.first ?? "")" }
+
+    /// This version set to play `link` (nil: its first playable link).
+    func playing(_ link: String?) -> SongVersion {
+        var copy = self
+        copy.chosenLink = link
+        return copy
+    }
+
+    /// Every playable link, in sheet order.
+    var streamableLinks: [String] {
+        var seen = Set<String>()
+        return (links ?? []).filter { link in
+            StreamResolver.isStreamableURL(link)
+                && !(URL(string: link).map { Self.pathHasNonAudioExtension($0.path) } ?? false)
+                && seen.insert(link).inserted
+        }
+    }
+
+    /// The link a recent leak most likely refers to. Snippet-type rows append each new
+    /// leak after the older ones; a full file's row leads with the file itself
+    /// (DECISIONS.md::Models.swift::recent-leak-link).
+    var recentLeakLink: String? {
+        guard (links?.count ?? 0) > 1 else { return nil }
+        let links = streamableLinks
+        guard links.count > 1 else { return nil }
+        let availability = availableLength?.lowercased() ?? ""
+        let appendsLeaks = ["snippet", "partial", "stem"].contains { availability.contains($0) }
+        return appendsLeaks ? links.last : nil
+    }
 
     /// File extensions that identify the linked file as NOT playable audio: such a
     /// version hides Play actions and opens the description sheet instead.
@@ -417,6 +449,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     var streamableLink: String? {
+        if let chosenLink { return chosenLink }
         guard let links else { return nil }
         return links.first { StreamResolver.isStreamableURL($0) }
     }

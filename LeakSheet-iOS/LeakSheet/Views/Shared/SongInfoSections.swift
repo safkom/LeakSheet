@@ -3,6 +3,99 @@ import SwiftUI
 /// The two self-contained sections of the song description sheet, each its own
 /// SwiftUI invalidation boundary.
 
+// MARK: - Sources section
+
+/// A version's playable links, each playable on its own: one row can carry several
+/// snippets or rips, and the first is not always the one wanted.
+struct SourcesSection: View {
+    let version: SongVersion
+    /// The link currently playing from this version, if any.
+    let playingLink: String?
+    let onPlay: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Sources")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(Array(version.streamableLinks.enumerated()), id: \.element) { index, link in
+                    SourceRow(
+                        number: index + 1, link: link,
+                        isSelected: version.streamableLink == link,
+                        isPlaying: playingLink == link,
+                        play: { onPlay(link) }
+                    )
+                }
+            }
+            .background(Color.lsCard)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+}
+
+private struct SourceRow: View {
+    let number: Int
+    let link: String
+    let isSelected: Bool
+    let isPlaying: Bool
+    let play: () -> Void
+
+    @State private var summary: String?
+
+    var body: some View {
+        Button(action: play) {
+            HStack(spacing: 10) {
+                Image(systemName: isPlaying ? "speaker.wave.2.fill" : "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.lsAccent)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Source \(number) · \(Format.shortHost(link))")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    if let summary {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.lsAccent)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(minHeight: Metrics.hitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Source \(number), \(Format.shortHost(link))")
+        .accessibilityValue([summary, isPlaying ? "Now playing" : nil].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityHint("Plays this source")
+        .task(id: link) {
+            // try?: a missing summary only leaves the row unlabelled.
+            guard let meta = try? await APIClient.shared.fetchMetadata(for: link) else { return }
+            summary = Self.summary(of: meta)
+        }
+    }
+
+    /// "WAVE · 1536 kbps · 2:49", or the uploaded file's name when that is all the host gives.
+    static func summary(of meta: FileMetadata) -> String? {
+        let parts = [
+            meta.container,
+            FileInfoRows.roundedNumeric(meta.bitrate),
+            meta.duration.map(FileInfoRows.formatDuration),
+        ].compactMap { $0 }.filter { !$0.isEmpty }
+        if !parts.isEmpty { return parts.joined(separator: " · ") }
+        return meta.filename
+    }
+}
+
 // MARK: - File Info section
 
 /// Stream file info (container, codec, bitrate, sample rate, …) for the version's

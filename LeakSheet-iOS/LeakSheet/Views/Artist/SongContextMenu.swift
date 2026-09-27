@@ -42,6 +42,22 @@ struct SongContextMenu: View {
             } label: {
                 Label("Add to Queue", systemImage: "text.append")
             }
+            let sources = version.streamableLinks
+            if sources.count > 1 {
+                Menu {
+                    ForEach(Array(sources.enumerated()), id: \.element) { index, link in
+                        Button {
+                            player.playTrack(version.playing(link), artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+                        } label: {
+                            // The checkmark marks the source Play uses.
+                            Label("Source \(index + 1) · \(Format.shortHost(link))",
+                                  systemImage: version.streamableLink == link ? "checkmark" : "play")
+                        }
+                    }
+                } label: {
+                    Label("Play Source", systemImage: "square.stack")
+                }
+            }
         }
         // A payload with no Song is still favouritable: Now Playing, the player's
         // description sheet and content-tab rows all carry a bare version.

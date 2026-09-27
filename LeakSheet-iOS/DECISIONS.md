@@ -434,6 +434,17 @@ the pinned literal tests keep their meaning.
 crossover is near 0.179, so every mid-tone backdrop in between got white text
 where black reads better. It compares both candidates now.
 
+## Models.swift::recent-leak-link — which link a recent leak played
+
+A row can carry several links: Ye's "Living So Italian [V1]" has five, LQ MP3 snippets
+from 2019/2023 followed by the lossless WAV snippets that leaked on the row's leak date.
+Playing `links.first` from Recents played a 2019 MP3. Across the 106 multi-link Ye rows
+that leaked in 2025-26 (checked through imgur.gg file names), Snippet / Partial / Stem
+Bounce rows append each new leak after the older ones, while Full / OG File rows lead with
+the complete file and trail older snippets. So Recents play the last playable link of a
+snippet-type row and the first otherwise; the Sources list and "Play Source" menu cover
+the rest.
+
 ## EraDisplayColors.swift::panel-tint — fixed lightness, not fixed opacity
 
 The songs panel used to be the cover's dominant colour at 8% over the page. Over OLED
