@@ -26,7 +26,9 @@ nonisolated struct EraDisplayColors: Equatable, Sendable {
     /// Card background gradient endpoints.
     let gradientTop: Color
     let gradientBottom: Color
-    /// Era-name group headers on the app background (recents/misc lists).
+    /// Songs-panel fill (SongPanel): lsCard's lightness in the cover's hue.
+    let panel: Color
+    /// Era-name group headers, on the panel and on the page (recents/misc lists).
     let readableHeader: Color
 
     // The color helpers (rgbComponents, preferredText, ensureReadable) are
@@ -59,6 +61,9 @@ nonisolated struct EraDisplayColors: Equatable, Sendable {
         let effective = topSolid.relativeLuminance(in: scheme) >= bottomSolid.relativeLuminance(in: scheme)
             ? topSolid : bottomSolid
         let title = Color.preferredText(on: effective, in: scheme)
+        // Chroma caps sit under sRGB's gamut edge at lsCard's lightness for every hue
+        // (DECISIONS.md::EraDisplayColors.swift::panel-tint).
+        let panel = dominant.tint(lightnessOf: .lsCard, maxChroma: scheme == .dark ? 0.028 : 0.018, in: scheme)
         return EraDisplayColors(
             dominant: dominant,
             title: title,
@@ -66,7 +71,10 @@ nonisolated struct EraDisplayColors: Equatable, Sendable {
             border: title.opacity(0.18),
             gradientTop: top,
             gradientBottom: bottom,
-            readableHeader: dominant.ensureReadable(against: .lsBackground, in: scheme)
+            panel: panel,
+            // The panel is lighter than the page in dark mode and darker in light, so
+            // clearing AA on the panel clears it on the page too.
+            readableHeader: dominant.ensureReadable(against: panel, in: scheme)
         )
     }
 }

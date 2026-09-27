@@ -268,6 +268,40 @@ extension Color {
         )
     }
 
+    /// OKLab (Björn Ottosson) of the resolved sRGB colour.
+    private func oklab(in scheme: ColorScheme) -> (L: Double, a: Double, b: Double) {
+        let (r, g, b) = rgbComponents(in: scheme)
+        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let (lr, lg, lb) = (linear(r), linear(g), linear(b))
+        let l = cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb)
+        let m = cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb)
+        let s = cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb)
+        return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+                1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+    }
+
+    /// This colour's hue at `reference`'s perceptual lightness, chroma capped at
+    /// `maxChroma`: a black cover tints as visibly as a white one.
+    func tint(lightnessOf reference: Color, maxChroma: Double, in scheme: ColorScheme = .dark) -> Color {
+        let lightness = reference.oklab(in: scheme).L
+        let (_, a0, b0) = oklab(in: scheme)
+        let chroma = (a0 * a0 + b0 * b0).squareRoot()
+        let k = chroma > 0 ? min(1, maxChroma / chroma) : 0
+        let (a, b) = (a0 * k, b0 * k)
+        func cube(_ x: Double) -> Double { x * x * x }
+        let l = cube(lightness + 0.3963377774 * a + 0.2158037573 * b)
+        let m = cube(lightness - 0.1055613458 * a - 0.0638541728 * b)
+        let s = cube(lightness - 0.0894841775 * a - 1.2914855480 * b)
+        func encode(_ c: Double) -> Double {
+            let c = min(max(c, 0), 1)
+            return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1 / 2.4) - 0.055
+        }
+        return Color(red: encode(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+                     green: encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+                     blue: encode(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
+    }
+
     // MARK: - Filter-specific accent colors
 
     static let filterBestOf = tone(hue: 45 / 360, saturation: 0.85, brightness: 0.90, lightBrightness: 0.46)

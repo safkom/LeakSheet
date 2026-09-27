@@ -57,9 +57,7 @@ jobs:
             -project LeakSheet.xcodeproj \
             -scheme LeakSheet \
             -destination "id=$SIM_UDID" \
-            CODE_SIGNING_ALLOWED=NO \
-            OTHER_SWIFT_FLAGS='$(inherited) -DSDK_WITHOUT_TOOLBAR_MINIMIZE'
-          # ^ the image's Xcode 27 beta 6 lacks toolbarMinimizeBehavior; see ArtistView.swift.
+            CODE_SIGNING_ALLOWED=NO
 
   live:
     name: Live invariants (latest data)

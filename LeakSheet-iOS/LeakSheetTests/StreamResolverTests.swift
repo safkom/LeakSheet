@@ -152,3 +152,34 @@ struct StreamResolverTests {
         #expect(proxied.contains("usp%3Ddrive_copy"))
     }
 }
+
+/// Which of a row's several links plays.
+struct VersionSourceTests {
+    private static let snippets = [
+        "https://pillows.su/f/old-lq",
+        "https://www.youtube.com/watch?v=sampled-song",
+        "https://pillows.su/f/old-lq",
+        "https://imgur.gg/f/new-lossless",
+    ]
+
+    @Test func `sources are the playable links, deduplicated, in sheet order`() {
+        let v = SongVersion(name: "Song", links: Self.snippets)
+        #expect(v.streamableLinks == ["https://pillows.su/f/old-lq", "https://imgur.gg/f/new-lossless"])
+    }
+
+    @Test func `a recent snippet leak plays the newest link, a full file its first`() {
+        #expect(SongVersion(name: "S", availableLength: "Snippet", links: Self.snippets).recentLeakLink
+                == "https://imgur.gg/f/new-lossless")
+        #expect(SongVersion(name: "S", availableLength: "Full", links: Self.snippets).recentLeakLink == nil)
+        #expect(SongVersion(name: "S", availableLength: "Snippet", links: ["https://pillows.su/f/one"]).recentLeakLink == nil)
+    }
+
+    @Test func `a chosen source plays and is its own track, without changing the row's links`() {
+        let v = SongVersion(name: "S", versionTag: "V1", links: Self.snippets)
+        let chosen = v.playing("https://imgur.gg/f/new-lossless")
+        #expect(chosen.streamableLink == "https://imgur.gg/f/new-lossless")
+        #expect(chosen.links == v.links)
+        #expect(chosen.id != v.id)
+        #expect(chosen.playing(nil) == v)
+    }
+}

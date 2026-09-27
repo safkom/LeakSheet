@@ -193,6 +193,11 @@ struct EraDisplayColorsContrastTests {
         (Color(hex: 0x7A7A7A), "mid grey"),
         (Color(hex: 0xC9A227), "gold"),
         (Color(hex: 0x2F6B4F), "forest"),
+        (Color(hex: 0x000000), "black"),
+        (Color(hex: 0xFFFFFF), "white"),
+        (Color(hex: 0x1227B7), "royal blue"),
+        (Color(hex: 0x7E5797), "purple"),
+        (Color(hex: 0x9E3A25), "brick"),
     ]
 
     @Test("Card title clears AA on both gradient stops", arguments: [ColorScheme.dark, .light])
@@ -204,6 +209,34 @@ struct EraDisplayColorsContrastTests {
                 #expect(ratio >= 4.5, "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)")
             }
         }
+    }
+
+    /// A fixed-opacity wash of the cover made the panel as dark as the cover: black
+    /// and blue covers left an invisible panel while light ones showed a grey one.
+    @Test("Songs panel lightness does not depend on the cover", arguments: [ColorScheme.dark, .light])
+    func panelLightness(scheme: ColorScheme) {
+        let card = Color.lsCard.relativeLuminance(in: scheme)
+        for (dominant, label) in Self.dominants {
+            let panel = EraDisplayColors.derive(from: dominant, in: scheme).panel
+            let ratio = panel.relativeLuminance(in: scheme) / card
+            #expect(abs(ratio - 1) < 0.1, "\(label) panel luminance is \(String(format: "%.2f", ratio))x lsCard in \(scheme)")
+        }
+    }
+
+    @Test("Era header clears AA on the songs panel and on the page", arguments: [ColorScheme.dark, .light])
+    func headerContrast(scheme: ColorScheme) {
+        for (dominant, label) in Self.dominants {
+            let colors = EraDisplayColors.derive(from: dominant, in: scheme)
+            for (backdrop, which) in [(colors.panel, "panel"), (Color.lsBackground, "page")] {
+                let ratio = colors.readableHeader.contrastRatio(against: backdrop, in: scheme)
+                #expect(ratio >= 4.5, "\(label) header on \(which): \(String(format: "%.2f", ratio)):1 in \(scheme)")
+            }
+        }
+    }
+
+    @Test func `a neutral cover gives a neutral panel`() {
+        let (r, g, b) = Color.black.tint(lightnessOf: Color(hex: 0x0F0F0F), maxChroma: 0.028).rgbComponents()
+        #expect(abs(r - 15 / 255) < 1.5 / 255 && abs(g - r) < 1e-3 && abs(b - r) < 1e-3)
     }
 }
 

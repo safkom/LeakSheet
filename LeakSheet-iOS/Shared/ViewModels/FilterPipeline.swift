@@ -218,8 +218,9 @@ extension ArtistViewModel {
                         .compactMap { $0 }
                         .first { !$0.isEmpty }
                     guard let dateStr else { continue }
+                    // Recents play the link that leaked on this date, not the row's oldest.
                     results.append(RecentResult(
-                        song: song, version: version, era: era,
+                        song: song, version: version.playing(version.recentLeakLink), era: era,
                         timestamp: parseLeakDate(dateStr), songOrdinal: songOrdinal
                     ))
                 }

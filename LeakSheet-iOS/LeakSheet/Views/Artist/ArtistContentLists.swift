@@ -184,9 +184,10 @@ struct SearchResultsListView: View {
                         eraName: result.era.name, eraArt: result.era.artUrl
                     ))
                 }
-                // Same tinted panel the eras branch uses; the tail rounds where the era changes.
+                // Same panel the eras branch uses; each era's run rounds at both ends.
                 .songPanel(
                     vm.eraDisplay[result.era.name],
+                    isFirst: idx == 0 || results[idx - 1].era.name != result.era.name,
                     isLast: idx == results.count - 1
                         || results[idx + 1].era.name != result.era.name
                 )
@@ -519,13 +520,16 @@ struct RecentsListView: View {
             ForEach(visible.enumerated(), id: \.element.id) { idx, result in
               // Single root: LazyVStack can only template row identity from the ForEach ids
               // when the body is unary (see ArtistRowViews.swift).
+              let startsGroup = idx == 0 || visible[idx - 1].era.name != result.era.name
               VStack(spacing: 0) {
                 // Era group header — show when era changes
-                if idx == 0 || visible[idx - 1].era.name != result.era.name {
+                if startsGroup {
                     HStack(spacing: 8) {
                         Text(result.era.name.uppercased())
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(vm.eraDisplay[result.era.name]?.readableHeader ?? .secondary)
+                            // The name wins the row; the rule takes what is left.
+                            .layoutPriority(1)
                         Rectangle()
                             .fill(Color.lsBorder)
                             .frame(height: 1)
@@ -535,54 +539,58 @@ struct RecentsListView: View {
                     .padding(.bottom, 2)
                 }
 
-                // Date label — show only when different from previous
-                let prevDate = idx > 0 ? (visible[idx - 1].version.leakDate ?? visible[idx - 1].version.fileDate) : nil
-                let thisDate = result.version.leakDate ?? result.version.fileDate
-                if let date = thisDate, !date.isEmpty, date != prevDate {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(date)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                }
-
-                SongRowView(
-                    song: result.song,
-                    version: result.version,
-                    artistName: artistName,
-                    artistSlug: artistSlug,
-                    sourceUrl: sourceUrl,
-                    eraName: result.era.name,
-                    eraArt: result.era.artUrl,
-                    showVersionBadge: true,
-                    // Swipe-to-play continues down the recents list like tap.
-                    onPlay: { _ in
-                        if let (items, idx) = vm.recentPlayback(for: result.id) {
-                            player.playInList(items, startAt: idx)
+                // Date label (only when it changes) sits inside the panel, so a group
+                // reads as one surface.
+                VStack(spacing: 0) {
+                    let prevDate = idx > 0 ? (visible[idx - 1].version.leakDate ?? visible[idx - 1].version.fileDate) : nil
+                    let thisDate = result.version.leakDate ?? result.version.fileDate
+                    if let date = thisDate, !date.isEmpty, date != prevDate {
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(date)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer()
                         }
-                    },
-                    onShowDescription: onShowDescription
-                )
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
-                // Tap opens Details, never plays — see handleSongTap.
-                .onTapGesture {
-                    onShowDescription(DescriptionSheet.Payload(
-                        song: result.song, version: result.version,
-                        artistName: artistName, artistSlug: artistSlug,
-                        eraName: result.era.name, eraArt: result.era.artUrl
-                    ))
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                    }
+
+                    SongRowView(
+                        song: result.song,
+                        version: result.version,
+                        artistName: artistName,
+                        artistSlug: artistSlug,
+                        sourceUrl: sourceUrl,
+                        eraName: result.era.name,
+                        eraArt: result.era.artUrl,
+                        showVersionBadge: true,
+                        // Swipe-to-play continues down the recents list like tap.
+                        onPlay: { _ in
+                            if let (items, idx) = vm.recentPlayback(for: result.id) {
+                                player.playInList(items, startAt: idx)
+                            }
+                        },
+                        onShowDescription: onShowDescription
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
+                    // Tap opens Details, never plays — see handleSongTap.
+                    .onTapGesture {
+                        onShowDescription(DescriptionSheet.Payload(
+                            song: result.song, version: result.version,
+                            artistName: artistName, artistSlug: artistSlug,
+                            eraName: result.era.name, eraArt: result.era.artUrl
+                        ))
+                    }
                 }
-                // Same tinted panel as the eras branch; the tail rounds where
-                // the era group ends.
+                // Same panel as the eras branch; no card above it, so the group rounds
+                // at both ends.
                 .songPanel(
                     vm.eraDisplay[result.era.name],
+                    isFirst: startsGroup,
                     isLast: idx == visible.count - 1
                         || visible[idx + 1].era.name != result.era.name
                 )
