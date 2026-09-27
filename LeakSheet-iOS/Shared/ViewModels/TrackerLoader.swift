@@ -86,9 +86,10 @@ final class TrackerLoader {
                 return cached
             }
             withAnimation { error = "This tracker is taking a while to load. Please try again." }
-        } catch is DecodingError {
+        } catch let decodingError as DecodingError {
             // The server answered, but with data this build can't read. Not
             // an outage, so don't say "couldn't reach the server".
+            Telemetry.report("Tracker payload did not decode: \(decodingError)", category: "TrackerLoader", attributes: ["tracker": trimmed])
             if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
                 staleNotice = "Couldn't read the latest data — showing the last saved copy."
                 return cached
@@ -105,6 +106,9 @@ final class TrackerLoader {
                 return cached
             }
             withAnimation { self.error = error.localizedDescription }
+        }
+        if let error {
+            Telemetry.report("Tracker load failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed])
         }
         return nil
     }
@@ -204,6 +208,7 @@ final class TrackerLoader {
             recents.saveTracker(artist: result.artist)
             return result.artist
         } catch {
+            Telemetry.report("Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed])
             withAnimation { self.error = "Failed to load tracker" }
             return nil
         }

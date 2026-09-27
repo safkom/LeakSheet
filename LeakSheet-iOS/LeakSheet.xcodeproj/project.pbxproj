@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E3C0000100000000000000A1 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E3C0000100000000000000B1 /* Sentry */; };
+		E3C0000100000000000000A2 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E3C0000100000000000000B2 /* Sentry */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E3AA00052F8D29B40029C2D5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -73,6 +78,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E3C0000100000000000000A1 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -87,6 +93,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E3C0000100000000000000A2 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -135,6 +142,7 @@
 			);
 			name = LeakSheet;
 			packageProductDependencies = (
+				E3C0000100000000000000B1 /* Sentry */,
 			);
 			productName = LeakSheet;
 			productReference = E30045932F8D29B40029C2D5 /* LeakSheet.app */;
@@ -180,6 +188,7 @@
 			);
 			name = LeakSheetTV;
 			packageProductDependencies = (
+				E3C0000100000000000000B2 /* Sentry */,
 			);
 			productName = LeakSheetTV;
 			productReference = E3B00002AAAA0000AAAA0002 /* LeakSheetTV.app */;
@@ -216,6 +225,9 @@
 			);
 			mainGroup = E300458A2F8D29B40029C2D5;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E3C0000100000000000000C1 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E30045942F8D29B40029C2D5 /* Products */;
 			projectDirPath = "";
@@ -641,6 +653,29 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+/* Begin XCRemoteSwiftPackageReference section */
+		E3C0000100000000000000C1 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.29.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E3C0000100000000000000B1 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E3C0000100000000000000C1 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+		E3C0000100000000000000B2 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E3C0000100000000000000C1 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E300458B2F8D29B40029C2D5 /* Project object */;
 }
