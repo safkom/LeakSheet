@@ -54,6 +54,11 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     # Process-global state keyed by tracker URL must not leak between tests.
     monkeypatch.setattr(api, "_revalidate_backoff", {})
     monkeypatch.setattr(fetcher, "_host_refresh", None)
+    # /trackers state: a failed ArtistGrid fetch arms a 60 s backoff that would
+    # hand every later /trackers test the seed fallback.
+    monkeypatch.setattr(api, "_trackers_cache", api.TTLCache(ttl=3600.0, max_entries=1))
+    monkeypatch.setattr(api, "_trackers_stale", None)
+    monkeypatch.setattr(api, "_trackers_fail_until", 0.0)
     return cache_dir
 
 
