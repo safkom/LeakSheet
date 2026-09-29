@@ -40,6 +40,14 @@ def test_undecodable_bytes_never_match():
     assert not fetcher.same_artwork(b"<html>403</html>", _art(1, 340))
 
 
+def test_oversized_image_is_refused_before_decode(monkeypatch):
+    # The pixel cap is read from the header: a decompression bomb (tiny file, huge
+    # canvas) must never be decoded. Lowered here so the test image stays small.
+    monkeypatch.setattr(fetcher, "MAX_DECODE_PIXELS", 340 * 340 - 1)
+    assert fetcher._dhash(_art(1, 340)) is None
+    assert not fetcher.same_artwork(_art(1, 340), _art(1, 340))
+
+
 def test_only_matching_covers_are_adopted(monkeypatch):
     images = {
         "main-a": _art(1, 102, "JPEG"), "tab-a": _art(1, 340),   # same art: upgrade

@@ -39,6 +39,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import StreamingResponse
 
 from src.config import (
+    ARTISTGRID_URL,
     USER_AGENT,
     curated_host_allowed,
 )
@@ -60,12 +61,14 @@ from src.fetcher import (
     content_hash,
     DEFAULT_CACHE_TTL,
     InvalidURLError,
+    MAX_DECODE_PIXELS,
     NetworkError,
     NoTablesError,
     ParseError,
     PhaseTimer,
     STALE_CACHE_TTL,
     stale_parsed_cache_urls,
+    unlink_if_older,
 )
 from src.streaming import (
     ALLOWED_STREAM_HOSTS,
@@ -1013,6 +1016,8 @@ async def clear_fetch_cache(request: Request):
 # See docs/decisions.md::api.py — image width buckets
 _IMAGE_SIZE_BUCKETS = (128, 320, 640, 1280, 1600)
 _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
+# An alias outlives its thumbnails: an offline client can hold a weeks-old payload.
+_IMAGE_ALIAS_TTL = 30 * 86400
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
 # Concurrent Pillow decodes: each can hold a 15MB input plus a 20MP decode (~80MB
@@ -1032,7 +1037,7 @@ def _resize_slot() -> asyncio.Semaphore:
 _IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
 # Compressed size says nothing about decoded size, so cap decoded pixels too,
 # checked from the header before the full-frame load() below.
-_IMAGE_MAX_DECODE_PIXELS = 20_000_000  # ~80MB peak as RGBA
+_IMAGE_MAX_DECODE_PIXELS = MAX_DECODE_PIXELS  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
 # sheets-images 302s to login for N>0, so those take the Pillow path.
@@ -1186,7 +1191,13 @@ def _maybe_evict_image_cache() -> None:
 
 
 def _evict_image_cache() -> None:
-    """Drop oldest resized images (by mtime) once the cache exceeds the cap."""
+    """Drop oldest resized images (by mtime) once the cache exceeds the cap, and
+    cover aliases no parse has re-written in _IMAGE_ALIAS_TTL."""
+    # Every warm re-writes the alias of each URL still in the sheet, and cover tokens
+    # rotate, so without this sweep the directory gains a file per era per re-parse.
+    alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
+    for alias in CACHE_DIR.glob("imgalias_*.txt"):
+        unlink_if_older(alias, alias_cutoff)
     entries = []
     total = 0
     for bin_path in CACHE_DIR.glob("img_*.bin"):
@@ -1253,6 +1264,19 @@ def _image_request_headers(url: str) -> dict[str, str]:
     if _is_allowed_domain(url, set(), _GOOGLE_IMAGE_DOMAINS):
         return {"Referer": "https://docs.google.com/"}
     return {}
+
+
+def _log_upstream_failure(what: str, url: str, exc: Exception) -> None:
+    """Log a proxy failure: an unreachable upstream is a WARNING, anything else a bug.
+
+    A host timing out or failing DNS is not ours to fix, and at ERROR the GlitchTip
+    logging integration files it as an issue.
+    """
+    # NetworkError: fetcher's wrapper for an upstream non-200 or transport failure.
+    if isinstance(exc, (httpx.TransportError, NetworkError)):
+        logger.warning("%s: upstream unreachable for %s: %r", what, url[:80], exc)
+    else:
+        logger.error("%s for %s: %s", what, url[:80], exc, exc_info=exc)
 
 
 _ERA_ART_WARM_CONCURRENCY = 3
@@ -1438,7 +1462,7 @@ async def proxy_image(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Image proxy error: %s", e)
+        _log_upstream_failure("Image proxy error", url, e)
         raise HTTPException(status_code=502, detail="Image proxy error")
 
 
@@ -1759,7 +1783,7 @@ async def proxy_metadata(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Metadata proxy error: %s", e)
+        _log_upstream_failure("Metadata proxy error", meta_url, e)
         raise HTTPException(status_code=502, detail="Metadata fetch failed")
 
 
@@ -1837,7 +1861,7 @@ async def list_trackers():
             },
         )
     except Exception as e:
-        logger.exception("ArtistGrid fetch failed: %s", e)
+        _log_upstream_failure("ArtistGrid fetch failed", ARTISTGRID_URL, e)
         _trackers_fail_until = time.monotonic() + _TRACKERS_FAIL_BACKOFF_S
         return _trackers_fallback_response()
 
@@ -2031,7 +2055,7 @@ async def proxy_stream(
         logger.warning("Stream error for %s: %s", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
     except Exception as e:
-        logger.exception("Stream error for %s: %s", stream_url, e)
+        _log_upstream_failure("Stream error", stream_url, e)
         raise HTTPException(status_code=502, detail="Upstream error")
 
     # Permission-required/private gdrive files come back from stream_audio

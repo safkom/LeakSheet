@@ -152,7 +152,9 @@ class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
                         raise ValueError(
                             f"blocked non-public address {info[4][0]} for host {host}"
                         )
-        except ValueError as exc:
+        # OSError: getaddrinfo's socket.gaierror. Unwrapped, it slips past every
+        # `except httpx.HTTPError` and a DNS blip becomes a 500.
+        except (ValueError, OSError) as exc:
             raise httpx.ConnectError(str(exc), request=request) from exc
         return await super().handle_async_request(request)
 
@@ -789,7 +791,7 @@ async def stream_audio(
             if resp.status_code == 403:
                 return resp
             if resp.status_code not in (200, 206, 416):
-                logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
+                logger.warning("Upstream %s returned HTTP %s", stream_url, resp.status_code)
                 raise UpstreamStatusError(resp.status_code)
             ct = resp.headers.get("content-type", "")
             if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
@@ -825,7 +827,7 @@ async def stream_audio(
         # 416 passes through so the API layer can relay it as a real 416
         # (Range Not Satisfiable) instead of a generic upstream error.
         if resp.status_code not in (200, 206, 416):
-            logger.error("Upstream %s returned HTTP %s", stream_url, resp.status_code)
+            logger.warning("Upstream %s returned HTTP %s", stream_url, resp.status_code)
             raise UpstreamStatusError(resp.status_code)
 
         if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
