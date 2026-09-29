@@ -79,6 +79,8 @@ _SHEET_EVICT_MIN_INTERVAL = 60.0  # scan the dir at most once a minute
 _last_sheet_evict = 0.0
 # tempfile.mkstemp(prefix=f"{name}.tmp") → "abc.html.tmpQ7z1zK".
 _TMP_SUFFIX_RE = re.compile(r"\.tmp[A-Za-z0-9_]{6,}$")
+# A live atomic write lasts milliseconds; one this old was abandoned by a killed worker.
+_ORPHAN_TMP_AGE_S = 3600.0
 
 # Concurrent sub-page fetches across ALL callers. Each holds a body of up to
 # ~12 MB, so one semaphore in _fetch_gid_page bounds every fan-out site.
@@ -810,14 +812,16 @@ def _evict_sheet_cache() -> None:
         return
     groups: dict[str, list[tuple[float, int, Path]]] = {}
     total = 0
+    orphan_cutoff = time.time() - _ORPHAN_TMP_AGE_S
     for path in CACHE_DIR.iterdir():
+        # Never group an atomic write (`abc.html.tmpQ7z1` would join entry "abc" and be
+        # unlinked mid-write); only age out the orphans, image-cache ones included.
+        if _TMP_SUFFIX_RE.search(path.name):
+            unlink_if_older(path, orphan_cutoff)
+            continue
         # img_* is the image cache (own cap); imgalias_* are the pointers old cover URLs
         # resolve through, and evicting them brings back expired-token failures.
         if not path.is_file() or path.name.startswith(("img_", "imgalias_")) or path.name.endswith(".lock"):
-            continue
-        # Skip in-flight atomic writes: `abc.html.tmpQ7z1` would group with entry "abc"
-        # and be unlinked mid-write.
-        if _TMP_SUFFIX_RE.search(path.name):
             continue
         try:
             stat = path.stat()
@@ -840,6 +844,15 @@ def _evict_sheet_cache() -> None:
                 victim.unlink()
             except OSError:
                 pass
+
+
+def unlink_if_older(path: Path, cutoff: float) -> None:
+    """Delete *path* if its mtime is before *cutoff*; a vanished file is fine."""
+    try:
+        if path.stat().st_mtime < cutoff:
+            path.unlink()
+    except OSError:
+        pass
 
 
 def _maybe_evict_sheet_cache() -> None:
@@ -1580,6 +1593,10 @@ _ART_COMPARE_CONCURRENCY = 8
 _ART_FETCH_TIMEOUT = 10.0
 # Same ceiling as the image proxy: the decode runs in a worker thread, not unbounded.
 _ART_MAX_BYTES = 25 * 1024 * 1024
+# Compressed size says nothing about decoded size: a 0.5 MB PNG can be 144 MP (~700 MB
+# decoded), and Pillow only refuses above ~179 MP. Checked from the header, before
+# any decode. Shared with the image proxy.
+MAX_DECODE_PIXELS = 20_000_000
 
 
 def _dhash(data: bytes, size: int = 16) -> int | None:
@@ -1588,6 +1605,8 @@ def _dhash(data: bytes, size: int = 16) -> int | None:
 
     try:
         with Image.open(io.BytesIO(data)) as img:
+            if img.width * img.height > MAX_DECODE_PIXELS:
+                return None
             img.draft("L", (size * 4, size * 4))
             pixels = img.convert("L").resize((size + 1, size)).tobytes()
     except (OSError, ValueError, Image.DecompressionBombError):

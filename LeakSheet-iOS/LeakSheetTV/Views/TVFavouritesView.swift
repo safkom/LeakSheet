@@ -101,7 +101,11 @@ struct TVFavouritesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    DedupedBadgePills(quality: entry.quality, availability: entry.availableLength)
+                    // New entries keep these in primaryVersion; the flat fields are legacy-only.
+                    DedupedBadgePills(
+                        quality: entry.primaryVersion?.quality ?? entry.quality,
+                        availability: entry.primaryVersion?.availableLength ?? entry.availableLength
+                    )
                 }
 
                 Spacer()

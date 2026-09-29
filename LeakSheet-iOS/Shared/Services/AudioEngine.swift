@@ -497,7 +497,7 @@ final class AudioEngine {
                         self.duration = dur.seconds
                     }
                     // Read format info from the MainActor-held current item, not the KVO-captured one
-                    // (AVPlayerItem is not Sendable); a stale item is caught by the track guard.
+                    // (AVPlayerItem is not Sendable); a stale item is caught by the track and item guard.
                     if let currentItem = self.player?.currentItem {
                         Task { await self.captureStreamFormat(for: currentItem) }
                     }
@@ -655,8 +655,10 @@ final class AudioEngine {
             bitrateBps = indicated > 0 ? indicated : nil
         }
 
-        // The track may have advanced while the asset loaded.
-        guard currentTrack?.id == trackKey else { return }
+        // The track may have advanced while the asset loaded, or a quality switch replaced
+        // the item: same track id, other file, and its own capture would then stop at the
+        // trackKey check above and leave this one's format showing.
+        guard currentTrack?.id == trackKey, player?.currentItem === item else { return }
         streamFormat = StreamFormatInfo(
             codec: codec,
             sampleRateHz: sampleRate,

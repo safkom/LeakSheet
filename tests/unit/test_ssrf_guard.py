@@ -6,6 +6,9 @@ server-side; a compromised/poisoned API could point it at an internal host
 requires https and rejects any host that resolves to a non-public address.
 """
 
+import asyncio
+import socket
+
 import httpx
 import pytest
 
@@ -101,3 +104,15 @@ async def test_transport_blocks_literal_private_ip():
     async with httpx.AsyncClient(transport=transport) as client:
         with pytest.raises(httpx.ConnectError, match="non-public"):
             await client.get("http://127.0.0.1:9/x")
+
+
+async def test_transport_wraps_dns_failure_as_connect_error(monkeypatch):
+    # A DNS blip (socket.gaierror) must surface as an httpx error: raw, it slipped past
+    # /sheet's `except httpx.HTTPError` and became a 500 "Internal error".
+    async def dns_down(*_args, **_kwargs):
+        raise socket.gaierror(-3, "Temporary failure in name resolution")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns_down)
+    async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
+        with pytest.raises(httpx.ConnectError, match="name resolution"):
+            await client.get("https://tracker.example/x")

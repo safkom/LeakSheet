@@ -19,10 +19,12 @@ class TestRateLimit:
         api._rate_hits.clear()
         # Pre-fill a bucket; with the limiter disabled it must be ignored.
         api._rate_hits["testclient"] = [time.monotonic()] * 50
+        # A limited path the handler rejects before any upstream call (unsupported
+        # host -> 400), so the test stays offline.
         r = api_client.get(
-            "/trackers", headers={"Origin": "http://example.com"}
+            "/stream?url=https://example.com/x", headers={"Origin": "http://example.com"}
         )
-        assert r.status_code != 429
+        assert r.status_code == 400
         api._rate_hits.clear()
 
     def test_throttled_429_carries_cors_header(self, api_client, monkeypatch):

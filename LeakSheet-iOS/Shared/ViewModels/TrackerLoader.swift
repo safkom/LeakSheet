@@ -50,6 +50,8 @@ final class TrackerLoader {
             cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
         }
 
+        // What went wrong, for telemetry: `error` holds only the user-facing message.
+        var cause: Error?
         do {
             let result = try await APIClient.shared.parseSheet(
                 url: trimmed,
@@ -77,18 +79,22 @@ final class TrackerLoader {
                    let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                     return cached
                 }
+                cause = apiError
                 withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
             case .invalidURL:
+                cause = apiError
                 withAnimation { error = "Invalid URL" }
             }
         } catch let urlError as URLError where urlError.code == .timedOut {
             if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                 return cached
             }
+            cause = urlError
             withAnimation { error = "This tracker is taking a while to load. Please try again." }
         } catch let decodingError as DecodingError {
             // The server answered, but with data this build can't read. Not
-            // an outage, so don't say "couldn't reach the server".
+            // an outage, so don't say "couldn't reach the server". Reported here, before
+            // the fallback: a cached copy hides it from the user, not from us.
             Telemetry.report("Tracker payload did not decode: \(decodingError)", category: "TrackerLoader", attributes: ["tracker": trimmed])
             if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
                 staleNotice = "Couldn't read the latest data — showing the last saved copy."
@@ -105,10 +111,11 @@ final class TrackerLoader {
             if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
                 return cached
             }
+            cause = error
             withAnimation { self.error = error.localizedDescription }
         }
-        if let error {
-            Telemetry.report("Tracker load failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed])
+        if let cause {
+            Telemetry.report("Tracker load failed: \(cause)", category: "TrackerLoader", attributes: ["tracker": trimmed])
         }
         return nil
     }

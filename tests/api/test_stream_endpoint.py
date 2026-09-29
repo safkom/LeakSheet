@@ -8,6 +8,9 @@ ignored, 416 relay, magic-byte MIME correction, and the download disposition.
 
 from __future__ import annotations
 
+import logging
+
+import httpx
 
 import src.api as api
 
@@ -61,6 +64,30 @@ class TestHostResolution:
         monkeypatch.setattr(api, "stream_audio", raiser)
         r = api_client.get("/stream", params={"url": PILLOWS})
         assert r.status_code == 502
+
+
+class TestUpstreamFailureLogging:
+    """An unreachable upstream is a WARNING; only our own bugs reach ERROR, which
+    GlitchTip's logging integration files as an issue."""
+
+    def _api_levels(self, api_client, monkeypatch, caplog, exc):
+        async def raiser(stream_url, *, range_header=None):
+            raise exc
+
+        monkeypatch.setattr(api, "stream_audio", raiser)
+        with caplog.at_level(logging.WARNING, logger="src.api"):
+            r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 502
+        return [rec for rec in caplog.records if rec.name == "src.api"]
+
+    def test_connect_timeout_is_a_warning(self, api_client, monkeypatch, caplog):
+        records = self._api_levels(api_client, monkeypatch, caplog, httpx.ConnectTimeout("timed out"))
+        assert [rec.levelno for rec in records] == [logging.WARNING]
+
+    def test_unexpected_error_is_an_error_with_traceback(self, api_client, monkeypatch, caplog):
+        records = self._api_levels(api_client, monkeypatch, caplog, RuntimeError("our bug"))
+        assert [rec.levelno for rec in records] == [logging.ERROR]
+        assert records[0].exc_info is not None
 
 
 class TestPassthroughAndFull:

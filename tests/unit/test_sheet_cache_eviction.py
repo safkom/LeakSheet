@@ -91,3 +91,43 @@ class TestSheetCacheEviction:
         assert not list(cache_dir.glob("a" * 64 + "*"))
         # …and the throttle timestamp advanced.
         assert fetcher._last_sheet_evict > 0.0
+
+
+def _touch(path, *, age_s: float) -> None:
+    path.write_bytes(b"x")
+    mtime = time.time() - age_s
+    os.utime(path, (mtime, mtime))
+
+
+class TestAbandonedFileSweep:
+    """Files no size cap ever counted: a killed worker's temp files and cover aliases
+    whose token URL no parse has produced in weeks."""
+
+    def test_orphaned_temp_files_are_aged_out(self, _isolate_cache):
+        cache_dir = _isolate_cache
+        orphan = cache_dir / ("a" * 64 + ".html.tmpAbCdEf12")
+        img_orphan = cache_dir / "img_deadbeef.bin.tmpQwErTy34"
+        in_flight = cache_dir / ("b" * 64 + ".parsed.json.tmpZxCvBn56")
+        _touch(orphan, age_s=2 * 3600)
+        _touch(img_orphan, age_s=2 * 3600)
+        _touch(in_flight, age_s=5)
+
+        fetcher._evict_sheet_cache()
+
+        assert not orphan.exists()
+        assert not img_orphan.exists()
+        assert in_flight.exists()
+
+    def test_stale_cover_aliases_are_swept(self, _isolate_cache):
+        import src.api as api
+
+        cache_dir = _isolate_cache
+        stale = cache_dir / "imgalias_old.txt"
+        live = cache_dir / "imgalias_new.txt"
+        _touch(stale, age_s=api._IMAGE_ALIAS_TTL + 60)
+        _touch(live, age_s=60)
+
+        api._evict_image_cache()
+
+        assert not stale.exists()
+        assert live.exists()
