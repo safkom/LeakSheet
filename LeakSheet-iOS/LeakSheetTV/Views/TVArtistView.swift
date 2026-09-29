@@ -23,10 +23,16 @@ struct TVArtistView: View {
         }
         .background(Color.lsBackground)
         .navigationTitle(artist.name)
-        .task {
-            if vm == nil { vm = await ArtistViewModel.make(artist: artist) }
-            // Era rollover needs the artist's era list, as on iOS and macOS.
-            if let vm { PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts) }
+        // Keyed on the view model, as on iOS: a refresh swaps in a new one, which must
+        // re-register its eras instead of leaving the old song lists.
+        .task(id: vm.map { ObjectIdentifier($0) }) {
+            if let vm {
+                // Era rollover needs the artist's era list, as on iOS and macOS.
+                PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts)
+            } else {
+                // Setting vm changes the id, so this task runs again to register it.
+                vm = await ArtistViewModel.make(artist: artist)
+            }
         }
     }
 
@@ -246,6 +252,7 @@ struct TVArtistView: View {
             vm = await ArtistViewModel.make(artist: result.artist)
         } catch {
             // Keep showing the current data; the Refresh button just re-enables.
+            Telemetry.report("Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": url])
         }
     }
 }
