@@ -791,11 +791,9 @@ async def stream_audio(
             if resp.status_code == 403:
                 return resp
             if resp.status_code not in (200, 206, 416):
-                logger.warning("Upstream %s returned HTTP %s", stream_url, resp.status_code)
                 raise UpstreamStatusError(resp.status_code)
             ct = resp.headers.get("content-type", "")
             if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-                logger.warning("Upstream %s returned non-media content-type: %s", stream_url, ct)
                 raise ValueError(f"Upstream returned non-audio content: {ct}")
         except Exception:
             await resp.aclose()
@@ -827,11 +825,9 @@ async def stream_audio(
         # 416 passes through so the API layer can relay it as a real 416
         # (Range Not Satisfiable) instead of a generic upstream error.
         if resp.status_code not in (200, 206, 416):
-            logger.warning("Upstream %s returned HTTP %s", stream_url, resp.status_code)
             raise UpstreamStatusError(resp.status_code)
 
         if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-            logger.warning("Upstream %s returned non-audio content-type: %s", stream_url, ct)
             raise ValueError(f"Upstream returned non-audio content: {ct}")
     except Exception:
         await resp.aclose()

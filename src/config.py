@@ -2,15 +2,19 @@
 
 import os
 import time
+import tomllib
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+# pyproject.toml is the one version source; the image copies it next to src/.
+VERSION = tomllib.loads((ROOT_DIR / "pyproject.toml").read_text())["project"]["version"]
+
 # Shared User-Agent for backend HTTP traffic. The image proxy uses its own
 # browser-like UA (api._get_proxy_client).
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/1.0"
+USER_AGENT = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LeakSheet/{VERSION}"
 
 TRACKERS_DIR = ROOT_DIR / "Trackers"
 
