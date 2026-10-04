@@ -1473,10 +1473,10 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": status},
             )
 
-        # A non-image 200 becomes 502, never a 200 <img> would render as empty. So does
-        # 403: Google's answer to an expired cover token, not a real denial. 404 relays.
+        # Only "gone" and "slow down" relay. Anything else, a non-image 200 or Google's 403
+        # for an expired cover token included, is 502: never a 5xx of ours.
         raise HTTPException(
-            status_code=502 if upstream_status in (200, 403) else upstream_status,
+            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 502),
             detail="Upstream image fetch failed",
         )
     except HTTPException:
@@ -1779,16 +1779,22 @@ async def proxy_metadata(
                 detail=f"Provider returned {resp.status_code}",
             )
 
-        if provider == "pillows":
-            result = _parse_pillows_metadata(resp.text)
-        elif provider == "froste":
-            result = _parse_froste_metadata(resp.json())
-        elif provider == "imgur":
-            result = _parse_imgur_metadata(resp.json())
-        elif provider == "pixeldrain":
-            result = _parse_pixeldrain_metadata(resp.json())
-        else:
-            result = {"provider": provider}
+        try:
+            if provider == "pillows":
+                result = _parse_pillows_metadata(resp.text)
+            elif provider == "froste":
+                result = _parse_froste_metadata(resp.json())
+            elif provider == "imgur":
+                result = _parse_imgur_metadata(resp.json())
+            elif provider == "pixeldrain":
+                result = _parse_pixeldrain_metadata(resp.json())
+            else:
+                result = {"provider": provider}
+        # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
+        # provider's outage, not a bug of ours.
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
+            raise HTTPException(status_code=502, detail="Metadata fetch failed")
 
         payload = json.dumps(result)
         _metadata_cache.set(meta_url, payload)
