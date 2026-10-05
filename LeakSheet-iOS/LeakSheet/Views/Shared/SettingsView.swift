@@ -151,7 +151,7 @@ struct SettingsView: View {
                 } footer: {
                     if customURLInvalid {
                         Text("Invalid URL — the default server will be used.")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.lsWarning)
                     } else {
                         Text("Leave empty to use the default server. For a local backend, enter its full address — for example http://192.168.1.20:8000.")
                     }

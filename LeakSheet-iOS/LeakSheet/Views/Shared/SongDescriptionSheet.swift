@@ -692,7 +692,7 @@ struct SongDescriptionSheet: View {
             ForEach(1...5, id: \.self) { star in
                 Image(systemName: star <= rating ? "star.fill" : "star")
                     .font(.caption2)
-                    .foregroundStyle(star <= rating ? Color.yellow : Color.lsDim)
+                    .foregroundStyle(star <= rating ? Color.lsStar : Color.lsDim)
             }
         }
         .padding(.horizontal, 10)

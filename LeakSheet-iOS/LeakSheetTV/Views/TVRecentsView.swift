@@ -79,7 +79,7 @@ struct TVRecentsView: View {
         loadingURL = url
         defer { loadingURL = "" }
         if let artist = await loader.load(url, recents: recents) {
-            path.append(.artist(artist))
+            path.append(.artist(artist, notice: loader.staleNotice))
         }
     }
 }

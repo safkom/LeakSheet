@@ -118,7 +118,7 @@ nonisolated struct PlaybackQueueLogic {
         }
         // Positions into the old array are meaningless — but only for the
         // artist whose list just changed.
-        if eraSongs?.artistName == artist {
+        if eraSongs.map(Self.artistKey) == artist {
             eraIndex = nil
         }
     }

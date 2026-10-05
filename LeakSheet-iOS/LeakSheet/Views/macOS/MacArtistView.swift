@@ -86,6 +86,9 @@ struct MacArtistView: View {
         }
         // Keyed on the view model's identity, not the slug: ⌘R replaces the parsed
         // tracker in place under the same slug.
+        .onChange(of: vm.eraPlaybackRevision) {
+            player.setArtistEras(vm.eraPlaybackContexts)
+        }
         .task(id: ObjectIdentifier(vm)) {
             if let url = artist.sourceUrl {
                 lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
@@ -155,7 +158,11 @@ struct MacArtistView: View {
             }
         }
         statRow(vm.artistStats)
-        if let lastUpdated {
+        if let notice = vm.loadNotice {
+            Text(notice)
+                .font(.caption2)
+                .foregroundStyle(Color.lsError)
+        } else if let lastUpdated {
             Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -225,8 +232,8 @@ struct MacArtistView: View {
     private func statRow(_ stats: ArtistViewModel.Stats) -> some View {
         HStack(spacing: 8) {
             statTile(stats.total, "Total", .secondary)
-            statTile(stats.available, "Available", .green)
-            statTile(stats.snippets, "Snippets", .orange)
+            statTile(stats.available, "Available", Color.lsSuccess)
+            statTile(stats.snippets, "Snippets", Color.lsWarning)
             statTile(stats.fullHQ, "Full HQ", .lsAccent)
         }
     }
@@ -418,10 +425,10 @@ struct MacArtistView: View {
             switch row {
             case .card, .divider, .eraGap:
                 return nil
-            case .groupHeader(let text, _):
-                return .header(text, id: "g:\(text)")
-            case .sectionHeader(let sectionName, _, _, _):
-                return .header(sectionName, id: "s:\(sectionName)")
+            case .groupHeader(let text, _, _):
+                return .header(text, id: row.id)
+            case .sectionHeader(let sectionName, _, _, _, _):
+                return .header(sectionName, id: row.id)
             case .song(let song, let eraName, let eraArt, _, _, _, let ordinal):
                 return .song(
                     song, version: song.bestPlayableVersion ?? song.versions.first,

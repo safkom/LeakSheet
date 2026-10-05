@@ -72,6 +72,12 @@ extension Color {
     static let lsAccent = lsPrimary
     static let lsError = adaptive(light: Color(hex: 0xC0342D), dark: Color(hex: 0xF85149))
     static let lsFavourite = adaptive(light: Color(hex: 0xC2264A), dark: Color(hex: 0xE84057))
+    /// Positive numbers ("Available"); system green fails AA on white.
+    static let lsSuccess = adaptive(light: Color(hex: 0x1F7A33), dark: Color(hex: 0x3FB950))
+    /// Caution text ("outdated", an invalid setting); system orange fails AA on white.
+    static let lsWarning = adaptive(light: Color(hex: 0xA35200), dark: Color(hex: 0xFFA032))
+    /// Star glyphs; system yellow is near-invisible on white.
+    static let lsStar = adaptive(light: Color(hex: 0xB07D00), dark: Color(hex: 0xFFD60A))
 
     /// Picks between two dark-appearance values by platform.
     private static func macDark(_ mac: UInt, iOS: UInt) -> Color {

@@ -170,10 +170,20 @@ struct MacRootView: View {
         forceRefresh: Bool = false,
         select: Bool = true
     ) async {
+        let shown = ui.selectedSlug.flatMap { ui.tracker($0) }
         guard let artist = await loader.load(
             url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
-        ) else { return }
+        ) else {
+            // A failed ⌘R keeps the loaded copy: say why there, not only on the other panes.
+            // No error means the load never ran (another was in flight), which says nothing.
+            if let shown, shown.artist.sourceUrl == url, let error = loader.error {
+                shown.vm.loadNotice = error
+            }
+            return
+        }
+        let notice = loader.staleNotice
         let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
+        vm.loadNotice = notice
         ui.store(LoadedTracker(artist: artist, vm: vm))
         if select || ui.selectedSlug != artist.slug {
             ui.selection = .tracker(slug: artist.slug)

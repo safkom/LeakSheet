@@ -32,15 +32,16 @@ struct TVRootView: View {
 /// The tvOS navigation graph. Value-typed so any screen can push without
 /// threading bindings through, mirroring iOS's `navigationDestination(for:)`.
 enum TVRoute: Hashable {
-    case artist(Artist)
+    /// `notice`: why the tracker is a cached copy (TrackerLoader.staleNotice), if it is.
+    case artist(Artist, notice: String? = nil)
     case song(SongDetailPayload)
 
     @MainActor
     @ViewBuilder
     var destination: some View {
         switch self {
-        case .artist(let artist):
-            TVArtistView(artist: artist)
+        case .artist(let artist, let notice):
+            TVArtistView(artist: artist, notice: notice)
         case .song(let payload):
             TVSongDetailView(payload: payload)
         }

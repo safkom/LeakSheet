@@ -85,14 +85,12 @@ is silently splitting the user's favourites in two. Removing the Recents entry
 ## PlaybackQueueLogic.swift::era-identity — era match excludes the version count
 
 An era is located inside its artist's registered list by (name, artist, art
-URL). The version count used to be a fourth **required** field, to disambiguate
-two eras sharing a name — but the registered list is built once from the
-**unfiltered** tracker (`ArtistViewModel.Precomputed.eraPlaybackContexts`) while
-playback starts from the **currently filtered** list
-(`ArtistContentLists.playWithEraContext`). Every era a chip had trimmed
-therefore failed to match, `eraIndex` stayed nil, and auto-advance stopped at
-the end of that era instead of rolling into the next one — with Best Of,
-Grails, Worst Of or No Snippets on, playback died mid-tracker.
+URL), never by its version count. The registered list follows the active filters
+(`ArtistViewModel.eraPlaybackContexts`, rebuilt with each filter pass, so a chip
+that hides snippets hides them from auto-advance too), but the playing context and
+the list are built at different moments: a refresh or a filter change between them
+leaves the counts different, and a count-based match would then stop auto-advance
+at the end of the era instead of rolling into the next one.
 
 The count is still consulted, but only as a tiebreaker *among* eras that match
 on all three identity fields (a tracker can carry two "Bonus Tracks" eras with

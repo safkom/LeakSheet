@@ -17,8 +17,9 @@ struct TVSongDetailView: View {
         _selected = State(initialValue: payload.version)
     }
 
+    /// Every version, not just those the artist screen's filter kept (as on iOS).
     private var versions: [SongVersion] {
-        payload.song?.versions ?? [payload.version]
+        payload.song?.allVersions ?? [payload.version]
     }
 
     /// Same fallback the iOS detail sheet uses: a payload built from a saved
@@ -85,14 +86,16 @@ struct TVSongDetailView: View {
     private var actions: some View {
         HStack(spacing: 16) {
             Button {
-                player.playInEra(
-                    selected,
-                    eraName: payload.eraName,
-                    artistName: payload.artistName,
-                    artUrl: payload.eraArt ?? "",
-                    versions: versions.filter(\.isStreamable),
-                    artistSlug: payload.artistSlug
-                )
+                // The song's versions as a list, as the iOS sheet plays them: an era context
+                // of one song would roll straight into the next era.
+                let streamable = versions.filter(\.isStreamable)
+                let items = streamable.map {
+                    PlaybackListItem(
+                        version: $0, artistName: payload.artistName, eraName: payload.eraName,
+                        artUrl: payload.eraArt ?? "", artistSlug: payload.artistSlug
+                    )
+                }
+                player.playInList(items, startAt: streamable.firstIndex(of: selected) ?? 0)
             } label: {
                 Label("Play", systemImage: "play.fill")
             }

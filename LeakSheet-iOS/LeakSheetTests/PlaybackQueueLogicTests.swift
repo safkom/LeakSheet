@@ -243,6 +243,17 @@ struct CrossArtistEraListTests {
         #expect(target.eraName == "B2")
     }
 
+    @Test func `a refresh that inserts an earlier era still rolls into the next one`() {
+        var logic = PlaybackQueueLogic()
+        let before = [era("A1", artist: "Alpha", ["a1"]), era("A2", artist: "Alpha", ["a2"]), era("A3", artist: "Alpha", ["a3"])]
+        logic.setArtistEras(before)
+        _ = logic.playInEra(before[0].versions[0], context: before[0])
+        #expect(playedName(logic.next()) == "a2")  // rolled over: the era position is now recorded
+        // The artist key is the slug ("alpha"), not the display name ("Alpha").
+        logic.setArtistEras([era("A0", artist: "Alpha", ["a0"])] + before)
+        #expect(playedName(logic.next()) == "a3")
+    }
+
     @Test func `re-registering the same artist's eras still refreshes them`() {
         var logic = PlaybackQueueLogic()
         let first = [era("A1", artist: "Alpha", ["a1"])]

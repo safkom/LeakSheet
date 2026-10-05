@@ -114,13 +114,10 @@ struct TVVersionRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Button {
-                player.playInEra(
-                    version,
-                    eraName: eraName,
-                    artistName: artist.name,
-                    artUrl: eraArt ?? "",
-                    versions: [version],
-                    artistSlug: artist.slug
+                // One track: an era context of one version would roll into the next era.
+                player.playTrack(
+                    version, artistName: artist.name, eraName: eraName,
+                    artUrl: eraArt ?? "", artistSlug: artist.slug
                 )
             } label: {
                 HStack(spacing: 16) {

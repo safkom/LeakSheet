@@ -133,7 +133,7 @@ struct MiscEntryRowView: View {
             } label: {
                 Image(systemName: isFavourited ? "heart.fill" : "heart")
             }
-            .tint(.pink)
+            .tint(Color.lsFavourite)
             .accessibilityLabel(
                 isFavourited
                     ? "Remove \(entry.name) from favourites"

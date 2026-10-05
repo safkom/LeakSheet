@@ -39,7 +39,7 @@ struct EraRowView: View {
                     .frame(height: 2)
                     .padding(.horizontal, 16)
 
-            case .groupHeader(let text, _):
+            case .groupHeader(let text, _, _):
                 panel(isLast: false) {
                     Text(text)
                         .font(.footnote.weight(.bold))
@@ -50,7 +50,7 @@ struct EraRowView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-            case .sectionHeader(let name, _, let group, let notes):
+            case .sectionHeader(let name, _, let group, _, let notes):
                 panel(isLast: false) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(name)
@@ -133,8 +133,8 @@ extension EraRow {
         switch self {
         case .card(let filtered, _): return filtered.era.name
         case .divider(let era), .eraGap(let era): return era
-        case .groupHeader(_, let era): return era
-        case .sectionHeader(_, let era, _, _): return era
+        case .groupHeader(_, let era, _): return era
+        case .sectionHeader(_, let era, _, _, _): return era
         case .song(_, let era, _, _, _, _, _): return era
         case .version(_, _, _, let era, _, _, _): return era
         }
