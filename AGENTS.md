@@ -14,6 +14,8 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
   after an intended change to the `/sheet` wire format.
 - `uv run python tests/tools/yetracker_diff.py` — diff the Ye parse against yetracker.cc, an
   independent parser. Run it after parser changes.
+- `k6 run tests/load/api.js` — load test of the hot paths; CI runs it on the Docker image
+  with a seeded cache (see the file header for local and production runs).
 - iOS: the Xcode MCP (`mcp__xcode__*`: BuildProject, RunAllTests) or
   `xcodebuild test -project LeakSheet-iOS/LeakSheet.xcodeproj -scheme LeakSheet -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`.
   Also build the `My Mac` destination and the `LeakSheetTV` scheme: they compile their own views.
