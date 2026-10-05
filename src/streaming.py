@@ -122,6 +122,22 @@ async def assert_public_redirect_target(resp: httpx.Response, *, source: str) ->
         raise
 
 
+_DNS_RETRY_DELAY_S = 0.3
+
+
+async def _getaddrinfo(host: str, port: int | None) -> list:
+    """Resolve *host*, retrying once on EAI_AGAIN: a resolver hiccup (they cluster
+    after a host reboot), unlike a name that does not exist."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        if exc.errno != socket.EAI_AGAIN:
+            raise
+    await asyncio.sleep(_DNS_RETRY_DELAY_S)
+    return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+
+
 class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
     """SSRF guard at the transport layer: before every connection (including
     each redirect hop) reject any host that resolves only-or-partly to a
@@ -143,10 +159,7 @@ class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
                 if not _ip_is_public(host):
                     raise ValueError(f"blocked non-public literal IP {host}")
             else:
-                loop = asyncio.get_running_loop()
-                infos = await loop.getaddrinfo(
-                    host, request.url.port, type=socket.SOCK_STREAM
-                )
+                infos = await _getaddrinfo(host, request.url.port)
                 for info in infos:
                     if not _ip_is_public(info[4][0]):
                         raise ValueError(
@@ -514,6 +527,8 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
                     "Referer": "https://krakenfiles.com/",
                 },
             )
+            if status in _RELAYED_STATUSES:
+                raise UpstreamStatusError(status)
             if status != 200:
                 raise ValueError(
                     f"krakenfiles.com returned {status} for {view_url}"
@@ -567,6 +582,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
             urls_to_try.append(fallback)
 
         last_err: Exception | None = None
+        statuses: list[int] = []
         for url in urls_to_try:
             try:
                 client = _get_shared_client()
@@ -574,6 +590,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     url, headers={"User-Agent": _STREAM_USER_AGENT}
                 )
                 if resp.status_code != 200:
+                    statuses.append(resp.status_code)
                     last_err = ValueError(
                         f"imgur.gg API returned {resp.status_code} for {url}"
                     )
@@ -604,6 +621,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                 )
                 continue
 
+        # Gone (or throttled) on every host is that answer, not an outage; max() prefers
+        # 429 ("try later") over 410 over 404 when the hosts disagree.
+        if len(statuses) == len(urls_to_try) and set(statuses) <= _RELAYED_STATUSES:
+            raise UpstreamStatusError(max(statuses))
         raise last_err  # type: ignore[misc]
 
     return await _cached_resolve(api_url, _do)
@@ -612,6 +633,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
 _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
 _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
+
+
+# Upstream answers the API relays (as 404 or 429) instead of a generic 502.
+_RELAYED_STATUSES = frozenset({404, 410, 429})
 
 
 class UpstreamStatusError(ValueError):

@@ -156,6 +156,8 @@ class TestErrorMapping:
             (NetworkError("down"), 503),
             (NoTablesError("empty"), 404),
             (ValueError("garbage"), 422),
+            (TimeoutError(), 503),
+            (RuntimeError("bug"), 500),
         ],
     )
     def test_fetch_errors_map_to_http_status(self, api_client, monkeypatch, exc, status):

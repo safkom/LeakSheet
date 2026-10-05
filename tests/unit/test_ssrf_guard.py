@@ -112,7 +112,41 @@ async def test_transport_wraps_dns_failure_as_connect_error(monkeypatch):
     async def dns_down(*_args, **_kwargs):
         raise socket.gaierror(-3, "Temporary failure in name resolution")
 
+    monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
     monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns_down)
     async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
         with pytest.raises(httpx.ConnectError, match="name resolution"):
             await client.get("https://tracker.example/x")
+
+
+async def test_transport_retries_a_transient_dns_failure_once(monkeypatch):
+    calls = []
+
+    async def flaky(host, *_args, **_kwargs):
+        calls.append(host)
+        if len(calls) == 1:
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 443))]
+
+    monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", flaky)
+    async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
+        # The retry's answer is the one vetted: a private address, refused before connecting.
+        with pytest.raises(httpx.ConnectError, match="non-public"):
+            await client.get("https://tracker.example/x")
+    assert len(calls) == 2
+
+
+async def test_transport_does_not_retry_a_missing_host(monkeypatch):
+    calls = []
+
+    async def missing(host, *_args, **_kwargs):
+        calls.append(host)
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", missing)
+    async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
+        with pytest.raises(httpx.ConnectError, match="not known"):
+            await client.get("https://tracker.example/x")
+    assert len(calls) == 1
