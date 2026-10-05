@@ -354,7 +354,7 @@ class Era(BaseModel):
         # docs/decisions.md::models.py — fields kept on the wire with no client reader
         d = super().model_dump(**kwargs)
         d["sections"] = [
-            {"name": sec.name, "group": sec.group, "songs": [s.dict() for s in sec.songs]}
+            {"name": sec.name, "group": sec.group, "notes": sec.notes, "songs": [s.dict() for s in sec.songs]}
             for sec in self.sections
         ]
         d["song_count"] = self.song_count

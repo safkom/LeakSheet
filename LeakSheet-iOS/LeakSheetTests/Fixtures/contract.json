@@ -1,0 +1,183 @@
+{
+  "eras": [
+    {
+      "alt_names": [],
+      "art_url": null,
+      "description": null,
+      "highlighted_producers": [],
+      "name": "Contract Era",
+      "sections": [
+        {
+          "group": "Deluxe Sessions",
+          "name": "Early Takes",
+          "notes": "(02/02/2002) (Sessions begin)",
+          "songs": [
+            {
+              "available_length": "Full (HQ)",
+              "badge": null,
+              "base_name": "First Song",
+              "file_date": null,
+              "leak_date": "Jan 1, 2020",
+              "quality": null,
+              "song_key": "first song",
+              "track_length": "3:00",
+              "versions": [
+                {
+                  "alt_titles": [],
+                  "available_length": "Full (HQ)",
+                  "badge": null,
+                  "collaboration": null,
+                  "credited_artists": "Guest Performer",
+                  "date_of_recording": null,
+                  "director": null,
+                  "featuring": null,
+                  "file_date": null,
+                  "leak_date": "Jan 1, 2020",
+                  "links": [
+                    "https://pillows.su/f/aaa"
+                  ],
+                  "name": "First Song",
+                  "notes": "first",
+                  "og_filename": null,
+                  "og_filenames": [],
+                  "preview_date": null,
+                  "producers": "Maker",
+                  "quality": null,
+                  "rating": 4,
+                  "refs": null,
+                  "samples": [],
+                  "sources": [
+                    {
+                      "label": "Proof",
+                      "url": "https://example.org/proof"
+                    }
+                  ],
+                  "streaming": null,
+                  "track_length": "3:00",
+                  "type": null,
+                  "version_tag": "V1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "group": "Deluxe Sessions",
+          "name": "Late Takes",
+          "notes": "(03/03/2003) (Sessions end)",
+          "songs": [
+            {
+              "available_length": "Snippet",
+              "badge": null,
+              "base_name": "Second Song",
+              "file_date": null,
+              "leak_date": "Jan 2, 2020",
+              "quality": null,
+              "song_key": "second song",
+              "track_length": "2:00",
+              "versions": [
+                {
+                  "alt_titles": [],
+                  "available_length": "Snippet",
+                  "badge": null,
+                  "collaboration": null,
+                  "credited_artists": null,
+                  "date_of_recording": null,
+                  "director": null,
+                  "featuring": null,
+                  "file_date": null,
+                  "leak_date": "Jan 2, 2020",
+                  "links": [
+                    "https://pillows.su/f/bbb"
+                  ],
+                  "name": "Second Song",
+                  "notes": "second",
+                  "og_filename": null,
+                  "og_filenames": [],
+                  "preview_date": null,
+                  "producers": null,
+                  "quality": null,
+                  "rating": null,
+                  "refs": null,
+                  "samples": [],
+                  "sources": [],
+                  "streaming": null,
+                  "track_length": "2:00",
+                  "type": null,
+                  "version_tag": null
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "song_count": 2,
+      "stats": {
+        "full": 2,
+        "og_files": 2,
+        "partial": 0,
+        "release_types": {},
+        "snippets": 0,
+        "stated_total": 0,
+        "stem_bounces": 0,
+        "tagged": 0,
+        "total": 4,
+        "total_full": 0,
+        "unavailable": 0
+      },
+      "stats_raw": "2 OG File(s)\n2 Full",
+      "timeline": [
+        {
+          "date": "01/01/2001",
+          "event": "Start"
+        }
+      ],
+      "version_count": 2
+    }
+  ],
+  "misc_entries": [],
+  "name": "Contract Artist",
+  "notices": [],
+  "parse_metadata": {
+    "dropped_columns": [],
+    "duplicate_columns": [],
+    "footer_rows": 0,
+    "fuzzy_matched_rows": 0,
+    "other_rows": 4,
+    "skipped_rows": 0,
+    "song_rows": 2,
+    "total_rows": 6,
+    "unmatched_rows": [],
+    "unmatched_rows_total": 0
+  },
+  "slug": "contract-artist",
+  "source_url": null,
+  "tabs": [
+    {
+      "entries": [
+        {
+          "available": null,
+          "date": null,
+          "entry_type": null,
+          "era_name": "Contract Era",
+          "length": "1:44",
+          "links": [
+            "https://pillows.su/f/ccc"
+          ],
+          "name": "Beat 1",
+          "notes": "demo",
+          "quality": null,
+          "row_index": 0,
+          "section": "Instrumentals",
+          "source_tab": "stems",
+          "streaming": null
+        }
+      ],
+      "kind": "stems",
+      "name": "Stems"
+    }
+  ],
+  "total_songs": 2,
+  "total_versions": 2,
+  "tracker_stats": null
+}
