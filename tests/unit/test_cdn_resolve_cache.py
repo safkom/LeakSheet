@@ -24,17 +24,6 @@ import src.streaming as streaming
 
 
 @pytest.fixture(autouse=True)
-def _clear_cdn_cache():
-    # _inflight_resolves too: a resolve deliberately left running by a
-    # cancellation test must not be adopted as a cache hit by the next one.
-    streaming._cdn_url_cache._data.clear()
-    streaming._inflight_resolves.clear()
-    yield
-    streaming._cdn_url_cache._data.clear()
-    streaming._inflight_resolves.clear()
-
-
-@pytest.fixture(autouse=True)
 def _skip_ssrf_check(monkeypatch):
     """The pre-flight does a real getaddrinfo; neutralise it by default."""
     monkeypatch.setattr(

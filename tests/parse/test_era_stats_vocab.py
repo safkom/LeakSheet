@@ -1,13 +1,8 @@
 """Era-stats vocabulary: both stat dialects must produce a real era header.
 
-Trackers write the era-stats cell in one of two unrelated vocabularies. Only
-the leak-status one was recognised, so discography-style era headers were not
-headers at all: the era vanished, its cover art / timeline / description went
-with it, and its songs were appended to whichever era came before.
-
-Measured over 400 captured real tabs before this fix: 267 lost era headers
-across 34 tabs (~9% of trackers). See tests/tools/corpus_sweep.py for the
-aggregate harness that produced those numbers.
+Trackers write the era-stats cell in one of two unrelated vocabularies (leak status
+or discography). A missed header loses the era's art, timeline and description, and
+its songs land in the era before it.
 """
 
 from __future__ import annotations

@@ -1,8 +1,5 @@
-"""Two fetcher.py regexes SonarQube flagged as super-linear (S8786), rewritten.
-
-Each rewrite must give exactly what the old pattern gave, and finish in linear
-time. The old patterns stay here as the oracle — same convention as
-tests/unit/test_linear_parser_regexes.py.
+"""Rewritten fetcher.py regexes give exactly what the old patterns gave (the old ones
+stay here as the oracle), and the functions using them stay linear on hostile names.
 """
 
 from __future__ import annotations

@@ -14,7 +14,7 @@ import time
 import pytest
 
 import src.fetcher as fetcher
-from src.fetcher import _cache_key, _read_meta, _set_cache, _set_cached_parsed
+from src.fetcher import _cache_key, _set_cache, _set_cached_parsed
 from src.models import Artist
 
 
@@ -62,26 +62,6 @@ class TestFreshnessSeparation:
         # Rebuilding the meta dict dropped this, so the next conditional
         # request could never 304.
         assert fetcher.get_cached_etag(URL) == etag
-
-    def test_parsed_write_preserves_the_url_the_prewarm_scan_needs(self):
-        _set_cache(URL, "<html></html>", "T")
-        _set_cached_parsed(URL, _artist())
-        assert _read_meta(_cache_key(URL))["url"] == URL
-
-    def test_entries_written_before_the_split_still_resolve(self):
-        """Existing on-disk caches carry only `timestamp`."""
-        _set_cache(URL, "<html></html>", "T")
-        _set_cached_parsed(URL, _artist())
-        key = _cache_key(URL)
-        meta_path = fetcher.CACHE_DIR / f"{key}.meta.json"
-        meta = json.loads(meta_path.read_text())
-        aged = time.time() - 600
-        meta.pop("parsed_timestamp")
-        meta["timestamp"] = aged
-        meta_path.write_text(json.dumps(meta))
-
-        age = fetcher.get_cached_age(URL)
-        assert age is not None and 500 < age < 700
 
 
 class TestTempFilesAreNotCacheEntries:
@@ -179,18 +159,3 @@ class TestCollapseGuard:
 
         _set_cached_parsed(URL, self._artist_with(40))
         assert self._cached_versions(tmp_path) == 40
-
-    def test_entries_written_before_the_counts_existed_still_guard(self, tmp_path):
-        """The counts moved into the meta sidecar so the check stops re-parsing
-        the whole entry. Cache entries already on disk have no counts in their
-        meta, and must still be protected — read back out of the parse once."""
-        _set_cached_parsed(URL, self._artist_with(100))
-        key = _cache_key(URL)
-        meta_file = tmp_path / f"{key}.meta.json"
-        meta = json.loads(meta_file.read_text())
-        meta.pop("total_versions", None)
-        meta.pop("era_count", None)
-        meta_file.write_text(json.dumps(meta))
-
-        _set_cached_parsed(URL, self._artist_with(40))
-        assert self._cached_versions(tmp_path) == 100

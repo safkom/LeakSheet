@@ -357,9 +357,8 @@ class TestProgressStream:
 
 
 class TestOneParsePerTracker:
-    """A cold parse is shared, not repeated: the box cannot fit two Ye-sized
-    parses at once, and a client retrying a stream it lost, a second device and
-    the prewarm loop all used to start their own."""
+    """A cold parse is shared, not repeated: the box cannot fit two Ye-sized parses
+    at once, and a client retrying a stream it lost or a second device would start one."""
 
     def test_concurrent_callers_share_one_fetch(self, artist, monkeypatch):
         import asyncio

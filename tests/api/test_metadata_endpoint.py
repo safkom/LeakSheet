@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 import src.api as api
 
@@ -33,12 +32,6 @@ class FakeClient:
     async def get(self, url, headers=None):
         self.calls += 1
         return self.resp
-
-
-@pytest.fixture(autouse=True)
-def _fresh_metadata_cache(monkeypatch):
-    # The metadata cache is a module global — reset it so tests don't leak hits.
-    monkeypatch.setattr(api, "_metadata_cache", api.TTLCache(ttl=3600.0, max_entries=500))
 
 
 def _install(monkeypatch, resp):

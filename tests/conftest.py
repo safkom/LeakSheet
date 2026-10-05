@@ -21,6 +21,7 @@ Nothing here hits the network; the ``live`` marker owns that.
 from __future__ import annotations
 
 import html as _html
+import socket
 from pathlib import Path
 
 import httpx
@@ -46,20 +47,50 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     files must not see this cache dir show up inside it.
     """
     import src.api as api
+    import src.config as config
     import src.fetcher as fetcher
+    import src.streaming as streaming
 
     cache_dir = tmp_path_factory.mktemp("leaksheet-cache")
     monkeypatch.setattr(fetcher, "CACHE_DIR", cache_dir)
     monkeypatch.setattr(api, "CACHE_DIR", cache_dir)
-    # Process-global state keyed by tracker URL must not leak between tests.
+    # Every process-global the app keeps between requests, reset here and only here:
+    # a test that leaves one behind changes the outcome of whichever test runs next.
     monkeypatch.setattr(api, "_revalidate_backoff", {})
-    monkeypatch.setattr(fetcher, "_host_refresh", None)
-    # /trackers state: a failed ArtistGrid fetch arms a 60 s backoff that would
-    # hand every later /trackers test the seed fallback.
+    monkeypatch.setattr(api, "_rate_hits", {})
+    monkeypatch.setattr(api, "_rate_last_prune", 0.0)
+    monkeypatch.setattr(api, "_metadata_cache", api.TTLCache(ttl=3600.0, max_entries=500))
     monkeypatch.setattr(api, "_trackers_cache", api.TTLCache(ttl=3600.0, max_entries=1))
     monkeypatch.setattr(api, "_trackers_stale", None)
     monkeypatch.setattr(api, "_trackers_fail_until", 0.0)
+    monkeypatch.setattr(fetcher, "_host_refresh", None)
+    monkeypatch.setattr(config, "_tracker_hosts", set())
+    monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
+    monkeypatch.setattr(streaming, "_cdn_url_cache", streaming.TTLCache(ttl=streaming._CDN_URL_TTL, max_entries=500))
+    monkeypatch.setattr(streaming, "_inflight_resolves", {})
     return cache_dir
+
+
+@pytest.fixture(autouse=True)
+def _no_network(request, monkeypatch):
+    """The offline gate never reaches the network; only ``-m live`` tests may.
+
+    Attempts are recorded as well as refused: app code often catches the error and
+    falls back quietly, which would hide the leak.
+    """
+    if request.node.get_closest_marker("live"):
+        yield
+        return
+    attempts: list[str] = []
+
+    def refuse(*args, **_kwargs):
+        attempts.append(repr(args[:2]))
+        raise OSError("network access in an offline test; mark it live")
+
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket.socket, "connect", lambda self, *a: refuse(*a))
+    yield
+    assert not attempts, f"offline test tried the network: {attempts}"
 
 
 @pytest.fixture(autouse=True)

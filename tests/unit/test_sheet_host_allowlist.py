@@ -11,7 +11,6 @@ scanner. The stream and image paths were hardened in the 2026-07-21 pass;
 import pytest
 
 from src import fetcher
-from src import config
 from src.config import (
     register_tracker_hosts,
     sheet_host_allowed,
@@ -23,8 +22,6 @@ from src.fetcher import InvalidURLError, _assert_sheet_host_allowed
 @pytest.fixture(autouse=True)
 def _clean_hosts(monkeypatch):
     monkeypatch.delenv("LEAKSHEET_EXTRA_SHEET_HOSTS", raising=False)
-    monkeypatch.setattr(config, "_tracker_hosts", set())
-    monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
 
 
 class TestAllowlistMembership:

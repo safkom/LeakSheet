@@ -1,7 +1,5 @@
-"""The parser regexes SonarQube flagged as super-linear (S8786), rewritten.
-
-Each rewrite must give exactly what the old pattern gave, and finish in linear
-time. The old patterns stay here as the oracle.
+"""Rewritten parser regexes give exactly what the old patterns gave; the old ones stay
+here as the oracle. tests/unit/test_regex_linear.py times every compiled pattern.
 """
 
 from __future__ import annotations
@@ -73,12 +71,6 @@ def test_availability_split_is_linear_on_hostile_cells(cell):
     assert time.perf_counter() - start < 0.5
 
 
-def test_stat_pairs_are_linear_on_a_long_digit_run():
-    start = time.perf_counter()
-    parser._STAT_PAIR_RE.findall("1" * 64_000)
-    assert time.perf_counter() - start < 0.5
-
-
 def test_misc_era_stats_matches_the_old_regex():
     for cell in [
         "3 Released 0 Unreleased 0 BTS 0 On Streaming",
@@ -90,8 +82,3 @@ def test_misc_era_stats_matches_the_old_regex():
         new = parser._MISC_ERA_STATS_RE.search(cell)
         assert (old.span() if old else None) == (new.span() if new else None), repr(cell)
 
-
-def test_misc_era_stats_is_linear_on_a_long_digit_run():
-    start = time.perf_counter()
-    parser._MISC_ERA_STATS_RE.search("1" * 32_000 + " " * 32_000)
-    assert time.perf_counter() - start < 0.5

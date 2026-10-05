@@ -11,8 +11,6 @@ services:
     pull_policy: never
     restart: unless-stopped
     environment:
-      # Must stay 0 with >1 gunicorn worker: see docs/decisions.md::api.py — prewarm loop
-      LEAKSHEET_PREWARM: "0"
       LEAKSHEET_TRUSTED_PROXY_HOPS: "${LEAKSHEET_TRUSTED_PROXY_HOPS}"
       LEAKSHEET_RATE_LIMIT_PER_MIN: "${LEAKSHEET_RATE_LIMIT_PER_MIN}"
       SENTRY_DSN: "${SENTRY_DSN}"

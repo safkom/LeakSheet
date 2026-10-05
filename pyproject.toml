@@ -67,12 +67,6 @@ markers = [
   "accuracy: data-quality checks needing real tracker HTML — structural invariants over the whole captured corpus, plus hand-labelled ground truth (tests/quality/). Skipped automatically when that content is absent (clean checkout / CI), since it is never committed.",
   "slow: long-running (e.g. the full 486-tracker mass validation).",
 ]
-filterwarnings = [
-  # pytest-asyncio<0.21 emits this until asyncio_mode is read; harmless.
-  "ignore:The 'asyncio_mode' default value will change:DeprecationWarning",
-  # pydantic v2 keeps v1 .dict()/.parse_obj() shims the code deliberately uses.
-  "ignore:.*(dict\\(\\)|parse_obj|copy).*:DeprecationWarning:pydantic.*",
-]
 
 [tool.coverage.run]
 source = ["src"]

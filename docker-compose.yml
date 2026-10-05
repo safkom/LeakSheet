@@ -5,9 +5,6 @@ services:
     env_file:
       - path: .env
         required: false
-    environment:
-      # Must stay 0 with >1 gunicorn worker: see docs/decisions.md::api.py — prewarm loop
-      LEAKSHEET_PREWARM: "0"
     volumes:
       - cache:/app/.cache
     # ~2x headroom for three workers, while keeping a runaway parse from taking the
