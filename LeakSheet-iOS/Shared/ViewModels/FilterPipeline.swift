@@ -17,8 +17,8 @@ extension ArtistViewModel {
             recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
         )
 
-        if state.misc || state.tabKey != nil {
-            let miscResults = computeMiscResults(artist: artist, state: state)
+        if let tabKey = state.tabKey {
+            let miscResults = computeMiscResults(artist: artist, tabKey: tabKey, state: state)
             return FilteredContent(
                 state: state, eras: [], searchResults: [], recentResults: [],
                 recentPlaybackItems: [], recentStreamIndex: [:],
@@ -277,15 +277,8 @@ extension ArtistViewModel {
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of restricts to badge-marked names when any
     /// exist (misc entries usually carry no badges — then it's a no-op).
-    private nonisolated static func computeMiscResults(artist: Artist, state: FilterState) -> [MiscEntry] {
-        // A selected tab sources that tab's entries; the legacy misc mode
-        // reads the flat misc/MV list (older cached payloads have no tabs).
-        var entries: [MiscEntry]
-        if let tabKey = state.tabKey {
-            entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
-        } else {
-            entries = artist.miscEntries ?? []
-        }
+    private nonisolated static func computeMiscResults(artist: Artist, tabKey: String, state: FilterState) -> [MiscEntry] {
+        var entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
         if state.noSnippets {
             entries = entries.filter { !isSnippetLike(available: $0.available, quality: $0.quality) }
         }

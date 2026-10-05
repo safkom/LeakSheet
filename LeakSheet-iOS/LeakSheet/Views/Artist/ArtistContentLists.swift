@@ -27,19 +27,12 @@ struct ContentTabsView: View {
         HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    TabButton(label: "Unreleased", icon: "waveform", isSelected: vm.selectedTabKey == nil && !vm.misc) {
+                    TabButton(label: "Unreleased", icon: "waveform", isSelected: vm.selectedTabKey == nil) {
                         vm.selectTab(nil)
                     }
-                    if !vm.availableTabs.isEmpty {
-                        ForEach(vm.availableTabs) { tab in
-                            TabButton(label: tab.name, icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
-                                vm.selectTab(tab.id)
-                            }
-                        }
-                    } else if vm.hasMiscEntries {
-                        // Older cached payloads without `tabs` keep a flat Misc tab.
-                        TabButton(label: "Misc", icon: "film.stack", isSelected: vm.misc) {
-                            vm.toggleMisc()
+                    ForEach(vm.availableTabs) { tab in
+                        TabButton(label: tab.name, icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
+                            vm.selectTab(tab.id)
                         }
                     }
                 }
@@ -85,7 +78,7 @@ private struct TabButton: View {
 struct FilterMenu: View {
     let vm: ArtistViewModel
 
-    private var onSongTree: Bool { vm.selectedTabKey == nil && !vm.misc }
+    private var onSongTree: Bool { vm.selectedTabKey == nil }
 
     private var activeCount: Int {
         onSongTree

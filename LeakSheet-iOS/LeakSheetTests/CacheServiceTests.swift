@@ -102,11 +102,8 @@ struct CacheServiceTests {
 
     // MARK: - Metadata sidecar
     //
-    // Reading one ETag used to cost a full Data(contentsOf:) + JSONDecoder
-    // pass over a multi-MB base64'd payload, on every tracker load, before the
-    // conditional request was even sent — and the data-age chip paid it again
-    // after the screen was already up, which is what shunted the list down
-    // mid-scroll.
+    // The ETag and age live in a small sidecar, so reading them never touches the
+    // multi-MB payload.
 
     @Test func `caching writes a sidecar alongside the payload`() async throws {
         let (service, dir) = makeService()

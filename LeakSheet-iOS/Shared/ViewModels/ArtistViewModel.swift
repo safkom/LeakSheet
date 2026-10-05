@@ -15,7 +15,6 @@ nonisolated struct FilterState: Equatable, Sendable {
     var grails = false
     var recents = false
     var noSnippets = false
-    var misc = false
     /// Selected TabSection id (Released / Best Of / Stems / …). Routes that
     /// tab's entries through the misc pipeline; nil = no tab mode active.
     var tabKey: String? = nil
@@ -154,11 +153,8 @@ final class ArtistViewModel {
     /// The badge "highlight" filters: each expands every matching era, and only one
     /// is active at a time, so the AND pipeline never intersects two badge sets.
     var isBadgeFilterActive: Bool { bestOf || worstOf || grails }
-    /// Misc mode — a strict switch, not a peer filter: only Misc / Music Videos entries
-    /// show, filtered by the other chips and search. Legacy path for payloads without `tabs`.
-    var misc: Bool = false
-    /// Selected content-tab id (TabSection.id) — same strict-switch
-    /// semantics as misc, one chip per parsed tab.
+    /// Selected content-tab id (TabSection.id): a strict switch, not a peer filter. Only
+    /// that tab's entries show, one chip per parsed tab.
     private(set) var selectedTabKey: String? = nil
     var expandedEra: String? = nil
     /// Expanded multi-version songs, keyed "eraName::baseName". Lives here
@@ -217,10 +213,6 @@ final class ArtistViewModel {
     private var eraColorFlushScheduled = false
 
     var isSearching: Bool { !debouncedQuery.isEmpty }
-
-    var hasMiscEntries: Bool {
-        !(artist.miscEntries ?? []).isEmpty
-    }
 
     /// Badge-annotation kinds: never pages. Older cached payloads may still carry them.
     private static let badgeTabKinds: Set<String> = [
@@ -451,14 +443,12 @@ final class ArtistViewModel {
     ///
     /// `warmArt` pulls the first few era covers (and their colours) into the cache
     /// while the landing spinner still shows, so the first cards don't pop in grey.
-    static func make(artist: Artist, warmArt: Bool = true) async -> ArtistViewModel {
+    static func make(artist: Artist) async -> ArtistViewModel {
         let precomputed = await Task.detached(priority: .userInitiated) {
             Precomputed(artist: artist)
         }.value
         let vm = ArtistViewModel(artist: artist, precomputed: precomputed)
-        if warmArt {
-            await vm.warmEraArt(limit: coldStartArtCount)
-        }
+        await vm.warmEraArt(limit: coldStartArtCount)
         return vm
     }
 
@@ -615,7 +605,6 @@ final class ArtistViewModel {
             grails: grails,
             recents: recents,
             noSnippets: noSnippets,
-            misc: misc,
             tabKey: selectedTabKey
         )
     }
@@ -668,7 +657,7 @@ final class ArtistViewModel {
     nonisolated static func filteredEraContexts(
         artist: Artist, state: FilterState, result: FilteredContent
     ) -> [EraSongContext]? {
-        let erasView = state.query.isEmpty && !state.recents && !state.misc && state.tabKey == nil
+        let erasView = state.query.isEmpty && !state.recents && state.tabKey == nil
         guard erasView, state != FilterState() else { return nil }
         var kept = result.eras[...]
         return artist.eras.map { era in
@@ -786,23 +775,12 @@ final class ArtistViewModel {
         applyFilters()
     }
 
-    func toggleMisc() {
-        misc.toggle()
-        if misc { selectedTabKey = nil }
-        if !misc && !isBadgeFilterActive && !recents {
-            expandedEra = nil
-            rebuildEraRows()
-        }
-        applyFilters()
-    }
-
     /// Selects a content tab (tapping the active chip deselects it).
     /// Entering a tab resets the filter chips — except No Snippets, which
     /// keeps excluding short clips on every page.
     func selectTab(_ key: String?) {
         selectedTabKey = (selectedTabKey == key) ? nil : key
         if selectedTabKey != nil {
-            misc = false
             bestOf = false
             worstOf = false
             grails = false

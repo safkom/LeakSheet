@@ -17,11 +17,6 @@ enum MacListRow: Identifiable {
         case .version(let v, _, let era, _, let idx, let ordinal): "v:\(era)::\(ordinal)::\(idx)::\(v.id)"
         }
     }
-
-    var isSelectable: Bool {
-        if case .header = self { return false }
-        return true
-    }
 }
 
 /// One flat, selectable list of song/version rows. `List(selection:)` gives the Mac

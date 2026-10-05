@@ -222,15 +222,15 @@ struct FilterPipelineTests {
         }
     }
 
-    @Test @MainActor func `toggleMisc rebuilds era rows when returning to the base state`() {
+    @Test @MainActor func `leaving a tab rebuilds era rows when returning to the base state`() {
         let vm = ArtistViewModel(artist: artist)
         vm.toggleEra("Era A")
         #expect(vm.expandedEra == "Era A")
 
-        vm.toggleMisc()
-        vm.toggleMisc()
+        vm.selectTab("misc::Misc")
+        vm.selectTab("misc::Misc")
         // Back to the base filter state — applyFilters() early-returns
-        // without ever reaching its own rebuildEraRows() call, so toggleMisc
+        // without ever reaching its own rebuildEraRows() call, so selectTab
         // must rebuild synchronously itself once it clears expandedEra.
         // Otherwise eraRows keeps rendering Era A as expanded even though
         // expandedEra is nil, and the next tap on that card is a no-op.
@@ -414,14 +414,6 @@ struct TabModeFilterTests {
         let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
         #expect(content.miscResults.isEmpty)
     }
-
-    @Test func `legacy misc mode still reads the flat list`() {
-        let artist = artistWithTabs()
-        var state = FilterState()
-        state.misc = true
-        let content = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:])
-        #expect(content.miscResults.map(\.name) == ["Old Flat Misc"])
-    }
 }
 
 /// Worst Of filter (2026-07-18): mirrors Best Of for the 🗑 badge.
@@ -549,13 +541,9 @@ struct CrossEraIndexTests {
     }
 
     @Test func `unidentified tracks are not linked to each other`() async {
-        // "???" is how these trackers write "nobody knows what this is". Each
-        // such row is its own mystery track, which is why the backend sends
-        // them with an empty songKey — and why the base-name fallback must not
-        // group them. Indexing them put all 319 of Ye's "???" rows under one
-        // key, so tapping any one of them opened a version picker listing every
-        // unidentified track on the tracker, with colliding ids, and the sheet
-        // could re-point itself at an unrelated song.
+        // "???" means "nobody knows what this is": each such row is its own track,
+        // so the backend sends an empty songKey and the base-name fallback must not
+        // group them (one key would list every unidentified track in one picker).
         let artist = Artist(
             name: "T", slug: "t", sourceUrl: nil,
             eras: [

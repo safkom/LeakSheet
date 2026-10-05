@@ -7,24 +7,9 @@
 //
 // Idempotent: it rewrites the PNGs and the Contents.json files every time.
 //
-// The mark is a water droplet (a "leak") with a music note. The previous art
-// was drawn by hand and had three defects this script fixes by construction:
-//
-//   1. The teardrop's straight flanks met its round body at a discontinuous
-//      tangent, leaving a visible kink near the tip. Here the flanks run to the
-//      TRUE tangent points of the circle, solved in closed form, so the join is
-//      tangent-continuous by definition.
-//   2. The specular highlight spilled outside the silhouette. Here it is
-//      clipped to the droplet path.
-//   3. The note was a separate fill whose colour differed per variant, so the
-//      light and dark icons disagreed. Here it is an even-odd cut-out of the
-//      same compound path, which is correct in every variant with no special
-//      casing. (The tvOS layer stack draws it as a separate layer instead, in
-//      the background colour, so it can parallax — visually identical when flat.)
-//
-// No third-party dependencies and no Python: the geometry is defined by
-// tangency and even-odd path compositing, both of which are single CoreGraphics
-// calls, and CoreGraphics is already on every machine that can build this app.
+// The mark is a water droplet (a "leak") with a music note: the flanks meet the round
+// body at its true tangent points, the highlight is clipped to the droplet, and the
+// note is punched out of the same path (a separate layer on tvOS, for parallax).
 
 import CoreGraphics
 import CoreText
@@ -94,8 +79,7 @@ private enum G {
 ///
 /// With `d = |apex − center|` and `γ = acos(R/d)`, the tangent points sit at
 /// `β ∓ γ` where `β` is the direction from centre to apex. Because those are the
-/// actual tangent points, each flank meets the arc with a continuous tangent —
-/// this is the fix for the kink in the old art, and it is exact, not eyeballed.
+/// actual tangent points, each flank meets the arc with a continuous tangent.
 func dropletPath() -> CGPath {
     let c = G.center, a = G.apex, r = G.radius
     let d = hypot(a.x - c.x, a.y - c.y)
@@ -214,7 +198,7 @@ func markTransform(size: CGSize, coverage: CGFloat = 1.0) -> CGAffineTransform {
         .scaledBy(x: s, y: s)
 }
 
-/// The droplet body, with the note cut out of it via even-odd, plus the
+/// The droplet body, with the note punched out of it, plus the
 /// clipped highlight. `drawNoteAsHole == false` omits the note entirely (the
 /// tvOS layer stack draws it on its own layer instead).
 func drawMark(
@@ -255,8 +239,7 @@ func drawMark(
     drawHighlight(ctx, droplet: droplet, transform: transform)
 }
 
-/// Specular highlight, clipped to the silhouette so it can never spill outside
-/// the droplet the way the old art's did.
+/// Specular highlight, clipped to the silhouette so it can never spill outside it.
 func drawHighlight(_ ctx: CGContext, droplet: CGPath, transform: CGAffineTransform) {
     ctx.saveGState()
     ctx.addPath(droplet)
