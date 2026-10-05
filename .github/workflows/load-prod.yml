@@ -1,8 +1,8 @@
 name: load-prod
 
-# k6 through the public domain, from a GitHub runner: what a distant user gets. Manual
-# only. spike and stress exceed the per-IP limits; relax them for the window first
-# (see tests/load/journey.js).
+# k6 through the public domain, from GitHub runners: what distant users get. Manual only.
+# Each runner is its own IP, so `runners` scales load the way real users do. spike and
+# stress exceed the per-IP limits; relax them for the window first (tests/load/journey.js).
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +11,11 @@ on:
         type: choice
         options: [smoke, load, soak, spike, stress]
         default: smoke
+      runners:
+        description: Parallel runners (one IP each)
+        type: choice
+        options: ["1", "3", "5"]
+        default: "1"
       base_url:
         description: API base URL
         default: https://sheets.safko.eu/api
@@ -21,8 +26,12 @@ concurrency:
 
 jobs:
   k6:
-    name: k6 ${{ inputs.profile }}
+    name: k6 ${{ inputs.profile }} (${{ matrix.runner }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON('{"1":[1],"3":[1,2,3],"5":[1,2,3,4,5]}')[inputs.runners] }}
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -37,5 +46,5 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: k6-${{ inputs.profile }}
+          name: k6-${{ inputs.profile }}-${{ matrix.runner }}
           path: k6-${{ inputs.profile }}-*

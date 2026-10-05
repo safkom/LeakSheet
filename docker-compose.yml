@@ -1,6 +1,10 @@
+# Builds the images ops/deploy.sh runs as the CasaOS app `leaksheet`. Its own project name
+# keeps a stray `docker compose up` here from replacing that app's containers.
+name: leaksheet-dev
 services:
   api:
     build: .
+    image: leaksheet-api:latest
     restart: unless-stopped
     env_file:
       - path: .env
@@ -21,6 +25,7 @@ services:
 
   web:
     build: ./web
+    image: leaksheet-web:latest
     restart: unless-stopped
     ports:
       - "8081:80"

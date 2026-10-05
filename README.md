@@ -138,9 +138,11 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 
 ### Deployment
 
-Self-hosted via Docker Compose (`docker-compose.yml`): an `api` container (`gunicorn` with three
-`UvicornWorker`s, see `Dockerfile`) and a `web` container (`nginx` reverse-proxying `/api/*`
-to `api` with the prefix stripped, see `web/nginx.conf`), the `/api` routing the apps assume. `web` publishes port `8081` on the host; a
+Self-hosted as the CasaOS app `leaksheet` (`ops/casaos/leaksheet.yml`): an `api` container
+(`gunicorn` with three `UvicornWorker`s, see `Dockerfile`) and a `web` container (`nginx`
+reverse-proxying `/api/*` to `api` with the prefix stripped, see `web/nginx.conf`), the `/api`
+routing the apps assume. `sh ops/deploy.sh` in the server's checkout builds both images with
+`docker-compose.yml` and restarts the app. `web` publishes port `8081` on the host; a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 (run separately, e.g. as a CasaOS app) points `sheets.safko.eu` at `http://localhost:8081`.
 
