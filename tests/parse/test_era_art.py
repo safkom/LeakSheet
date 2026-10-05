@@ -1,11 +1,8 @@
 """Era cover art must come out of the parser as a URL something can fetch.
 
-Self-hosted trackers serve covers from their own origin as "/assets/<sha>.jpg".
-Those relative paths reached clients verbatim and could be fetched by nothing —
-268 eras across the captured corpus. Two halves to the fix, and both are
-needed: resolve the URL against the tab it came from, and let the image proxy
-fetch from that tracker's host — which it does only for curated hosts, never for
-ones harvested from the third-party ArtistGrid feed.
+Self-hosted trackers serve covers as "/assets/<sha>.jpg": the parser resolves them
+against the tab they came from, and the image proxy fetches from that tracker's host
+only when it is curated, never when it was harvested from the ArtistGrid feed.
 """
 
 from __future__ import annotations

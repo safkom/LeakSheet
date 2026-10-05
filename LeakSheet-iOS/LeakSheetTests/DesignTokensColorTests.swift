@@ -3,8 +3,7 @@ import Testing
 
 @testable import LeakSheet
 
-/// Pins `Color.rgbComponents` after it moved off `UIColor(self)` onto SwiftUI's
-/// own `resolve(in:)` (the UIKit round-trip has no macOS equivalent), and pins
+/// Pins `Color.rgbComponents` (SwiftUI's `resolve(in:)`, which macOS has too) and
 /// the contrast guarantees the appearance-aware palette rests on.
 ///
 /// The expected values are the exact sRGB components of the literals in

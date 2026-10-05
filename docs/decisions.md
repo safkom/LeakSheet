@@ -216,22 +216,6 @@ worth it — the divergence is pinned in
 rather than left to the oracle test, which generates bracket groups atomically and
 therefore never produces this shape.
 
-## api.py — prewarm loop
-
-Frequently-updated trackers otherwise always serve stale-first once per TTL window:
-the first request after expiry gets the stale copy and only *then* triggers a
-refresh. The loop revalidates cache entries sitting in the stale-while-revalidate
-gap. It **sleeps before its first pass**, so app startup and `TestClient` contexts
-never fire network work. `LEAKSHEET_PREWARM=0` disables it (2026-07-20 review).
-
-**It is disabled in production** (`docker-compose.yml`, 2026-09-21). The loop is
-started per-process in `lifespan`, and the per-URL guard in `_background_revalidate`
-is in-process too, so once gunicorn runs more than one worker each worker runs its
-own hourly pass over the same trackers — an hourly all-workers stall instead of an
-hourly one-worker one. Request-triggered stale-while-revalidate still covers
-freshness; the loop only front-ran it for the hour's first visitor. Re-enabling it
-needs a single dedicated process, not a flag flip.
-
 ## api.py — image width buckets
 
 Buckets bound the disk-cache cardinality; clients snap up to the next one. `1600`
@@ -361,7 +345,7 @@ it for days. Covers therefore loaded only while the parse was young. On 2026-09-
 production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
 Keem were fine.
 
-After every server-side parse (cold miss, stream, background revalidation, prewarm), each
+After every server-side parse (cold miss, stream, background revalidation), each
 era cover is downloaded while its token still works and stored in the image cache under
 the exact URL the payload carries (width 0). `/image-proxy` reads that copy before going
 upstream, so a cover keeps loading for the image cache's 7-day life.
@@ -500,7 +484,7 @@ seen across trackers:
 - `Album, Clean` — release variant versions
 - `Song 1, Song 2` — ordered song variants (Carti tracker)
 
-## models.py::ALIAS_LABEL_RE — stripping the redundant "AKA:" label
+## models.py::_ALIAS_LABEL_RE — stripping the redundant "AKA:" label
 
 Some trackers label the alias line instead of just writing it: Travis uses "(AKA:
 iLLamerica)" on 220 of its 259 alias lines. The field IS the alias, so the label is
@@ -645,7 +629,7 @@ from the abbreviated era names used in song rows (e.g. "Birds In The Trap Sing
 McKnight" vs. "Birds") — a name-column era header creates a 0-song stub era that then
 gets merged into its adjacent songs-bearing era.
 
-## parser.py::STATS_LIKE_ERA_RE — shape-based stats cell recognition
+## parser.py::_STATS_LIKE_ERA_RE — shape-based stats cell recognition
 
 Matches "1 Mixtape Tracks", "0 Project(s)", "99 tracks" — counted-stats cells whose
 vocabulary a fixed keyword list doesn't carry. Recognised by shape (`^\d+\s+\S`) so

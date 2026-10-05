@@ -137,7 +137,7 @@ class SongVersion(BaseModel):
     director: str | None = Field(None, description="Director credit on video rows, e.g. 'Dave Meyers'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
     notes: str | None = Field(None, description="Description/history text")
-    og_filename: str | None = Field(None, description="First original filename from metadata (legacy single-value field)")
+    og_filename: str | None = Field(None, description="First original filename (og_filenames holds every one)")
     og_filenames: list[str] = Field(default_factory=list, description="All original filenames from metadata, in order of appearance")
     samples: list[str] = Field(default_factory=list, description="Sampled songs/works, e.g. ['Got Money — Lil Wayne']")
     sources: list[SourceRef] = Field(default_factory=list, description="Labeled evidence links from a Sources column")
@@ -719,7 +719,7 @@ def parse_tracker_stats(
 # Collapses any whitespace run, newlines included, unlike _INNER_SPACE_RE.
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
-# Must stay linear (S5852): line-break spaces are stripped first (parse_song_credits)
+# Must stay linear: line-break spaces are stripped first (parse_song_credits)
 # so each char matches one way, and the possessive scan never retries inner openers.
 _CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
 
@@ -765,7 +765,7 @@ def _split_credit_parts(body: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-# Strips the redundant "AKA:" label — see docs/decisions.md::models.py::ALIAS_LABEL_RE
+# Strips the redundant "AKA:" label — see docs/decisions.md::models.py::_ALIAS_LABEL_RE
 _ALIAS_LABEL_RE = re.compile(r"^\s*a\.?k\.?a\.?\s*[:\-–]?\s+", re.IGNORECASE)
 
 
@@ -927,7 +927,7 @@ def parse_song_credits(raw_name: str) -> SongCredits:
         # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
         if not line.strip("()[] "):
             continue
-        # Multi-alias paren splitting — see docs/decisions.md::models.py::ALIAS_LABEL_RE
+        # Multi-alias paren splitting — see docs/decisions.md::models.py::_ALIAS_LABEL_RE
         if line.startswith("(") and line.endswith(")"):
             inner = _strip_alias_label(line[1:-1].strip())
             alt_titles.extend(_split_alt_aliases(inner))

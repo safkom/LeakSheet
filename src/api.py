@@ -25,18 +25,17 @@ import os
 import re
 import time
 from collections.abc import Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.datastructures import Headers
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
-from starlette.datastructures import Headers
-from starlette.middleware.gzip import GZipMiddleware
-from starlette.responses import StreamingResponse
 
 from src.config import (
     ARTISTGRID_URL,
@@ -68,7 +67,6 @@ from src.fetcher import (
     ParseError,
     PhaseTimer,
     STALE_CACHE_TTL,
-    stale_parsed_cache_urls,
     unlink_if_older,
 )
 from src.streaming import (
@@ -402,18 +400,8 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Prewarm loop (LEAKSHEET_PREWARM=0 disables): see docs/decisions.md::api.py — prewarm loop
-    prewarm_task: asyncio.Task | None = None
-    if os.environ.get("LEAKSHEET_PREWARM", "1") != "0":
-        prewarm_task = asyncio.create_task(_prewarm_loop())
     yield
-    # Shutdown: stop background work and close all three shared HTTP clients.
-    if prewarm_task is not None:
-        prewarm_task.cancel()
-        # Awaiting our own cancelled task: its CancelledError is the expected
-        # result, not a cancellation of this shutdown.
-        with suppress(asyncio.CancelledError):
-            await prewarm_task
+    # Shutdown: close all three shared HTTP clients.
     if _proxy_client is not None:
         await _proxy_client.aclose()
     await close_shared_client()
@@ -647,38 +635,6 @@ _REVALIDATE_BACKOFF_S = 15 * 60.0
 _revalidate_backoff: dict[str, float] = {}
 
 
-# Stale-cache prewarm — refresh parses inside the stale-while-revalidate gap
-# so trackers people actually use serve fresh data instead of stale-first.
-_PREWARM_INTERVAL_S = float(os.environ.get("LEAKSHEET_PREWARM_INTERVAL", "3600"))
-_PREWARM_BATCH = int(os.environ.get("LEAKSHEET_PREWARM_BATCH", "25"))
-
-
-async def _refresh_stale_once(limit: int = _PREWARM_BATCH) -> int:
-    """Revalidate up to ``limit`` stale cached parses; returns how many ran.
-
-    Sequential on purpose — this is background politeness work, not a sweep.
-    Reuses ``_background_revalidate`` so the per-URL single-flight guard also
-    covers request-triggered revalidations of the same tracker.
-    """
-    urls = await asyncio.to_thread(stale_parsed_cache_urls, limit)
-    for url in urls:
-        await _background_revalidate(url)
-    return len(urls)
-
-
-async def _prewarm_loop() -> None:
-    while True:
-        await asyncio.sleep(_PREWARM_INTERVAL_S)
-        try:
-            refreshed = await _refresh_stale_once()
-            if refreshed:
-                logger.info("Prewarm: revalidated %d stale tracker(s)", refreshed)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001 — the loop must survive anything
-            logger.warning("Prewarm pass failed: %s", e)
-
-
 def _parse_if_none_match(header_value: str) -> str:
     """Extract the opaque tag from an `If-None-Match` header value.
 
@@ -755,11 +711,6 @@ async def parse_sheet(
             cached = await async_get_cached_parsed_bytes(req.url, max_age=STALE_CACHE_TTL)
         if cached is not None:
             raw, etag, age = cached
-            if not etag:
-                # Legacy cache entry without a stored hash. The ETag is a hash
-                # of the served bytes, so this is one SHA-256 — no parse.
-                with timer.phase("etag"):
-                    etag = content_hash(raw)
             if req.artist_name:
                 with timer.phase("rename"):
                     raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
@@ -1108,16 +1059,14 @@ def _image_cache_paths(key: str):
 def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
     """Blocking read of a cached resized image — call via asyncio.to_thread.
 
-    Returns (bytes, content_type, etag). Entries without a stored ETag fall back
-    to the legacy key-plus-write-second form.
+    Returns (bytes, content_type, etag).
     """
     bin_path, meta_path = _image_cache_paths(key)
     try:
         meta = json.loads(meta_path.read_text())
         if time.time() - meta["timestamp"] > _IMAGE_CACHE_TTL:
             return None
-        etag = meta.get("etag") or f"{key}-{int(meta['timestamp'])}"
-        return bin_path.read_bytes(), meta["content_type"], etag
+        return bin_path.read_bytes(), meta["content_type"], meta["etag"]
     except (OSError, ValueError, KeyError):
         return None
 
@@ -1157,7 +1106,7 @@ def _era_art_base(tracker_url: str, era_name: str) -> str:
     """
     tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
     era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
-    # v2: v1 slots hold Art-tab images adopted by name alone, often another era's art.
+    # The version segment retires slots filled under older adoption rules.
     return f"leaksheet:art/v2/{tracker}/{era}"
 
 
@@ -1664,7 +1613,6 @@ def _parse_froste_metadata(data: dict) -> dict:
 def _parse_imgur_metadata(data: dict) -> dict:
     """Extract useful fields from imgur.gg file API response."""
     result: dict = {"provider": "imgur"}
-    # The live API returns the mime under "type"; "mimeType" is a possible legacy form.
     mime = data.get("type") or data.get("mimeType")
     if data.get("size"):
         result["file_size"] = data["size"]
@@ -2006,18 +1954,15 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
     skipped = 0
     async for chunk in source:
         chunk_end = skipped + len(chunk)
-        # Entirely before range_start — skip
         if chunk_end <= range_start:
             skipped += len(chunk)
             continue
-        # Compute the slice of this chunk we need
         start_in_chunk = max(0, range_start - skipped)
         end_in_chunk = min(len(chunk), range_end + 1 - skipped)
         portion = chunk[start_in_chunk:end_in_chunk]
         if portion:
             yield portion
         skipped += len(chunk)
-        # Past range_end — stop
         if skipped > range_end:
             break
 

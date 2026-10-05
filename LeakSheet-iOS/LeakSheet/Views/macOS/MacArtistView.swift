@@ -52,7 +52,7 @@ struct MacArtistView: View {
     ///
     /// ponytail: reuses iOS `MiscListView` verbatim (no selection, keys or hover); fork it if tabs get browsed heavily.
     private var isMiscMode: Bool {
-        vm.misc || vm.selectedTabKey != nil
+        vm.selectedTabKey != nil
     }
 
     private var hasTimeline: Bool {
@@ -127,17 +127,13 @@ struct MacArtistView: View {
                 MacFilterChip(label: "Grails", icon: "trophy.fill", isActive: vm.grails, tint: .filterGrail) { vm.toggleGrails() }
                 MacFilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tint: .filterRecent) { vm.toggleRecents() }
                 MacFilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tint: .filterNoSnippets) { vm.toggleNoSnippets() }
-                if !vm.availableTabs.isEmpty {
-                    ForEach(vm.availableTabs) { tab in
-                        MacFilterChip(
-                            label: tab.name,
-                            icon: ContentTabsView.tabIcon(for: tab.kind),
-                            isActive: vm.selectedTabKey == tab.id,
-                            tint: .filterMisc
-                        ) { vm.selectTab(tab.id) }
-                    }
-                } else if vm.hasMiscEntries {
-                    MacFilterChip(label: "Misc", icon: "film.stack", isActive: vm.misc, tint: .filterMisc) { vm.toggleMisc() }
+                ForEach(vm.availableTabs) { tab in
+                    MacFilterChip(
+                        label: tab.name,
+                        icon: ContentTabsView.tabIcon(for: tab.kind),
+                        isActive: vm.selectedTabKey == tab.id,
+                        tint: .filterMisc
+                    ) { vm.selectTab(tab.id) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

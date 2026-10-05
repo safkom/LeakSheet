@@ -2,15 +2,8 @@ import Testing
 
 @testable import LeakSheet
 
-/// Pins the era-colour cache eviction.
-///
-/// The bug this exists for: `init` restored `cache` from UserDefaults (up to
-/// 200 entries) but left `insertionOrder` empty. On any launch where the
-/// persisted cache was already full, the first extraction pushed the count to
-/// 201, computed `excess == 1`, and evicted `insertionOrder.prefix(1)` — the
-/// key that had just been added. The cache froze at whatever 200 entries were
-/// on disk and no new era colour was ever written again for the life of the
-/// install.
+/// Pins the era-colour cache eviction: a full cache restored from disk must still
+/// evict its oldest entry, never the one just added.
 @Suite("Era colour cache eviction")
 struct EraColorCacheTests {
     private func makeCache(_ count: Int, prefix: String = "k") -> ([String: [Double]], [String]) {

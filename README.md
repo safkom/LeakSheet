@@ -130,9 +130,6 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/metadata`; `/image-proxy` gets 10× this, since one screen loads dozens of covers. `/cache/clear` carries its own fixed cap of 10/min that applies whether or not this is set |
 | `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
 | `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed. `/image-proxy` trusts only the seed plus this list — never the feed — so a feed-only tracker with self-hosted covers must be added here for its art to load |
-| `LEAKSHEET_PREWARM` | `1` (on) | Hourly SWR-gap revalidation of actually-used trackers; `0` disables |
-| `LEAKSHEET_PREWARM_INTERVAL` | `3600` | Seconds between prewarm passes |
-| `LEAKSHEET_PREWARM_BATCH` | `25` | Max cache entries revalidated per prewarm pass |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 | `LEAKSHEET_GID_FETCH_CONCURRENCY` | `6` | Concurrent tab-page fetches across all requests. Each holds a full response body in memory |
 | `LEAKSHEET_HUB_LOAD_CONCURRENCY` | `3` | Concurrent hub-workbook tab loads — fetched *and* parsed, so tighter than the above |
@@ -158,8 +155,7 @@ LeakSheet-iOS app both assume. `web` publishes port `8081` on the host; a
 
 Three workers, so one cold parse doesn't stall every other request; parse/serialize work also
 runs off the event loop via `asyncio.to_thread`. Anything held in process memory — the rate
-limiter, single-flight parses, revalidation backoff, CDN-resolve caches — is therefore per worker,
-and `LEAKSHEET_PREWARM` must stay `0` (see `docker-compose.yml`).
+limiter, single-flight parses, revalidation backoff, CDN-resolve caches — is therefore per worker.
 
 
 ---

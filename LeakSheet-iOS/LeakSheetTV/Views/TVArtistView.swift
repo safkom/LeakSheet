@@ -62,9 +62,6 @@ struct TVArtistView: View {
                     ForEach(vm.content.eras) { filtered in
                         eraSection(filtered, vm: vm)
                     }
-                    if !vm.content.miscResults.isEmpty {
-                        miscSection(vm)
-                    }
                 }
             }
             .padding(.vertical, 32)
@@ -230,19 +227,6 @@ struct TVArtistView: View {
             }
             .focusSection()
         }
-    }
-
-    @ViewBuilder
-    private func miscSection(_ vm: ArtistViewModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Misc")
-                .font(.title3.weight(.semibold))
-                .padding(.horizontal, 60)
-            ForEach(Array(vm.content.miscResults.enumerated()), id: \.offset) { _, entry in
-                TVMiscRowView(entry: entry)
-            }
-        }
-        .focusSection()
     }
 
     // MARK: - Refresh

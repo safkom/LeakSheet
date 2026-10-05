@@ -9,11 +9,8 @@ import Testing
 struct LoadingResilienceTests {
     // MARK: - Image retry classification
     //
-    // loadImage ignored the HTTP status entirely: a 429 body ("Too Many
-    // Requests") went into ImageIO, failed to decode, and came back nil —
-    // indistinguishable from a genuinely missing image. Callers then render a
-    // placeholder and never ask again. With /image-proxy sharing the /sheet
-    // rate-limit bucket, a quarter of all cover requests took that path.
+    // A throttled or failed image request is retried, not decoded: a nil result
+    // reads as "no such image" and callers never ask again.
 
     @Test(arguments: [429, 500, 502, 503, 504, 599])
     func `throttles and server errors are worth retrying`(status: Int) {

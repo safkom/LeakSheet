@@ -568,7 +568,7 @@ _DISCOGRAPHY_STATS_PATTERN = re.compile(
 )
 
 # Any "<int> <word>" pair, used only to count a cell's counts. The lookbehind starts
-# each attempt at a digit run's first digit, keeping this linear (S8786).
+# each attempt at a digit run's first digit, keeping this linear.
 _STAT_PAIR_RE = re.compile(r"(?<!\d)\d++\s++[A-Za-z]")
 _MIN_DISCOGRAPHY_PAIRS = 2
 
@@ -2181,10 +2181,10 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 
 
 # Compound availability (Travis Scott, no Quality column): '<avail> - HQ',
-# 'Unconfirmed (Snippet - LQ)'. No leading \s* (quadratic, S8786): the caller strips.
+# 'Unconfirmed (Snippet - LQ)'. No leading \s* (quadratic): the caller strips.
 _COMPOUND_QUALITY_PATTERN = re.compile(r"-\s*(~?)(HQ|LQ|CDQ)\b")
 # Stars may be separated by whitespace or newlines ("⭐\n⭐\n⭐"); the rating counts
-# star glyphs. Scanned from the end: an end-anchored regex is quadratic (S8786).
+# star glyphs. Scanned from the end: an end-anchored regex is quadratic.
 _STAR_CHARS = "⭐★"
 _STAR_RUN_CHARS = "⭐★☆"
 _COMPOUND_QUALITY_NAMES = {
@@ -2614,12 +2614,12 @@ BADGE_SECTION_LABELS = frozenset({
 })
 
 # Era header rows carry per-era stats in the era column ("3 Released 0 Unreleased").
-# The lookbehind keeps a long digit run linear, as in _STAT_PAIR_RE (S8786).
+# The lookbehind keeps a long digit run linear, as in _STAT_PAIR_RE.
 _MISC_ERA_STATS_RE = re.compile(
     r"(?<!\d)\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
 )
 
-# Shape-based stats cell match — see docs/decisions.md::parser.py::STATS_LIKE_ERA_RE
+# Shape-based stats cell match — see docs/decisions.md::parser.py::_STATS_LIKE_ERA_RE
 _STATS_LIKE_ERA_RE = re.compile(r"^\s*\d+\s+\S")
 
 

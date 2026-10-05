@@ -158,7 +158,7 @@ private struct ArtistContentView: View {
 
                 // Branch on computed state — see DECISIONS.md::ArtistView.swift::content-state-branching
                 let contentState = vm.content.state
-                if contentState.misc || contentState.tabKey != nil {
+                if contentState.tabKey != nil {
                     MiscListView(
                         vm: vm,
                         artistName: artist.name,

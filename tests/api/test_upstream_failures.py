@@ -48,8 +48,6 @@ def upstream(monkeypatch):
         monkeypatch.setattr(api, "_get_shared_client", lambda: client)
         monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
         monkeypatch.setattr(api, "_get_proxy_client", lambda: client)
-        monkeypatch.setattr(api, "_metadata_cache", api.TTLCache(ttl=60.0, max_entries=10))
-        monkeypatch.setattr(streaming, "_cdn_url_cache", streaming.TTLCache(ttl=60.0, max_entries=10))
         return hits
 
     return install

@@ -28,7 +28,7 @@ HEALTHCHECK --interval=5m --timeout=5s --retries=3 --start-period=60s --start-in
 # --timeout 90: UvicornWorker's event-loop watchdog. Must clear a cold Ye-sized parse
 #   yet stay under Cloudflare's 125 s edge read timeout (fixed below Enterprise).
 # --workers 3: a parse blocks its worker's event loop (~1.3GB resident each). The
-#   rate limiter and in-process caches are per worker; LEAKSHEET_PREWARM must stay 0.
+#   rate limiter and in-process caches are per worker.
 # --max-requests 1000 (+jitter): recycling bounds lxml arena fragmentation; the
 #   jitter keeps all three workers from recycling at once.
 CMD ["gunicorn", "src.api:app", \

@@ -561,8 +561,7 @@ def is_imgur_api_url(url: str) -> bool:
 async def resolve_imgur_cdn_url(api_url: str) -> str:
     """Fetch imgur.gg file metadata and return the CDN stream URL.
 
-    Tries the given URL first, then temp.imgur.gg: which of the two hosts is
-    live has flipped before.
+    Tries the given URL first, then temp.imgur.gg, since either host may be the live one.
 
     Args:
         api_url: e.g. ``https://imgur.gg/api/file/wGLEqSB``

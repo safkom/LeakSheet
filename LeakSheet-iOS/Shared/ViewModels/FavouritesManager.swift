@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import OSLog
 
-/// Manages favourited songs with UserDefaults persistence.
+/// Manages favourited songs, persisted as a JSON file.
 /// Composite key: "artistSlug::eraName::baseName"
 @MainActor
 @Observable

@@ -508,9 +508,8 @@ def _build_sheet_html_url(
     return f"{parsed.scheme}://{parsed.netloc}{path}?{query}"
 
 
-# Trailing-text regexes below start with (?<!\s) or exclude the opener from
-# their inner class, so no run of spaces or brackets is rescanned from every
-# character in it (S8786).
+# Trailing-text regexes below start with (?<!\s) or exclude the opener from their
+# inner class, so no run of spaces or brackets is rescanned from every character.
 _TRACKER_QUALIFIER_RE = re.compile(
     r"(?<!\s)\s+Tracker\s+(?:[\d.v]+|PUBLIC|PRIVATE|OFFICIAL|UNOFFICIAL|BACKUP|ARCHIVE"
     r"|\[[^\]]*\]|\([^)]*\))\s*$",
@@ -939,13 +938,11 @@ def _write_meta(key: str, updates: dict) -> None:
 
 
 def _parsed_timestamp(meta: dict) -> float:
-    """Freshness of the PARSED cache.
+    """Freshness of the PARSED cache (`timestamp` tracks the HTML); 0 if never parsed.
 
-    Distinct from `timestamp`, which tracks the HTML. Falls back to it for
-    entries written before the two were separated.
+    Written with `content_hash` in one meta merge, so an entry with one has both.
     """
-    ts = meta.get("parsed_timestamp")
-    return float(ts) if ts else float(meta.get("timestamp", 0) or 0)
+    return float(meta.get("parsed_timestamp") or 0)
 
 
 def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist | None:
@@ -991,20 +988,14 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
         age = 0.0
-    # Checked before the counts: past this age the old entry is never
-    # preferred, so a legacy entry must not pay the full read below for it.
     if age > STALE_CACHE_TTL:
         return None
 
-    # The counts live in the small meta sidecar, sparing a multi-MB json.loads per
-    # write. Pre-counts entries fall back to that read once and are rewritten below.
+    # The counts live in the small meta sidecar, sparing a multi-MB json.loads per write.
     old = meta.get("total_versions")
     old_eras = meta.get("era_count")
     if old is None or old_eras is None:
-        previous = _legacy_parsed_counts(parsed_file)
-        if previous is None:
-            return None
-        old, old_eras = previous
+        return None
 
     if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
         return None
@@ -1012,17 +1003,6 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
     return (
         f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
     )
-
-
-def _legacy_parsed_counts(parsed_file: Path) -> tuple[int, int] | None:
-    """(total_versions, era count) read out of a pre-counts cache entry."""
-    try:
-        previous = json.loads(parsed_file.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(previous, dict):
-        return None
-    return (previous.get("total_versions") or 0, len(previous.get("eras") or []))
 
 
 def _set_cached_parsed(url: str, artist: Artist) -> None:
@@ -1077,35 +1057,6 @@ async def _async_get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TT
 
 async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
     await asyncio.to_thread(_set_cached_parsed, url, artist)
-
-
-def stale_parsed_cache_urls(limit: int) -> list[str]:
-    """URLs of cached parses inside the stale-while-revalidate gap.
-
-    Age between DEFAULT_CACHE_TTL and STALE_CACHE_TTL, freshest-stale first,
-    capped at ``limit``. The prewarm loop refreshes them in the background.
-    """
-    if not CACHE_DIR.exists():
-        return []
-    now = time.time()
-    candidates: list[tuple[float, str]] = []
-    for meta_file in CACHE_DIR.glob("*.meta.json"):
-        stem = meta_file.name.removesuffix(".meta.json")
-        if not (CACHE_DIR / f"{stem}.parsed.json").exists():
-            continue  # gid sub-pages etc. — only full parses are prewarmed
-        try:
-            meta = json.loads(meta_file.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        url = meta.get("url")
-        ts = _parsed_timestamp(meta)
-        if not url or ts <= 0:
-            continue
-        age = now - ts
-        if DEFAULT_CACHE_TTL < age <= STALE_CACHE_TTL:
-            candidates.append((age, url))
-    candidates.sort()
-    return [url for _, url in candidates[:limit]]
 
 
 def clear_cache() -> tuple[int, int]:
@@ -1168,7 +1119,7 @@ def get_cached_age(url: str) -> float | None:
 
 def get_cached_parsed_bytes(
     url: str, max_age: float = STALE_CACHE_TTL
-) -> tuple[bytes, str | None, float] | None:
+) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
 
@@ -1186,19 +1137,19 @@ def get_cached_parsed_bytes(
     try:
         meta = json.loads(meta_file.read_text())
         ts = _parsed_timestamp(meta)
-        if ts <= 0:
+        if ts <= 0 or not meta.get("content_hash"):
             return None
         age = time.time() - ts
         if age > max_age:
             return None
-        return parsed_file.read_bytes(), meta.get("content_hash"), age
+        return parsed_file.read_bytes(), meta["content_hash"], age
     except (OSError, json.JSONDecodeError):
         return None
 
 
 async def async_get_cached_parsed_bytes(
     url: str, max_age: float = STALE_CACHE_TTL
-) -> tuple[bytes, str | None, float] | None:
+) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
 
@@ -1585,17 +1536,15 @@ async def _load_secondary_tabs(
         )
 
 
-# Largest 16x16 dHash distance (of 256 bits) still counted as the same artwork. On 91
-# main-tab/Art-tab cover pairs from 5 trackers, same art measured 0-27 and different art
-# 65+: docs/decisions.md::fetcher.py::art-tab-identity.
+# Largest 16x16 dHash distance (of 256 bits) still counted as the same artwork:
+# docs/decisions.md::fetcher.py::art-tab-identity.
 _SAME_ART_MAX_DISTANCE = 40
 _ART_COMPARE_CONCURRENCY = 8
 _ART_FETCH_TIMEOUT = 10.0
 # Same ceiling as the image proxy: the decode runs in a worker thread, not unbounded.
 _ART_MAX_BYTES = 25 * 1024 * 1024
-# Compressed size says nothing about decoded size: a 0.5 MB PNG can be 144 MP (~700 MB
-# decoded), and Pillow only refuses above ~179 MP. Checked from the header, before
-# any decode. Shared with the image proxy.
+# Decoded pixels, checked from the header before any decode: a small PNG can decode to
+# hundreds of MB, far below Pillow's own bomb limit. Shared with the image proxy.
 MAX_DECODE_PIXELS = 20_000_000
 
 
