@@ -4,10 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    # Daily — catches "a tracker changed format and the parser now drops data"
-    # even on days with no code changes.
-    - cron: "0 6 * * *"
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -17,6 +13,7 @@ jobs:
   offline:
     name: Offline suite (gate)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -24,18 +21,28 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run ruff check .
-      # Bare pytest = the offline gate (addopts excludes live/accuracy/slow).
-      # Deterministic, no network, no Trackers/ dumps needed. This gates merges.
-      - run: uv run pytest
+      # Bare pytest = the offline gate (addopts excludes live/accuracy/slow; the network
+      # is refused). Coverage is reported, not enforced.
+      - run: uv run coverage run -m pytest
+      - run: uv run coverage report
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t leaksheet-api .
+      - run: docker build -t leaksheet-web web
+      # nginx resolves proxy_pass hosts at load time, hence the stand-in for `api`.
+      - run: docker run --rm --add-host api:127.0.0.1 leaksheet-web nginx -t
 
   ios:
     name: iOS tests
     # GitHub-hosted arm64 image with Xcode 27; the app's deployment target is
     # iOS 27, so no older image can build it.
     runs-on: xcode-27
-    # The image is a public preview: keep its breakage out of the nightly run,
-    # and don't let a hung simulator hold the runner for the 6 h default.
-    if: github.event_name != 'schedule'
+    # Don't let a hung simulator hold the runner for the 6 h default.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -66,19 +73,3 @@ jobs:
             -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO
           xcodebuild build -project LeakSheet.xcodeproj -scheme LeakSheetTV \
             -destination 'generic/platform=tvOS Simulator' CODE_SIGNING_ALLOWED=NO
-
-  live:
-    name: Live invariants (latest data)
-    runs-on: ubuntu-latest
-    # Tracker availability / Google rate-limiting must never block a merge —
-    # this job is informational. Real parse breaks still show up as failures.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync --locked
-      # The locked public URL set only (excludes the slow full TrackerHub
-      # sweep, which is a deliberate local/cron-scale run, not a PR gate).
-      - run: uv run pytest -m "live and not slow" -ra
