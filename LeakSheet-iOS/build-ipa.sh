@@ -6,8 +6,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
-
 rm -rf build
 xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheet -configuration Release \
   -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath build/DerivedData \
