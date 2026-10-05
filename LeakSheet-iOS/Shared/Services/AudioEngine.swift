@@ -468,12 +468,16 @@ final class AudioEngine {
             }
         }
 
+        // Item callbacks hop to the main actor after the fact: one queued before a track change
+        // must not act on the next track (error, seek, duration).
+        let itemID = ObjectIdentifier(item)
+
         // Duration observer: `.status` fires once, often before a progressive (or FLAC/VBR)
         // body knows its duration. Captures only `dur`: AVPlayerItem is not Sendable.
         observations.append(item.observe(\.duration) { [weak self] item, _ in
             let dur = item.duration
             Task { @MainActor [weak self] in
-                guard let self, dur.isValid, !dur.isIndefinite, dur.seconds > 0 else { return }
+                guard let self, self.isCurrentItem(itemID), dur.isValid, !dur.isIndefinite, dur.seconds > 0 else { return }
                 self.duration = dur.seconds
             }
         })
@@ -485,7 +489,7 @@ final class AudioEngine {
             let dur = item.duration
             let errDesc = item.error?.localizedDescription
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.isCurrentItem(itemID) else { return }
                 switch status {
                 case .readyToPlay:
                     self.loading = false
@@ -534,6 +538,10 @@ final class AudioEngine {
                         self.loading = false
                     case .paused:
                         self.isPlaying = false
+                        // A pause during a stall is the user's choice, not a timeout.
+                        self.loading = false
+                        self.loadingTimeoutTask?.cancel()
+                        self.loadingTimeoutTask = nil
                     case .waitingToPlayAtSpecifiedRate:
                         self.isPlaying = false
                         self.loading = true
@@ -552,7 +560,7 @@ final class AudioEngine {
         observations.append(item.observe(\.isPlaybackBufferEmpty) { [weak self] item, _ in
             let empty = item.isPlaybackBufferEmpty
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.isCurrentItem(itemID) else { return }
                 // The initial timeout is cancelled at .readyToPlay; re-arm it so a mid-track
                 // stall on a dead stream surfaces an error.
                 if empty {
@@ -564,7 +572,7 @@ final class AudioEngine {
         observations.append(item.observe(\.isPlaybackLikelyToKeepUp) { [weak self] item, _ in
             let keepUp = item.isPlaybackLikelyToKeepUp
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.isCurrentItem(itemID) else { return }
                 if keepUp {
                     self.loading = false
                     // Recovered before the re-armed stall timeout fired.
@@ -723,6 +731,10 @@ final class AudioEngine {
         #endif
     }
 
+    private func isCurrentItem(_ id: ObjectIdentifier) -> Bool {
+        player?.currentItem.map(ObjectIdentifier.init) == id
+    }
+
     private func startLoadingTimeout() {
         loadingTimeoutTask?.cancel()
         loadingTimeoutTask = Task { @MainActor [weak self] in
@@ -777,6 +789,11 @@ final class AudioEngine {
         }
         commandCenter.pauseCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.player?.pause() }
+            return .success
+        }
+        // The Mac's play/pause key and a wired headset's button send this, not play/pause.
+        commandCenter.togglePlayPauseCommand.addTarget { @Sendable [weak self] _ in
+            Task { @MainActor in self?.togglePlay() }
             return .success
         }
         commandCenter.nextTrackCommand.addTarget { @Sendable [weak self] _ in
@@ -888,6 +905,10 @@ final class AudioEngine {
         }
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        #if os(macOS)
+        // macOS routes media keys by this state; iOS infers it from the audio session.
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+        #endif
 
         // Load artwork once per track: `artworkAttemptedUrl` is set BEFORE the fetch, since
         // this runs every ~3s and a 404ing cover would otherwise be re-requested each time.
@@ -930,6 +951,9 @@ final class AudioEngine {
 
     private func clearNowPlayingInfo() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        #if os(macOS)
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
+        #endif
     }
 
     // MARK: - Duration Parsing

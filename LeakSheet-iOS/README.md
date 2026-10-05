@@ -49,15 +49,15 @@ needed. All three platforms read the same `UserDefaults` key.
 ## Build and test
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild test -project LeakSheet.xcodeproj -scheme LeakSheet -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
+xcodebuild test -project LeakSheet.xcodeproj -scheme LeakSheet -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
 ```
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild test -project LeakSheet.xcodeproj -scheme LeakSheet -destination 'platform=macOS,arch=arm64'
+xcodebuild test -project LeakSheet.xcodeproj -scheme LeakSheet -destination 'platform=macOS,arch=arm64'
 ```
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheetTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=27.0' build
+xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheetTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=27.0' build
 ```
 
 Swift Testing (`import Testing`), 288 cases in `LeakSheetTests/`, all of which
@@ -144,7 +144,7 @@ Tools/make-icons.swift  — regenerates every app icon for all three platforms
 All app icons are generated, not hand-drawn:
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcrun swift Tools/make-icons.swift
+xcrun swift Tools/make-icons.swift
 ```
 
 Emits the iOS light/dark/tinted 1024s, the macOS `mac`-idiom sizes with the

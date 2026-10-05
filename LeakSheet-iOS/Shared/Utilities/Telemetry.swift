@@ -8,23 +8,21 @@ nonisolated enum Telemetry {
     private static let dsn = "https://c19622c356c34b4b9fcdef0b0d22f9d8@glitchtip.safko.eu/2"
 
     static func start() {
-        // A test host launching the app must not report.
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        // Debug builds and test hosts must not report: they are not what users run.
+        #if DEBUG
+        return
+        #else
         SentrySDK.start { options in
             options.dsn = dsn
             options.enableLogs = true
             options.enableAutoSessionTracking = false  // GlitchTip has no sessions
             options.tracesSampleRate = 0
             options.sendDefaultPii = false
-            // 502 is an upstream host being down (pillows) or an expired cover token:
-            // logged where it matters, not an issue of ours.
-            options.failedRequestStatusCodes = [
-                HttpStatusCodeRange(min: 500, max: 501), HttpStatusCodeRange(min: 503, max: 599),
-            ]
-            #if DEBUG
-            options.environment = "debug"
-            #endif
+            // The API's own 5xx are upstream outages it already logs; only Cloudflare's 52x
+            // (origin unreachable) is visible from here alone.
+            options.failedRequestStatusCodes = [HttpStatusCodeRange(min: 520, max: 599)]
         }
+        #endif
     }
 
     /// Logs locally and records the failure in GlitchTip.

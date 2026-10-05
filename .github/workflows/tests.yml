@@ -36,7 +36,7 @@ jobs:
     # The image is a public preview: keep its breakage out of the nightly run,
     # and don't let a hung simulator hold the runner for the 6 h default.
     if: github.event_name != 'schedule'
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       # Device names shift between image releases — take an iPhone on the
@@ -58,6 +58,14 @@ jobs:
             -scheme LeakSheet \
             -destination "id=$SIM_UDID" \
             CODE_SIGNING_ALLOWED=NO
+      # The macOS and tvOS targets share most code but compile their own views.
+      - name: xcodebuild build (macOS, tvOS)
+        working-directory: LeakSheet-iOS
+        run: |
+          xcodebuild build -project LeakSheet.xcodeproj -scheme LeakSheet \
+            -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO
+          xcodebuild build -project LeakSheet.xcodeproj -scheme LeakSheetTV \
+            -destination 'generic/platform=tvOS Simulator' CODE_SIGNING_ALLOWED=NO
 
   live:
     name: Live invariants (latest data)
