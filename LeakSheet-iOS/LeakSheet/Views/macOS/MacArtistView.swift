@@ -232,7 +232,7 @@ struct MacArtistView: View {
     private func statRow(_ stats: ArtistViewModel.Stats) -> some View {
         HStack(spacing: 8) {
             statTile(stats.total, "Total", .secondary)
-            statTile(stats.available, "Available", .green)
+            statTile(stats.available, "Available", Color.lsSuccess)
             statTile(stats.snippets, "Snippets", Color.lsWarning)
             statTile(stats.fullHQ, "Full HQ", .lsAccent)
         }

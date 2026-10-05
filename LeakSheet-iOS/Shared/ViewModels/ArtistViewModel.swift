@@ -74,9 +74,10 @@ nonisolated struct FilteredContent: Equatable, Sendable {
 nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case card(FilteredEra, expanded: Bool)
     case divider(eraName: String)
-    // Headers are keyed by their section's position: names and groups repeat within an era.
-    case groupHeader(text: String, eraName: String, sectionIndex: Int)
-    case sectionHeader(name: String, eraName: String, group: String?, sectionIndex: Int, notes: String? = nil)
+    // Names and groups repeat within an era: headers are keyed by which occurrence they are,
+    // which a filter hiding other sections does not renumber.
+    case groupHeader(text: String, eraName: String, occurrence: Int)
+    case sectionHeader(name: String, eraName: String, group: String?, occurrence: Int, notes: String? = nil)
     // `ordinal` disambiguates same-baseName songs — see DECISIONS.md::ArtistViewModel.swift::song-ordinal
     case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool, ordinal: Int)
     case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool, songOrdinal: Int)
@@ -86,8 +87,8 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
         switch self {
         case .card(let filtered, _): return "card::\(filtered.era.name)"
         case .divider(let era): return "div::\(era)"
-        case .groupHeader(_, let era, let index): return "grp::\(era)::\(index)"
-        case .sectionHeader(_, let era, _, let index, _): return "sec::\(era)::\(index)"
+        case .groupHeader(let text, let era, let nth): return "grp::\(era)::\(text)::\(nth)"
+        case .sectionHeader(let name, let era, let group, let nth, _): return "sec::\(era)::\(group ?? "")::\(name)::\(nth)"
         case .song(let song, let era, _, _, _, _, let ord): return "song::\(era)::\(ord)::\(song.baseName)"
         case .version(let version, let index, let song, let era, _, _, let songOrd):
             return "ver::\(era)::\(songOrd)::\(song.baseName)::\(version.id)::\(index)"
@@ -199,6 +200,7 @@ final class ArtistViewModel {
     /// auto-advance too. Views re-register whenever `eraPlaybackRevision` changes.
     private(set) var eraPlaybackContexts: [EraSongContext]
     private(set) var eraPlaybackRevision = 0
+    private var eraPlaybackIsFiltered = false
 
     // MARK: - Recents windowing
 
@@ -635,12 +637,7 @@ final class ArtistViewModel {
             await previousTask?.value
             guard !Task.isCancelled else { return }
             let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats, searchIndex: searchIndex)
-            let contexts = result.eras.map { filtered in
-                EraSongContext(
-                    eraName: filtered.era.name, artistName: artist.name, artUrl: filtered.era.artUrl ?? "",
-                    versions: filtered.streamableVersions, artistSlug: artist.slug
-                )
-            }
+            let contexts = ArtistViewModel.filteredEraContexts(artist: artist, state: state, result: result)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -649,15 +646,41 @@ final class ArtistViewModel {
                 guard self.currentFilterState == state else { return }
                 self.content = result
                 self.isFiltering = false
-                // Search, recents and tab modes show no eras; rollover keeps the whole tracker.
-                self.eraPlaybackContexts = contexts.isEmpty ? self.allEraPlaybackContexts : contexts
-                self.eraPlaybackRevision += 1
+                // Re-register only when the list actually changes: a registration resets the
+                // playing era's position, and search keystrokes would otherwise do it per key.
+                if contexts != nil || self.eraPlaybackIsFiltered {
+                    self.eraPlaybackContexts = contexts ?? self.allEraPlaybackContexts
+                    self.eraPlaybackIsFiltered = contexts != nil
+                    self.eraPlaybackRevision += 1
+                }
                 // Ordinals are positions within the FILTERED era, so a filter change renumbers
                 // them and the expanded set must reset.
                 self.expandedSongs.removeAll()
                 self.resetRecentsWindow()
                 self.rebuildEraRows()
             }
+        }
+    }
+
+    /// Rollover order while the eras view shows filter chips: every era stays registered, a
+    /// filtered-out one with no versions, so the playing era is still found and empty ones are
+    /// skipped. Nil elsewhere (no chips, search, recents, tabs): the whole tracker.
+    nonisolated static func filteredEraContexts(
+        artist: Artist, state: FilterState, result: FilteredContent
+    ) -> [EraSongContext]? {
+        let erasView = state.query.isEmpty && !state.recents && !state.misc && state.tabKey == nil
+        guard erasView, state != FilterState() else { return nil }
+        var kept = result.eras[...]
+        return artist.eras.map { era in
+            var versions: [SongVersion] = []
+            if let first = kept.first, first.era.name == era.name {
+                versions = first.streamableVersions
+                kept = kept.dropFirst()
+            }
+            return EraSongContext(
+                eraName: era.name, artistName: artist.name, artUrl: era.artUrl ?? "",
+                versions: versions, artistSlug: artist.slug
+            )
         }
     }
 
@@ -812,17 +835,24 @@ final class ArtistViewModel {
                     appendSongRows(&rows, songs: filtered.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
                 } else {
                     var previousGroup: String?
-                    for (index, section) in filtered.sections.enumerated() {
+                    var seen: [String: Int] = [:]
+                    for section in filtered.sections {
                         // The parser stamps the group on every section under it: one header per run.
-                        if let group = section.group, group != previousGroup {
-                            rows.append(.groupHeader(text: group, eraName: eraName, sectionIndex: index))
+                        let startsRun = section.group != nil && section.group != previousGroup
+                        if startsRun, let group = section.group {
+                            let key = "grp:\(group)"
+                            rows.append(.groupHeader(text: group, eraName: eraName, occurrence: seen[key, default: 0]))
+                            seen[key, default: 0] += 1
                         }
                         previousGroup = section.group
                         if !section.name.isEmpty {
+                            let key = "sec:\(section.group ?? ""):\(section.name)"
+                            // `group` only when a group header sits directly above (tighter spacing).
                             rows.append(.sectionHeader(
-                                name: section.name, eraName: eraName,
-                                group: section.group, sectionIndex: index, notes: section.notes
+                                name: section.name, eraName: eraName, group: startsRun ? section.group : nil,
+                                occurrence: seen[key, default: 0], notes: section.notes
                             ))
+                            seen[key, default: 0] += 1
                         }
                         appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
                     }

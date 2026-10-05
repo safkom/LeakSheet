@@ -252,7 +252,7 @@ struct TVArtistView: View {
         guard let url = artist.sourceUrl else { return }
         let fresh = await refresher.load(url, artistName: artist.name, forceRefresh: true, recents: recents)
         guard let fresh, refresher.staleNotice == nil else {
-            vm?.loadNotice = refresher.error ?? refresher.staleNotice
+            if let notice = refresher.error ?? refresher.staleNotice { vm?.loadNotice = notice }
             return
         }
         vm = await ArtistViewModel.make(artist: fresh)

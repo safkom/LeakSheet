@@ -134,6 +134,7 @@ struct DesignTokensColorTests {
     func onBackgroundContrast(scheme: ColorScheme) {
         for (color, label) in [
             (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (.lsFavourite, "lsFavourite"), (.lsWarning, "lsWarning"),
+            (.lsSuccess, "lsSuccess"),
         ] {
             expectAA(color, on: .lsBackground, label, scheme)
         }

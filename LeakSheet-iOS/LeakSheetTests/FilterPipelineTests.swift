@@ -299,6 +299,24 @@ struct FilterPipelineTests {
         #expect(groupHeaders == ["Deluxe", "Other", "Deluxe"])
     }
 
+    @Test @MainActor func `a filter that hides the playing era keeps it registered, empty`() async throws {
+        let vm = ArtistViewModel(artist: artist)
+        let revision = vm.eraPlaybackRevision
+        vm.toggleBestOf()  // Era B has no starred song
+        for _ in 0..<300 where vm.eraPlaybackRevision == revision {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.eraPlaybackContexts.map(\.eraName) == ["Era A", "Era B"])
+        #expect(vm.eraPlaybackContexts.last?.versions.isEmpty == true)
+    }
+
+    @Test func `search, recents and tabs roll over through the whole tracker`() {
+        for state in [FilterState(query: "song"), FilterState(recents: true), FilterState()] {
+            let result = compute(state)
+            #expect(ArtistViewModel.filteredEraContexts(artist: artist, state: state, result: result) == nil)
+        }
+    }
+
     @Test @MainActor func `era rollover follows the active filters`() async throws {
         let vm = ArtistViewModel(artist: artist)
         let isSnippet = { (v: SongVersion) in v.availableLength == "Snippet" }
