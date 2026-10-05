@@ -1119,7 +1119,7 @@ def get_cached_age(url: str) -> float | None:
 
 def get_cached_parsed_bytes(
     url: str, max_age: float = STALE_CACHE_TTL
-) -> tuple[bytes, str | None, float] | None:
+) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
 
@@ -1137,19 +1137,19 @@ def get_cached_parsed_bytes(
     try:
         meta = json.loads(meta_file.read_text())
         ts = _parsed_timestamp(meta)
-        if ts <= 0:
+        if ts <= 0 or not meta.get("content_hash"):
             return None
         age = time.time() - ts
         if age > max_age:
             return None
-        return parsed_file.read_bytes(), meta.get("content_hash"), age
+        return parsed_file.read_bytes(), meta["content_hash"], age
     except (OSError, json.JSONDecodeError):
         return None
 
 
 async def async_get_cached_parsed_bytes(
     url: str, max_age: float = STALE_CACHE_TTL
-) -> tuple[bytes, str | None, float] | None:
+) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
 

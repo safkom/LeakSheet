@@ -219,15 +219,14 @@ final class ArtistViewModel {
         "best_of", "worst_of", "special", "grails", "wanted",
     ]
 
-    /// Parsed content tabs (Misc / Music Videos / Released / Stems / …) —
-    /// one switchable chip each. Empty for older cached payloads, which
-    /// fall back to the single legacy Misc chip.
+    /// Parsed content tabs (Misc / Music Videos / Released / Stems / …), one
+    /// switchable chip each.
     var availableTabs: [TabSection] {
         (artist.tabs ?? []).filter { !Self.badgeTabKinds.contains($0.kind) }
     }
 
     /// Display name of the selected content tab, for anything that has to name
-    /// the page — nil on the song tree, or on the legacy flat Misc mode.
+    /// the page — nil on the song tree.
     var selectedTabName: String? {
         guard let key = selectedTabKey else { return nil }
         return availableTabs.first { $0.id == key }?.name
@@ -441,8 +440,8 @@ final class ArtistViewModel {
 
     /// Preferred construction path: the stats/content pass runs off-main.
     ///
-    /// `warmArt` pulls the first few era covers (and their colours) into the cache
-    /// while the landing spinner still shows, so the first cards don't pop in grey.
+    /// Also pulls the first few era covers (and their colours) into the cache while the
+    /// landing spinner still shows, so the first cards don't pop in grey.
     static func make(artist: Artist) async -> ArtistViewModel {
         let precomputed = await Task.detached(priority: .userInitiated) {
             Precomputed(artist: artist)
