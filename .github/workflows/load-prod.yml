@@ -1,0 +1,41 @@
+name: load-prod
+
+# k6 through the public domain, from a GitHub runner: what a distant user gets. Manual
+# only. spike and stress exceed the per-IP limits; relax them for the window first
+# (see tests/load/journey.js).
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: k6 profile
+        type: choice
+        options: [smoke, load, soak, spike, stress]
+        default: smoke
+      base_url:
+        description: API base URL
+        default: https://sheets.safko.eu/api
+
+concurrency:
+  group: load-prod
+  cancel-in-progress: false
+
+jobs:
+  k6:
+    name: k6 ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Run
+        env:
+          K6_WEB_DASHBOARD: "true"
+          K6_WEB_DASHBOARD_EXPORT: k6-${{ inputs.profile }}-report.html
+          PROFILE: ${{ inputs.profile }}
+          BASE_URL: ${{ inputs.base_url }}
+        run: k6 run -e PROFILE="$PROFILE" -e BASE_URL="$BASE_URL" tests/load/journey.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-${{ inputs.profile }}
+          path: k6-${{ inputs.profile }}-*
