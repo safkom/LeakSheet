@@ -70,7 +70,7 @@ struct TVURLEntryView: View {
         // Same normalisation the phone applies to a hand-entered URL.
         let normalized = TrackerURLNormalizer.normalize(loader.url)
         if let artist = await loader.load(normalized, recents: recents) {
-            path.append(.artist(artist))
+            path.append(.artist(artist, notice: loader.staleNotice))
         }
     }
 }

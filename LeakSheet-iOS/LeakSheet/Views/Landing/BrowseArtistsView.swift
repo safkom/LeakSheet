@@ -89,7 +89,7 @@ struct BrowseArtistsView: View {
                                             if artist.best == true {
                                                 Image(systemName: "star.fill")
                                                     .font(.caption2)
-                                                    .foregroundStyle(.yellow)
+                                                    .foregroundStyle(Color.lsStar)
                                                     .accessibilityLabel("Best of")
                                             }
                                         }
@@ -104,7 +104,7 @@ struct BrowseArtistsView: View {
                                             if artist.upToDate == false {
                                                 Text("outdated")
                                                     .font(.caption2)
-                                                    .foregroundStyle(.orange)
+                                                    .foregroundStyle(Color.lsWarning)
                                             }
                                             // Link health is tri-state upstream: only a definite false is worth a warning,
                                             // shown BEFORE the user opens a tracker whose files are gone.

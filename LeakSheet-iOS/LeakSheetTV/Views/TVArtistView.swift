@@ -4,11 +4,12 @@ import SwiftUI
 /// in one column, because the focus engine walks rows rather than tapping headers.
 struct TVArtistView: View {
     let artist: Artist
+    var notice: String?
 
     @Environment(RecentTrackersManager.self) private var recents
 
     @State private var vm: ArtistViewModel?
-    @State private var refreshing = false
+    @State private var refresher = TrackerLoader()
     @State private var showStats = false
     @State private var showLegend = false
 
@@ -23,6 +24,9 @@ struct TVArtistView: View {
         }
         .background(Color.lsBackground)
         .navigationTitle(artist.name)
+        .onChange(of: vm?.eraPlaybackRevision) {
+            if let vm { PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts) }
+        }
         // Keyed on the view model, as on iOS: a refresh swaps in a new one, which must
         // re-register its eras instead of leaving the old song lists.
         .task(id: vm.map { ObjectIdentifier($0) }) {
@@ -31,7 +35,9 @@ struct TVArtistView: View {
                 PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts)
             } else {
                 // Setting vm changes the id, so this task runs again to register it.
-                vm = await ArtistViewModel.make(artist: artist)
+                let made = await ArtistViewModel.make(artist: artist)
+                made.loadNotice = notice
+                vm = made
             }
         }
     }
@@ -42,6 +48,12 @@ struct TVArtistView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 statsBar(vm)
+                if let notice = vm.loadNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(Color.lsError)
+                        .frame(maxWidth: .infinity)
+                }
                 filterChips(vm)
 
                 if vm.isSearching {
@@ -70,9 +82,9 @@ struct TVArtistView: View {
                 Button {
                     Task { await refresh() }
                 } label: {
-                    if refreshing { ProgressView() } else { Text("Refresh") }
+                    if refresher.loading { ProgressView() } else { Text("Refresh") }
                 }
-                .disabled(refreshing)
+                .disabled(refresher.loading)
             }
         }
         .sheet(isPresented: $showStats) { TVStatsView(artist: vm.artist, stats: vm.artistStats) }
@@ -235,24 +247,14 @@ struct TVArtistView: View {
 
     // MARK: - Refresh
 
+    /// As on iOS: a failed or cache-served refresh keeps the current data and says why.
     private func refresh() async {
         guard let url = artist.sourceUrl else { return }
-        refreshing = true
-        defer { refreshing = false }
-        // As on iOS: forceRefresh skips the ETag check so the backend re-parses, and
-        // the result is re-cached.
-        do {
-            let result = try await APIClient.shared.parseSheet(
-                url: url, artistName: artist.name, forceRefresh: true
-            )
-            if let etag = result.etag {
-                await CacheService.shared.cacheTracker(url: url, data: result.rawData, etag: etag)
-            }
-            recents.saveTracker(artist: result.artist)
-            vm = await ArtistViewModel.make(artist: result.artist)
-        } catch {
-            // Keep showing the current data; the Refresh button just re-enables.
-            Telemetry.report("Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": url])
+        let fresh = await refresher.load(url, artistName: artist.name, forceRefresh: true, recents: recents)
+        guard let fresh, refresher.staleNotice == nil else {
+            vm?.loadNotice = refresher.error ?? refresher.staleNotice
+            return
         }
+        vm = await ArtistViewModel.make(artist: fresh)
     }
 }

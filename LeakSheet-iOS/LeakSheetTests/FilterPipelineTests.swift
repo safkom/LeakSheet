@@ -271,6 +271,48 @@ struct FilterPipelineTests {
         #expect(Set(songRowIDs).count == 3)  // all distinct — no id collision
     }
 
+    @Test @MainActor func `every era row id is unique, with one header per group run`() {
+        let mystery = { song("???", versions: [version("???", link: nil)]) }
+        let sections = [
+            Section(name: "Surfaced", group: "Deluxe", songs: [mystery()]),
+            Section(name: "Unsurfaced", group: "Deluxe", songs: [mystery()]),
+            Section(name: "Surfaced", group: "Other", songs: [mystery()]),
+            Section(name: "Surfaced", group: "Deluxe", songs: [mystery(), mystery()]),
+        ]
+        let grouped = Era(
+            name: "Grouped Era", altNames: nil, description: nil, timeline: nil, artUrl: nil,
+            sections: sections, songCount: nil, versionCount: nil
+        )
+        let a = Artist(
+            name: "G", slug: "g", sourceUrl: nil, eras: [grouped, era("Next Era", songs: [mystery()])],
+            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+        let vm = ArtistViewModel(artist: a)
+        vm.toggleEra("Grouped Era")
+
+        let ids = vm.eraRows.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        let groupHeaders = vm.eraRows.compactMap { row -> String? in
+            if case .groupHeader(let text, _, _) = row { return text }
+            return nil
+        }
+        #expect(groupHeaders == ["Deluxe", "Other", "Deluxe"])
+    }
+
+    @Test @MainActor func `era rollover follows the active filters`() async throws {
+        let vm = ArtistViewModel(artist: artist)
+        let isSnippet = { (v: SongVersion) in v.availableLength == "Snippet" }
+        #expect(vm.eraPlaybackContexts.flatMap(\.versions).contains(where: isSnippet))
+
+        let revision = vm.eraPlaybackRevision
+        vm.toggleNoSnippets()
+        for _ in 0..<300 where vm.eraPlaybackRevision == revision {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(vm.eraPlaybackRevision != revision)
+        #expect(!vm.eraPlaybackContexts.flatMap(\.versions).contains(where: isSnippet))
+    }
+
     @Test @MainActor func `setEraColor coalesces same-turn callbacks into one eraDisplay write`() async {
         let vm = ArtistViewModel(artist: artist)
         // Simulate several EraCardViews finishing extraction in the same

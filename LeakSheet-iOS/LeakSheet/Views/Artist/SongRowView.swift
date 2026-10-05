@@ -137,7 +137,7 @@ struct SongRowView: View {
             Button(action: toggleFavourite) {
                 Image(systemName: isFavourite ? "heart.fill" : "heart")
             }
-            .tint(.pink)
+            .tint(Color.lsFavourite)
             .accessibilityLabel(isFavourite ? "Remove \(song.baseName) from favourites" : "Add \(song.baseName) to favourites")
 
             if canStream {
@@ -246,6 +246,9 @@ struct SongPlayControl: View {
                         .foregroundStyle(Color.lsAccent)
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.lsAccent.opacity(0.14)))
+                        // Inside the label, or only the 28 pt circle is tappable (DECISIONS.md).
+                        .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Play \(title)")

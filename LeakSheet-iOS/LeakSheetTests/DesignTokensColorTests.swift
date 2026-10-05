@@ -132,9 +132,13 @@ struct DesignTokensColorTests {
     /// Plain text drawn straight on the app background.
     @Test("Body tones clear AA on the app background", arguments: [ColorScheme.dark, .light])
     func onBackgroundContrast(scheme: ColorScheme) {
-        for (color, label) in [(Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (.lsFavourite, "lsFavourite")] {
+        for (color, label) in [
+            (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (.lsFavourite, "lsFavourite"), (.lsWarning, "lsWarning"),
+        ] {
             expectAA(color, on: .lsBackground, label, scheme)
         }
+        // A glyph, not text: WCAG's non-text minimum is 3:1.
+        #expect(Color.lsStar.contrastRatio(against: .lsBackground, in: scheme) >= 3, "lsStar \(scheme)")
     }
 
     private func expectAA(

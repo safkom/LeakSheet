@@ -99,7 +99,7 @@ struct TVBrowseView: View {
         loadingURL = url
         defer { loadingURL = "" }
         if let artist = await loader.load(url, artistName: name, recents: recents) {
-            path.append(.artist(artist))
+            path.append(.artist(artist, notice: loader.staleNotice))
         }
     }
 }

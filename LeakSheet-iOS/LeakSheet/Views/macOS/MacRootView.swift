@@ -172,8 +172,16 @@ struct MacRootView: View {
     ) async {
         guard let artist = await loader.load(
             url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
-        ) else { return }
+        ) else {
+            // A failed ⌘R keeps the loaded copy: say why there, not only on the other panes.
+            if let slug = ui.selectedSlug, let loaded = ui.tracker(slug), loaded.artist.sourceUrl == url {
+                loaded.vm.loadNotice = loader.error
+            }
+            return
+        }
+        let notice = loader.staleNotice
         let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
+        vm.loadNotice = notice
         ui.store(LoadedTracker(artist: artist, vm: vm))
         if select || ui.selectedSlug != artist.slug {
             ui.selection = .tracker(slug: artist.slug)

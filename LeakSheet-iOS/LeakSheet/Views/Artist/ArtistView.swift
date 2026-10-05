@@ -316,6 +316,9 @@ private struct ArtistContentView: View {
         }
         // Keyed on the view model so a pull-to-refresh, which swaps in a new
         // one, re-registers its eras instead of leaving the old song lists.
+        .onChange(of: vm.eraPlaybackRevision) {
+            player.setArtistEras(vm.eraPlaybackContexts)
+        }
         .task(id: ObjectIdentifier(vm)) {
             // Prebuilt off-main in Precomputed.
             player.setArtistEras(vm.eraPlaybackContexts)

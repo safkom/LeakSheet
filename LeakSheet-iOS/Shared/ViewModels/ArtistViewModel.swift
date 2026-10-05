@@ -74,8 +74,9 @@ nonisolated struct FilteredContent: Equatable, Sendable {
 nonisolated enum EraRow: Identifiable, Equatable, Sendable {
     case card(FilteredEra, expanded: Bool)
     case divider(eraName: String)
-    case groupHeader(text: String, eraName: String)
-    case sectionHeader(name: String, eraName: String, group: String?, notes: String? = nil)
+    // Headers are keyed by their section's position: names and groups repeat within an era.
+    case groupHeader(text: String, eraName: String, sectionIndex: Int)
+    case sectionHeader(name: String, eraName: String, group: String?, sectionIndex: Int, notes: String? = nil)
     // `ordinal` disambiguates same-baseName songs — see DECISIONS.md::ArtistViewModel.swift::song-ordinal
     case song(Song, eraName: String, eraArt: String?, expanded: Bool, hasMultiple: Bool, isLast: Bool, ordinal: Int)
     case version(SongVersion, index: Int, song: Song, eraName: String, eraArt: String?, isLast: Bool, songOrdinal: Int)
@@ -85,10 +86,8 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
         switch self {
         case .card(let filtered, _): return "card::\(filtered.era.name)"
         case .divider(let era): return "div::\(era)"
-        case .groupHeader(let text, let era): return "grp::\(era)::\(text)"
-        // Group is part of section identity (Section.id is name+group) —
-        // same-named sections under different groups must not collide.
-        case .sectionHeader(let name, let era, let group, _): return "sec::\(era)::\(group ?? "")::\(name)"
+        case .groupHeader(_, let era, let index): return "grp::\(era)::\(index)"
+        case .sectionHeader(_, let era, _, let index, _): return "sec::\(era)::\(index)"
         case .song(let song, let era, _, _, _, _, let ord): return "song::\(era)::\(ord)::\(song.baseName)"
         case .version(let version, let index, let song, let era, _, _, let songOrd):
             return "ver::\(era)::\(songOrd)::\(song.baseName)::\(version.id)::\(index)"
@@ -194,8 +193,12 @@ final class ArtistViewModel {
 
     /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
     private let searchIndex: [[SongSearchFields]]
-    /// Ordered era playback contexts (see Precomputed.eraPlaybackContexts).
-    let eraPlaybackContexts: [EraSongContext]
+    /// Every era's streamable versions, in tracker order (see Precomputed.eraPlaybackContexts).
+    private let allEraPlaybackContexts: [EraSongContext]
+    /// Era rollover order for the current filters: a chip that hides songs hides them from
+    /// auto-advance too. Views re-register whenever `eraPlaybackRevision` changes.
+    private(set) var eraPlaybackContexts: [EraSongContext]
+    private(set) var eraPlaybackRevision = 0
 
     // MARK: - Recents windowing
 
@@ -530,6 +533,7 @@ final class ArtistViewModel {
         self.altTitleKeySongs = precomputed.altTitleKeySongs
         self.eraOrder = precomputed.eraOrder
         self.searchIndex = precomputed.searchIndex
+        self.allEraPlaybackContexts = precomputed.eraPlaybackContexts
         self.eraPlaybackContexts = precomputed.eraPlaybackContexts
 
         // Seed era colors from persisted cache — see DECISIONS.md::EraColorExtractor.swift::cache-key
@@ -631,6 +635,12 @@ final class ArtistViewModel {
             await previousTask?.value
             guard !Task.isCancelled else { return }
             let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats, searchIndex: searchIndex)
+            let contexts = result.eras.map { filtered in
+                EraSongContext(
+                    eraName: filtered.era.name, artistName: artist.name, artUrl: filtered.era.artUrl ?? "",
+                    versions: filtered.streamableVersions, artistSlug: artist.slug
+                )
+            }
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -639,6 +649,9 @@ final class ArtistViewModel {
                 guard self.currentFilterState == state else { return }
                 self.content = result
                 self.isFiltering = false
+                // Search, recents and tab modes show no eras; rollover keeps the whole tracker.
+                self.eraPlaybackContexts = contexts.isEmpty ? self.allEraPlaybackContexts : contexts
+                self.eraPlaybackRevision += 1
                 // Ordinals are positions within the FILTERED era, so a filter change renumbers
                 // them and the expanded set must reset.
                 self.expandedSongs.removeAll()
@@ -798,14 +811,17 @@ final class ArtistViewModel {
                 if filtered.sections.isEmpty {
                     appendSongRows(&rows, songs: filtered.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
                 } else {
-                    for section in filtered.sections {
-                        if let group = section.group {
-                            rows.append(.groupHeader(text: group, eraName: eraName))
+                    var previousGroup: String?
+                    for (index, section) in filtered.sections.enumerated() {
+                        // The parser stamps the group on every section under it: one header per run.
+                        if let group = section.group, group != previousGroup {
+                            rows.append(.groupHeader(text: group, eraName: eraName, sectionIndex: index))
                         }
+                        previousGroup = section.group
                         if !section.name.isEmpty {
                             rows.append(.sectionHeader(
                                 name: section.name, eraName: eraName,
-                                group: section.group, notes: section.notes
+                                group: section.group, sectionIndex: index, notes: section.notes
                             ))
                         }
                         appendSongRows(&rows, songs: section.songs, eraName: eraName, eraArt: eraArt, ordinal: &ordinal)
