@@ -2031,7 +2031,8 @@ def parse_sheet(
         fuzzy_matched_rows,
     )
     if unmatched_rows:
-        logger.warning(
+        # DEBUG: runs per candidate tab, and parse_metadata already carries these rows.
+        logger.debug(
             "Parser found %d unmatched rows in %r (showing first %d): %s",
             len(unmatched_rows),
             artist_name,

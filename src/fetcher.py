@@ -1655,7 +1655,7 @@ async def _adopt_matching_art(artist: Artist, candidates: dict[str, str]) -> Non
         if main and art and await asyncio.to_thread(same_artwork, main, art):
             era.art_url = candidates[era.name]
             adopted += 1
-    logger.info("Art tab: %d of %d candidate covers matched the main tab", adopted, len(eras))
+    logger.debug("Art tab: %d of %d candidate covers matched the main tab", adopted, len(eras))
 
 
 def _hub_workbook_candidates(

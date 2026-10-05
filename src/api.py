@@ -41,6 +41,7 @@ from starlette.responses import StreamingResponse
 from src.config import (
     ARTISTGRID_URL,
     USER_AGENT,
+    VERSION,
     curated_host_allowed,
 )
 from src.models import Artist, TrackerEntry, slugify
@@ -91,24 +92,41 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-if _sentry_dsn := os.environ.get("SENTRY_DSN"):
-    # Errors and INFO+ log lines go to the self-hosted GlitchTip. 502 is an upstream
-    # host being down (pillows), which is logged but is not an issue of ours.
-    import sentry_sdk
+def _sentry_options(dsn: str) -> dict:
+    """GlitchTip settings: errors and INFO+ log lines, no request PII.
+
+    No HTTP status is an issue by itself: 5xx answers here are upstream outages, logged
+    where they happen, and an unhandled exception still reaches GlitchTip as one.
+    """
     from sentry_sdk.integrations.fastapi import FastApiIntegration
     from sentry_sdk.integrations.starlette import StarletteIntegration
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
-    _failed = set(range(500, 600)) - {502}
-    sentry_sdk.init(
-        dsn=_sentry_dsn,
+    return dict(
+        dsn=dsn,
+        release=f"leaksheet-api@{VERSION}",
         enable_logs=True,
         traces_sample_rate=0.0,
         send_default_pii=False,
+        # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
+        event_scrubber=EventScrubber(
+            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token"]
+        ),
         integrations=[
-            StarletteIntegration(failed_request_status_codes=_failed),
-            FastApiIntegration(failed_request_status_codes=_failed),
+            StarletteIntegration(failed_request_status_codes=set()),
+            FastApiIntegration(failed_request_status_codes=set()),
         ],
     )
+
+
+if _sentry_dsn := os.environ.get("SENTRY_DSN"):
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import ignore_logger_for_sentry_logs
+
+    # Worker boot, recycle and shutdown lines stay on stdout only.
+    for _server_logger in ("uvicorn.error", "gunicorn.error"):
+        ignore_logger_for_sentry_logs(_server_logger)
+    sentry_sdk.init(**_sentry_options(_sentry_dsn))
 
 logger = logging.getLogger(__name__)
 
@@ -405,8 +423,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LeakSheet",
     description="Parser + API for Google Spreadsheet-based music tracker documents",
-    version="0.3.0",
+    version=VERSION,
     lifespan=lifespan,
+    # nginx serves the API under /api/, so the default docs UI never loaded its schema.
+    openapi_url=None,
 )
 
 # compresslevel 6 ≈ level 9's ratio on JSON at a fraction of the CPU.
@@ -1320,7 +1340,7 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 resp, data = await _get_image_capped(url, _image_request_headers(url))
                 content_type = resp.headers.get("content-type", "")
             except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
-                logger.info("era art warm: %s failed: %s", url[:80], exc)
+                logger.debug("era art warm: %s failed: %s", url[:80], exc)
         stored = await asyncio.to_thread(_read_image_cache, key)
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
@@ -1814,7 +1834,8 @@ async def health() -> Response:
     which is exactly what the watchdog needs to know.
     """
     return Response(
-        content='{"status":"ok"}',
+        # Compact: uptime monitors match the keyword "status":"ok" in this body.
+        content=json.dumps({"status": "ok", "version": VERSION}, separators=(",", ":")),
         media_type="application/json",
         headers={"Cache-Control": "no-store"},
     )
