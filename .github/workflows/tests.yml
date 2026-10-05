@@ -36,6 +36,20 @@ jobs:
       - run: docker build -t leaksheet-web web
       # nginx resolves proxy_pass hosts at load time, hence the stand-in for `api`.
       - run: docker run --rm --add-host api:127.0.0.1 leaksheet-web nginx -t
+      # Load test the production image (gunicorn, 3 workers) on a seeded cache: no
+      # request leaves the runner. The container's uid writes the seed, so it can read it.
+      - name: Seed a cache and start the API image
+        run: |
+          mkdir -m 777 k6cache
+          docker run --rm -v "$PWD/tests:/app/tests:ro" -v "$PWD/k6cache:/app/.cache" \
+            leaksheet-api python -m tests.load.seed_cache /app/.cache
+          docker run -d --name api -p 8080:8080 -v "$PWD/k6cache:/app/.cache" leaksheet-api
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8080/health && exit 0; sleep 1; done
+          docker logs api; exit 1
+      - uses: grafana/setup-k6-action@v1
+      - run: k6 run tests/load/api.js
+      - if: failure()
+        run: docker logs api
 
   ios:
     name: iOS tests
