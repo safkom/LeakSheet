@@ -150,29 +150,39 @@ def check_field_sanity(artist: Artist) -> list[str]:
 def check_ios_contract(artist: Artist) -> list[str]:
     """Fields the Swift models declare non-optional must never be null.
 
-    Swift decoding throws on a null for a non-optional, which fails the whole
-    payload — one bad row takes down the entire tracker on device.
+    Checked on the serialized payload, which is what the app decodes: a null for a
+    non-optional fails the whole payload, so one bad row takes down the tracker.
     """
-    out = []
-    if artist.slug is None:
-        out.append("artist.slug is null (non-optional in Swift)")
-    for era in artist.eras:
-        if era.name is None:
-            out.append("era.name is null (non-optional in Swift)")
-        for section in era.sections:
-            if section.name is None:
-                out.append("section.name is null (non-optional in Swift)")
-            for song in section.songs:
-                if song.base_name is None:
-                    out.append("song.base_name is null (non-optional in Swift)")
-                if song.song_key is None:
-                    out.append(f"{song.base_name!r}: song_key is null")
-                for v in song.versions:
-                    if v.name is None:
-                        out.append(f"{song.base_name!r}: version.name is null")
-                    for ref in v.sources:
-                        if ref.url is None:
-                            out.append(f"{song.base_name!r}: source.url is null")
+    return ios_contract_violations(artist.model_dump())
+
+
+def ios_contract_violations(payload: dict) -> list[str]:
+    out: list[str] = []
+
+    def need(d: dict, keys: list[str], ctx: str) -> None:
+        out.extend(f"{ctx}: {k!r} is null/missing" for k in keys if d.get(k) is None)
+
+    need(payload, ["name", "slug", "eras"], "Artist")
+    for era in payload.get("eras") or []:
+        need(era, ["name", "sections"], f"Era {era.get('name')!r}")
+        for sec in era.get("sections") or []:
+            need(sec, ["name", "songs"], f"Section in {era.get('name')!r}")
+            for song in sec.get("songs") or []:
+                need(song, ["base_name", "versions", "song_key"], f"Song in {era.get('name')!r}")
+                if not song.get("versions"):
+                    out.append(f"Song {song.get('base_name')!r} has no versions")
+                for v in song.get("versions") or []:
+                    need(v, ["name"], f"Version of {song.get('base_name')!r}")
+                    for ref in v.get("sources") or []:
+                        need(ref, ["label", "url"], f"SourceRef on {v.get('name')!r}")
+    entries = list(payload.get("misc_entries") or [])
+    for n in payload.get("notices") or []:
+        need(n, ["text"], "Notice")
+    for t in payload.get("tabs") or []:
+        need(t, ["kind", "name", "entries"], f"TabSection {t.get('name')!r}")
+        entries += t.get("entries") or []
+    for m in entries:
+        need(m, ["era_name", "name", "links", "source_tab"], f"Entry {m.get('name')!r}")
     return out
 
 

@@ -154,6 +154,7 @@
 			buildPhases = (
 				E3AA00092F8D29B40029C2D5 /* Sources */,
 				E3AA000A2F8D29B40029C2D5 /* Frameworks */,
+				E3AA000B2F8D29B40029C2D5 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -241,6 +242,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		E3AA000B2F8D29B40029C2D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E30045912F8D29B40029C2D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -653,6 +661,7 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		E3C0000100000000000000C1 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;

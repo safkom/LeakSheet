@@ -15,34 +15,11 @@ from __future__ import annotations
 
 from src.parser import parse_misc_tab, parse_sheet
 from tests.conftest import read_synthetic
-
-
-def _assert_non_null(d: dict, keys: list[str], ctx: str) -> None:
-    for k in keys:
-        assert k in d and d[k] is not None, f"{ctx}: {k!r} is null/missing — iOS decode would fail"
+from tests.quality.invariants import ios_contract_violations
 
 
 def _check_artist_payload(payload: dict) -> None:
-    _assert_non_null(payload, ["name", "slug", "eras"], "Artist")
-    for era in payload["eras"]:
-        _assert_non_null(era, ["name", "sections"], f"Era {era.get('name')!r}")
-        for sec in era["sections"]:
-            _assert_non_null(sec, ["name", "songs"], f"Section in {era['name']!r}")
-            for song in sec["songs"]:
-                _assert_non_null(song, ["base_name", "versions"], f"Song in {era['name']!r}")
-                assert song["versions"], f"Song {song['base_name']!r} has empty versions"
-                for v in song["versions"]:
-                    _assert_non_null(v, ["name"], f"Version of {song['base_name']!r}")
-                    for s in v.get("sources") or []:
-                        _assert_non_null(s, ["label", "url"], f"SourceRef on {v['name']!r}")
-    for m in payload.get("misc_entries") or []:
-        _assert_non_null(m, ["era_name", "name", "links", "source_tab"], f"MiscEntry {m.get('name')!r}")
-    for n in payload.get("notices") or []:
-        _assert_non_null(n, ["text"], "Notice")
-    for t in payload.get("tabs") or []:
-        _assert_non_null(t, ["kind", "name", "entries"], f"TabSection {t.get('name')!r}")
-        for m in t["entries"]:
-            _assert_non_null(m, ["era_name", "name", "links", "source_tab"], f"Tab entry {m.get('name')!r}")
+    assert not ios_contract_violations(payload)
 
 
 class TestIOSHardDecodeContract:
