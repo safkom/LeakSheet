@@ -18,8 +18,8 @@ nonisolated enum Telemetry {
             options.enableAutoSessionTracking = false  // GlitchTip has no sessions
             options.tracesSampleRate = 0
             options.sendDefaultPii = false
-            // The API's own 5xx are upstream outages it already logs; only Cloudflare's 52x
-            // (origin unreachable) is visible from here alone.
+            // The API's own 5xx are upstream outages it already logs; Cloudflare's 52x (origin
+            // timeouts and connection errors) are visible from here alone.
             options.failedRequestStatusCodes = [HttpStatusCodeRange(min: 520, max: 599)]
         }
         #endif

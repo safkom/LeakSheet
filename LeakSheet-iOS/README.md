@@ -57,10 +57,10 @@ xcodebuild test -project LeakSheet.xcodeproj -scheme LeakSheet -destination 'pla
 ```
 
 ```bash
-xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheetTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=27.0' build
+xcodebuild -project LeakSheet.xcodeproj -scheme LeakSheetTV -destination 'generic/platform=tvOS Simulator' build
 ```
 
-Swift Testing (`import Testing`), 288 cases in `LeakSheetTests/`, all of which
+Swift Testing (`import Testing`) in `LeakSheetTests/`, all of which
 run unchanged on both iOS and macOS. There is no tvOS test target — the code
 under test is byte-identical and already covered twice. The schemes are shared,
 so this all works from a clean clone.

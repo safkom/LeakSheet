@@ -792,10 +792,13 @@ final class AudioEngine {
             return .success
         }
         // The Mac's play/pause key and a wired headset's button send this, not play/pause.
+        // Not on tvOS: the Siri Remote's button already toggles through onPlayPauseCommand.
+        #if !os(tvOS)
         commandCenter.togglePlayPauseCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.togglePlay() }
             return .success
         }
+        #endif
         commandCenter.nextTrackCommand.addTarget { @Sendable [weak self] _ in
             Task { @MainActor in self?.playNext() }
             return .success
