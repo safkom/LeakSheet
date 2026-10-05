@@ -334,7 +334,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=5.0.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.35" },
+    { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=2.56" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
     { name = "uvicorn-worker", specifier = ">=0.4.0" },
 ]

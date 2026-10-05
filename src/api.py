@@ -1834,7 +1834,8 @@ async def health() -> Response:
     which is exactly what the watchdog needs to know.
     """
     return Response(
-        content=json.dumps({"status": "ok", "version": VERSION}),
+        # Compact: uptime monitors match the keyword "status":"ok" in this body.
+        content=json.dumps({"status": "ok", "version": VERSION}, separators=(",", ":")),
         media_type="application/json",
         headers={"Cache-Control": "no-store"},
     )
