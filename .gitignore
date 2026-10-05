@@ -1,4 +1,4 @@
-agents.md
+AGENTS.local.md
 /memory
 /.claude
 /.pytest_cache
@@ -6,7 +6,6 @@ agents.md
 /.env
 /Trackers
 *__pycache__
-ui_ideas
 
 # Real tracker content (DMCA): never commit fetched sheet HTML or parsed dumps.
 # Deterministic tests use tests/fixtures/synthetic/ (invented content) instead;
@@ -15,8 +14,6 @@ ui_ideas
 /tests/fixtures/snapshots/
 /tests/fixtures/*.html
 /tests/results/
-iOS
-.worktrees
 .superpowers
 Log.txt
 .DS_Store
@@ -32,3 +29,5 @@ sonarqube-setup.txt
 .scannerwork/
 coverage.xml
 .coverage
+/web/dist/
+/web/node_modules/

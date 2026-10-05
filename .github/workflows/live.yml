@@ -1,0 +1,22 @@
+name: live
+
+# Real trackers change format without warning: a daily run against the locked public
+# URL set. Not a merge gate (Google rate limits and tracker outages are not our bugs),
+# but a failure here is a real red run and emails the owner.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  live:
+    name: Live invariants (latest data)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m "live and not slow" -ra

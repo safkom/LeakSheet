@@ -15,14 +15,10 @@ LeakSheet is split into three pieces:
 | Piece | Path | Stack |
 |---|---|---|
 | **Backend / parser** | `src/` | Python 3.11+, FastAPI, httpx, lxml |
-| **Web app** | `web/` | Vue 3, Vite, TailwindCSS, shadcn-ui — see [web/README.md](web/README.md) · **unmaintained** |
+| **nginx front** | `web/` | Proxies `/api/*` to the backend; serves nothing else |
 | **Apple apps** | `LeakSheet-iOS/` | SwiftUI (iOS 27 / macOS 27 / tvOS 27), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
-All clients talk to the same FastAPI backend. The Apple apps are the maintained clients — one Xcode project builds iPhone/iPad, Mac and Apple TV from a shared codebase. The web app is kept for reference but no longer developed.
-
-### Web app (in short)
-
-Browser-based tracker reader. Search and filter eras, stream audio inline, favourite songs, manage a queue, and switch between multiple trackers. Works on desktop and mobile.
+The Apple apps are the clients — one Xcode project builds iPhone/iPad, Mac and Apple TV from a shared codebase — and all of them talk to the same FastAPI backend.
 
 ### iOS app (in short)
 
@@ -44,18 +40,15 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 ## Quick Start
 
-You'll need [uv](https://docs.astral.sh/uv/) and (for the web app) Node 18+. uv installs
-Python 3.11 itself, from `.python-version`, so there is nothing else to set up.
+You'll need [uv](https://docs.astral.sh/uv/). It installs Python 3.11 itself, from
+`.python-version`, so there is nothing else to set up.
 
 ```bash
-# Backend
 uv run uvicorn src.api:app --reload   # → http://localhost:8000
-
-# Web app (separate terminal)
-cd web && npm install && npm run dev  # → http://localhost:5173
 ```
 
-Then open the frontend and paste any supported tracker URL. For the iOS app, open `LeakSheet-iOS/LeakSheet.xcodeproj` in Xcode 27+ and run (iOS 27+ device or simulator).
+For the apps, open `LeakSheet-iOS/LeakSheet.xcodeproj` in Xcode 27+ and run (iOS 27+ device or
+simulator), then point Settings → Backend URL at the local server.
 
 ### One-liner: parse a tracker from the CLI
 
@@ -79,8 +72,8 @@ Dependencies live in `pyproject.toml` and are pinned in `uv.lock`; `uv run` sync
 environment before it runs anything. To change one, edit `pyproject.toml` then `uv lock`.
 
 The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|quality|live`) with one
-shared health definition in `tests/_health.py`. CI runs the offline gate on every push and a
-soft live job daily (`.github/workflows/tests.yml`).
+shared health definition in `tests/_health.py`. CI runs the offline gate, the Docker builds and the
+Apple targets on every push (`.github/workflows/tests.yml`), and the live trackers daily (`live.yml`).
 
 ---
 
@@ -146,10 +139,8 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 ### Deployment
 
 Self-hosted via Docker Compose (`docker-compose.yml`): an `api` container (`gunicorn` with three
-`UvicornWorker`s, see `Dockerfile`) and a `web` container (`nginx` serving the built SPA
-and reverse-proxying `/api/*` to `api` with the prefix stripped, see `web/Dockerfile` and
-`web/nginx.conf`) — this replicates the same-origin `/api` routing the frontend and the
-LeakSheet-iOS app both assume. `web` publishes port `8081` on the host; a
+`UvicornWorker`s, see `Dockerfile`) and a `web` container (`nginx` reverse-proxying `/api/*`
+to `api` with the prefix stripped, see `web/nginx.conf`), the `/api` routing the apps assume. `web` publishes port `8081` on the host; a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 (run separately, e.g. as a CasaOS app) points `sheets.safko.eu` at `http://localhost:8081`.
 

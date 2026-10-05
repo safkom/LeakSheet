@@ -9,8 +9,7 @@ Endpoints:
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
   POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
-In production nginx serves these under /api/* and strips the prefix; in local
-dev Vite's proxy does the same.
+In production nginx serves these under /api/* and strips the prefix.
 """
 
 from __future__ import annotations

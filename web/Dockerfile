@@ -1,10 +1,3 @@
-FROM node:22-slim AS build
-WORKDIR /web
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
-
+# nginx in front of the API: /api/* is proxied to it, and nothing else is served.
 FROM nginx:alpine
-COPY --from=build /web/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
