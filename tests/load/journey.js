@@ -1,8 +1,9 @@
 // What an app user gets through the public domain (Cloudflare → tunnel → nginx → API):
 // browse trackers, open one, revisit it (304), load its era covers, read file metadata.
 // Run: k6 run -e PROFILE=smoke tests/load/journey.js   (smoke | load | soak | spike | stress)
-// spike and stress exceed the per-IP limits (Cloudflare: 5 /api/sheet per 10 s; API: 60/min)
-// and need both relaxed for the test window; smoke, load and soak stay inside them.
+// One IP fits about 3 users under Cloudflare's 5 /api/sheet per 10 s (a journey makes two):
+// smoke, load and soak stay inside it, and the load-prod workflow's `runners` adds IPs.
+// spike and stress exceed it and the API's 60/min, so both need relaxing for the window.
 // /stream (third-party hosts) gets one ranged request in smoke only; nothing forces a re-parse.
 import http from "k6/http";
 import { check, group, sleep } from "k6";
@@ -26,12 +27,11 @@ const TRACKERS = [
 
 const PROFILES = {
   smoke: { executor: "constant-vus", vus: 1, duration: "1m" },
-  // Fits the limits: 10 users opening a tracker about once a minute.
   load: {
     executor: "ramping-vus",
-    stages: [{ duration: "2m", target: 10 }, { duration: "6m", target: 10 }, { duration: "2m", target: 0 }],
+    stages: [{ duration: "2m", target: 3 }, { duration: "6m", target: 3 }, { duration: "2m", target: 0 }],
   },
-  soak: { executor: "constant-vus", vus: 6, duration: "1h" },
+  soak: { executor: "constant-vus", vus: 3, duration: "1h" },
   // A new leak drops: 50 users open the same tracker within seconds.
   spike: {
     executor: "ramping-vus",
@@ -90,7 +90,7 @@ function note(res, endpoint) {
 
 // Each tracker is fetched once here; the users then reuse its ETag and covers.
 export function setup() {
-  return TRACKERS.map((t) => {
+  const trackers = TRACKERS.map((t) => {
     const res = http.post(`${BASE}/sheet`, JSON.stringify({ url: t.url }), {
       headers: headers({ "Content-Type": "application/json", Accept: "application/json" }),
       timeout: "180s",
@@ -111,6 +111,8 @@ export function setup() {
     }
     return { url: t.url, weight: t.weight, etag: res.headers["Etag"], covers, links: links.slice(0, 2) };
   });
+  sleep(10); // these five /sheet calls fill Cloudflare's per-IP window; let it pass
+  return trackers;
 }
 
 function pick(trackers) {

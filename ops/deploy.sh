@@ -4,7 +4,8 @@
 # Never `docker compose up` in the checkout itself: that starts a second, legacy copy.
 set -eu
 cd "$(dirname "$0")/.."
-git fetch -q origin && git reset -q --hard origin/main
+# The full ref: a local branch named origin/main would shadow the remote one.
+git fetch -q origin && git reset -q --hard refs/remotes/origin/main
 docker compose build -q api web
 set -a; [ -f .env ] && . ./.env; set +a
 export LEAKSHEET_TRUSTED_PROXY_HOPS="${LEAKSHEET_TRUSTED_PROXY_HOPS:-}" \
