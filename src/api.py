@@ -42,6 +42,7 @@ from src.config import (
     VERSION,
     curated_host_allowed,
 )
+from src import host_health
 from src.models import Artist, TrackerEntry, slugify
 from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
@@ -413,7 +414,9 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    prober = asyncio.create_task(host_health.probe_forever())
     yield
+    prober.cancel()
     # Shutdown: close all three shared HTTP clients.
     if _proxy_client is not None:
         await _proxy_client.aclose()
@@ -1996,6 +1999,35 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
             break
 
 
+async def _record_stream_outcome(provider: str | None, link: str, exc: Exception | None) -> None:
+    """Feed one /stream upstream outcome into the shared provider health."""
+    if provider is None:
+        return
+    if exc is None or (isinstance(exc, UpstreamStatusError) and exc.status_code < 500):
+        await asyncio.to_thread(host_health.record_success, provider)  # the host answered
+        return
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        hard = True  # no connection at all: the host itself is unreachable
+    elif isinstance(exc, (httpx.TransportError, ValueError)):
+        hard = False
+    else:
+        return  # a bug of ours says nothing about the host
+    await asyncio.to_thread(
+        host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__
+    )
+
+
+@app.get("/hosts")
+async def list_stream_hosts() -> Response:
+    """Health of each streaming provider, from real /stream traffic and recovery probes."""
+    hosts = await asyncio.to_thread(host_health.snapshot)
+    return Response(
+        content=json.dumps({"hosts": hosts}),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=30"},
+    )
+
+
 @app.get("/stream")
 async def proxy_stream(
     request: Request,
@@ -2014,6 +2046,15 @@ async def proxy_stream(
 
     if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
+
+    # A provider known to be down is refused at once: see docs/decisions.md::host_health.py.
+    provider = host_health.provider_of(stream_url)
+    if provider and (outage := await asyncio.to_thread(host_health.down, provider)):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{outage['host']} is temporarily unavailable",
+            headers={"Retry-After": "60"},
+        )
 
     # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
     # not forwarded: upstreams turn garbage Range values into hard errors.
@@ -2041,6 +2082,7 @@ async def proxy_stream(
         # Relay upstream's status so a client can tell "gone" from "throttled"; only the
         # code crosses over (see UpstreamStatusError). Everything else is 503.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        await _record_stream_outcome(provider, url, e)
         if e.status_code in (404, 410):
             raise HTTPException(status_code=404, detail="Upstream file not found")
         if e.status_code == 429:
@@ -2054,10 +2096,13 @@ async def proxy_stream(
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
         raise HTTPException(status_code=503, detail="Upstream error")
     except Exception as e:
         _log_upstream_failure("Stream error", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
         raise HTTPException(status_code=503, detail="Upstream error")
+    await _record_stream_outcome(provider, url, None)
 
     # Permission-required/private gdrive files come back from stream_audio
     # as a real 403 response object (not raised) — relay it as-is.

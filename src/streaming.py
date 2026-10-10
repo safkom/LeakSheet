@@ -348,7 +348,8 @@ def _get_shared_client() -> httpx.AsyncClient:
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient(
             follow_redirects=True,
-            timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
+            # Connect stays short: a dead host fails in seconds, not half a minute.
+            timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
             # limits live on the transport because a custom transport bypasses
             # the client-level `limits` argument.
             transport=PublicOnlyAsyncTransport(

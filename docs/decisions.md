@@ -913,3 +913,18 @@ Tracker links sometimes point at a PDF, an archive or an image. Drive labels the
 fell back to `audio/mpeg`: production relayed a PDF as `206 audio/mpeg`. When the
 first chunk matches no audio or video signature but does match a known document,
 archive, image or HTML one, `/stream` answers 415 instead.
+
+## host_health.py — per-provider stream health, shared through one file
+
+A provider that is down (froste on 2026-10-10) made every play attempt wait out a
+connect timeout before failing, and AVPlayer makes several attempts per track. Each
+/stream outcome now feeds a per-provider state in `CACHE_DIR/host_health.json`,
+written under a flock so all gunicorn workers share it. A connect-level failure marks
+a provider down at once; a 5xx or read timeout needs 3 failures within 120 s across
+2 links, so one broken file never takes a host down. A down provider gets an instant
+503 with `Retry-After: 60`. One worker (non-blocking probe lock) re-probes every 60 s
+with the recent failing links (`bytes=0-0`); any answer, a 404 included, means up.
+
+Only /stream feeds it: on that day pillows' metadata API was healthy while its stream
+endpoint returned 500, so metadata outcomes would mislabel the stream path. Links are
+never crawled: tens of thousands of probes would invite rate limits and bans.
