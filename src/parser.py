@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import unquote_plus, urljoin, urlparse
 
 
 from src.config import COLUMN_ALIASES
@@ -200,6 +200,8 @@ def _cell_from_td(td) -> _Cell:
     text joins the cell text, and each link records the line number the
     anchor closes on.
     """
+    if not len(td):  # most cells: plain text, nothing to walk
+        return _Cell(text=(td.text or "").strip())
     parts: list[str] = []
     links: list[str] = []
     link_lines: list[int] = []
@@ -1155,6 +1157,8 @@ def _normalize_unicode(text: str) -> str:
 
     Handles cases like "geëky" → "geeky", "ROSALÍA" → "ROSALIA".
     """
+    if text.isascii():
+        return text
     # NFKD decomposition splits characters like ë into e + combining diaeresis
     decomposed = unicodedata.normalize("NFKD", text)
     # Remove combining characters (diacritics)
@@ -1287,19 +1291,20 @@ def _acronym(era_key: str) -> str:
 # Link cleanup
 # ---------------------------------------------------------------------------
 
+_REDIRECT_Q_RE = re.compile(r"(?:^|&)q=([^&]+)")
+
+
 def _clean_link(url: str) -> str:
     """Strip Google redirect wrapper from URLs.
 
     Google Sheets wraps links as: https://www.google.com/url?q=REAL_URL&...
     """
     if "google.com/url" in url:
-        try:
-            qs = parse_qs(urlparse(url).query)
-        except ValueError:
-            return url
-        target = qs.get("q")
-        if target and target[0]:
-            return target[0]
+        # Same result as parse_qs(urlparse(url).query)["q"][0], at a fraction of the cost.
+        query = url.partition("#")[0].partition("?")[2]
+        m = _REDIRECT_Q_RE.search(query)
+        if m:
+            return unquote_plus(m.group(1))
     return url
 
 
