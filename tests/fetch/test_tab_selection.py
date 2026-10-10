@@ -108,6 +108,29 @@ class TestMiscTabGidRegression:
         assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
 
 
+class TestExcludedTabsNeverWin:
+    """A tab the fetcher deliberately does not parse ("Recent", "Tracklist", …) must
+    not become the tracker: the result is cached under the gid-less URL every user
+    reads, so a subset would replace the whole catalogue for 1-24 h."""
+
+    async def test_requested_recent_gid_falls_through_to_main(
+        self, workbook_client, patch_sheets_client
+    ):
+        names = {"100": "Songs", "400": "Recent"}
+        client = workbook_client({"100": WORKBOOK["100"], "400": WORKBOOK["400"]}, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client, gid="400")
+        assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
+
+    async def test_discovery_never_picks_an_excluded_tab(
+        self, workbook_client, patch_sheets_client
+    ):
+        # The excluded tab is the bigger one and comes first: it still loses.
+        names = {"400": "Recent", "100": "Songs"}
+        client = workbook_client({"400": WORKBOOK["100"], "100": WORKBOOK["400"]}, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client)
+        assert [e.name for e in artist.eras] == ["Recently Added"]
+
+
 class TestHubWorkbook:
     """A workbook whose main tab is a hub of category descriptions, with the
     catalogue split across unclassified sibling tabs (Avicii, 2026-07-27).

@@ -94,7 +94,7 @@ class TestTabDiscovery:
         assert "200" not in reordered          # misc excluded from candidates
 
     def test_prioritize_without_unreleased_keeps_candidate_order(self):
-        base = build_htmlview_base({"100": "Songs", "400": "Recent"})
+        base = build_htmlview_base({"100": "Songs", "400": "Early Songs"})
         gids = _discover_gids(base)
         reordered, art_gid, unreleased_gid, misc_tabs, _named = _prioritize_gids(base, gids)
         assert unreleased_gid is None

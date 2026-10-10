@@ -466,6 +466,12 @@ real main tab and skip parsing it as misc entries entirely. When the GID turns o
 be the Misc/Music-Videos tab itself, the code falls through to full discovery, which
 finds the real main tab and parses this one correctly via `parse_misc_tab`.
 
+The same holds for the tabs in `_EXCLUDED_TAB_NAMES` (Recent, Tracklist, …), in both
+the gid path and discovery (`_prioritize_gids`). A gid-specific parse is cached under
+the gid-less URL every user reads, so a `#gid=<Recent>` link once replaced the whole
+catalogue with the Recent subset for 1-24 h; and an excluded tab with more songs than
+the real main tab could win discovery outright.
+
 ## fetcher.py::gid-fetch-priority — Unreleased first, the rest only if needed
 
 A tab named Unreleased is fetched and parsed on its own first. The remaining GIDs

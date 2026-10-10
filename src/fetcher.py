@@ -739,6 +739,11 @@ _CONTENT_TAB_KINDS: list[tuple[frozenset, str]] = [
 ]
 
 
+def _excluded_tab_gids(named_tabs: dict[str, str]) -> set[str]:
+    """GIDs of the tabs deliberately never parsed (Recent, Tracklist, …)."""
+    return {gid for gid, name in named_tabs.items() if _clean_tab_name(name) in _EXCLUDED_TAB_NAMES}
+
+
 def _get_content_tabs(named_tabs: dict[str, str]) -> list[tuple[str, str, str]]:
     """Return [(gid, kind, display_name)] for every parseable content tab.
 
@@ -1196,7 +1201,7 @@ def _prioritize_gids(
     unreleased_gid = _get_unreleased_tab_gid(named_tabs)
     content_tabs = _get_content_tabs(named_tabs)
 
-    exclude = {gid for gid, _, _ in content_tabs}
+    exclude = {gid for gid, _, _ in content_tabs} | _excluded_tab_gids(named_tabs)
     if art_gid:
         exclude.add(art_gid)
     filtered = [g for g in gids if g not in exclude]
@@ -1821,8 +1826,10 @@ async def async_fetch_and_parse(
                 base_page_paths = _page_path_map(base_html)
             except httpx.HTTPError:
                 pass  # Can't tell — fall back to trusting parse_sheet below
-            gid_is_misc_tab = gid in {g for g, _kind, _n in _get_content_tabs(named_tabs)}
-            if not gid_is_misc_tab:
+            # A content or excluded tab is never the tracker; its parse would be cached
+            # under the gid-less URL every user reads.
+            side_tabs = {g for g, _kind, _n in _get_content_tabs(named_tabs)}
+            if gid not in side_tabs | _excluded_tab_gids(named_tabs):
                 name = _resolve_artist_name(title, artist_name)
                 t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
                 with t.phase("parse"):
@@ -1854,7 +1861,7 @@ async def async_fetch_and_parse(
                         return artist
                     # A better "Unreleased" tab exists — fall through to full discovery
                 # GID produced 0 eras or 0 songs — fall through to discovery
-            # else: gid is the Misc/Music-Videos tab — fall through to full discovery,
+            # else: gid is a content or excluded tab — fall through to full discovery,
             # see docs/decisions.md::fetcher.py::gid-subpage-discovery
         except AccessDeniedError:
             # "This tracker is private" is an answer, not a failure: let the API's dedicated
