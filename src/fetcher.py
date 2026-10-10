@@ -1815,7 +1815,7 @@ async def async_fetch_and_parse(
     client = _get_sheets_client()
     if gid:
         try:
-            with t.phase("gid_fetch"):
+            with t.phase("gid_fetch"), t.phase("stage_select"):
                 html, title = await async_fetch_sheet_html(
                     url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
                 )
@@ -1835,7 +1835,7 @@ async def async_fetch_and_parse(
             if gid not in side_tabs | _excluded_tab_gids(named_tabs):
                 name = _resolve_artist_name(title, artist_name)
                 t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
-                with t.phase("parse"):
+                with t.phase("parse"), t.phase("stage_select"):
                     artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
                 # Eras alone aren't enough — a hub tab parses to eras with no
                 # songs, and accepting it here would skip discovery entirely.
@@ -1850,15 +1850,16 @@ async def async_fetch_and_parse(
                         artist.source_url = url_norm
                         # Load Art + content tabs here too, so a gid URL returns the same content
                         # as discovery.
-                        await _load_secondary_tabs(
-                            artist,
-                            _get_art_tab_gid(named_tabs),
-                            _get_content_tabs(named_tabs),
-                            url_norm, title,
-                            client=client, timeout=timeout,
-                            cache_ttl=cache_ttl, use_cache=use_cache, t=t,
-                            page_paths=base_page_paths,
-                        )
+                        with t.phase("stage_enrich"):
+                            await _load_secondary_tabs(
+                                artist,
+                                _get_art_tab_gid(named_tabs),
+                                _get_content_tabs(named_tabs),
+                                url_norm, title,
+                                client=client, timeout=timeout,
+                                cache_ttl=cache_ttl, use_cache=use_cache, t=t,
+                                page_paths=base_page_paths,
+                            )
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
                         return artist
@@ -1989,20 +1990,21 @@ async def async_fetch_and_parse(
         else:
             first_wave, second_wave = gids, []
 
-        try:
-            stopped = False
-            for task in _start(first_wave):
-                if await _consider(task):
-                    stopped = True
-                    break
-            if not stopped and second_wave:
-                for task in _start(second_wave):
+        with t.phase("stage_select"):
+            try:
+                stopped = False
+                for task in _start(first_wave):
                     if await _consider(task):
+                        stopped = True
                         break
-        finally:
-            for task in fetch_tasks:
-                task.cancel()
-            await asyncio.gather(*fetch_tasks, return_exceptions=True)
+                if not stopped and second_wave:
+                    for task in _start(second_wave):
+                        if await _consider(task):
+                            break
+            finally:
+                for task in fetch_tasks:
+                    task.cancel()
+                await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
         if best_artist and best_score[1] > 0:
             best_artist.source_url = url_norm
@@ -2011,28 +2013,29 @@ async def async_fetch_and_parse(
                 f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
             )
 
-            # Hub workbook: the main tab held no songs, so the catalogue is spread across
-            # unclassified sibling tabs. Gated, so a healthy tracker never pays for the fetches.
-            if hub_gid is not None:
-                await _aggregate_hub_workbook(
-                    best_artist,
-                    _hub_workbook_candidates(
-                        named_tabs,
-                        {best_gid, hub_gid, art_gid}
-                        | {g for g, _k, _n in content_tabs},
-                    ),
-                    url_norm, title,
+            with t.phase("stage_enrich"):
+                # Hub workbook: the main tab held no songs, so the catalogue is spread across
+                # unclassified sibling tabs. Gated, so a healthy tracker never pays for the fetches.
+                if hub_gid is not None:
+                    await _aggregate_hub_workbook(
+                        best_artist,
+                        _hub_workbook_candidates(
+                            named_tabs,
+                            {best_gid, hub_gid, art_gid}
+                            | {g for g, _k, _n in content_tabs},
+                        ),
+                        url_norm, title,
+                        client=client, timeout=timeout, cache_ttl=cache_ttl,
+                        use_cache=use_cache, t=t, page_paths=page_paths,
+                    )
+
+                # Secondary tabs (Art + content tabs) — fetched concurrently,
+                # all optional: a failure never fails the request.
+                await _load_secondary_tabs(
+                    best_artist, art_gid, content_tabs, url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,
                     use_cache=use_cache, t=t, page_paths=page_paths,
                 )
-
-            # Secondary tabs (Art + content tabs) — fetched concurrently,
-            # all optional: a failure never fails the request.
-            await _load_secondary_tabs(
-                best_artist, art_gid, content_tabs, url_norm, title,
-                client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t, page_paths=page_paths,
-            )
 
             # Re-run AFTER every merge: sibling tabs' eras are appended after parse_sheet made
             # names unique, and clients drop duplicate-named eras. Idempotent.

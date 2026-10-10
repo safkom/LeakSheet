@@ -359,6 +359,20 @@ class TestPrivateSheetPropagates:
             )
 
 
+class TestWallClockStages:
+    """Server-Timing sums concurrent fetches, so it could not say where a slow cold
+    load spent its time; the sequential stages are timed on their own."""
+
+    @pytest.mark.parametrize("gid", [None, "100"])
+    async def test_stages_are_timed(self, workbook_client, patch_sheets_client, gid):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        await async_fetch_and_parse(URL, gid=gid, use_cache=False, write_cache=False, timer=timer)
+        assert {"base_fetch", "stage_select", "stage_enrich"} <= set(timer.phases)
+
+
 class TestProgressEvents:
     """The real pipeline reports what it is doing, in order, with real names."""
 
