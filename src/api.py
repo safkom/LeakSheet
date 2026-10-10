@@ -40,7 +40,10 @@ from src.config import (
     ARTISTGRID_URL,
     USER_AGENT,
     VERSION,
-    curated_host_allowed,
+    _IMAGE_ALLOWED_DOMAINS,  # noqa: F401 — re-exported for tests
+    _IMAGE_ALLOWED_PARENT_DOMAINS,  # noqa: F401
+    _image_host_allowed,
+    _is_allowed_domain,
 )
 from src import host_health
 from src.models import Artist, TrackerEntry, slugify
@@ -48,6 +51,10 @@ from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
+    _era_art_base,
+    read_art_pointer,
+    same_artwork,
+    update_art_pointer,
     _atomic_write_bytes,
     _normalize_url,
     async_fetch_and_parse,
@@ -296,29 +303,6 @@ _CC_TRACKERS_STALE = "public, max-age=600"  # /trackers stale fallback — retry
 # SSRF protection — domain allowlists for proxy endpoints
 # ---------------------------------------------------------------------------
 
-_IMAGE_ALLOWED_DOMAINS = {
-    # Misc-tab YouTube thumbnails (MiscLinkClassifier.thumbnailURL); the client
-    # routes every thumbnail through this proxy.
-    "img.youtube.com",
-    "i.ytimg.com",
-    # Exact hostnames allowed for image proxy
-    "lh3.googleusercontent.com",
-    "lh4.googleusercontent.com",
-    "lh5.googleusercontent.com",
-    "lh6.googleusercontent.com",
-    "lh7-rt.googleusercontent.com",
-    "ggpht.com",
-    "gstatic.com",
-}
-
-# Subdomains of these are also allowed (e.g. lh3.googleusercontent.com)
-_IMAGE_ALLOWED_PARENT_DOMAINS = {
-    "googleusercontent.com",
-    "ggpht.com",
-    "gstatic.com",
-    "google.com",
-}
-
 # Single source of truth: the hosts resolve_stream_url can emit.
 
 
@@ -327,43 +311,6 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 _GOOGLE_IMAGE_DOMAINS = {
     "googleusercontent.com", "ggpht.com", "google.com", "gstatic.com",
 }
-
-
-def _image_host_allowed(url: str) -> bool:
-    """Hosts the image proxy may fetch from.
-
-    Google's image CDNs, plus the curated tracker seed and
-    LEAKSHEET_EXTRA_SHEET_HOSTS (self-hosted trackers serve covers from their own
-    origin). Deliberately NOT the ArtistGrid-harvested hosts /sheet accepts: see
-    docs/decisions.md::config.py::curated_host_allowed.
-    """
-    if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
-        return True
-    try:
-        return curated_host_allowed(urlparse(url).hostname)
-    except ValueError:  # unclosed "[" in the host
-        return False
-
-
-def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
-    """Check if the URL's hostname is in the explicit allow-list.
-
-    Exact match first. If parent_domains is provided, also accepts any hostname
-    that is a direct or nested subdomain of one of those parent domains.
-    """
-    try:
-        hostname = urlparse(url).hostname
-        if not hostname:
-            return False
-        hostname = hostname.lower()
-        if hostname in allowed:
-            return True
-        if parent_domains:
-            return any(hostname == d or hostname.endswith("." + d) for d in parent_domains)
-        return False
-    except Exception as e:
-        logger.debug("URL domain check failed for %s: %s", url[:80], e)
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1112,18 +1059,7 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
         return None
 
 
-# Covers are keyed by the stable (tracker_url, era_name), with an alias per token URL:
-# see docs/decisions.md::api.py::_era_art_base — covers keyed by tracker and era
-def _era_art_base(tracker_url: str, era_name: str) -> str:
-    """The stable cache identity of one era's cover, as a synthetic URL.
-
-    Shaped like a URL so it drops straight into ``_image_cache_key`` and keeps
-    the width-keyed thumbnail stable too — a resize is done once, not hourly.
-    """
-    tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
-    era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
-    # The version segment retires slots filled under older adoption rules.
-    return f"leaksheet:art/v2/{tracker}/{era}"
+_ART_SLOT_RE = re.compile(r"(leaksheet:art/v2/[0-9a-f]{32}/[0-9a-f]{32})(?:\?v=\d{1,9})?")
 
 
 def _image_alias_path(url: str):
@@ -1181,7 +1117,7 @@ def _evict_image_cache() -> None:
     # Every warm re-writes the alias of each URL still in the sheet, and cover tokens
     # rotate, so without this sweep the directory gains a file per era per re-parse.
     alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
-    for alias in CACHE_DIR.glob("imgalias_*.txt"):
+    for alias in [*CACHE_DIR.glob("imgalias_*.txt"), *CACHE_DIR.glob("imgsrc_*.json")]:
         unlink_if_older(alias, alias_cutoff)
     entries = []
     total = 0
@@ -1294,20 +1230,31 @@ def _spawn_detached(coro) -> asyncio.Task:
 async def _warm_era_art(artist, tracker_url: str) -> None:
     """Download each era cover now, while its URL still works, and keep it.
 
-    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead
-    here keeps the era's last good cover.
+    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
+    the era's last good cover; an Art-tab image showing the same picture replaces it
+    (docs/decisions.md::fetcher.py::art-tab-identity).
     """
+    # A parse carries its token URLs aside: its payload holds slot keys.
+    sources = artist._art_sources or {era.name: era.art_url or "" for era in artist.eras}
     covers: dict[str, str] = {}
-    for era in artist.eras:
-        url = era.art_url or ""
+    for name, url in sources.items():
         if url.startswith("//"):
             url = "https:" + url
         if url.startswith(("http://", "https://")) and _image_host_allowed(url):
-            covers[era.name] = url
+            covers[name] = url
     if not covers:
         return
-
+    candidates = artist._art_candidates
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+
+    async def download(url: str) -> tuple[bytes, str]:
+        async with slots:
+            try:
+                resp, data = await _get_image_capped(url, _image_request_headers(url))
+                return data, resp.headers.get("content-type", "")
+            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
+                logger.debug("era art warm: %s failed: %s", url[:80], exc)
+                return b"", ""
 
     async def warm(era_name: str, url: str) -> None:
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
@@ -1315,14 +1262,16 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         base = _era_art_base(tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        data, content_type = b"", ""
-        async with slots:
-            try:
-                resp, data = await _get_image_capped(url, _image_request_headers(url))
-                content_type = resp.headers.get("content-type", "")
-            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
-                logger.debug("era art warm: %s failed: %s", url[:80], exc)
+        data, content_type = await download(url)
         stored = await asyncio.to_thread(_read_image_cache, key)
+        candidate = candidates.get(era_name)
+        if data and candidate:
+            better, better_type = await download(candidate)
+            if better and await asyncio.to_thread(same_artwork, data, better):
+                data, content_type = better, better_type
+            elif not better and stored and await asyncio.to_thread(same_artwork, stored[0], data):
+                # The Art-tab image did not load this time: keep the upgrade already stored.
+                data, content_type = stored[0], stored[1]
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
@@ -1330,8 +1279,11 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 return
             data, content_type = stored[0], stored[1]
         elif stored and stored[0] != data:
-            # The sheet changed this era's cover: its thumbnails show the old one.
+            # The sheet changed this era's cover: its thumbnails show the old one, and a
+            # new picture gets a new version so clients holding the old one refetch.
             await asyncio.to_thread(_drop_image_thumbnails, base)
+            if not await asyncio.to_thread(same_artwork, stored[0], data):
+                await asyncio.to_thread(update_art_pointer, base, bump=True)
         await asyncio.to_thread(_write_image_cache, key, data, content_type)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
@@ -1349,15 +1301,26 @@ async def proxy_image(
     supports ``=sNNN`` sizing, else locally with Pillow (result disk-cached
     in CACHE_DIR as flat ``img_*`` files, cleared by /cache/clear).
     """
+    # A payload's stable cover key: served from its slot, filled from the slot's latest
+    # source on a miss (docs/decisions.md::api.py::_era_art_base).
+    slot = None
+    if url.startswith("leaksheet:"):
+        match = _ART_SLOT_RE.fullmatch(url)
+        if match is None:
+            raise HTTPException(status_code=400, detail="Invalid cover key")
+        slot = match.group(1)
+        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
+
     # Fix protocol-relative URLs
     if url.startswith("//"):
         url = "https:" + url
 
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="Invalid URL scheme")
-
-    if not _image_host_allowed(url):
-        raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
+    # A slot with no recorded source can still be served from its stored copy.
+    if slot is None or url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme")
+        if not _image_host_allowed(url):
+            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
 
     width = _snap_image_width(w) if w else None
     base_headers = {
@@ -1371,7 +1334,7 @@ async def proxy_image(
 
     # The client's URL may be an expired cover token: resolve the (tracker, era) slot
     # it was warmed into, so original and thumbnail survive the next reparse.
-    cache_base = await asyncio.to_thread(_read_image_alias, url) or url
+    cache_base = slot or await asyncio.to_thread(_read_image_alias, url) or url
 
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
@@ -1425,10 +1388,15 @@ async def proxy_image(
         if stored is not None:
             data, ct = stored[0], stored[1]
             upstream_status = 200
+        elif not url:
+            raise HTTPException(status_code=404, detail="Unknown cover")
         else:
             resp, data = await _get_image_capped(url, headers)
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
+            if slot is not None and upstream_status == 200 and _is_raster_image(ct):
+                # A cold slot keeps its original, so other widths need no upstream.
+                await asyncio.to_thread(_write_image_cache, _image_cache_key(slot, None), data, ct)
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)

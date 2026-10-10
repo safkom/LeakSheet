@@ -40,6 +40,7 @@ import httpx
 from src.config import (
     ARTISTGRID_URL,
     USER_AGENT,
+    _image_host_allowed,
     register_tracker_hosts,
     sheet_host_allowed,
     tracker_hosts_are_stale,
@@ -824,9 +825,9 @@ def _evict_sheet_cache() -> None:
         if _TMP_SUFFIX_RE.search(path.name):
             unlink_if_older(path, orphan_cutoff)
             continue
-        # img_* is the image cache (own cap); imgalias_* are the pointers old cover URLs
+        # img_* is the image cache (own cap); imgalias_*/imgsrc_* are the pointers covers
         # resolve through, and evicting them brings back expired-token failures.
-        if not path.is_file() or path.name.startswith(("img_", "imgalias_")) or path.name.endswith(".lock"):
+        if not path.is_file() or path.name.startswith(("img_", "imgalias_", "imgsrc_")) or path.name.endswith(".lock"):
             continue
         try:
             stat = path.stat()
@@ -1484,10 +1485,9 @@ async def _load_secondary_tabs(
                 _, art_html = art_result
                 with t.phase("art_parse"):
                     art_map = await asyncio.to_thread(parse_art_tab, art_html, url_norm)
-                candidates = art_tab_candidates(artist, art_map) if art_map else {}
-                if candidates:
-                    with t.phase("art_compare"):
-                        await _adopt_matching_art(artist, candidates)
+                # Compared after the response, by the cover warm: see
+                # docs/decisions.md::fetcher.py::art-tab-identity.
+                artist._art_candidates = art_tab_candidates(artist, art_map) if art_map else {}
         except Exception as e:
             # Art tab optional — keep existing art_url on failure. WARNING so
             # a systematically broken tab is visible at default log level.
@@ -1545,10 +1545,6 @@ async def _load_secondary_tabs(
 # Largest 16x16 dHash distance (of 256 bits) still counted as the same artwork:
 # docs/decisions.md::fetcher.py::art-tab-identity.
 _SAME_ART_MAX_DISTANCE = 40
-_ART_COMPARE_CONCURRENCY = 8
-_ART_FETCH_TIMEOUT = 10.0
-# Same ceiling as the image proxy: the decode runs in a worker thread, not unbounded.
-_ART_MAX_BYTES = 25 * 1024 * 1024
 # Decoded pixels, checked from the header before any decode: a small PNG can decode to
 # hundreds of MB, far below Pillow's own bomb limit. Shared with the image proxy.
 MAX_DECODE_PIXELS = 20_000_000
@@ -1578,39 +1574,6 @@ def same_artwork(a: bytes, b: bytes) -> bool:
     """True when two images are the same picture, whatever their size or encoding."""
     ha, hb = _dhash(a), _dhash(b)
     return ha is not None and hb is not None and (ha ^ hb).bit_count() <= _SAME_ART_MAX_DISTANCE
-
-
-async def _fetch_art(url: str, slots: asyncio.Semaphore) -> bytes | None:
-    if not url.startswith(("http://", "https://")):
-        return None
-    async with slots:
-        try:
-            resp = await _get_capped(
-                _get_sheets_client(), url,
-                headers={"Referer": "https://docs.google.com/"}, timeout=_ART_FETCH_TIMEOUT,
-            )
-        except httpx.HTTPError:
-            return None
-    ok = resp.status_code == 200 and len(resp.content) <= _ART_MAX_BYTES
-    return resp.content if ok else None
-
-
-async def _adopt_matching_art(artist: Artist, candidates: dict[str, str]) -> None:
-    """Swap a main-tab cover for its Art-tab candidate only when both show the same
-    picture (the Art tab's copy is larger). Either image failing to load keeps the
-    main-tab cover."""
-    slots = asyncio.Semaphore(_ART_COMPARE_CONCURRENCY)
-    eras = [era for era in artist.eras if era.name in candidates]
-    pairs = await asyncio.gather(*(
-        asyncio.gather(_fetch_art(era.art_url, slots), _fetch_art(candidates[era.name], slots))
-        for era in eras
-    ))
-    adopted = 0
-    for era, (main, art) in zip(eras, pairs):
-        if main and art and await asyncio.to_thread(same_artwork, main, art):
-            era.art_url = candidates[era.name]
-            adopted += 1
-    logger.debug("Art tab: %d of %d candidate covers matched the main tab", adopted, len(eras))
 
 
 def _hub_workbook_candidates(
@@ -1772,6 +1735,67 @@ async def _aggregate_hub_workbook(
     return total
 
 
+# Covers are keyed by the stable (tracker_url, era_name), with an alias per token URL:
+# see docs/decisions.md::api.py::_era_art_base — covers keyed by tracker and era
+def _era_art_base(tracker_url: str, era_name: str) -> str:
+    """The stable cache identity of one era's cover, as a synthetic URL.
+
+    Shaped like a URL so it drops straight into ``_image_cache_key`` and keeps
+    the width-keyed thumbnail stable too — a resize is done once, not hourly.
+    """
+    tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
+    era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
+    # The version segment retires slots filled under older adoption rules.
+    return f"leaksheet:art/v2/{tracker}/{era}"
+
+
+def _art_pointer_key(base: str) -> str:
+    return "imgsrc_" + hashlib.sha256(base.encode()).hexdigest()
+
+
+def read_art_pointer(base: str) -> dict:
+    """A cover slot's latest source URL (``src``) and picture version (``v``). Blocking."""
+    try:
+        return json.loads((CACHE_DIR / f"{_art_pointer_key(base)}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def update_art_pointer(base: str, *, src: str | None = None, bump: bool = False) -> dict:
+    """Record a slot's newest source and/or a new picture version. Blocking."""
+    key = _art_pointer_key(base)
+    with _entry_lock(key):
+        pointer = read_art_pointer(base)
+        if src:
+            pointer["src"] = src
+        pointer["v"] = pointer.get("v", 1) + (1 if bump else 0)
+        _atomic_write_text(CACHE_DIR / f"{key}.json", json.dumps(pointer))
+    return pointer
+
+
+def _finalize(artist: Artist, url_norm: str) -> None:
+    """The last step of every parse path, before its cache write. Blocking.
+
+    The parse is shared by every URL variant, so ``source_url`` is the normalized
+    one; sibling-tab merges may have duplicated era names. Each cover becomes its
+    stable slot key, as Google re-signs token URLs on every fetch: see
+    docs/decisions.md::api.py::_era_art_base.
+    """
+    artist.source_url = url_norm
+    artist.eras = _disambiguate_era_names(artist.eras)
+    sources: dict[str, str] = {}
+    for era in artist.eras:
+        url = era.art_url or ""
+        if url.startswith("//"):
+            url = "https:" + url
+        if not url.startswith(("http://", "https://")) or not _image_host_allowed(url):
+            continue
+        base = _era_art_base(url_norm, era.name)
+        sources[era.name] = url
+        era.art_url = f"{base}?v={update_art_pointer(base, src=url)['v']}"
+    artist._art_sources = sources
+
+
 async def async_fetch_and_parse(
     url: str,
     *,
@@ -1847,7 +1871,6 @@ async def async_fetch_and_parse(
                     # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                     if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                        artist.source_url = url_norm
                         # Load Art + content tabs here too, so a gid URL returns the same content
                         # as discovery.
                         with t.phase("stage_enrich"):
@@ -1860,6 +1883,7 @@ async def async_fetch_and_parse(
                                 cache_ttl=cache_ttl, use_cache=use_cache, t=t,
                                 page_paths=base_page_paths,
                             )
+                        await asyncio.to_thread(_finalize, artist, url_norm)
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
                         return artist
@@ -1886,7 +1910,7 @@ async def async_fetch_and_parse(
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
-                artist.source_url = url_norm
+                await asyncio.to_thread(_finalize, artist, url_norm)
                 if write_cache:
                     await _async_set_cache(url_norm, base_html, title)
                     await _async_set_cached_parsed(url_norm, artist)
@@ -2007,7 +2031,6 @@ async def async_fetch_and_parse(
                 await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
         if best_artist and best_score[1] > 0:
-            best_artist.source_url = url_norm
             t.report(
                 "parsing",
                 f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
@@ -2037,9 +2060,7 @@ async def async_fetch_and_parse(
                     use_cache=use_cache, t=t, page_paths=page_paths,
                 )
 
-            # Re-run AFTER every merge: sibling tabs' eras are appended after parse_sheet made
-            # names unique, and clients drop duplicate-named eras. Idempotent.
-            best_artist.eras = _disambiguate_era_names(best_artist.eras)
+            await asyncio.to_thread(_finalize, best_artist, url_norm)
 
             if write_cache:
                 t.report("saving", "Saving")
@@ -2056,7 +2077,7 @@ async def async_fetch_and_parse(
         )
         name = _resolve_artist_name(title, artist_name)
         artist = await asyncio.to_thread(parse_sheet, html, name, url)
-        artist.source_url = url_norm
+        await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)
         return artist

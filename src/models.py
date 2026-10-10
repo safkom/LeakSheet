@@ -479,6 +479,10 @@ class Artist(BaseModel):
     # (JSON bytes, ETag) as written to the parse cache, so the API can serve them
     # without re-serializing. model_copy carries it: don't reuse after mutating.
     _wire: tuple[bytes, str] | None = PrivateAttr(default=None)
+    # Era name -> Google's token cover URL behind each slot key in ``art_url``, and the
+    # Art-tab image that may upgrade it; read by the cover warm after a parse.
+    _art_sources: dict[str, str] = PrivateAttr(default_factory=dict)
+    _art_candidates: dict[str, str] = PrivateAttr(default_factory=dict)
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
     source_url: str | None = Field(None, description="Original Google Sheets URL")

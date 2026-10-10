@@ -359,6 +359,39 @@ class TestPrivateSheetPropagates:
             )
 
 
+def _with_cover(token: str) -> str:
+    """The main tab with a cover on its first era, signed with *token* as Google does."""
+    cell = "<td>(2018) (SynthWave forms the group)</td><td></td>"
+    assert cell in WORKBOOK["100"]
+    return WORKBOOK["100"].replace(
+        cell,
+        "<td>(2018) (SynthWave forms the group)</td>"
+        f'<td><img src="https://docs.google.com/sheets-images-rt/{token}=w340-h339"></td>',
+        1,
+    )
+
+
+class TestStableCoverKeys:
+    """Google re-signs cover URLs on every fetch; a payload carrying them changed its
+    ETag on every revalidation. See docs/decisions.md::api.py::_era_art_base."""
+
+    async def test_reparses_with_new_tokens_serialize_identically(
+        self, workbook_client, patch_sheets_client
+    ):
+        from src.fetcher import serialize_artist
+
+        bodies = []
+        for token in ("token-one", "token-two"):
+            patch_sheets_client(
+                workbook_client({**WORKBOOK, "100": _with_cover(token)}, tab_names=TAB_NAMES)
+            )
+            artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+            assert artist.eras[0].art_url.startswith("leaksheet:art/v2/")
+            assert artist._art_sources["Debut Era"].endswith(f"{token}=w340-h339")
+            bodies.append(serialize_artist(artist)[0])
+        assert bodies[0] == bodies[1]
+
+
 class TestWallClockStages:
     """Server-Timing sums concurrent fetches, so it could not say where a slow cold
     load spent its time; the sequential stages are timed on their own."""

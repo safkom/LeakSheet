@@ -75,6 +75,66 @@ def curated_host_allowed(host: str | None) -> bool:
     host = host.lower()
     return host in _SHEET_HOST_SEED or host in _env_sheet_hosts()
 
+# Image-proxy reach (SSRF allowlist): Google's image CDNs plus the curated hosts.
+_IMAGE_ALLOWED_DOMAINS = {
+    # Misc-tab YouTube thumbnails (MiscLinkClassifier.thumbnailURL); the client
+    # routes every thumbnail through this proxy.
+    "img.youtube.com",
+    "i.ytimg.com",
+    # Exact hostnames allowed for image proxy
+    "lh3.googleusercontent.com",
+    "lh4.googleusercontent.com",
+    "lh5.googleusercontent.com",
+    "lh6.googleusercontent.com",
+    "lh7-rt.googleusercontent.com",
+    "ggpht.com",
+    "gstatic.com",
+}
+
+# Subdomains of these are also allowed (e.g. lh3.googleusercontent.com)
+_IMAGE_ALLOWED_PARENT_DOMAINS = {
+    "googleusercontent.com",
+    "ggpht.com",
+    "gstatic.com",
+    "google.com",
+}
+
+
+def _image_host_allowed(url: str) -> bool:
+    """Hosts the image proxy may fetch from.
+
+    Google's image CDNs, plus the curated tracker seed and
+    LEAKSHEET_EXTRA_SHEET_HOSTS (self-hosted trackers serve covers from their own
+    origin). Deliberately NOT the ArtistGrid-harvested hosts /sheet accepts: see
+    docs/decisions.md::config.py::curated_host_allowed.
+    """
+    if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
+        return True
+    try:
+        return curated_host_allowed(urlparse(url).hostname)
+    except ValueError:  # unclosed "[" in the host
+        return False
+
+
+def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
+    """Check if the URL's hostname is in the explicit allow-list.
+
+    Exact match first. If parent_domains is provided, also accepts any hostname
+    that is a direct or nested subdomain of one of those parent domains.
+    """
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return False
+        hostname = hostname.lower()
+        if hostname in allowed:
+            return True
+        if parent_domains:
+            return any(hostname == d or hostname.endswith("." + d) for d in parent_domains)
+        return False
+    except ValueError:  # an unparseable URL is never allowed
+        return False
+
 
 def sheet_host_allowed(host: str | None) -> bool:
     """True if *host* may be fetched by the sheet pipeline."""

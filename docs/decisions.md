@@ -336,7 +336,7 @@ Ye's 43 main-tab covers, and Yandhi [V2] showed the "Brothers" single instead of
 lilac CD. The main-tab image is the tracker's own cover but only ~100 px wide; the Art
 tab's copy of the same art is ~340 px.
 
-So `_adopt_matching_art` downloads both and takes the Art-tab image only when a 16x16
+So the cover warm (`api.py::_warm_era_art`) downloads both and stores the Art-tab image only when a 16x16
 difference hash of the two is within 40 of 256 bits. Across 91 downloadable pairs from
 five trackers (2026-09-27), same artwork measured 0–27 and different artwork 65+; the
 one near miss (Ca$ino, 103) is the same photo recropped to a portrait, which rightly
@@ -344,6 +344,11 @@ stays on the main-tab image. When either download fails (Ye's proxied tokens are
 already dead) the main-tab cover stays, and an era with no main-tab cover gets no
 Art-tab image. The per-era cover slot moved to `v2` at the same time, so name-matched
 v1 images are not served again.
+
+The comparison runs after the response, not during the parse: on a slow link to
+Google it added 15-20 s to every cold load. Since the payload carries the slot key,
+an upgrade changes the slot's bytes, never the payload. If a later Art-tab download
+fails, a stored copy of the same picture is kept rather than downgraded.
 
 ## api.py::_warm_era_art — covers are downloaded at parse time
 
@@ -381,7 +386,15 @@ expired token — 16% of all `/image-proxy` traffic on 2026-09-21.
 
 `(tracker_url, era_name)` is stable, so the bytes live under a slot derived from it,
 with a tiny `imgalias_*` pointer left behind for every URL that has ever named it. Old
-payloads keep resolving, and one entry per era replaces one per era per parse. The
+payloads keep resolving, and one entry per era replaces one per era per parse.
+
+The payload carries that slot too (`fetcher.py::_finalize`): an `art_url` holding the
+re-signed token changed every era's URL, and so the ETag, on every revalidation (all
+43 Ye covers between two fetches on 2026-10-10), so clients rarely got a 304. `art_url`
+is now `leaksheet:art/v2/<tracker>/<era>?v=<n>`, which every client already passes
+opaquely to `/image-proxy`. An `imgsrc_*` pointer holds the slot's latest token URL,
+to fill a cold slot, and its picture version `v`. The warm bumps `v` only when a new
+download is a different picture, so the payload changes exactly when the cover does. The
 sheet-cache eviction skips `imgalias_*` for the same reason, and a cache hit touches
 the entry's mtime so a cover still in use is not evicted before stale copies.
 
