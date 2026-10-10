@@ -344,19 +344,23 @@ _HOST_LINKS = [
 ]
 
 
+@pytest.mark.parametrize("suffix", ["", "?usp=sharing", "&sa=D&source=editors&ust=1"])
 @pytest.mark.parametrize("prefix", ["https://", "https://www.", "http://", "http://www."])
 @pytest.mark.parametrize("path,file_id", _HOST_LINKS)
-def test_every_host_spelling_resolves_allowlisted_with_its_whole_id(prefix, path, file_id):
+def test_every_host_spelling_resolves_allowlisted_with_its_whole_id(prefix, path, file_id, suffix):
+    # The "&sa=…" tail is Google's redirect tracking glued onto the path; /metadata
+    # receives links exactly as the sheet stores them.
     if prefix.endswith("www.") and path.startswith("music.froste.lol"):
         pytest.skip("froste has no www host")
-    resolved = resolve_stream_url(prefix + path)
+    resolved = resolve_stream_url(prefix + path + suffix)
     assert resolved is not None
     assert _is_allowed_domain(resolved, ALLOWED_STREAM_HOSTS)
     assert file_id in resolved
 
 
-def test_froste_metadata_keeps_the_whole_hash():
-    meta = resolve_metadata_url("https://music.froste.lol/song/abcDEF12")
+@pytest.mark.parametrize("suffix", ["", "&sa=D&ust=1"])
+def test_froste_metadata_keeps_the_whole_hash(suffix):
+    meta = resolve_metadata_url("https://music.froste.lol/song/abcDEF12" + suffix)
     assert meta["url"] == "https://music.froste.lol/song/abcDEF12/analyze-quality"
 
 

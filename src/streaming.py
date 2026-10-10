@@ -206,9 +206,10 @@ _IMGUR_PATTERN = re.compile(
     r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
 )
 # music.froste.lol
-# The lookahead keeps a mixed-case hash from resolving to its lowercase prefix.
+# The lookahead stops a non-hex id resolving to its hex prefix; "&sa=…" tracking
+# glued onto the path still matches.
 _FROSTE_PATTERN = re.compile(
-    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?=$|[/?#])",
+    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?![A-Za-z0-9])",
 )
 
 # krakenfiles.com
