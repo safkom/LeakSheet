@@ -104,22 +104,16 @@ def _assert_public_https_url(url: str, *, source: str) -> None:
 
 
 async def assert_public_redirect_target(resp: httpx.Response, *, source: str) -> None:
-    """Re-validate that the FINAL url of a (redirect-followed) response is a
-    public https host; aclose the response and raise ValueError otherwise.
+    """Require the FINAL url of a (redirect-followed) response to be https; aclose
+    the response and raise ValueError otherwise.
 
-    Callers pass ``stream=True`` and run this before reading the body, so no
-    internal content is ever relayed to the client.
+    Callers pass ``stream=True`` and run this before reading the body. No DNS check
+    here: PublicOnlyAsyncTransport already refused every non-public hop at connect.
     """
     final = str(resp.url)
-    parsed = urlparse(final)
-    host = parsed.hostname or ""
-    try:
-        if parsed.scheme != "https":
-            raise ValueError(f"{source} redirected to non-https URL: {final[:80]}")
-        await asyncio.to_thread(_assert_public_host, host, source=source)
-    except ValueError:
+    if urlparse(final).scheme != "https":
         await resp.aclose()
-        raise
+        raise ValueError(f"{source} redirected to non-https URL: {final[:80]}")
 
 
 _DNS_RETRY_DELAY_S = 0.3
@@ -807,7 +801,9 @@ async def stream_audio(
     if is_kraken_view_url(stream_url):
         stream_url = await resolve_kraken_cdn_url(stream_url)
 
-    req_headers = {"User-Agent": _STREAM_USER_AGENT}
+    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range (gdrive
+    # included), so the body must not arrive content-encoded (httpx would decode it).
+    req_headers = {"User-Agent": _STREAM_USER_AGENT, "Accept-Encoding": "identity"}
     if range_header:
         req_headers["Range"] = range_header
 
@@ -835,9 +831,6 @@ async def stream_audio(
     if "krakencloud.net" in stream_url:
         req_headers["Referer"] = "https://krakenfiles.com/"
 
-    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range,
-    # so the body must not arrive content-encoded (httpx would decode it).
-    req_headers["Accept-Encoding"] = "identity"
     client = _get_shared_client()
 
     request = client.build_request("GET", stream_url, headers=req_headers)

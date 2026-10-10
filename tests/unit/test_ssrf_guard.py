@@ -57,44 +57,70 @@ def test_allows_public_https(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Redirect re-validation: follow_redirects=True lets a guard-passing public
-# origin 30x to an internal host. The final resp.url must be re-checked before
-# any body is relayed. (Regression: this path was previously unguarded on the
-# general stream/image-proxy paths — only the gdrive path re-validated.)
+# Redirects: follow_redirects=True lets a public origin 30x to an internal host.
+# The guarded transport checks every hop, so the hop to the internal host never
+# connects; stream_audio only re-checks the final URL's scheme.
 # ---------------------------------------------------------------------------
 
-async def test_redirect_to_private_host_is_rejected_and_closed(monkeypatch):
-    monkeypatch.setattr(streaming.socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254"))
+async def test_transport_rejects_a_redirect_hop_to_a_private_host(monkeypatch):
+    async def fake_getaddrinfo(host, port):
+        ip = "169.254.169.254" if host == "metadata.internal" else "8.8.8.8"
+        return [(2, 1, 6, "", (ip, 0))]
 
+    async def fake_send(self, request):
+        assert request.url.host == "cdn.example", "the private hop must never connect"
+        return httpx.Response(302, headers={"Location": "https://metadata.internal/x"})
+
+    monkeypatch.setattr(streaming, "_getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_send)
+    async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport(), follow_redirects=True) as client:
+        with pytest.raises(httpx.ConnectError, match="non-public"):
+            await client.get("https://cdn.example/x")
+
+
+def test_stream_client_uses_the_guarded_transport():
+    # stream_audio relies on this for every redirect hop.
+    assert isinstance(streaming._get_shared_client()._transport, PublicOnlyAsyncTransport)
+
+
+async def test_redirect_to_plain_http_is_rejected_and_closed():
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "cdn.example":
-            return httpx.Response(302, headers={"Location": "https://metadata.internal/x"})
-        return httpx.Response(200, content=b"secret-internal-bytes")
+        if request.url.scheme == "https":
+            return httpx.Response(302, headers={"Location": "http://cdn.example/x"})
+        return httpx.Response(200, content=b"bytes")
 
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
-        resp = await client.send(
-            client.build_request("GET", "https://cdn.example/x"), stream=True
-        )
-        assert resp.url.host == "metadata.internal"  # redirect was followed
-        with pytest.raises(ValueError, match="non-public"):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        resp = await client.send(client.build_request("GET", "https://cdn.example/x"), stream=True)
+        with pytest.raises(ValueError, match="non-https"):
             await assert_public_redirect_target(resp, source="test")
         assert resp.is_closed  # body never relayed
 
 
-async def test_redirect_to_public_host_passes(monkeypatch):
-    monkeypatch.setattr(streaming.socket, "getaddrinfo", _fake_getaddrinfo("8.8.8.8"))
+async def test_https_final_url_passes_without_a_dns_lookup(monkeypatch):
+    def no_dns(*args, **kwargs):
+        raise AssertionError("the transport already resolved and checked this host")
+
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", no_dns)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200))) as client:
+        resp = await client.send(client.build_request("GET", "https://cdn.example/x"), stream=True)
+        await assert_public_redirect_target(resp, source="test")
+        await resp.aclose()
+
+
+async def test_gdrive_request_asks_for_identity_encoding(monkeypatch):
+    # Drive bytes are relayed under the upstream's Content-Length/Content-Range.
+    seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=b"data")
+        seen.append(request.headers.get("accept-encoding", ""))
+        return httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=b"ID3")
 
-    transport = httpx.MockTransport(handler)
-    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
-        resp = await client.send(
-            client.build_request("GET", "https://cdn.example/x"), stream=True
-        )
-        await assert_public_redirect_target(resp, source="test")  # must not raise
-        await resp.aclose()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
+    resp = await streaming.stream_audio("https://drive.google.com/uc?export=download&id=abc")
+    await resp.aclose()
+    await client.aclose()
+    assert seen == ["identity"]
 
 
 async def test_transport_blocks_literal_private_ip():

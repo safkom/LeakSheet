@@ -1464,8 +1464,8 @@ async def _get_image_capped(
     req = _get_proxy_client().build_request("GET", url, headers=headers)
     resp = await _get_proxy_client().send(req, stream=True)
 
-    # Re-check the allowlist on the URL we LANDED on, before reading any body. Not
-    # assert_public_redirect_target: the transport already refuses private IPs.
+    # Re-check the allowlist on the URL we LANDED on, before reading any body; the
+    # transport already refused private IPs on every hop.
     final_url = str(resp.url)
     if final_url != url and not _image_host_allowed(final_url):
         await resp.aclose()
