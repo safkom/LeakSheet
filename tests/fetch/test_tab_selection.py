@@ -479,3 +479,18 @@ class TestUnreleasedFirstSkipsOtherCatalogueTabs:
         assert artist.total_songs == 4
         assert any("100" in u for u in requested)
         assert not any("gid=400" in u or "/400" in u for u in requested), requested
+
+
+class TestCoverKeysNeverFailAParse:
+    async def test_a_pointer_write_error_keeps_the_token_url(
+        self, workbook_client, patch_sheets_client, monkeypatch
+    ):
+        import src.fetcher as fetcher
+
+        def disk_full(*args, **kwargs):
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr(fetcher, "update_art_pointer", disk_full)
+        patch_sheets_client(workbook_client({**WORKBOOK, "100": _with_cover("tok")}, tab_names=TAB_NAMES))
+        artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+        assert artist.eras[0].art_url.endswith("tok=w340-h339")

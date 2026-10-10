@@ -1791,8 +1791,13 @@ def _finalize(artist: Artist, url_norm: str) -> None:
         if not url.startswith(("http://", "https://")) or not _image_host_allowed(url):
             continue
         base = _era_art_base(url_norm, era.name)
+        try:
+            version = update_art_pointer(base, src=url)["v"]
+        except OSError as e:  # a cover must never fail the parse: keep the token URL
+            logger.warning("cover pointer write failed for %s: %s", base, e)
+            continue
         sources[era.name] = url
-        era.art_url = f"{base}?v={update_art_pointer(base, src=url)['v']}"
+        era.art_url = f"{base}?v={version}"
     artist._art_sources = sources
 
 
