@@ -121,9 +121,12 @@ struct TVVersionRowView: View {
                 )
             } label: {
                 HStack(spacing: 16) {
-                    Image(systemName: "play.circle")
+                    Image(systemName: HostHealthStore.shared.isDown(link: version.streamableLink)
+                          ? "exclamationmark.circle" : "play.circle")
                         .foregroundStyle(.secondary)
                         .frame(width: 34)
+                        .accessibilityLabel(HostHealthStore.shared.downHost(for: version.streamableLink)
+                            .map { "\($0) is down" } ?? "Play")
                     VStack(alignment: .leading, spacing: 6) {
                         Text(version.name)
                             .lineLimit(1)

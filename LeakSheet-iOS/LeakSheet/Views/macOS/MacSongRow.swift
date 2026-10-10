@@ -145,17 +145,19 @@ struct MacSongRow: View {
     private var trailingControls: some View {
         HStack(spacing: 2) {
             if canStream, let v = version {
+                let downHost = HostHealthStore.shared.downHost(for: v.streamableLink)
                 Button {
                     play(v)
                 } label: {
                     Image(systemName: "play.fill")
                         .font(.caption)
+                        .foregroundStyle(downHost == nil ? Color.primary : Color.secondary)
                         .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Play")
-                .accessibilityLabel("Play \(song.baseName)")
+                .help(downHost.map { "\($0) is down right now" } ?? "Play")
+                .accessibilityLabel(downHost.map { "Play \(song.baseName). \($0) is down" } ?? "Play \(song.baseName)")
             }
 
             if version != nil {

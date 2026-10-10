@@ -65,6 +65,7 @@ struct SongRowView: View {
                 isPlaying: player.isPlaying,
                 canStream: canStream,
                 title: song.baseName,
+                link: version?.streamableLink,
                 play: play
             )
 
@@ -223,6 +224,8 @@ struct SongPlayControl: View {
     let isPlaying: Bool
     let canStream: Bool
     let title: String
+    /// The link Play streams, so a host the backend reports down shows dimmed.
+    var link: String? = nil
     let play: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -240,18 +243,20 @@ struct SongPlayControl: View {
                     // Repeating symbol effects are not suppressed by Reduce Motion.
                     .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isPlaying && !reduceMotion)
             } else if canStream {
+                // Still tappable while its host is down: the backend may already be back.
+                let downHost = HostHealthStore.shared.downHost(for: link)
                 Button(action: play) {
                     Image(systemName: "play.fill")
                         .font(.caption)
-                        .foregroundStyle(Color.lsAccent)
+                        .foregroundStyle(downHost == nil ? Color.lsAccent : Color.secondary)
                         .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color.lsAccent.opacity(0.14)))
+                        .background(Circle().fill((downHost == nil ? Color.lsAccent : Color.secondary).opacity(0.14)))
                         // Inside the label, or only the 28 pt circle is tappable (DECISIONS.md).
                         .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Play \(title)")
+                .accessibilityLabel(downHost.map { "Play \(title). \($0) is down" } ?? "Play \(title)")
             } else {
                 Color.clear
             }

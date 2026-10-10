@@ -26,6 +26,8 @@ final class TrackerLoader {
         recents: RecentTrackersManager
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Rows dim the play button of a host the backend reports down.
+        Task { await HostHealthStore.shared.refresh() }
         guard !trimmed.isEmpty else { return nil }
         // A tracker keeps the name it was first opened under, whichever entry point
         // reopens it: see DECISIONS.md::TrackerLoader.swift::sticky-artist-name.

@@ -102,6 +102,19 @@ enum StreamResolver {
         }
     }
 
+    /// The backend's provider key for a link, as `GET /hosts` names it.
+    nonisolated static func provider(for link: String) -> String? {
+        switch target(for: link) {
+        case .pillows: return "pillows"
+        case .imgur: return "imgur"
+        case .froste: return "froste"
+        case .kraken: return "kraken"
+        case .pixeldrain: return "pixeldrain"
+        case .gdrive: return "gdrive"
+        case nil: return nil
+        }
+    }
+
     nonisolated static func isStreamableURL(_ url: String) -> Bool {
         target(for: url) != nil
     }

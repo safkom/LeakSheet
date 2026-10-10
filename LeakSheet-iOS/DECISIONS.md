@@ -533,3 +533,16 @@ the key it follows the device, so a Light-mode phone flashed white before Dark t
 `UILaunchScreen.UIColorName` points at `LaunchBackground`, black in both appearances, to
 match the default. Someone who picks Light gets a black launch instead; that is the rarer
 choice.
+
+## HostHealthStore.swift — down hosts dim, never block
+
+A streaming provider that is down used to cost a 30 s wait per play attempt before the
+generic error. The backend now tracks provider health (`GET /hosts`, see the API's
+`docs/decisions.md::host_health.py`) and answers a known-down host at once. The app reads
+it so a row's play button dims, with an accessibility note, and a failed play says which
+host is down instead of "Playback failed".
+
+The status only ever informs: Play stays enabled and nothing is skipped client-side,
+because the list refreshes at most once a minute and the host may already be back. The
+store refreshes when a tracker loads, before each play (throttled), and forced after a
+failed play or a load timeout. A failed `/hosts` fetch keeps the last known state.
