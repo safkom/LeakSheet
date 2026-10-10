@@ -21,7 +21,7 @@ from src.models import Artist
 @pytest.fixture(autouse=True)
 def _tmp_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(fetcher, "CACHE_DIR", tmp_path)
-    yield tmp_path
+    return tmp_path
 
 
 def _artist(name: str = "SynthWave") -> Artist:

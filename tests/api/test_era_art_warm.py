@@ -70,7 +70,7 @@ class _Google:
         return _Response(request.url, body, 200 if ok else 403)
 
 
-@pytest.fixture()
+@pytest.fixture
 def google(monkeypatch, tmp_path):
     fake = _Google()
     monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)

@@ -231,7 +231,7 @@ class FakeClient:
         return resp
 
 
-@pytest.fixture()
+@pytest.fixture
 def proxy_env(monkeypatch, tmp_path):
     """TestClient with a fake upstream and an isolated cache dir."""
     fake = FakeClient(make_png(800, 600))

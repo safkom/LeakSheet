@@ -1063,7 +1063,8 @@ def _walk_og_lines(notes: str):
             continue
         # A quoted filename bounds the capture; otherwise take the line rest.
         quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
-        names = [quoted.group(1)] if quoted else ([rest] if rest else [])
+        # _is_og_listing guarantees a non-empty rest.
+        names = [quoted.group(1) if quoted else rest]
         indices = [i]
         # '&' continuation: the next line holds another filename — unless it
         # is itself a labelled OG line, which the outer loop handles.

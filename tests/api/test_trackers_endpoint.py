@@ -107,7 +107,7 @@ class FakeClient:
         return httpx.Response(self.response.status_code, text=self.response.text, headers=self.response.headers)
 
 
-@pytest.fixture()
+@pytest.fixture
 def trackers_env(monkeypatch):
     fake = FakeClient()
     import src.fetcher as fetcher
