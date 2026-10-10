@@ -332,6 +332,34 @@ GDRIVE_PERMISSION_DENIED_HTML = """
 """
 
 
+# Every host, every spelling a tracker uses. A resolved URL the proxy allowlist then
+# rejects is a silent 403 on every play, and a truncated id plays the wrong file.
+_HOST_LINKS = [
+    ("pillows.su/f/AbC_1-x", "AbC_1-x"),
+    ("imgur.gg/f/AbC12", "AbC12"),
+    ("music.froste.lol/song/abcDEF12", "abcDEF12"),
+    ("krakenfiles.com/view/FJmpAhYHMp/file.html", "FJmpAhYHMp"),
+    ("pixeldrain.com/u/AbC123", "AbC123"),
+    ("drive.google.com/file/d/1AbC_-x/view", "1AbC_-x"),
+]
+
+
+@pytest.mark.parametrize("prefix", ["https://", "https://www.", "http://", "http://www."])
+@pytest.mark.parametrize("path,file_id", _HOST_LINKS)
+def test_every_host_spelling_resolves_allowlisted_with_its_whole_id(prefix, path, file_id):
+    if prefix.endswith("www.") and path.startswith("music.froste.lol"):
+        pytest.skip("froste has no www host")
+    resolved = resolve_stream_url(prefix + path)
+    assert resolved is not None
+    assert _is_allowed_domain(resolved, ALLOWED_STREAM_HOSTS)
+    assert file_id in resolved
+
+
+def test_froste_metadata_keeps_the_whole_hash():
+    meta = resolve_metadata_url("https://music.froste.lol/song/abcDEF12")
+    assert meta["url"] == "https://music.froste.lol/song/abcDEF12/analyze-quality"
+
+
 class TestParseGdriveConfirmForm:
     def test_extracts_hidden_fields(self):
         fields = parse_gdrive_confirm_form(GDRIVE_INTERSTITIAL_HTML)

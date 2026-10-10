@@ -212,8 +212,9 @@ _IMGUR_PATTERN = re.compile(
     r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
 )
 # music.froste.lol
+# The lookahead keeps a mixed-case hash from resolving to its lowercase prefix.
 _FROSTE_PATTERN = re.compile(
-    r"https?://music\.froste\.lol/song/([a-f0-9]+)",
+    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?=$|[/?#])",
 )
 
 # krakenfiles.com
@@ -470,9 +471,11 @@ def resolve_stream_url(link: str) -> str | None:
 
     m = _KRAKEN_PATTERN.match(link)
     if m:
-        # Return view URL unchanged — resolved to CDN URL lazily in stream_audio()
-        logger.debug("Resolved krakenfiles.com link %s (CDN resolved lazily)", link)
-        return link
+        # Canonical view URL (a www. host is off the allowlist); its CDN URL is
+        # resolved lazily in stream_audio().
+        resolved = f"https://krakenfiles.com/view/{m.group(1)}/file.html"
+        logger.debug("Resolved krakenfiles.com link %s → %s", link, resolved)
+        return resolved
 
     m = _PIXELDRAIN_PATTERN.match(link)
     if m:
