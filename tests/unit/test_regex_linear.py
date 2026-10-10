@@ -15,6 +15,7 @@ MODULES = ["src.config", "src.models", "src.parser", "src.fetcher", "src.streami
 UNITS = [
     "1", "1 ", " ", "\n", "a\n", "(", "((", "[", "a ", "a,", "&", "-", "/", " /",
     "feat. ", "prod. ", "down ", "fix ", "Samples a's 'x ", '{name:"',
+    "x and y ", "x feat y ",
 ]
 SIZE = 32 * 1024
 BUDGET_S = 0.1
@@ -40,7 +41,9 @@ def test_pattern_is_linear(name, pattern):
     run = pattern.match if name in ANCHORED else pattern.search
     for unit in UNITS:
         text = (unit * (SIZE // len(unit) + 1))[:SIZE]
-        for probe in (text, "a" + text + "!"):
+        # The "\n!" tail: a `.+$` without DOTALL rescans a long line that ends
+        # before a newline, from every start.
+        for probe in (text, "a" + text + "!", text + "\n!"):
             start = time.perf_counter()
             run(probe)
             elapsed = time.perf_counter() - start

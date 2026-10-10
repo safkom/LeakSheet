@@ -334,6 +334,27 @@ actor APIClient {
         try JSONDecoder().decode([DiscoveryArtist].self, from: data)
     }
 
+    // MARK: - Stream host health
+
+    /// Each streaming provider's status, as the backend sees it (`GET /hosts`).
+    func fetchHostHealth() async throws -> [HostStatus] {
+        guard let url = URL(string: "\(Self.baseURL)/hosts") else {
+            throw APIError.invalidURL
+        }
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.httpError(status: 0, message: "Unexpected response type")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw APIError.httpError(status: httpResponse.statusCode, message: "Host status fetch failed")
+        }
+        return try Self.decodeHostHealth(from: data)
+    }
+
+    nonisolated static func decodeHostHealth(from data: Data) throws -> [HostStatus] {
+        try JSONDecoder().decode(HostHealthResponse.self, from: data).hosts
+    }
+
     /// Strip the optional `W/` weak prefix and surrounding quotes from an
     /// HTTP ETag header value, preserving inner content. Returns nil when the
     /// header is missing or empty.
@@ -372,6 +393,19 @@ enum APIError: LocalizedError, Sendable {
         case .httpError(_, let message): message
         }
     }
+}
+
+/// One provider's row in `GET /hosts`.
+nonisolated struct HostStatus: Codable, Sendable, Equatable {
+    let provider: String
+    let host: String
+    let status: String
+
+    var isDown: Bool { status == "down" }
+}
+
+nonisolated private struct HostHealthResponse: Codable, Sendable {
+    let hosts: [HostStatus]
 }
 
 nonisolated struct ErrorResponse: Codable, Sendable {

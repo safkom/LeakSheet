@@ -108,6 +108,29 @@ class TestMiscTabGidRegression:
         assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
 
 
+class TestExcludedTabsNeverWin:
+    """A tab the fetcher deliberately does not parse ("Recent", "Tracklist", …) must
+    not become the tracker: the result is cached under the gid-less URL every user
+    reads, so a subset would replace the whole catalogue for 1-24 h."""
+
+    async def test_requested_recent_gid_falls_through_to_main(
+        self, workbook_client, patch_sheets_client
+    ):
+        names = {"100": "Songs", "400": "Recent"}
+        client = workbook_client({"100": WORKBOOK["100"], "400": WORKBOOK["400"]}, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client, gid="400")
+        assert [e.name for e in artist.eras] == ["Debut Era", "Sophomore Era"]
+
+    async def test_discovery_never_picks_an_excluded_tab(
+        self, workbook_client, patch_sheets_client
+    ):
+        # The excluded tab is the bigger one and comes first: it still loses.
+        names = {"400": "Recent", "100": "Songs"}
+        client = workbook_client({"400": WORKBOOK["100"], "100": WORKBOOK["400"]}, tab_names=names)
+        artist = await _fetch(client, patch_sheets_client)
+        assert [e.name for e in artist.eras] == ["Recently Added"]
+
+
 class TestHubWorkbook:
     """A workbook whose main tab is a hub of category descriptions, with the
     catalogue split across unclassified sibling tabs (Avicii, 2026-07-27).
@@ -185,9 +208,18 @@ class TestHubWorkbook:
 
 
 class TestSourceUrlAndResilience:
-    async def test_source_url_is_the_original(self, workbook_client, patch_sheets_client):
-        client = workbook_client(WORKBOOK, tab_names=TAB_NAMES)
-        artist = await _fetch(client, patch_sheets_client)
+    @pytest.mark.parametrize("variant", [
+        "https://docs.google.com/spreadsheets/d/SYNTH123/edit?usp=sharing",
+        "https://docs.google.com/spreadsheets/d/SYNTH123/edit#gid=100",
+        "docs.google.com/spreadsheets/d/SYNTH123/htmlview",
+    ])
+    async def test_source_url_is_the_normalized_url(
+        self, workbook_client, patch_sheets_client, variant
+    ):
+        # The parse is shared by every URL variant of the tracker, so it must not carry
+        # whichever variant happened to trigger it into everyone's Recents.
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        artist = await async_fetch_and_parse(variant, use_cache=False, write_cache=False)
         assert artist.source_url == URL
 
     async def test_failing_secondary_tab_does_not_break_request(
@@ -327,6 +359,53 @@ class TestPrivateSheetPropagates:
             )
 
 
+def _with_cover(token: str) -> str:
+    """The main tab with a cover on its first era, signed with *token* as Google does."""
+    cell = "<td>(2018) (SynthWave forms the group)</td><td></td>"
+    assert cell in WORKBOOK["100"]
+    return WORKBOOK["100"].replace(
+        cell,
+        "<td>(2018) (SynthWave forms the group)</td>"
+        f'<td><img src="https://docs.google.com/sheets-images-rt/{token}=w340-h339"></td>',
+        1,
+    )
+
+
+class TestStableCoverKeys:
+    """Google re-signs cover URLs on every fetch; a payload carrying them changed its
+    ETag on every revalidation. See docs/decisions.md::api.py::_era_art_base."""
+
+    async def test_reparses_with_new_tokens_serialize_identically(
+        self, workbook_client, patch_sheets_client
+    ):
+        from src.fetcher import serialize_artist
+
+        bodies = []
+        for token in ("token-one", "token-two"):
+            patch_sheets_client(
+                workbook_client({**WORKBOOK, "100": _with_cover(token)}, tab_names=TAB_NAMES)
+            )
+            artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+            assert artist.eras[0].art_url.startswith("leaksheet:art/v2/")
+            assert artist._art_sources["Debut Era"].endswith(f"{token}=w340-h339")
+            bodies.append(serialize_artist(artist)[0])
+        assert bodies[0] == bodies[1]
+
+
+class TestWallClockStages:
+    """Server-Timing sums concurrent fetches, so it could not say where a slow cold
+    load spent its time; the sequential stages are timed on their own."""
+
+    @pytest.mark.parametrize("gid", [None, "100"])
+    async def test_stages_are_timed(self, workbook_client, patch_sheets_client, gid):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        await async_fetch_and_parse(URL, gid=gid, use_cache=False, write_cache=False, timer=timer)
+        assert {"base_fetch", "stage_select", "stage_enrich"} <= set(timer.phases)
+
+
 class TestProgressEvents:
     """The real pipeline reports what it is doing, in order, with real names."""
 
@@ -400,3 +479,18 @@ class TestUnreleasedFirstSkipsOtherCatalogueTabs:
         assert artist.total_songs == 4
         assert any("100" in u for u in requested)
         assert not any("gid=400" in u or "/400" in u for u in requested), requested
+
+
+class TestCoverKeysNeverFailAParse:
+    async def test_a_pointer_write_error_keeps_the_token_url(
+        self, workbook_client, patch_sheets_client, monkeypatch
+    ):
+        import src.fetcher as fetcher
+
+        def disk_full(*args, **kwargs):
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr(fetcher, "update_art_pointer", disk_full)
+        patch_sheets_client(workbook_client({**WORKBOOK, "100": _with_cover("tok")}, tab_names=TAB_NAMES))
+        artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+        assert artist.eras[0].art_url.endswith("tok=w340-h339")

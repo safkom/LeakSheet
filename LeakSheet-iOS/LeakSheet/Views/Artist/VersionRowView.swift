@@ -56,6 +56,7 @@ struct VersionRowView: View {
                 isPlaying: player.isPlaying,
                 canStream: canStream,
                 title: version.name,
+                link: version.streamableLink,
                 play: play
             )
 

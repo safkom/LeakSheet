@@ -182,4 +182,33 @@ struct VersionSourceTests {
         #expect(chosen.id != v.id)
         #expect(chosen.playing(nil) == v)
     }
+
+    /// The provider key must match the backend's `GET /hosts` names, or a down host
+    /// never dims its rows.
+    @Test(arguments: [
+        ("https://pillows.su/f/abc123", "pillows"),
+        ("https://imgur.gg/f/wGLEqSB", "imgur"),
+        ("https://music.froste.lol/song/0a1b2c3d", "froste"),
+        ("https://www.krakenfiles.com/view/FJmpAhYHMp/file.html", "kraken"),
+        ("https://pixeldrain.com/u/aBc123", "pixeldrain"),
+        ("https://drive.google.com/file/d/1AbC-x_9/view", "gdrive"),
+    ])
+    func `each host maps to its backend provider key`(link: String, provider: String) {
+        #expect(StreamResolver.provider(for: link) == provider)
+    }
+
+    @Test func `an unsupported link has no provider`() {
+        #expect(StreamResolver.provider(for: "https://example.com/a.mp3") == nil)
+    }
+
+    @Test func `hosts response decodes into the down providers`() throws {
+        let json = Data("""
+        {"hosts": [
+          {"provider": "pillows", "host": "pillows.su", "status": "up", "since": null, "checked": null},
+          {"provider": "froste", "host": "music.froste.lol", "status": "down", "since": 1.0, "checked": 2.0}
+        ]}
+        """.utf8)
+        let hosts = try APIClient.decodeHostHealth(from: json)
+        #expect(HostHealthStore.downHosts(from: hosts) == ["froste": "music.froste.lol"])
+    }
 }

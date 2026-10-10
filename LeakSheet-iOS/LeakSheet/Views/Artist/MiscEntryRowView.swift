@@ -197,6 +197,7 @@ struct MiscEntryRowView: View {
                 isPlaying: player.isPlaying,
                 canStream: canStream,
                 title: entry.name,
+                link: entry.streamableLink,
                 play: play
             )
         }

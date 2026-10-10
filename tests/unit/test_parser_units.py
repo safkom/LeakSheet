@@ -2013,3 +2013,23 @@ class TestVersionSorting:
         era = Era(name="E", sections=[Section(name="", songs=[song])])
         _sort_era_versions(era)
         assert [x.version_tag for x in song.versions] == ["V1", "V2", "Demo 2", "Demo 10"]
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.google.com/url?q=https://pillows.su/f/abc&sa=D&ust=1",
+    "https://www.google.com/url?sa=D&q=https%3A%2F%2Fx.com%2Fa%3Fb%3D1&ust=2",
+    "https://www.google.com/url?q=a+b%20c",
+    "https://www.google.com/url?q=&q=https://second.com",
+    "https://www.google.com/url?q=",
+    "https://www.google.com/url?sa=D",
+    "https://www.google.com/url#frag?q=https://nope.com",
+    "https://www.google.com/url?q=https://x.com#frag",
+    "https://www.google.com/url?aq=1&q=https://y.com",
+])
+def test_clean_link_matches_parse_qs(url):
+    from urllib.parse import parse_qs, urlparse
+
+    from src.parser import _clean_link
+
+    target = parse_qs(urlparse(url).query).get("q")
+    assert _clean_link(url) == (target[0] if target and target[0] else url)

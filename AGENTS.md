@@ -65,3 +65,4 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 - `docs/decisions.md`, `LeakSheet-iOS/DECISIONS.md` — why non-obvious code is the way it
   is, keyed `file::symbol`; source sites carry a one-line pointer.
 - `README.md`, `LeakSheet-iOS/README.md`. Local, untracked notes may live in `AGENTS.local.md`.
+- `docs/ROADMAP.md` — deferred work (e.g. a .NET rewrite) and what would trigger it.

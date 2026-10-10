@@ -188,7 +188,6 @@ class TestSSRFGuard:
         monkeypatch.setattr(config, "_tracker_hosts", set())
         monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
         monkeypatch.setattr(fetcher, "_refresh_tracker_hosts", _noop)
-        yield
 
     @pytest.mark.parametrize("url", [
         "http://169.254.169.254/latest/meta-data/",   # cloud metadata

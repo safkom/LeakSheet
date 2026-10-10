@@ -72,7 +72,7 @@ class TestMetadataEndpoint:
         assert data["provider"] == "froste"
         assert data["bitrate"] == "256kbps"
 
-    def test_provider_error_is_502(self, api_client, monkeypatch):
+    def test_provider_error_is_503(self, api_client, monkeypatch):
         _install(monkeypatch, FakeResp(text="", status=500))
         r = api_client.get("/metadata", params={"url": "https://pillows.su/f/abc"})
-        assert r.status_code == 502
+        assert r.status_code == 503

@@ -162,6 +162,7 @@ final class AudioEngine {
         player?.play()
         updateNowPlayingInfo()
         startLoadingTimeout()
+        Task { await HostHealthStore.shared.refresh() }
 
         // Early video hint — see DECISIONS.md::AudioEngine.swift::early-video-hint
         // Held and cancelled on skip, so rapid skipping leaves no /metadata requests running.
@@ -520,6 +521,7 @@ final class AudioEngine {
                     self.error = errDesc ?? "Playback failed"
                     Telemetry.report("Playback failed: \(errDesc ?? "unknown")", category: "Playback",
                                      attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
+                    self.explainIfHostDown()
                 default:
                     break
                 }
@@ -746,6 +748,20 @@ final class AudioEngine {
             Telemetry.report("Stream timed out", category: "Playback",
                              attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
             self.player?.pause()
+            self.explainIfHostDown()
+        }
+    }
+
+    /// After a failed load: when the backend reports this track's host down, say so
+    /// instead of a generic error. Retry and the play button work as before.
+    private func explainIfHostDown() {
+        let link = currentTrack?.streamableLink
+        Task { [weak self] in
+            await HostHealthStore.shared.refresh(force: true)
+            guard let self, let link, link == self.currentTrack?.streamableLink,
+                  !self.error.isEmpty,
+                  let host = HostHealthStore.shared.downHost(for: link) else { return }
+            self.error = "\(host) is down right now. Try again in a minute."
         }
     }
 

@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import unquote_plus, urljoin, urlparse
 
 
 from src.config import COLUMN_ALIASES
@@ -200,6 +200,8 @@ def _cell_from_td(td) -> _Cell:
     text joins the cell text, and each link records the line number the
     anchor closes on.
     """
+    if not len(td):  # most cells: plain text, nothing to walk
+        return _Cell(text=(td.text or "").strip())
     parts: list[str] = []
     links: list[str] = []
     link_lines: list[int] = []
@@ -1134,14 +1136,19 @@ _FOOTER_KEYWORDS_RE = re.compile(
 )
 
 
+# Emoji, counts and punctuation ahead of a footer keyword ("🔗 616 Total Links").
+_FOOTER_LINE_LEAD_RE = re.compile(r"^[\W\d_]+")
+
+
 def _is_tracker_footer(row: list[_Cell]) -> bool:
     """Check if a row belongs to the tracker footer (stats, changelogs, guidelines).
 
-    This prevents footer content from being attributed to the last era.
+    A keyword must open a cell line: see docs/decisions.md::parser.py::_is_tracker_footer.
     """
     for cell in row:
-        if cell.text and _FOOTER_KEYWORDS_RE.search(cell.text.lower()):
-            return True
+        for line in cell.text.lower().split("\n"):
+            if _FOOTER_KEYWORDS_RE.match(_FOOTER_LINE_LEAD_RE.sub("", line, count=1)):
+                return True
     return False
 
 
@@ -1150,6 +1157,8 @@ def _normalize_unicode(text: str) -> str:
 
     Handles cases like "geëky" → "geeky", "ROSALÍA" → "ROSALIA".
     """
+    if text.isascii():
+        return text
     # NFKD decomposition splits characters like ë into e + combining diaeresis
     decomposed = unicodedata.normalize("NFKD", text)
     # Remove combining characters (diacritics)
@@ -1282,19 +1291,20 @@ def _acronym(era_key: str) -> str:
 # Link cleanup
 # ---------------------------------------------------------------------------
 
+_REDIRECT_Q_RE = re.compile(r"(?:^|&)q=([^&]+)")
+
+
 def _clean_link(url: str) -> str:
     """Strip Google redirect wrapper from URLs.
 
     Google Sheets wraps links as: https://www.google.com/url?q=REAL_URL&...
     """
     if "google.com/url" in url:
-        try:
-            qs = parse_qs(urlparse(url).query)
-        except ValueError:
-            return url
-        target = qs.get("q")
-        if target and target[0]:
-            return target[0]
+        # Same result as parse_qs(urlparse(url).query)["q"][0], at a fraction of the cost.
+        query = url.partition("#")[0].partition("?")[2]
+        m = _REDIRECT_Q_RE.search(query)
+        if m:
+            return unquote_plus(m.group(1))
     return url
 
 
@@ -1587,6 +1597,64 @@ def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
             era.art_url = urljoin(source_url, era.art_url)
 
 
+def _resolve_row_era(
+    row_era: str,
+    current_era: Era | None,
+    era_by_key: dict[str, Era],
+    era_by_key_fallback: dict[str, Era],
+    own_keys_cache: dict[int, set[str]],
+) -> tuple[Era | None, bool]:
+    """The era a row's era-column value names, and whether only a fuzzy match found it.
+
+    Tried in order: the current era's own keys, the primary then the fallback keys
+    (each by full then stripped key), a fuzzy match on the current era, then on all.
+    A positional fuzzy hit is registered as a fallback key for the rows that follow.
+    """
+    norm = _normalize_unicode(row_era).lower()
+    stripped = _era_match_key(row_era)
+    if current_era is not None:
+        own = own_keys_cache.get(id(current_era))
+        if own is None:
+            own = own_keys_cache[id(current_era)] = _era_own_keys(current_era)
+        if norm in own or stripped in own:
+            return current_era, False
+    for keys in (era_by_key, era_by_key_fallback):
+        for key in (norm, stripped):
+            era = keys.get(key)
+            if era is not None:
+                return era, False
+    cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
+    if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
+        era_by_key_fallback.setdefault(stripped, current_era)
+        logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
+        return current_era, True
+    era = _fuzzy_era_match(norm, era_by_key)
+    if era is not None:
+        logger.debug("Fuzzy era match: %r → %r", norm, era.name)
+    return era, era is not None
+
+
+def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
+    """An era from a header row with no stats cell: timeline from Notes, else Name."""
+    timeline_raw = _get_cell_text(row, col_map.get("notes", 2)) or _get_cell_text(
+        row, col_map.get("name", 1)
+    )
+    return Era(
+        name=name,
+        timeline=parse_timeline(timeline_raw) if timeline_raw else [],
+        art_url=_first_row_image(row),
+        sections=[Section()],
+    )
+
+
+def _sample_unmatched(sample: list[str], row_idx: int, row: list[_Cell]) -> None:
+    """Keep a capped diagnostic sample of rows no rule claimed."""
+    if len(sample) < _MAX_UNMATCHED_ROWS:
+        row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
+        if row_text:
+            sample.append(f"Row {row_idx}: {row_text}")
+
+
 def parse_sheet(
     html_content: str, artist_name: str, source_url: str | None = None
 ) -> Artist:
@@ -1751,58 +1819,11 @@ def parse_sheet(
             continue
 
         if row_era:
-            row_era_norm = _normalize_unicode(row_era).lower()
-            row_era_stripped = _era_match_key(row_era)
-
-            # Positional-exact prior: a value naming the current era belongs there, ahead of any
-            # sibling (docs/decisions.md::parser.py::parse_sheet — positional-prior era matching).
-            matched_era = None
-            if current_era is not None:
-                own_keys = _era_own_keys_cache.get(id(current_era))
-                if own_keys is None:
-                    own_keys = _era_own_keys(current_era)
-                    _era_own_keys_cache[id(current_era)] = own_keys
-                if row_era_norm in own_keys or row_era_stripped in own_keys:
-                    matched_era = current_era
-
-            # Case-insensitive exact lookup with Unicode normalization
-            if matched_era is None:
-                matched_era = era_by_key.get(row_era_norm)
-
-            # Try stripped key (version tags removed) if exact fails
-            if matched_era is None and row_era_stripped != row_era_norm:
-                matched_era = era_by_key.get(row_era_stripped)
-
-            # Fallback dict (slash parts) — only consulted after primary fails,
-            # so a real era declared later still wins over a partial registration.
-            if matched_era is None:
-                matched_era = era_by_key_fallback.get(row_era_norm)
-                if matched_era is None and row_era_stripped != row_era_norm:
-                    matched_era = era_by_key_fallback.get(row_era_stripped)
-
-            # Fuzzy positional prior, before the global fuzzy search: a value fuzzy-matching
-            # the current header abbreviates it (same positional-prior decisions entry).
-            if matched_era is None and current_era is not None:
-                cur_key = _era_match_key(current_era.name) if current_era.name else ""
-                if cur_key and _fuzzy_era_match(row_era_norm, {cur_key: current_era}):
-                    matched_era = current_era
-                    fuzzy_matched_rows += 1
-                    # Future rows with the same abbreviation resolve exactly
-                    # (fallback tier, so a genuine era keeps primary-key wins).
-                    era_by_key_fallback.setdefault(row_era_stripped, current_era)
-                    logger.debug(
-                        "Positional fuzzy match: %r → current era %r",
-                        row_era_norm, current_era.name,
-                    )
-
-            # Fuzzy match if all exact paths fail
-            if matched_era is None:
-                matched_era = _fuzzy_era_match(row_era_norm, era_by_key)
-                if matched_era is not None:
-                    fuzzy_matched_rows += 1
-                    logger.debug(
-                        "Fuzzy era match: %r → %r", row_era_norm, matched_era.name
-                    )
+            # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
+            matched_era, fuzzy = _resolve_row_era(
+                row_era, current_era, era_by_key, era_by_key_fallback, _era_own_keys_cache
+            )
+            fuzzy_matched_rows += fuzzy
 
             if matched_era is not None:
                 current_era = matched_era
@@ -1870,11 +1891,7 @@ def parse_sheet(
                             current_era.sections.append(Section(name=row_era))
                         else:
                             # Enough data to be an era header without stats
-                            notes_idx = col_map.get("notes", 2)
-                            name_idx = col_map.get("name", 1)
-                            timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
-                            timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                            new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
+                            new_era = _stats_less_era(row, row_era, col_map)
                             eras.append(new_era)
                             _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                             current_era = new_era
@@ -1886,10 +1903,7 @@ def parse_sheet(
                     # Skip non-era rows (announcements, footers, etc.)
                     skipped_rows += 1
                     unmatched_total += 1
-                    if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
-                        row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
-                        if row_text:
-                            unmatched_rows.append(f"Row {row_idx}: {row_text}")
+                    _sample_unmatched(unmatched_rows, row_idx, row)
                     continue
 
                 version = _parse_song_row(row, col_map)
@@ -1902,11 +1916,7 @@ def parse_sheet(
                     song_rows += 1
                 else:
                     # No song data — stats-less era header (Kid Cudi style)
-                    notes_idx = col_map.get("notes", 2)
-                    name_idx = col_map.get("name", 1)
-                    timeline_raw = _get_cell_text(row, notes_idx) or _get_cell_text(row, name_idx)
-                    timeline = parse_timeline(timeline_raw) if timeline_raw else []
-                    new_era = Era(name=row_era, timeline=timeline, art_url=_first_row_image(row), sections=[Section()])
+                    new_era = _stats_less_era(row, row_era, col_map)
                     eras.append(new_era)
                     _register_era_keys(new_era, row_era, era_by_key)
                     current_era = new_era
@@ -1985,10 +1995,7 @@ def parse_sheet(
         # Unmatched row — track it for diagnostics
         skipped_rows += 1
         unmatched_total += 1
-        if len(unmatched_rows) < _MAX_UNMATCHED_ROWS:
-            row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
-            if row_text:
-                unmatched_rows.append(f"Row {row_idx}: {row_text}")
+        _sample_unmatched(unmatched_rows, row_idx, row)
 
     # Step 3: detect and parse global stats row
     tracker_stats = _find_global_stats(rows)
@@ -2248,13 +2255,13 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     badge, after_badge = extract_badge(raw_name)
 
     # Parse credits and alt titles from the multi-line name
-    credits = parse_song_credits(after_badge)
-    title = credits.title
-    featuring = credits.featuring
-    producers = credits.producers
-    collaboration = credits.collaboration
-    refs = credits.refs
-    alt_titles = credits.alt_titles
+    song_credits = parse_song_credits(after_badge)
+    title = song_credits.title
+    featuring = song_credits.featuring
+    producers = song_credits.producers
+    collaboration = song_credits.collaboration
+    refs = song_credits.refs
+    alt_titles = song_credits.alt_titles
 
     # "(unfinished)"/"[unfinished]" is a status tag, not an alt name: move it from
     # alt_titles to version_tag (only if no tag was found).
@@ -2350,7 +2357,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         credited_artists=credited_artists,
         collaboration=collaboration,
         refs=refs,
-        director=credits.director,
+        director=song_credits.director,
         alt_titles=alt_titles,
         notes=notes_text,
         og_filename=og_filenames[0] if og_filenames else None,

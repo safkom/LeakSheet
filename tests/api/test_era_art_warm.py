@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import src.api as api
+import src.fetcher as fetcher
 from src.api import app
 from src.models import Artist, Era
 
@@ -70,7 +71,7 @@ class _Google:
         return _Response(request.url, body, 200 if ok else 403)
 
 
-@pytest.fixture()
+@pytest.fixture
 def google(monkeypatch, tmp_path):
     fake = _Google()
     monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
@@ -114,7 +115,7 @@ class TestWarmEraArt:
         r = TestClient(app).get("/image-proxy", params={"url": stale, "w": 320})
         # 502, not the 403 Google gave us: an expired token is this server
         # holding a stale URL, not the caller being forbidden the image.
-        assert r.status_code == 502
+        assert r.status_code == 503
 
     def test_covers_from_another_tracker_are_not_borrowed(self, google):
         good = _cover("other-tracker")
@@ -124,7 +125,7 @@ class TestWarmEraArt:
         stale = _cover("ye-stale")
         asyncio.run(api._warm_era_art(_artist(("Donda", stale)), TRACKER))
         r = TestClient(app).get("/image-proxy", params={"url": stale})
-        assert r.status_code == 502
+        assert r.status_code == 503
 
     def test_a_rewarm_marks_the_current_cover_recently_used(self, google):
         """Eviction drops the oldest mtime first; a cover the live parse still
@@ -318,3 +319,124 @@ class TestStableCoverKeying:
         api._write_image_alias(url, "leaksheet:art/aa/bb")
         api._image_alias_path(url).write_text("../../etc/passwd")
         assert api._read_image_alias(url) is None
+
+
+def _drawn(seed: int, size: int, fmt: str = "PNG") -> bytes:
+    """A distinct picture per seed (solid colours all hash alike), at *size* px."""
+    from PIL import ImageDraw
+
+    img = Image.new("RGB", (400, 400), (30, 30, 30))
+    draw = ImageDraw.Draw(img)
+    for i in range(5):
+        x, y = (seed * 97 + i * 71) % 300, (seed * 53 + i * 131) % 300
+        draw.ellipse((x, y, x + 100, y + 100), fill=((seed * 60 + i * 40) % 255, 200, 90))
+    buf = io.BytesIO()
+    img.resize((size, size)).save(buf, format=fmt)
+    return buf.getvalue()
+
+
+class TestSlotKeysInThePayload:
+    """The payload carries the (tracker, era) slot, not Google's re-signed token, so
+    its bytes and ETag stay put between reparses: docs/decisions.md::api.py::_era_art_base."""
+
+    def test_a_slot_key_serves_the_warmed_cover(self, google):
+        url = _cover("live")
+        google.alive.add(url)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        google.requested.clear()
+        key = api._era_art_base(TRACKER, "Donda") + "?v=1"
+        r = TestClient(app).get("/image-proxy", params={"url": key, "w": 320})
+        assert r.status_code == 200
+        assert google.requested == []
+
+    def test_a_cold_slot_is_filled_from_its_source(self, google):
+        url = _cover("source")
+        google.alive.add(url)
+        artist = _artist(("Donda", url))
+        fetcher._finalize(artist, TRACKER)
+        key = artist.eras[0].art_url
+        assert key == api._era_art_base(TRACKER, "Donda") + "?v=1"
+
+        client = TestClient(app)
+        assert client.get("/image-proxy", params={"url": key, "w": 320}).status_code == 200
+        assert google.requested == [url]
+        google.alive.clear()
+        google.requested.clear()
+        # The original was filed under the slot: another width needs no upstream.
+        assert client.get("/image-proxy", params={"url": key, "w": 640}).status_code == 200
+        assert google.requested == []
+
+    def test_an_unknown_slot_is_404(self, google):
+        key = "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32
+        assert TestClient(app).get("/image-proxy", params={"url": key}).status_code == 404
+
+    @pytest.mark.parametrize("key", ["leaksheet:art/v2/../../etc", "leaksheet:art/v1/aa/bb"])
+    def test_a_malformed_slot_key_is_400(self, google, key):
+        assert TestClient(app).get("/image-proxy", params={"url": key}).status_code == 400
+
+    def test_a_new_picture_bumps_the_version_the_next_payload_carries(self, google):
+        a, b = _cover("pic-a"), _cover("pic-b")
+        google.alive = {a, b}
+        google.content[a], google.content[b] = _drawn(1, 340), _drawn(2, 340)
+
+        first = _artist(("Donda", a))
+        fetcher._finalize(first, TRACKER)
+        asyncio.run(api._warm_era_art(first, TRACKER))
+        second = _artist(("Donda", b))
+        fetcher._finalize(second, TRACKER)
+        assert second.eras[0].art_url.endswith("?v=1")  # not yet known to differ
+        asyncio.run(api._warm_era_art(second, TRACKER))
+
+        third = _artist(("Donda", b))
+        fetcher._finalize(third, TRACKER)
+        assert third.eras[0].art_url.endswith("?v=2")
+
+    def test_the_same_picture_under_a_new_token_keeps_the_version(self, google):
+        a, b = _cover("same-1"), _cover("same-2")
+        google.alive = {a, b}
+        google.content[a] = google.content[b] = _drawn(1, 340)
+        for url in (a, b, b):
+            artist = _artist(("Donda", url))
+            fetcher._finalize(artist, TRACKER)
+            asyncio.run(api._warm_era_art(artist, TRACKER))
+        assert artist.eras[0].art_url.endswith("?v=1")
+
+
+class TestArtTabUpgrade:
+    """An Art-tab cover replaces the main-tab one only when it is the same picture
+    (docs/decisions.md::fetcher.py::art-tab-identity); the comparison runs here,
+    after the response, instead of holding up a cold parse."""
+
+    def test_only_a_matching_art_tab_cover_is_stored(self, google):
+        main = {"A": _cover("main-a"), "B": _cover("main-b"), "C": _cover("main-c")}
+        tab = {"A": _cover("tab-a"), "B": _cover("tab-b"), "C": _cover("tab-c")}
+        google.content.update({
+            main["A"]: _drawn(1, 102, "JPEG"), tab["A"]: _drawn(1, 340),   # same art: upgrade
+            main["B"]: _drawn(2, 102, "JPEG"), tab["B"]: _drawn(3, 340),   # another picture
+            main["C"]: _drawn(4, 102, "JPEG"),                             # tab image dead
+        })
+        google.alive = {main["A"], main["B"], main["C"], tab["A"], tab["B"]}
+        artist = _artist(*main.items())
+        artist._art_candidates = dict(tab)
+        asyncio.run(api._warm_era_art(artist, TRACKER))
+
+        stored = {
+            era: api._read_image_cache(api._image_cache_key(api._era_art_base(TRACKER, era), None))[0]
+            for era in "ABC"
+        }
+        assert stored == {"A": _drawn(1, 340), "B": _drawn(2, 102, "JPEG"), "C": _drawn(4, 102, "JPEG")}
+
+    def test_a_failed_art_tab_download_keeps_the_upgraded_cover(self, google):
+        main, tab = _cover("main"), _cover("tab")
+        google.content.update({main: _drawn(1, 102, "JPEG"), tab: _drawn(1, 340)})
+        google.alive = {main, tab}
+        first = _artist(("Donda", main))
+        first._art_candidates = {"Donda": tab}
+        asyncio.run(api._warm_era_art(first, TRACKER))
+
+        google.alive = {main}  # the Art-tab token died this time
+        second = _artist(("Donda", main))
+        second._art_candidates = {"Donda": tab}
+        asyncio.run(api._warm_era_art(second, TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        assert api._read_image_cache(key)[0] == _drawn(1, 340)

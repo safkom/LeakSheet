@@ -40,13 +40,21 @@ from src.config import (
     ARTISTGRID_URL,
     USER_AGENT,
     VERSION,
-    curated_host_allowed,
+    _IMAGE_ALLOWED_DOMAINS,  # noqa: F401 — re-exported for tests
+    _IMAGE_ALLOWED_PARENT_DOMAINS,  # noqa: F401
+    _image_host_allowed,
+    _is_allowed_domain,
 )
+from src import host_health
 from src.models import Artist, TrackerEntry, slugify
 from src.tracker_seed import SEED_TRACKERS
 from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
+    _era_art_base,
+    read_art_pointer,
+    same_artwork,
+    update_art_pointer,
     _atomic_write_bytes,
     _normalize_url,
     async_fetch_and_parse,
@@ -141,6 +149,17 @@ _MIME_CORRECTIONS: dict[str, str] = {
 }
 
 # Audio format sniffing — see docs/decisions.md::api.py::mime-sniffing
+
+# Files a tracker link can point at that are never playable: see
+# docs/decisions.md::api.py::non-media-415.
+_NON_MEDIA_SIGNATURES = (b"%PDF", b"PK\x03\x04", b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"Rar!", b"7z\xbc\xaf")
+
+
+def _is_non_media(head: bytes) -> bool:
+    if head.startswith(_NON_MEDIA_SIGNATURES):
+        return True
+    return head.lstrip()[:9].lower().startswith((b"<!doctype", b"<html"))
+
 
 def _sniff_audio_format(header: bytes) -> str | None:
     """Detect audio format from magic bytes.  Returns corrected MIME or None."""
@@ -284,29 +303,6 @@ _CC_TRACKERS_STALE = "public, max-age=600"  # /trackers stale fallback — retry
 # SSRF protection — domain allowlists for proxy endpoints
 # ---------------------------------------------------------------------------
 
-_IMAGE_ALLOWED_DOMAINS = {
-    # Misc-tab YouTube thumbnails (MiscLinkClassifier.thumbnailURL); the client
-    # routes every thumbnail through this proxy.
-    "img.youtube.com",
-    "i.ytimg.com",
-    # Exact hostnames allowed for image proxy
-    "lh3.googleusercontent.com",
-    "lh4.googleusercontent.com",
-    "lh5.googleusercontent.com",
-    "lh6.googleusercontent.com",
-    "lh7-rt.googleusercontent.com",
-    "ggpht.com",
-    "gstatic.com",
-}
-
-# Subdomains of these are also allowed (e.g. lh3.googleusercontent.com)
-_IMAGE_ALLOWED_PARENT_DOMAINS = {
-    "googleusercontent.com",
-    "ggpht.com",
-    "gstatic.com",
-    "google.com",
-}
-
 # Single source of truth: the hosts resolve_stream_url can emit.
 
 
@@ -315,40 +311,6 @@ _IMAGE_ALLOWED_PARENT_DOMAINS = {
 _GOOGLE_IMAGE_DOMAINS = {
     "googleusercontent.com", "ggpht.com", "google.com", "gstatic.com",
 }
-
-
-def _image_host_allowed(url: str) -> bool:
-    """Hosts the image proxy may fetch from.
-
-    Google's image CDNs, plus the curated tracker seed and
-    LEAKSHEET_EXTRA_SHEET_HOSTS (self-hosted trackers serve covers from their own
-    origin). Deliberately NOT the ArtistGrid-harvested hosts /sheet accepts: see
-    docs/decisions.md::config.py::curated_host_allowed.
-    """
-    if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
-        return True
-    return curated_host_allowed(urlparse(url).hostname)
-
-
-def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:
-    """Check if the URL's hostname is in the explicit allow-list.
-
-    Exact match first. If parent_domains is provided, also accepts any hostname
-    that is a direct or nested subdomain of one of those parent domains.
-    """
-    try:
-        hostname = urlparse(url).hostname
-        if not hostname:
-            return False
-        hostname = hostname.lower()
-        if hostname in allowed:
-            return True
-        if parent_domains:
-            return any(hostname == d or hostname.endswith("." + d) for d in parent_domains)
-        return False
-    except Exception as e:
-        logger.debug("URL domain check failed for %s: %s", url[:80], e)
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +361,9 @@ class _StreamSafeGZipMiddleware(GZipMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    prober = asyncio.create_task(host_health.probe_forever())
     yield
+    prober.cancel()
     # Shutdown: close all three shared HTTP clients.
     if _proxy_client is not None:
         await _proxy_client.aclose()
@@ -1095,18 +1059,7 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
         return None
 
 
-# Covers are keyed by the stable (tracker_url, era_name), with an alias per token URL:
-# see docs/decisions.md::api.py::_era_art_base — covers keyed by tracker and era
-def _era_art_base(tracker_url: str, era_name: str) -> str:
-    """The stable cache identity of one era's cover, as a synthetic URL.
-
-    Shaped like a URL so it drops straight into ``_image_cache_key`` and keeps
-    the width-keyed thumbnail stable too — a resize is done once, not hourly.
-    """
-    tracker = hashlib.sha256(_normalize_url(tracker_url).encode()).hexdigest()[:32]
-    era = hashlib.sha256(era_name.encode()).hexdigest()[:32]
-    # The version segment retires slots filled under older adoption rules.
-    return f"leaksheet:art/v2/{tracker}/{era}"
+_ART_SLOT_RE = re.compile(r"(leaksheet:art/v2/[0-9a-f]{32}/[0-9a-f]{32})(?:\?v=\d{1,9})?")
 
 
 def _image_alias_path(url: str):
@@ -1164,7 +1117,7 @@ def _evict_image_cache() -> None:
     # Every warm re-writes the alias of each URL still in the sheet, and cover tokens
     # rotate, so without this sweep the directory gains a file per era per re-parse.
     alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
-    for alias in CACHE_DIR.glob("imgalias_*.txt"):
+    for alias in [*CACHE_DIR.glob("imgalias_*.txt"), *CACHE_DIR.glob("imgsrc_*.json")]:
         unlink_if_older(alias, alias_cutoff)
     entries = []
     total = 0
@@ -1203,13 +1156,13 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
         img = Image.open(io.BytesIO(data))
         if img.width * img.height > _IMAGE_MAX_DECODE_PIXELS:
             return data, content_type
+        if img.width <= w:  # header only: no full decode for an image that fits
+            return data, content_type
         img.load()
     except Exception as exc:
         # Serve the original bytes, but leave a trace — a systematically
         # undecodable source would otherwise be invisible.
         logger.warning("image resize: decode failed (%s) — serving original", exc)
-        return data, content_type
-    if img.width <= w:
         return data, content_type
 
     img.thumbnail((w, 10 * w))
@@ -1224,6 +1177,22 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
         img = img.convert("RGB")
     img.save(buf, format="JPEG", quality=82)
     return buf.getvalue(), "image/jpeg"
+
+
+def _fits_width(data: bytes, w: int) -> bool:
+    """True when *data*'s header decodes, within the pixel cap, at most *w* wide.
+
+    Reads the header only, so it is cheap enough for the event loop.
+    """
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return img.width <= w and img.width * img.height <= _IMAGE_MAX_DECODE_PIXELS
+    except Exception:
+        return False
 
 
 def _image_request_headers(url: str) -> dict[str, str]:
@@ -1261,20 +1230,31 @@ def _spawn_detached(coro) -> asyncio.Task:
 async def _warm_era_art(artist, tracker_url: str) -> None:
     """Download each era cover now, while its URL still works, and keep it.
 
-    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead
-    here keeps the era's last good cover.
+    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
+    the era's last good cover; an Art-tab image showing the same picture replaces it
+    (docs/decisions.md::fetcher.py::art-tab-identity).
     """
+    # A parse carries its token URLs aside: its payload holds slot keys.
+    sources = artist._art_sources or {era.name: era.art_url or "" for era in artist.eras}
     covers: dict[str, str] = {}
-    for era in artist.eras:
-        url = era.art_url or ""
+    for name, url in sources.items():
         if url.startswith("//"):
             url = "https:" + url
         if url.startswith(("http://", "https://")) and _image_host_allowed(url):
-            covers[era.name] = url
+            covers[name] = url
     if not covers:
         return
-
+    candidates = artist._art_candidates
     slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+
+    async def download(url: str) -> tuple[bytes, str]:
+        async with slots:
+            try:
+                resp, data = await _get_image_capped(url, _image_request_headers(url))
+                return data, resp.headers.get("content-type", "")
+            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
+                logger.debug("era art warm: %s failed: %s", url[:80], exc)
+                return b"", ""
 
     async def warm(era_name: str, url: str) -> None:
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
@@ -1282,14 +1262,16 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         base = _era_art_base(tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        data, content_type = b"", ""
-        async with slots:
-            try:
-                resp, data = await _get_image_capped(url, _image_request_headers(url))
-                content_type = resp.headers.get("content-type", "")
-            except (httpx.HTTPError, httpx.InvalidURL, HTTPException, ValueError) as exc:
-                logger.debug("era art warm: %s failed: %s", url[:80], exc)
+        data, content_type = await download(url)
         stored = await asyncio.to_thread(_read_image_cache, key)
+        candidate = candidates.get(era_name)
+        if data and candidate:
+            better, better_type = await download(candidate)
+            if better and await asyncio.to_thread(same_artwork, data, better):
+                data, content_type = better, better_type
+            elif not better and stored and await asyncio.to_thread(same_artwork, stored[0], data):
+                # The Art-tab image did not load this time: keep the upgrade already stored.
+                data, content_type = stored[0], stored[1]
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
@@ -1297,8 +1279,11 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 return
             data, content_type = stored[0], stored[1]
         elif stored and stored[0] != data:
-            # The sheet changed this era's cover: its thumbnails show the old one.
+            # The sheet changed this era's cover: its thumbnails show the old one, and a
+            # new picture gets a new version so clients holding the old one refetch.
             await asyncio.to_thread(_drop_image_thumbnails, base)
+            if not await asyncio.to_thread(same_artwork, stored[0], data):
+                await asyncio.to_thread(update_art_pointer, base, bump=True)
         await asyncio.to_thread(_write_image_cache, key, data, content_type)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
@@ -1316,15 +1301,26 @@ async def proxy_image(
     supports ``=sNNN`` sizing, else locally with Pillow (result disk-cached
     in CACHE_DIR as flat ``img_*`` files, cleared by /cache/clear).
     """
+    # A payload's stable cover key: served from its slot, filled from the slot's latest
+    # source on a miss (docs/decisions.md::api.py::_era_art_base).
+    slot = None
+    if url.startswith("leaksheet:"):
+        match = _ART_SLOT_RE.fullmatch(url)
+        if match is None:
+            raise HTTPException(status_code=400, detail="Invalid cover key")
+        slot = match.group(1)
+        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
+
     # Fix protocol-relative URLs
     if url.startswith("//"):
         url = "https:" + url
 
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="Invalid URL scheme")
-
-    if not _image_host_allowed(url):
-        raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
+    # A slot with no recorded source can still be served from its stored copy.
+    if slot is None or url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme")
+        if not _image_host_allowed(url):
+            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
 
     width = _snap_image_width(w) if w else None
     base_headers = {
@@ -1338,7 +1334,7 @@ async def proxy_image(
 
     # The client's URL may be an expired cover token: resolve the (tracker, era) slot
     # it was warmed into, so original and thumbnail survive the next reparse.
-    cache_base = await asyncio.to_thread(_read_image_alias, url) or url
+    cache_base = slot or await asyncio.to_thread(_read_image_alias, url) or url
 
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
@@ -1392,10 +1388,15 @@ async def proxy_image(
         if stored is not None:
             data, ct = stored[0], stored[1]
             upstream_status = 200
+        elif not url:
+            raise HTTPException(status_code=404, detail="Unknown cover")
         else:
             resp, data = await _get_image_capped(url, headers)
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
+            if slot is not None and upstream_status == 200 and _is_raster_image(ct):
+                # A cold slot keeps its original, so other widths need no upstream.
+                await asyncio.to_thread(_write_image_cache, _image_cache_key(slot, None), data, ct)
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
@@ -1404,8 +1405,8 @@ async def proxy_image(
                         _resize_image_bytes, data, width, ct
                     )
                 # _resize_image_bytes returns the input untouched when it refuses to decode;
-                # never file an original under the width-keyed thumbnail entry.
-                if len(data) < original_len:
+                # only a resize, or an original that already fits, is filed under the width.
+                if len(data) < original_len or _fits_width(data, width):
                     written_etag = await asyncio.to_thread(
                         _write_image_cache, cache_key, data, ct
                     )
@@ -1422,16 +1423,16 @@ async def proxy_image(
             )
 
         # Only "gone" and "slow down" relay. Anything else, a non-image 200 or Google's 403
-        # for an expired cover token included, is 502: never a 5xx of ours.
+        # for an expired cover token included, is 503 (Cloudflare masks a 502).
         raise HTTPException(
-            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 502),
+            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
             detail="Upstream image fetch failed",
         )
     except HTTPException:
         raise
     except Exception as e:
         _log_upstream_failure("Image proxy error", url, e)
-        raise HTTPException(status_code=502, detail="Image proxy error")
+        raise HTTPException(status_code=503, detail="Image proxy error")
 
 
 def _parse_content_length(raw: str | None) -> int | None:
@@ -1464,13 +1465,13 @@ async def _get_image_capped(
     req = _get_proxy_client().build_request("GET", url, headers=headers)
     resp = await _get_proxy_client().send(req, stream=True)
 
-    # Re-check the allowlist on the URL we LANDED on, before reading any body. Not
-    # assert_public_redirect_target: the transport already refuses private IPs.
+    # Re-check the allowlist on the URL we LANDED on, before reading any body; the
+    # transport already refused private IPs on every hop.
     final_url = str(resp.url)
     if final_url != url and not _image_host_allowed(final_url):
         await resp.aclose()
         logger.warning("image proxy: redirect off allowlist -> %s", final_url[:120])
-        raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
+        raise HTTPException(status_code=503, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
         if resp.status_code != 200 or not _is_raster_image(ct):
@@ -1481,7 +1482,7 @@ async def _get_image_capped(
         async for chunk in resp.aiter_bytes():
             total += len(chunk)
             if total > _IMAGE_DOWNLOAD_CAP:
-                raise HTTPException(status_code=502, detail="Upstream image too large")
+                raise HTTPException(status_code=503, detail="Upstream image too large")
             chunks.append(chunk)
         return resp, b"".join(chunks)
     finally:
@@ -1722,7 +1723,7 @@ async def proxy_metadata(
                         },
                     )
             raise HTTPException(
-                status_code=502,
+                status_code=503,
                 detail=f"Provider returned {resp.status_code}",
             )
 
@@ -1741,7 +1742,7 @@ async def proxy_metadata(
         # provider's outage, not a bug of ours.
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-            raise HTTPException(status_code=502, detail="Metadata fetch failed")
+            raise HTTPException(status_code=503, detail="Metadata fetch failed")
 
         payload = json.dumps(result)
         _metadata_cache.set(meta_url, payload)
@@ -1757,7 +1758,7 @@ async def proxy_metadata(
         raise
     except Exception as e:
         _log_upstream_failure("Metadata proxy error", meta_url, e)
-        raise HTTPException(status_code=502, detail="Metadata fetch failed")
+        raise HTTPException(status_code=503, detail="Metadata fetch failed")
 
 
 # ---------------------------------------------------------------------------
@@ -1966,6 +1967,35 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
             break
 
 
+async def _record_stream_outcome(provider: str | None, link: str, exc: Exception | None) -> None:
+    """Feed one /stream upstream outcome into the shared provider health."""
+    if provider is None:
+        return
+    if exc is None or (isinstance(exc, UpstreamStatusError) and exc.status_code < 500):
+        await asyncio.to_thread(host_health.record_success, provider)  # the host answered
+        return
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        hard = True  # no connection at all: the host itself is unreachable
+    elif isinstance(exc, (httpx.TransportError, ValueError)):
+        hard = False
+    else:
+        return  # a bug of ours says nothing about the host
+    await asyncio.to_thread(
+        host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__
+    )
+
+
+@app.get("/hosts")
+async def list_stream_hosts() -> Response:
+    """Health of each streaming provider, from real /stream traffic and recovery probes."""
+    hosts = await asyncio.to_thread(host_health.snapshot)
+    return Response(
+        content=json.dumps({"hosts": hosts}),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=30"},
+    )
+
+
 @app.get("/stream")
 async def proxy_stream(
     request: Request,
@@ -1984,6 +2014,15 @@ async def proxy_stream(
 
     if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
+
+    # A provider known to be down is refused at once: see docs/decisions.md::host_health.py.
+    provider = host_health.provider_of(stream_url)
+    if provider and (outage := await asyncio.to_thread(host_health.down, provider)):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{outage['host']} is temporarily unavailable",
+            headers={"Retry-After": "60"},
+        )
 
     # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
     # not forwarded: upstreams turn garbage Range values into hard errors.
@@ -2009,8 +2048,9 @@ async def proxy_stream(
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
         # Relay upstream's status so a client can tell "gone" from "throttled"; only the
-        # code crosses over (see UpstreamStatusError). Everything else stays 502.
+        # code crosses over (see UpstreamStatusError). Everything else is 503.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        await _record_stream_outcome(provider, url, e)
         if e.status_code in (404, 410):
             raise HTTPException(status_code=404, detail="Upstream file not found")
         if e.status_code == 429:
@@ -2019,15 +2059,18 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
-        raise HTTPException(status_code=502, detail="Upstream error")
+        raise HTTPException(status_code=503, detail="Upstream error")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
-        raise HTTPException(status_code=502, detail="Upstream error")
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail="Upstream error")
     except Exception as e:
         _log_upstream_failure("Stream error", stream_url, e)
-        raise HTTPException(status_code=502, detail="Upstream error")
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail="Upstream error")
+    await _record_stream_outcome(provider, url, None)
 
     # Permission-required/private gdrive files come back from stream_audio
     # as a real 403 response object (not raised) — relay it as-is.
@@ -2036,7 +2079,7 @@ async def proxy_stream(
         raise HTTPException(status_code=403, detail="Provider denied access")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
-    # instead of collapsing it into a generic 502.
+    # instead of collapsing it into a generic 503.
     if resp.status_code == 416:
         cr = resp.headers.get("content-range")
         await resp.aclose()
@@ -2066,13 +2109,16 @@ async def proxy_stream(
             _prepend_chunk = b""
         except Exception as exc:
             # A read error while sniffing would leak `resp`'s pooled connection: close it and
-            # surface a 502.
+            # surface a 503.
             await resp.aclose()
             logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
-            raise HTTPException(status_code=502, detail="Upstream read error") from exc
+            raise HTTPException(status_code=503, detail="Upstream read error") from exc
         sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
         if sniffed:
             ct = sniffed
+        elif _is_non_media(_prepend_chunk):
+            await resp.aclose()
+            raise HTTPException(status_code=415, detail="Not an audio or video file")
 
     # When ?download=true, add Content-Disposition with correct extension
     if download:

@@ -21,7 +21,7 @@ from src.models import Artist
 @pytest.fixture(autouse=True)
 def _tmp_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(fetcher, "CACHE_DIR", tmp_path)
-    yield tmp_path
+    return tmp_path
 
 
 def _artist(name: str = "SynthWave") -> Artist:
@@ -89,6 +89,17 @@ class TestTempFilesAreNotCacheEntries:
         cleared, _ = fetcher.clear_cache()
         assert cleared >= 1
         assert tmp.exists()
+
+    def test_clear_cache_keeps_the_cross_worker_lock_files(self):
+        # Unlinking a held *.meta.lock lets another worker flock a fresh file and
+        # interleave a parsed body with the other's content_hash.
+        _set_cache(URL, "<html></html>", "T")
+        lock = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.lock"
+        assert lock.exists()
+
+        fetcher.clear_cache()
+        assert lock.exists()
+        assert not (fetcher.CACHE_DIR / f"{_cache_key(URL)}.html").exists()
 
     def test_a_real_entry_is_still_evictable(self, monkeypatch):
         """Guard against the skip being too broad."""

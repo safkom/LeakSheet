@@ -26,6 +26,8 @@ final class TrackerLoader {
         recents: RecentTrackersManager
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Rows dim the play button of a host the backend reports down.
+        Task { await HostHealthStore.shared.refresh() }
         guard !trimmed.isEmpty else { return nil }
         // A tracker keeps the name it was first opened under, whichever entry point
         // reopens it: see DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
@@ -214,6 +216,11 @@ final class TrackerLoader {
             }
             recents.saveTracker(artist: result.artist)
             return result.artist
+        } catch is CancellationError {
+            // The user navigated away, as in load(): no banner, no telemetry.
+            return nil
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            return nil
         } catch {
             Telemetry.report("Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed])
             withAnimation { self.error = "Failed to load tracker" }

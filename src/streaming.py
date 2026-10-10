@@ -104,22 +104,16 @@ def _assert_public_https_url(url: str, *, source: str) -> None:
 
 
 async def assert_public_redirect_target(resp: httpx.Response, *, source: str) -> None:
-    """Re-validate that the FINAL url of a (redirect-followed) response is a
-    public https host; aclose the response and raise ValueError otherwise.
+    """Require the FINAL url of a (redirect-followed) response to be https; aclose
+    the response and raise ValueError otherwise.
 
-    Callers pass ``stream=True`` and run this before reading the body, so no
-    internal content is ever relayed to the client.
+    Callers pass ``stream=True`` and run this before reading the body. No DNS check
+    here: PublicOnlyAsyncTransport already refused every non-public hop at connect.
     """
     final = str(resp.url)
-    parsed = urlparse(final)
-    host = parsed.hostname or ""
-    try:
-        if parsed.scheme != "https":
-            raise ValueError(f"{source} redirected to non-https URL: {final[:80]}")
-        await asyncio.to_thread(_assert_public_host, host, source=source)
-    except ValueError:
+    if urlparse(final).scheme != "https":
         await resp.aclose()
-        raise
+        raise ValueError(f"{source} redirected to non-https URL: {final[:80]}")
 
 
 _DNS_RETRY_DELAY_S = 0.3
@@ -212,8 +206,10 @@ _IMGUR_PATTERN = re.compile(
     r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
 )
 # music.froste.lol
+# The lookahead stops a non-hex id resolving to its hex prefix; "&sa=…" tracking
+# glued onto the path still matches.
 _FROSTE_PATTERN = re.compile(
-    r"https?://music\.froste\.lol/song/([a-f0-9]+)",
+    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?![A-Za-z0-9])",
 )
 
 # krakenfiles.com
@@ -352,7 +348,8 @@ def _get_shared_client() -> httpx.AsyncClient:
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient(
             follow_redirects=True,
-            timeout=httpx.Timeout(_STREAM_TIMEOUT, read=120.0),
+            # Connect stays short: a dead host fails in seconds, not half a minute.
+            timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
             # limits live on the transport because a custom transport bypasses
             # the client-level `limits` argument.
             transport=PublicOnlyAsyncTransport(
@@ -381,7 +378,10 @@ def _extract_gdrive_id(link: str) -> str | None:
         file_id = m.group(1)
         return file_id if _GDRIVE_ID_RE.match(file_id) else None
 
-    parsed = urlparse(link)
+    try:
+        parsed = urlparse(link)
+    except ValueError:  # unclosed "[" in the host
+        return None
     host = (parsed.hostname or "").lower()
     if host not in ("drive.google.com", "www.drive.google.com"):
         return None
@@ -470,9 +470,11 @@ def resolve_stream_url(link: str) -> str | None:
 
     m = _KRAKEN_PATTERN.match(link)
     if m:
-        # Return view URL unchanged — resolved to CDN URL lazily in stream_audio()
-        logger.debug("Resolved krakenfiles.com link %s (CDN resolved lazily)", link)
-        return link
+        # Canonical view URL (a www. host is off the allowlist); its CDN URL is
+        # resolved lazily in stream_audio().
+        resolved = f"https://krakenfiles.com/view/{m.group(1)}/file.html"
+        logger.debug("Resolved krakenfiles.com link %s → %s", link, resolved)
+        return resolved
 
     m = _PIXELDRAIN_PATTERN.match(link)
     if m:
@@ -804,7 +806,9 @@ async def stream_audio(
     if is_kraken_view_url(stream_url):
         stream_url = await resolve_kraken_cdn_url(stream_url)
 
-    req_headers = {"User-Agent": _STREAM_USER_AGENT}
+    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range (gdrive
+    # included), so the body must not arrive content-encoded (httpx would decode it).
+    req_headers = {"User-Agent": _STREAM_USER_AGENT, "Accept-Encoding": "identity"}
     if range_header:
         req_headers["Range"] = range_header
 
@@ -832,9 +836,6 @@ async def stream_audio(
     if "krakencloud.net" in stream_url:
         req_headers["Referer"] = "https://krakenfiles.com/"
 
-    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range,
-    # so the body must not arrive content-encoded (httpx would decode it).
-    req_headers["Accept-Encoding"] = "identity"
     client = _get_shared_client()
 
     request = client.build_request("GET", stream_url, headers=req_headers)
