@@ -6,7 +6,7 @@
 
 [project]
 name = "leaksheet"
-version = "0.3.0"
+version = "0.4.0"
 description = "Parses Google Sheets leak trackers into a structured API."
 # 3.11 for asyncio.timeout (api.py's parse deadline) and tomllib (config.VERSION).
 requires-python = ">=3.11"
