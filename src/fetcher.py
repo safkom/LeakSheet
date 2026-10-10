@@ -414,8 +414,9 @@ def _normalize_url(url: str) -> str:
     url = url.strip()
     if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
-    parsed = urlparse(url)
+    # urlparse and .port raise ValueError on an unclosed "[" or an out-of-range port.
     try:
+        parsed = urlparse(url)
         port = parsed.port
     except ValueError as exc:
         raise InvalidURLError(f"Invalid URL: {url}") from exc

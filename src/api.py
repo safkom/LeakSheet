@@ -327,7 +327,10 @@ def _image_host_allowed(url: str) -> bool:
     """
     if _is_allowed_domain(url, _IMAGE_ALLOWED_DOMAINS, _IMAGE_ALLOWED_PARENT_DOMAINS):
         return True
-    return curated_host_allowed(urlparse(url).hostname)
+    try:
+        return curated_host_allowed(urlparse(url).hostname)
+    except ValueError:  # unclosed "[" in the host
+        return False
 
 
 def _is_allowed_domain(url: str, allowed: set[str], parent_domains: set[str] | None = None) -> bool:

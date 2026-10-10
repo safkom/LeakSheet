@@ -377,7 +377,10 @@ def _extract_gdrive_id(link: str) -> str | None:
         file_id = m.group(1)
         return file_id if _GDRIVE_ID_RE.match(file_id) else None
 
-    parsed = urlparse(link)
+    try:
+        parsed = urlparse(link)
+    except ValueError:  # unclosed "[" in the host
+        return None
     host = (parsed.hostname or "").lower()
     if host not in ("drive.google.com", "www.drive.google.com"):
         return None
