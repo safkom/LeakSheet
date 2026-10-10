@@ -399,3 +399,33 @@ class TestImageProxyEndpoint:
         assert is_google("https://google.com/x")
         assert not is_google("https://attacker.tld/?x=google.com")
         assert not is_google("https://google.com.attacker.tld/x")
+
+
+class TestCoverAlreadySmallEnough:
+    """Main-tab covers are ~100 px; asked for w=320 they were re-read and
+    re-decoded on every request and never got an ETag."""
+
+    def test_small_original_is_cached_under_the_width_with_an_etag(self, monkeypatch, tmp_path):
+        fake = FakeClient(make_png(100, 100))
+        monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
+        monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
+        client = TestClient(app)
+
+        r = client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
+        assert r.headers["X-Cache-Status"] == "miss"
+        assert r.content == make_png(100, 100)
+        etag = r.headers["ETag"]
+
+        r2 = client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
+        assert r2.headers["X-Cache-Status"] == "hit"
+        r3 = client.get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320}, headers={"If-None-Match": etag})
+        assert r3.status_code == 304
+        assert len(fake.requested) == 1
+
+    def test_undecodable_original_is_still_never_cached(self, monkeypatch, tmp_path):
+        fake = FakeClient(b"not an image", content_type="image/png")
+        monkeypatch.setattr(api, "_get_proxy_client", lambda: fake)
+        monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
+        r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
+        assert r.headers["X-Cache-Status"] == "origin"
+        assert "ETag" not in r.headers

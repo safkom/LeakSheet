@@ -396,6 +396,11 @@ The tag is the cache key plus a digest of the stored bytes, written into the ent
 meta. A tag built from write time instead let a same-second rewrite with different
 bytes keep its tag, so a client holding the old image got a 304.
 
+An original that already fits its width bucket is filed under that width too
+(main-tab covers are ~100 px and the app asks for 320): otherwise every request
+re-read and re-decoded it and it never got a tag. An original that does not decode,
+or exceeds the pixel cap, is still never filed under a width.
+
 ## api.py::video-codec-regex — codec is the strongest audio/video signal
 
 mp4/mov containers hold audio-only m4a files too, so an ambiguous container without

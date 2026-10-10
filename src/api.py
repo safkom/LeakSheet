@@ -1217,13 +1217,13 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
         img = Image.open(io.BytesIO(data))
         if img.width * img.height > _IMAGE_MAX_DECODE_PIXELS:
             return data, content_type
+        if img.width <= w:  # header only: no full decode for an image that fits
+            return data, content_type
         img.load()
     except Exception as exc:
         # Serve the original bytes, but leave a trace — a systematically
         # undecodable source would otherwise be invisible.
         logger.warning("image resize: decode failed (%s) — serving original", exc)
-        return data, content_type
-    if img.width <= w:
         return data, content_type
 
     img.thumbnail((w, 10 * w))
@@ -1238,6 +1238,22 @@ def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, 
         img = img.convert("RGB")
     img.save(buf, format="JPEG", quality=82)
     return buf.getvalue(), "image/jpeg"
+
+
+def _fits_width(data: bytes, w: int) -> bool:
+    """True when *data*'s header decodes, within the pixel cap, at most *w* wide.
+
+    Reads the header only, so it is cheap enough for the event loop.
+    """
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return img.width <= w and img.width * img.height <= _IMAGE_MAX_DECODE_PIXELS
+    except Exception:
+        return False
 
 
 def _image_request_headers(url: str) -> dict[str, str]:
@@ -1418,8 +1434,8 @@ async def proxy_image(
                         _resize_image_bytes, data, width, ct
                     )
                 # _resize_image_bytes returns the input untouched when it refuses to decode;
-                # never file an original under the width-keyed thumbnail entry.
-                if len(data) < original_len:
+                # only a resize, or an original that already fits, is filed under the width.
+                if len(data) < original_len or _fits_width(data, width):
                     written_etag = await asyncio.to_thread(
                         _write_image_cache, cache_key, data, ct
                     )
