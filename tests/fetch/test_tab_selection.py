@@ -208,9 +208,18 @@ class TestHubWorkbook:
 
 
 class TestSourceUrlAndResilience:
-    async def test_source_url_is_the_original(self, workbook_client, patch_sheets_client):
-        client = workbook_client(WORKBOOK, tab_names=TAB_NAMES)
-        artist = await _fetch(client, patch_sheets_client)
+    @pytest.mark.parametrize("variant", [
+        "https://docs.google.com/spreadsheets/d/SYNTH123/edit?usp=sharing",
+        "https://docs.google.com/spreadsheets/d/SYNTH123/edit#gid=100",
+        "docs.google.com/spreadsheets/d/SYNTH123/htmlview",
+    ])
+    async def test_source_url_is_the_normalized_url(
+        self, workbook_client, patch_sheets_client, variant
+    ):
+        # The parse is shared by every URL variant of the tracker, so it must not carry
+        # whichever variant happened to trigger it into everyone's Recents.
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        artist = await async_fetch_and_parse(variant, use_cache=False, write_cache=False)
         assert artist.source_url == URL
 
     async def test_failing_secondary_tab_does_not_break_request(

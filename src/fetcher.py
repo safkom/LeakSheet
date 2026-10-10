@@ -1076,9 +1076,9 @@ def clear_cache() -> tuple[int, int]:
     cleared = 0
     skipped = 0
     for f in CACHE_DIR.iterdir():
-        # Same reason as the eviction scan: unlinking another thread's
-        # in-flight atomic write makes its os.replace raise.
-        if f.is_file() and not _TMP_SUFFIX_RE.search(f.name):
+        # Same reasons as the eviction scan: unlinking another thread's in-flight
+        # atomic write makes its os.replace raise, and a held .lock stops locking.
+        if f.is_file() and not _TMP_SUFFIX_RE.search(f.name) and not f.name.endswith(".lock"):
             try:
                 f.unlink()
                 cleared += 1
@@ -1785,6 +1785,8 @@ async def async_fetch_and_parse(
     """Fetch and parse a tracker, trying multiple GIDs when the first result
     produces 0 eras (handles landing-page sheets).
 
+    ``source_url`` is the normalized URL: the parse is shared by every variant of it.
+
     ``use_cache`` gates cache *reads*; ``write_cache`` gates cache *writes* and
     defaults to ``use_cache``. A force-refresh passes ``use_cache=False`` but
     ``write_cache=True`` so the fresh parse still populates the cache.
@@ -1804,7 +1806,7 @@ async def async_fetch_and_parse(
         with t.phase("cache_read"):
             cached_artist = await _async_get_cached_parsed(url_norm, cache_ttl)
         if cached_artist is not None:
-            cached_artist.source_url = url
+            cached_artist.source_url = url_norm
             return cached_artist
 
     # If a specific GID was requested, try it first.
@@ -1844,7 +1846,7 @@ async def async_fetch_and_parse(
                     # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
                     unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
                     if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                        artist.source_url = url
+                        artist.source_url = url_norm
                         # Load Art + content tabs here too, so a gid URL returns the same content
                         # as discovery.
                         await _load_secondary_tabs(
@@ -1882,7 +1884,7 @@ async def async_fetch_and_parse(
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
             if artist.eras:
-                artist.source_url = url
+                artist.source_url = url_norm
                 if write_cache:
                     await _async_set_cache(url_norm, base_html, title)
                     await _async_set_cached_parsed(url_norm, artist)
@@ -2002,7 +2004,7 @@ async def async_fetch_and_parse(
             await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
         if best_artist and best_score[1] > 0:
-            best_artist.source_url = url
+            best_artist.source_url = url_norm
             t.report(
                 "parsing",
                 f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
@@ -2050,7 +2052,7 @@ async def async_fetch_and_parse(
         )
         name = _resolve_artist_name(title, artist_name)
         artist = await asyncio.to_thread(parse_sheet, html, name, url)
-        artist.source_url = url
+        artist.source_url = url_norm
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)
         return artist
