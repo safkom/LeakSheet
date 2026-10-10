@@ -1137,12 +1137,13 @@ def _clean_sample_artist(artist: str) -> str | None:
 # Each starts with (?<!\s) so a long whitespace run is scanned once, from its
 # first character, instead of once from every character in it.
 _ARTIST_TRAILING_AND_RE = re.compile(r"(?<!\s)\s+and$", re.IGNORECASE)
+# DOTALL: a `.+$` that stops at a newline rescans the line from every start.
 _ARTIST_NOISE_RES = [
-    re.compile(r"(?<!\s)\s+and\s+.+$", re.IGNORECASE),
-    re.compile(r"(?<!\s)\s+vs\.?\s*.*$", re.IGNORECASE),
-    re.compile(r"(?<!\s)\s+feat\.?(\s+.+)?$", re.IGNORECASE),
+    re.compile(r"(?<!\s)\s+and\s+.+$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?<!\s)\s+vs\.?\s*.*$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?<!\s)\s+feat\.?(\s+.+)?$", re.IGNORECASE | re.DOTALL),
     # Prose continuation ('CyHi from his 2014 mixtape …') is commentary.
-    re.compile(r"(?<!\s)\s+from\s+(?:his|her|their|the)\b.*$", re.IGNORECASE),
+    re.compile(r"(?<!\s)\s+from\s+(?:his|her|their|the)\b.*$", re.IGNORECASE | re.DOTALL),
 ]
 
 
