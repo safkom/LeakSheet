@@ -27,6 +27,16 @@ footer-looking row, it's a new era, not leftover footer.
 
 Found in the 2026-07-20 review.
 
+## parser.py::_is_tracker_footer
+
+A footer row stays footer until the next era header, so one false positive drops
+every later song in the era. Matching a keyword anywhere in a cell did exactly that
+to song rows whose notes mention one in prose: "leaked via the changelog drop", "a
+beat idea for TrackerHub" (Trackerism 2 lost 13 of 80 versions). Real footer cells
+open with the keyword once emoji and counts are skipped ("🔗 616 Total Links",
+"Changelogs", "Want to contribute? …"), so the keyword must start a cell line.
+Over a 70-tab corpus the rule changed no other tab's songs.
+
 ## parser.py::parse_sheet — positional-prior era matching
 
 Two rules, both from the 2026-07-20 review, both guarding the same failure: a

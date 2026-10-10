@@ -1134,14 +1134,19 @@ _FOOTER_KEYWORDS_RE = re.compile(
 )
 
 
+# Emoji, counts and punctuation ahead of a footer keyword ("🔗 616 Total Links").
+_FOOTER_LINE_LEAD_RE = re.compile(r"^[\W\d_]+")
+
+
 def _is_tracker_footer(row: list[_Cell]) -> bool:
     """Check if a row belongs to the tracker footer (stats, changelogs, guidelines).
 
-    This prevents footer content from being attributed to the last era.
+    A keyword must open a cell line: see docs/decisions.md::parser.py::_is_tracker_footer.
     """
     for cell in row:
-        if cell.text and _FOOTER_KEYWORDS_RE.search(cell.text.lower()):
-            return True
+        for line in cell.text.lower().split("\n"):
+            if _FOOTER_KEYWORDS_RE.match(_FOOTER_LINE_LEAD_RE.sub("", line, count=1)):
+                return True
     return False
 
 
