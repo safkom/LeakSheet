@@ -1425,16 +1425,16 @@ async def proxy_image(
             )
 
         # Only "gone" and "slow down" relay. Anything else, a non-image 200 or Google's 403
-        # for an expired cover token included, is 502: never a 5xx of ours.
+        # for an expired cover token included, is 503 (Cloudflare masks a 502).
         raise HTTPException(
-            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 502),
+            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
             detail="Upstream image fetch failed",
         )
     except HTTPException:
         raise
     except Exception as e:
         _log_upstream_failure("Image proxy error", url, e)
-        raise HTTPException(status_code=502, detail="Image proxy error")
+        raise HTTPException(status_code=503, detail="Image proxy error")
 
 
 def _parse_content_length(raw: str | None) -> int | None:
@@ -1473,7 +1473,7 @@ async def _get_image_capped(
     if final_url != url and not _image_host_allowed(final_url):
         await resp.aclose()
         logger.warning("image proxy: redirect off allowlist -> %s", final_url[:120])
-        raise HTTPException(status_code=502, detail="Upstream redirect not allowed")
+        raise HTTPException(status_code=503, detail="Upstream redirect not allowed")
     try:
         ct = resp.headers.get("content-type", "")
         if resp.status_code != 200 or not _is_raster_image(ct):
@@ -1484,7 +1484,7 @@ async def _get_image_capped(
         async for chunk in resp.aiter_bytes():
             total += len(chunk)
             if total > _IMAGE_DOWNLOAD_CAP:
-                raise HTTPException(status_code=502, detail="Upstream image too large")
+                raise HTTPException(status_code=503, detail="Upstream image too large")
             chunks.append(chunk)
         return resp, b"".join(chunks)
     finally:
@@ -1725,7 +1725,7 @@ async def proxy_metadata(
                         },
                     )
             raise HTTPException(
-                status_code=502,
+                status_code=503,
                 detail=f"Provider returned {resp.status_code}",
             )
 
@@ -1744,7 +1744,7 @@ async def proxy_metadata(
         # provider's outage, not a bug of ours.
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-            raise HTTPException(status_code=502, detail="Metadata fetch failed")
+            raise HTTPException(status_code=503, detail="Metadata fetch failed")
 
         payload = json.dumps(result)
         _metadata_cache.set(meta_url, payload)
@@ -1760,7 +1760,7 @@ async def proxy_metadata(
         raise
     except Exception as e:
         _log_upstream_failure("Metadata proxy error", meta_url, e)
-        raise HTTPException(status_code=502, detail="Metadata fetch failed")
+        raise HTTPException(status_code=503, detail="Metadata fetch failed")
 
 
 # ---------------------------------------------------------------------------
@@ -2012,7 +2012,7 @@ async def proxy_stream(
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
         # Relay upstream's status so a client can tell "gone" from "throttled"; only the
-        # code crosses over (see UpstreamStatusError). Everything else stays 502.
+        # code crosses over (see UpstreamStatusError). Everything else is 503.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
         if e.status_code in (404, 410):
             raise HTTPException(status_code=404, detail="Upstream file not found")
@@ -2022,15 +2022,15 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
-        raise HTTPException(status_code=502, detail="Upstream error")
+        raise HTTPException(status_code=503, detail="Upstream error")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
-        raise HTTPException(status_code=502, detail="Upstream error")
+        raise HTTPException(status_code=503, detail="Upstream error")
     except Exception as e:
         _log_upstream_failure("Stream error", stream_url, e)
-        raise HTTPException(status_code=502, detail="Upstream error")
+        raise HTTPException(status_code=503, detail="Upstream error")
 
     # Permission-required/private gdrive files come back from stream_audio
     # as a real 403 response object (not raised) — relay it as-is.
@@ -2039,7 +2039,7 @@ async def proxy_stream(
         raise HTTPException(status_code=403, detail="Provider denied access")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
-    # instead of collapsing it into a generic 502.
+    # instead of collapsing it into a generic 503.
     if resp.status_code == 416:
         cr = resp.headers.get("content-range")
         await resp.aclose()
@@ -2069,10 +2069,10 @@ async def proxy_stream(
             _prepend_chunk = b""
         except Exception as exc:
             # A read error while sniffing would leak `resp`'s pooled connection: close it and
-            # surface a 502.
+            # surface a 503.
             await resp.aclose()
             logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
-            raise HTTPException(status_code=502, detail="Upstream read error") from exc
+            raise HTTPException(status_code=503, detail="Upstream read error") from exc
         sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
         if sniffed:
             ct = sniffed

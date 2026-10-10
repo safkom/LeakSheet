@@ -893,3 +893,10 @@ skipping tabs it already covers took Ye from 20 requests (31.8 MB) to 11 (21.2 M
 byte-identical output, and serializing once per miss removed two of the three
 serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
 NDJSON progress lines to clients that ask for `application/x-ndjson`.
+
+## api.py::upstream-503 — proxy failures answer 503, not 502
+
+Cloudflare replaces an origin's 502 (and 504) with its own HTML error page, so a
+proxy's JSON `detail` never reached a client: `/stream` for a pillows outage arrived
+as Cloudflare's page. `/sheet` already answered 503 for this reason; `/stream`,
+`/image-proxy` and `/metadata` now do too. The relayed 404, 409 and 429 stay.

@@ -354,7 +354,7 @@ class TestImageProxyEndpoint:
         monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
 
         r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
-        assert r.status_code == 502
+        assert r.status_code == 503
         # The streamed response is closed even on the reject path, so the
         # upstream connection is returned to the pool rather than leaked.
         assert fake.responses and fake.responses[-1].closed
@@ -374,7 +374,7 @@ class TestImageProxyEndpoint:
         monkeypatch.setattr(api, "CACHE_DIR", tmp_path)
 
         r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL})
-        assert r.status_code == 502
+        assert r.status_code == 503
         # Rejected before the body is read, and the connection is not leaked.
         assert fake.responses and fake.responses[-1].closed
 

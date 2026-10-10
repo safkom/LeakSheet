@@ -57,13 +57,13 @@ class TestHostResolution:
         r = api_client.get("/stream", params={"url": PILLOWS})
         assert r.status_code == 403
 
-    def test_upstream_valueerror_is_502(self, api_client, monkeypatch):
+    def test_upstream_valueerror_is_503(self, api_client, monkeypatch):
         async def raiser(stream_url, *, range_header=None):
             raise ValueError("upstream returned non-audio content")
 
         monkeypatch.setattr(api, "stream_audio", raiser)
         r = api_client.get("/stream", params={"url": PILLOWS})
-        assert r.status_code == 502
+        assert r.status_code == 503
 
 
 class TestUpstreamFailureLogging:
@@ -77,7 +77,7 @@ class TestUpstreamFailureLogging:
         monkeypatch.setattr(api, "stream_audio", raiser)
         with caplog.at_level(logging.WARNING, logger="src.api"):
             r = api_client.get("/stream", params={"url": PILLOWS})
-        assert r.status_code == 502
+        assert r.status_code == 503
         return [rec for rec in caplog.records if rec.name == "src.api"]
 
     def test_connect_timeout_is_a_warning(self, api_client, monkeypatch, caplog):
@@ -194,15 +194,15 @@ class TestStreamEndpointGdriveMapping:
         r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
         assert r.status_code == 403
 
-    def test_generic_upstream_error_still_maps_to_502(self, api_client, monkeypatch):
-        # Non-gdrive failures keep their 502 mapping — the 409/403 branches
+    def test_generic_upstream_error_still_maps_to_503(self, api_client, monkeypatch):
+        # Non-gdrive failures keep their 503 mapping — the 409/403 branches
         # must not swallow other ValueErrors.
         async def fake_stream_audio(url, *, range_header=None):
             raise ValueError("Upstream returned 500")
 
         monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
         r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
-        assert r.status_code == 502
+        assert r.status_code == 503
 
     def test_unresolvable_url_still_400s(self, api_client):
         r = api_client.get("/stream", params={"url": "https://not-a-supported-host.example/x"})
@@ -271,9 +271,9 @@ class TestUpstreamStatusIsRelayed:
         assert r.status_code == 429
         assert r.headers["Retry-After"] == "30"
 
-    def test_anything_else_stays_502(self, api_client, monkeypatch):
+    def test_anything_else_stays_503(self, api_client, monkeypatch):
         self._raise(monkeypatch, 500)
-        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 502
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 503
 
     def test_no_upstream_detail_leaks_to_the_client(self, api_client, monkeypatch):
         self._raise(monkeypatch, 404)

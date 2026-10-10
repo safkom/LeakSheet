@@ -114,7 +114,7 @@ class TestWarmEraArt:
         r = TestClient(app).get("/image-proxy", params={"url": stale, "w": 320})
         # 502, not the 403 Google gave us: an expired token is this server
         # holding a stale URL, not the caller being forbidden the image.
-        assert r.status_code == 502
+        assert r.status_code == 503
 
     def test_covers_from_another_tracker_are_not_borrowed(self, google):
         good = _cover("other-tracker")
@@ -124,7 +124,7 @@ class TestWarmEraArt:
         stale = _cover("ye-stale")
         asyncio.run(api._warm_era_art(_artist(("Donda", stale)), TRACKER))
         r = TestClient(app).get("/image-proxy", params={"url": stale})
-        assert r.status_code == 502
+        assert r.status_code == 503
 
     def test_a_rewarm_marks_the_current_cover_recently_used(self, google):
         """Eviction drops the oldest mtime first; a cover the live parse still

@@ -1,4 +1,4 @@
-"""Every proxy endpoint answers an upstream failure with 404, 429 or 502, and logs it
+"""Every proxy endpoint answers an upstream failure with 404, 429 or 503, and logs it
 below ERROR: a host being down is not an issue of ours, and a 5xx of ours would be.
 """
 
@@ -26,13 +26,13 @@ _UPSTREAM = {
     "404": (httpx.Response(404, text="gone"), 404),
     "410": (httpx.Response(410, text="gone"), 404),
     "429": (httpx.Response(429, text="slow down"), 429),
-    "500": (httpx.Response(500, text="boom"), 502),
-    "503": (httpx.Response(503, text="down"), 502),
-    "html-200": (httpx.Response(200, text="<html>challenge</html>", headers={"content-type": "text/html"}), 502),
+    "500": (httpx.Response(500, text="boom"), 503),
+    "503": (httpx.Response(503, text="down"), 503),
+    "html-200": (httpx.Response(200, text="<html>challenge</html>", headers={"content-type": "text/html"}), 503),
 }
 
 # What the metadata API can't tell apart: it only knows the provider failed.
-_METADATA_STATUS = {404: 502, 429: 502}
+_METADATA_STATUS = {404: 503, 429: 503}
 
 
 @pytest.fixture

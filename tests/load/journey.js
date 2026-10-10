@@ -71,7 +71,7 @@ export const options = {
 http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 429));
 
 // A third-party host being down (pillows, imgur) is not a failure of ours.
-const thirdParty = http.expectedStatuses({ min: 200, max: 399 }, 404, 429, 502);
+const thirdParty = http.expectedStatuses({ min: 200, max: 399 }, 404, 429, 503);
 const rateLimited = new Rate("rate_limited");
 const cacheStatus = new Counter("cache_status");
 
