@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 import httpx
+import pytest
 
 import src.api as api
 
@@ -279,3 +280,26 @@ class TestUpstreamStatusIsRelayed:
         self._raise(monkeypatch, 404)
         body = api_client.get("/stream", params={"url": PILLOWS}).text.lower()
         assert "pillows" not in body and "api.pillows.su" not in body
+
+
+class TestNonMediaBodyIsRefused:
+    """A tracker link can point at a PDF or an archive; relaying it as audio/mpeg
+    made the player fail on bytes that were never audio."""
+
+    @pytest.mark.parametrize("head", [
+        b"%PDF-1.2\n", b"PK\x03\x04\x14\x00", b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff\xe0",
+        b"GIF89a", b"Rar!\x1a\x07", b"7z\xbc\xaf\x27\x1c", b"<!DOCTYPE html>", b"<HTML><body>",
+    ])
+    def test_known_non_media_signature_is_415(self, api_client, monkeypatch, head):
+        resp = FakeStreamResponse(200, {"content-type": "application/octet-stream"}, [head + b"x" * 64])
+        _patch_stream(monkeypatch, resp)
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 415
+
+    @pytest.mark.parametrize("head", [
+        b"ID3\x03\x00", b"\xff\xfb\x90\x00", b"\x00\x00\x00\x18ftypmp42", b"OggS\x00\x02", b"fLaC\x00",
+    ])
+    def test_media_still_streams(self, api_client, monkeypatch, head):
+        resp = FakeStreamResponse(200, {"content-type": "application/octet-stream"}, [head + b"x" * 64])
+        _patch_stream(monkeypatch, resp)
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 200

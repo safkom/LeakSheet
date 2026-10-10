@@ -142,6 +142,17 @@ _MIME_CORRECTIONS: dict[str, str] = {
 
 # Audio format sniffing — see docs/decisions.md::api.py::mime-sniffing
 
+# Files a tracker link can point at that are never playable: see
+# docs/decisions.md::api.py::non-media-415.
+_NON_MEDIA_SIGNATURES = (b"%PDF", b"PK\x03\x04", b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"Rar!", b"7z\xbc\xaf")
+
+
+def _is_non_media(head: bytes) -> bool:
+    if head.startswith(_NON_MEDIA_SIGNATURES):
+        return True
+    return head.lstrip()[:9].lower().startswith((b"<!doctype", b"<html"))
+
+
 def _sniff_audio_format(header: bytes) -> str | None:
     """Detect audio format from magic bytes.  Returns corrected MIME or None."""
     if not header:
@@ -2076,6 +2087,9 @@ async def proxy_stream(
         sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
         if sniffed:
             ct = sniffed
+        elif _is_non_media(_prepend_chunk):
+            await resp.aclose()
+            raise HTTPException(status_code=415, detail="Not an audio or video file")
 
     # When ?download=true, add Content-Disposition with correct extension
     if download:

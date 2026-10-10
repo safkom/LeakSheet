@@ -900,3 +900,11 @@ Cloudflare replaces an origin's 502 (and 504) with its own HTML error page, so a
 proxy's JSON `detail` never reached a client: `/stream` for a pillows outage arrived
 as Cloudflare's page. `/sheet` already answered 503 for this reason; `/stream`,
 `/image-proxy` and `/metadata` now do too. The relayed 404, 409 and 429 stay.
+
+## api.py::non-media-415 — /stream refuses a body that is plainly not media
+
+Tracker links sometimes point at a PDF, an archive or an image. Drive labels them
+`application/octet-stream`, which passes the content-type gate, and the sniff then
+fell back to `audio/mpeg`: production relayed a PDF as `206 audio/mpeg`. When the
+first chunk matches no audio or video signature but does match a known document,
+archive, image or HTML one, `/stream` answers 415 instead.
