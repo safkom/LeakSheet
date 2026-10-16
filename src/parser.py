@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from bisect import bisect_left
 from collections import Counter
 import unicodedata
 from functools import lru_cache
@@ -305,16 +306,20 @@ def _grid_text(text: str) -> str:
     return _GRID_CONTROL_RE.sub("\ufffd", text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
-def _utf16_index(text: str, units: int) -> int:
-    """Python index of a UTF-16 offset: API run offsets count astral characters twice."""
-    if text.isascii():
-        return units
-    seen = 0
+def _utf16_offsets(text: str) -> list[int]:
+    """UTF-16 offset of every character, then the total: API run offsets count astral characters twice."""
+    offsets = [0]
+    for ch in text:
+        offsets.append(offsets[-1] + (2 if ord(ch) > 0xFFFF else 1))
+    return offsets
+
+
+def _line_breaks_before(text: str) -> list[int]:
+    """Line breaks in text[:i] for every i, as _grid_text renders them: CRLF counts once."""
+    counts = [0]
     for i, ch in enumerate(text):
-        if seen >= units:
-            return i
-        seen += 2 if ord(ch) > 0xFFFF else 1
-    return len(text)
+        counts.append(counts[-1] + (ch == "\r" or (ch == "\n" and (i == 0 or text[i - 1] != "\r"))))
+    return counts
 
 
 def _grid_link(uri: str) -> str:
@@ -329,22 +334,31 @@ def _grid_cell(value: dict) -> _Cell:
         # htmlview renders a cell with a hyperlink as one anchor around all of it.
         return _Cell(text=text, links=[_grid_link(hyperlink)], link_lines=[_grid_text(raw).count("\n")])
     runs = value.get("textFormatRuns") or []
-    starts = [_utf16_index(raw, run.get("startIndex", 0)) for run in runs]
-    spans: list[tuple[int, int, str]] = []
-    for i, run in enumerate(runs):
-        if uri := ((run.get("format") or {}).get("link") or {}).get("uri"):
-            spans.append((starts[i], starts[i + 1] if i + 1 < len(runs) else len(raw), uri))
-    for chip in value.get("chipRuns") or []:
-        if uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"):
-            start = _utf16_index(raw, chip.get("startIndex", 0))
-            spans.append((start, start + 1, uri))
-    if not spans:
+    chips = value.get("chipRuns") or []
+    link_runs = [(i, uri) for i, run in enumerate(runs)
+                 if (uri := ((run.get("format") or {}).get("link") or {}).get("uri"))]
+    link_chips = [(chip.get("startIndex", 0), uri) for chip in chips
+                  if (uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"))]
+    if not link_runs and not link_chips:
         return _Cell(text=text)
+    # Linear in the cell, not per run: a cell can hold thousands of runs.
+    offsets, breaks = _utf16_offsets(raw), _line_breaks_before(raw)
+
+    def index(units: int) -> int:
+        return min(bisect_left(offsets, units), len(raw))
+
+    spans: list[tuple[int, int, str]] = []
+    for i, uri in link_runs:
+        end = index(runs[i + 1].get("startIndex", 0)) if i + 1 < len(runs) else len(raw)
+        spans.append((index(runs[i].get("startIndex", 0)), end, uri))
+    for units, uri in link_chips:
+        start = index(units)
+        spans.append((start, start + 1, uri))
     spans.sort()
     return _Cell(
         text=text,
         links=[_grid_link(uri) for _start, _end, uri in spans],
-        link_lines=[_grid_text(raw[:end]).count("\n") for _start, end, _uri in spans],
+        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
     )
 
 
@@ -367,6 +381,9 @@ def extract_grid(sheet: dict) -> list[list[_Cell]]:
     cols = [c for c in range(grid.get("columnCount", 0)) if not hidden(col_meta, c)]
     covered: set[tuple[int, int]] = set()
     for m in sheet.get("merges") or []:
+        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
+        if hidden(row_meta, m.get("startRowIndex", 0)):
+            continue
         for r in range(m.get("startRowIndex", 0) + 1, m.get("endRowIndex", 0)):
             for c in range(m.get("startColumnIndex", 0), m.get("endColumnIndex", 0)):
                 covered.add((r, c))
