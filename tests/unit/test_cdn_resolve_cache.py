@@ -231,7 +231,7 @@ class TestSingleFlight:
 
 class TestKrakenResolveCache:
     KRAKEN_VIEW = "https://krakenfiles.com/view/WS7wzkrklJ/file.html"
-    KRAKEN_CDN = "https://cdn1.krakencloud.net/uploads/2026-01-01/abc/music.mp3"
+    KRAKEN_CDN = "https://hs0.krakenfiles.com/uploads/01-01-2030/abc/music.mp3"
 
     @pytest.mark.asyncio
     async def test_repeat_calls_are_served_from_cache(self, monkeypatch):
