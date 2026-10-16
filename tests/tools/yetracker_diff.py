@@ -20,8 +20,10 @@ import asyncio
 import json
 import re
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 import httpx
 
@@ -43,9 +45,11 @@ def ours(api: str | None) -> dict:
         r = httpx.post(f"{api.rstrip('/')}/sheet", json={"url": YE_URL}, timeout=180)
         r.raise_for_status()
         return r.json()
-    from src.fetcher import async_fetch_and_parse
+    from src import fetcher
 
-    artist = asyncio.run(async_fetch_and_parse(YE_URL, use_cache=False, write_cache=False))
+    # Every parse writes cover pointers; keep them out of the corpus cache.
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fetcher, "CACHE_DIR", Path(tmp)):
+        artist = asyncio.run(fetcher.async_fetch_and_parse(YE_URL, use_cache=False, write_cache=False))
     return json.loads(artist.model_dump_json())
 
 
