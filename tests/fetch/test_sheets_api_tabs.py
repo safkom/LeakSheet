@@ -141,6 +141,28 @@ class TestFallback:
         assert await _parse(again, patch_sheets_client) == htmlview_only
         assert again.api_requests() == []  # inside the backoff window
 
+    async def test_a_429_on_the_title_lookup_backs_off(self, with_key, htmlview_only, patch_sheets_client):
+        def api(request: httpx.Request) -> httpx.Response:
+            if "includeGridData" in request.url.params:
+                return httpx.Response(400, json={"error": {"message": "Unable to parse range"}})
+            return httpx.Response(429, headers={"Retry-After": "120"}, json={"error": {}})
+
+        assert await _parse(Recorder(api=api), patch_sheets_client) == htmlview_only
+        again = Recorder()
+        assert await _parse(again, patch_sheets_client) == htmlview_only
+        assert again.api_requests() == []  # the quota is still spent: no call inside the window
+
+    async def test_a_key_the_title_lookup_rejects_is_not_retried_on_every_parse(
+        self, with_key, htmlview_only, patch_sheets_client
+    ):
+        def api(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"error": {"message": "API key not valid"}})
+
+        assert await _parse(Recorder(api=api), patch_sheets_client) == htmlview_only
+        again = Recorder(api=api)
+        assert await _parse(again, patch_sheets_client) == htmlview_only
+        assert again.api_requests() == []  # one bad key must not cost two calls per parse
+
     async def test_any_other_error_falls_back(self, with_key, htmlview_only, patch_sheets_client):
         rec = Recorder(api=lambda r: httpx.Response(400, json={"error": {"message": "Unable to parse range"}}))
         assert await _parse(rec, patch_sheets_client) == htmlview_only
