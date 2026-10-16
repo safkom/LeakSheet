@@ -12,6 +12,7 @@ import pytest
 
 from src import fetcher
 from src.config import (
+    _image_host_allowed,
     register_tracker_hosts,
     sheet_host_allowed,
     tracker_hosts_are_stale,
@@ -41,6 +42,14 @@ class TestAllowlistMembership:
         # Exact-match only: an attacker-controlled *.google.com subdomain is
         # not a tracker host.
         assert not sheet_host_allowed("evil.docs.google.com")
+
+    def test_drive_host_is_not_a_sheet_host(self):
+        # drive.google.com has no htmlview/sheet path to fetch.
+        assert not sheet_host_allowed("drive.google.com")
+
+    def test_drive_host_stays_reachable_by_the_image_proxy(self):
+        # The proxy trusts google.com as a parent domain, independent of the seed.
+        assert _image_host_allowed("https://drive.google.com/thumbnail?id=abc")
 
     def test_env_escape_hatch(self, monkeypatch):
         monkeypatch.setenv("LEAKSHEET_EXTRA_SHEET_HOSTS", "sheets.example, other.example")
@@ -72,6 +81,13 @@ class TestFetcherGuard:
         monkeypatch.setattr(fetcher, "_refresh_tracker_hosts", _noop)
         with pytest.raises(InvalidURLError, match="host not allowed"):
             await _assert_sheet_host_allowed("http://169.254.169.254/latest/meta-data/")
+
+    async def test_drive_url_rejected(self, monkeypatch):
+        async def _noop():
+            register_tracker_hosts([])
+        monkeypatch.setattr(fetcher, "_refresh_tracker_hosts", _noop)
+        with pytest.raises(InvalidURLError, match="host not allowed"):
+            await _assert_sheet_host_allowed("https://drive.google.com/file/d/ABC/view")
 
     async def test_allowed_host_passes(self):
         await _assert_sheet_host_allowed("https://docs.google.com/spreadsheets/d/X/htmlview")

@@ -25,7 +25,6 @@ ARTISTGRID_URL = "https://artists.artistgrid.cx/artists.csv"
 # SSRF guard for POST /sheet: see docs/decisions.md::config.py — the /sheet host allowlist
 _SHEET_HOST_SEED = frozenset({
     "docs.google.com",
-    "drive.google.com",
     "yetracker.net",          # README's CLI example
     "deftonestracker.net",    # non-Google tracker host
     "franktracker.net",       # non-Google host in the built-in seed (src/tracker_seed.py)
