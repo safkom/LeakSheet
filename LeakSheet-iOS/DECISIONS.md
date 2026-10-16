@@ -546,3 +546,19 @@ The status only ever informs: Play stays enabled and nothing is skipped client-s
 because the list refreshes at most once a minute and the host may already be back. The
 store refreshes when a tracker loads, before each play (throttled), and forced after a
 failed play or a load timeout. A failed `/hosts` fetch keeps the last known state.
+
+## AudioEngine.swift::original-quality-default — Original quality plays unless switched off
+
+pillows is about 47 % of all sheet links, and the proxied path (`/api/get`) serves an
+Ogg transcode of every file: 11 of 11 probed links answered `OggS`, at 2 to 43 % of the
+original's size across six paired probes (one file: 1.3 MB against 3.6 MB). The owner
+chose the original file as the default. `StreamResolver.originalQualityURL` sends pillows
+to `/api/download/{id}`, which answers ranged requests with 206.
+
+`@AppStorage(...) = true` only sets the default a view reads; it never writes the key, so
+`UserDefaults.bool(forKey:)` still reads an unset key as false. `prefersOriginalQuality`
+reads an unset key as true and an explicit choice as stored, so a user who turned it off
+keeps it off. Costs: lossless files stream whole (one WAV: 72 MB against 1.5 MB), and
+the original URL is fetched directly, so the backend's MIME sniffing, its 415 on non-media
+bodies and its host-health outcomes do not apply to pillows plays; a failed item shows
+its error and the Stream toggle is the manual fallback.

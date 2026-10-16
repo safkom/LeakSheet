@@ -26,6 +26,7 @@ def clock(monkeypatch):
 
 def test_provider_of_each_supported_link():
     assert host_health.provider_for("https://pillows.su/f/abc") == "pillows"
+    assert host_health.provider_for("https://plwcse.top/f/abc") == "pillows"
     assert host_health.provider_for("https://www.krakenfiles.com/view/AbC/file.html") == "kraken"
     assert host_health.provider_for("https://music.froste.lol/song/abc123") == "froste"
     assert host_health.provider_for("https://imgur.gg/f/abc") == "imgur"

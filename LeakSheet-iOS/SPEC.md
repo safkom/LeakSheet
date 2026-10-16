@@ -248,7 +248,7 @@ Cached: max-age=3600
 ### GET /api/stream?url=...&download=false
 ```
 Proxies audio stream from supported file hosts.
-Hosts: pillows.su, pillowcase.su, imgur.gg, temp.imgur.gg, music.froste.lol, krakenfiles.com,
+Hosts: pillows.su, pillowcase.su, plwcse.top, imgur.gg, temp.imgur.gg, music.froste.lol, krakenfiles.com,
 pixeldrain.com (`/u/{id}`), drive.google.com (`/file/d/{id}`, `open?id=`, `uc?id=`; the
 virus-scan interstitial is retried via its confirm form — persistent interstitial → HTTP 409
 `gdrive_interstitial`, private file → 403)
@@ -406,7 +406,7 @@ best: Bool?                     // recommended tracker
 All audio/video streams go through `/api/stream?url=<encoded_original_link>`.
 Supported host patterns (per-host matchers in `Models/StreamResolver.swift` — kept in sync
 with the backend resolvers in `src/streaming.py`; there is no single combined regex anymore):
-- `pillows.su/f/{id}`, `pillowcase.su/f/{id}`
+- `pillows.su/f/{id}`, `pillowcase.su/f/{id}`, `plwcse.top/f/{id}`
 - `imgur.gg/f/{id}`, `temp.imgur.gg/f/{id}`
 - `music.froste.lol/song/{hash}`
 - `krakenfiles.com/view/{id}/file.html`
@@ -418,7 +418,7 @@ streamable; `MiscLinkClassifier` additionally reclassifies video/archive links o
 streamable hosts.
 
 ### Original Quality URLs
-- pillows: `https://api.pillows.su/api/download/{id}`
+- pillows (all three aliases): `https://api.pillows.su/api/download/{id}`
 - froste: `https://music.froste.lol/song/{hash}/download`
 - pixeldrain: `https://pixeldrain.com/api/file/{id}?download`
 - imgur/kraken/gdrive: same URL (proxy serves original)
@@ -439,8 +439,8 @@ streamable hosts.
 - UIBackgroundModes: `audio` only — the app schedules no background work
 
 ### Quality Switching
-- Compressed stream (default) via `/api/stream`
-- Original quality via direct download URL
+- Original quality (default, Settings → Playback Quality) via direct download URL
+- Compressed stream via `/api/stream`
 - Preserves playback position on switch
 
 ---
@@ -671,6 +671,7 @@ frame" fault.
 |------|-------------|-------------------|
 | pillows.su | `/f/{id}` | → `/api/stream?url=...` (proxy) |
 | pillowcase.su | `/f/{id}` | → `/api/stream?url=...` (proxy) |
+| plwcse.top | `/f/{id}` | → `/api/stream?url=...` (proxy) |
 | imgur.gg | `/f/{id}` | → `/api/stream?url=...` (proxy) |
 | temp.imgur.gg | `/f/{id}` | → `/api/stream?url=...` (proxy) |
 | music.froste.lol | `/song/{hash}` | → `/api/stream?url=...` (proxy) |

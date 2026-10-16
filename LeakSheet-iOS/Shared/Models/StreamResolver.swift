@@ -59,7 +59,7 @@ enum StreamResolver {
         let path = comps.path.split(separator: "/").map(String.init)
 
         switch host {
-        case "pillows.su", "pillowcase.su":
+        case "pillows.su", "pillowcase.su", "plwcse.top":
             guard path.count >= 2, path[0].lowercased() == "f", isID(path[1]) else { return nil }
             return .pillows(id: path[1])
 
