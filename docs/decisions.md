@@ -912,6 +912,48 @@ byte-identical output, and serializing once per miss removed two of the three
 serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
 NDJSON progress lines to clients that ask for `application/x-ndjson`.
 
+**Re-assessed 2026-10-16 (ADR, accepted): stay on Python 3 + FastAPI + gunicorn/uvicorn-worker
++ lxml.** Measured on ten trackers loaded cold one at a time: wall time 1.6-11.8 s, of which
+parsing (`parse` + `misc_parse` + `art_parse` + `hub_parse`) was 0.05-1.5 s. Production app cold
+opens took 7.8-20.5 s with parse at 59-403 ms. On the 20 largest corpus tabs, `extract_table`
+is 55 % of parse time, mostly building one `_Cell` per `<td>` (~1.1 M per pass). Python 3.14
+parsed them 5 % faster than 3.11, which is inside run-to-run noise.
+
+| Option | Cold-load gain | Cost |
+|---|---|---|
+| Keep Python/FastAPI | none | none |
+| Litestar, plain Starlette, Granian | none measurable at ~50 loads/day | migration churn |
+| Go, ASP.NET Core, TypeScript, Rust | at most the parse share (≤1.5 s of 12 s) | port ~3,000 lines of heuristics and ~1,200 tests; per-worker state redesign |
+| selectolax instead of lxml | only part of the 55 % in `extract_table` | 1.0 API break (2026-10); parity risk |
+
+Cold loads wait on Google, so the levers are the request plan and the data source (see
+fetcher.py::data-source), not the runtime. Move off 3.11 before its security support ends in
+2027-10 for the support window, not for speed. Revisit a port when `sheet_timing` shows parse
+above half of cold time, or the Python runtime itself becomes the operational problem.
+Research: `docs/reviews/2026-10-16/` (local, untracked).
+
+## fetcher.py::data-source — htmlview stays; Sheets API v4 is the candidate (ADR, proposed)
+
+Measured 2026-10-16 on three public workbooks, per path, against the htmlview HTML:
+
+| | htmlview (today) | XLSX export | Sheets API v4 `spreadsheets.get` |
+|---|---|---|---|
+| Requests, time | 12-22, 12-24 s sequential | 2, 10-14 s | 1, 1.3-4.2 s |
+| Bytes on the wire | 0.75-1.3 MB | 83-108 MB (embeds media) | 0.7-1.2 MB gzip (13-34 MB JSON) |
+| Hyperlinks | baseline | loses secondary links in multi-link cells | all on 2 of 3; 5 URLs missing on the third |
+| Era covers (in-cell images) | 47 / 262 / 382 | 0 / 262 / 381 | none: v4 has no image field |
+| Notes, conditional colours | no | notes yes, conditional colours no | both |
+| Refusals | none | 401 when the owner disabled downloads | none |
+
+XLSX is rejected: too large, refused by download-disabled sheets, and it drops links. The API
+is the fastest and richest path for cell data, but it cannot see covers. It needs an API key
+(anonymous calls get 403) with quotas of 300 reads/min per project and 60 per user, no daily
+cap. Mirror domains (yetracker.net, `*tracker.net`) are not Google URLs, so the API cannot read
+them. The decision is to keep htmlview, and prototype a hybrid behind the existing cell
+model: the API for every tab's cells and links, htmlview only for tabs that carry covers. That
+cuts a cold load from 8-16 Google page fetches to one API call plus one or two pages. Adopt it
+only if the hybrid's output matches htmlview on the accuracy labels and the yetracker diff.
+
 ## api.py::upstream-503 — proxy failures answer 503, not 502
 
 Cloudflare replaces an origin's 502 (and 504) with its own HTML error page, so a
