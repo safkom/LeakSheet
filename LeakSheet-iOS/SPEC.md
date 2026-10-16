@@ -439,7 +439,8 @@ streamable hosts.
 - UIBackgroundModes: `audio` only — the app schedules no background work
 
 ### Quality Switching
-- Original quality (default, Settings → Playback Quality) via direct download URL
+- Original quality (default, Settings → Playback Quality): pillows and pixeldrain play the host's
+  download URL directly; froste, kraken, imgur and gdrive stay on `/api/stream`
 - Compressed stream via `/api/stream`
 - Preserves playback position on switch
 

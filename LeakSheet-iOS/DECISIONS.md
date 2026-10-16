@@ -563,4 +563,6 @@ the original URL is fetched directly, so the backend's MIME sniffing, its 415 on
 bodies and its host-health outcomes do not apply to pillows plays; a failed item shows
 its error and the Stream toggle is the manual fallback. froste stays proxied in original
 mode because its download needs a Referer that AVPlayer does not send; pixeldrain and
-pillows play direct.
+pillows play direct. For froste the original and streaming URLs are therefore the same,
+so the Playback Quality toggle changes nothing there, and whether the proxied
+`/song/{hash}/file` is the original file is unverified.
