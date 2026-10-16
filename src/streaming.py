@@ -640,6 +640,10 @@ _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.c
 _RELAYED_STATUSES = frozenset({404, 410, 429})
 
 
+class NonMediaError(ValueError):
+    """Upstream served a body that is not audio: a fault of that file, not of the host."""
+
+
 class UpstreamStatusError(ValueError):
     """Upstream answered with a status we cannot stream.
 
@@ -796,7 +800,7 @@ async def stream_audio(
     Returns the streaming response. Caller is responsible for closing it
     with ``await resp.aclose()``.
 
-    Raises ValueError if upstream returns non-audio content.
+    Raises NonMediaError (a ValueError) if upstream returns non-audio content.
     """
     # imgur.gg: resolve metadata API → CDN URL first
     if is_imgur_api_url(stream_url):
@@ -822,7 +826,7 @@ async def stream_audio(
                 raise UpstreamStatusError(resp.status_code)
             ct = resp.headers.get("content-type", "")
             if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-                raise ValueError(f"Upstream returned non-audio content: {ct}")
+                raise NonMediaError(f"Upstream returned non-audio content: {ct}")
         except Exception:
             await resp.aclose()
             raise
@@ -853,7 +857,7 @@ async def stream_audio(
             raise UpstreamStatusError(resp.status_code)
 
         if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-            raise ValueError(f"Upstream returned non-audio content: {ct}")
+            raise NonMediaError(f"Upstream returned non-audio content: {ct}")
     except Exception:
         await resp.aclose()
         raise
