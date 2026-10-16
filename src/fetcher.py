@@ -45,6 +45,7 @@ from src.config import (
     sheet_host_allowed,
     tracker_hosts_are_stale,
 )
+from src import sheets_api
 from src.models import Artist, Section, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
@@ -1438,6 +1439,26 @@ async def _fetch_gid_page(
         return None
 
 
+def _start_api_tabs(
+    url_norm: str,
+    content_tabs: list[tuple[str, str, str]],
+    client: httpx.AsyncClient,
+    timeout: float,
+) -> asyncio.Task | None:
+    """Content tabs from one Sheets API call, started early to overlap the main tab's fetch.
+
+    Main, Art and hub tabs stay on htmlview: the API has no in-cell images.
+    See docs/decisions.md::sheets_api.py.
+    """
+    sheet_id = _extract_sheet_id(url_norm) if _is_google_sheets_url(url_norm) else None
+    if not sheet_id or not content_tabs or not sheets_api.api_key():
+        return None
+    return asyncio.create_task(sheets_api.fetch_tabs(
+        client, sheet_id, {gid: name for gid, _kind, name in content_tabs},
+        timeout=timeout, max_bytes=_MAX_SHEET_BYTES,
+    ))
+
+
 async def _load_secondary_tabs(
     artist: Artist,
     art_gid: str | None,
@@ -1451,15 +1472,19 @@ async def _load_secondary_tabs(
     use_cache: bool,
     t: PhaseTimer,
     page_paths: dict[str, str] | None = None,
+    api_tabs: asyncio.Task | None = None,
 ) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
     Everything here is optional — a failure never fails the request. Misc/MV
     entries also stay in the flat ``misc_entries`` list for backward
-    compatibility; every non-empty tab lands in ``Artist.tabs``.
+    compatibility; every non-empty tab lands in ``Artist.tabs``. Content tabs
+    come from ``api_tabs`` when it has them, else from htmlview.
     """
     if not art_gid and not content_tabs:
         return
+    if api_tabs is None:
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
 
     total = len(content_tabs) + (1 if art_gid else 0)
     done = 0
@@ -1496,15 +1521,26 @@ async def _load_secondary_tabs(
 
     tab_results: dict[str, list] = {}
 
+    async def _api_rows(gid_val: str) -> list | None:
+        if api_tabs is None:
+            return None
+        try:
+            return ((await api_tabs) or {}).get(gid_val)
+        except Exception as e:  # the API never costs a tab: htmlview can still read it
+            logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
+            return None
+
     async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
         try:
-            with t.phase("misc_fetch"):
-                result = await _fetch(gid_val)
-            if result:
-                _, tab_html = result
+            source = await _api_rows(gid_val)
+            if source is None:
+                with t.phase("misc_fetch"):
+                    result = await _fetch(gid_val)
+                source = result[1] if result else None
+            if source is not None:
                 with t.phase("misc_parse"):
                     tab_results[gid_val] = await asyncio.to_thread(
-                        parse_misc_tab, tab_html, kind,
+                        parse_misc_tab, source, kind,
                         [era.name for era in artist.eras],
                     )
         except Exception as e:
@@ -1904,6 +1940,7 @@ async def async_fetch_and_parse(
             pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
+    api_tabs: asyncio.Task | None = None
     try:
         with t.phase("base_fetch"):
             base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
@@ -1932,6 +1969,7 @@ async def async_fetch_and_parse(
         gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
             base_html, gids
         )
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
         first_tab = named_tabs.get(gids[0]) if gids else None
         t.report(
             "fetching",
@@ -2063,6 +2101,7 @@ async def async_fetch_and_parse(
                     best_artist, art_gid, content_tabs, url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,
                     use_cache=use_cache, t=t, page_paths=page_paths,
+                    api_tabs=api_tabs,
                 )
 
             await asyncio.to_thread(_finalize, best_artist, url_norm)
@@ -2089,3 +2128,6 @@ async def async_fetch_and_parse(
 
     except httpx.HTTPError as e:
         _raise_fetch_error(e, url)
+    finally:
+        if api_tabs is not None:
+            api_tabs.cancel()  # a no-op once consumed; frees the request on every other exit

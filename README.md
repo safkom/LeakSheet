@@ -125,6 +125,7 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed. `/image-proxy` trusts only the seed plus this list — never the feed — so a feed-only tracker with self-hosted covers must be added here for its art to load |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 | `LEAKSHEET_GID_FETCH_CONCURRENCY` | `6` | Concurrent tab-page fetches across all requests. Each holds a full response body in memory |
+| `LEAKSHEET_GOOGLE_API_KEY` | *(unset)* | Google API key with the Sheets API enabled. Set ⇒ a docs.google.com workbook's content tabs (Misc, Released, Best Of, …) come from one Sheets API v4 call instead of one htmlview page each; main and Art tabs stay on htmlview for their images. Any API failure falls back to htmlview, and a 429 pauses API use for that worker. Unset ⇒ htmlview only |
 | `LEAKSHEET_HUB_LOAD_CONCURRENCY` | `3` | Concurrent hub-workbook tab loads — fetched *and* parsed, so tighter than the above |
 | `LEAKSHEET_IMAGE_RESIZE_CONCURRENCY` | `3` | Concurrent Pillow decodes in `/image-proxy`; each can hold a 15 MB input plus a 20 MP decode |
 

@@ -1,0 +1,138 @@
+"""LeakSheet — Sheets API v4 reads of a docs.google.com workbook's content tabs.
+
+One spreadsheets.get returns every requested tab's cells, which `extract_grid`
+turns into the rows the htmlview parser reads. Off unless LEAKSHEET_GOOGLE_API_KEY
+is set; every failure returns None so the caller falls back to htmlview.
+See docs/decisions.md::sheets_api.py.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import json
+import logging
+import os
+import time
+
+import httpx
+
+from src.config import USER_AGENT
+from src.parser import _Cell, extract_grid
+
+logger = logging.getLogger(__name__)
+
+API_URL = "https://sheets.googleapis.com/v4/spreadsheets/"
+# Only what the parser reads: colours and notes would multiply the payload.
+_FIELDS = (
+    "sheets(properties(sheetId,title,gridProperties),merges,"
+    "data(rowMetadata(hiddenByUser,hiddenByFilter),columnMetadata(hiddenByUser,hiddenByFilter),"
+    "rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format/link/uri),chipRuns))))"
+)
+_DEFAULT_BACKOFF_S = 60.0
+_MAX_BACKOFF_S = 3600.0
+# Per worker, like every process global here: each of the 3 workers backs off on its own 429.
+_backoff_until = 0.0
+
+
+def api_key() -> str:
+    return os.environ.get("LEAKSHEET_GOOGLE_API_KEY", "").strip()
+
+
+def _a1(title: str) -> str:
+    return "'" + title.replace("'", "''") + "'"
+
+
+def _retry_after(resp: httpx.Response) -> float:
+    try:
+        return min(_MAX_BACKOFF_S, max(1.0, float(resp.headers.get("Retry-After", ""))))
+    except ValueError:
+        return _DEFAULT_BACKOFF_S
+
+
+def _rows_by_gid(body: bytes, gids: set[str]) -> dict[str, list[list[_Cell]]]:
+    rows: dict[str, list[list[_Cell]]] = {}
+    for sheet in json.loads(body).get("sheets") or []:
+        gid = str((sheet.get("properties") or {}).get("sheetId"))
+        if gid in gids:
+            rows[gid] = extract_grid(sheet)
+    return rows
+
+
+async def _get(
+    client: httpx.AsyncClient, sheet_id: str, key: str, params: list, *, timeout: float, max_bytes: int,
+) -> tuple[httpx.Response, bytes] | None:
+    request = client.build_request(
+        "GET", API_URL + sheet_id, params=params, timeout=timeout,
+        # Google APIs compress only for a User-Agent containing "gzip".
+        headers={"X-Goog-Api-Key": key, "User-Agent": f"{USER_AGENT} (gzip)", "Accept-Encoding": "gzip"},
+    )
+    try:
+        # Never follow a redirect: the key header would go with it.
+        resp = await client.send(request, stream=True, follow_redirects=False)
+        try:
+            body = bytearray()
+            async for chunk in resp.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    logger.warning("Sheets API body for %s over %d bytes", sheet_id, max_bytes)
+                    return None
+        finally:
+            await resp.aclose()
+    except httpx.HTTPError as e:
+        logger.warning("Sheets API request for %s failed: %s", sheet_id, type(e).__name__)
+        return None
+    return resp, bytes(body)
+
+
+async def fetch_tabs(
+    client: httpx.AsyncClient,
+    sheet_id: str,
+    tabs: dict[str, str],
+    *,
+    timeout: float,
+    max_bytes: int,
+) -> dict[str, list[list[_Cell]]] | None:
+    """{gid: rows} for the tabs named in *tabs* ({gid: title}); None when the API is off or fails.
+
+    A tab missing from the result is the caller's to read from htmlview.
+    """
+    global _backoff_until
+    key = api_key()
+    if not key or not tabs or time.monotonic() < _backoff_until:
+        return None
+    get = functools.partial(_get, client, sheet_id, key, timeout=timeout, max_bytes=max_bytes)
+    titles = tabs
+    for attempt in range(2):
+        params = [("includeGridData", "true"), ("fields", _FIELDS)]
+        got = await get(params + [("ranges", _a1(title)) for title in titles.values()])
+        if got is None:
+            return None
+        resp, body = got
+        if resp.status_code != 400 or attempt:
+            break
+        # The htmlview tab listing trims names; ask for the exact titles by sheet id.
+        got = await get([("fields", "sheets.properties(sheetId,title)")])
+        if got is None or got[0].status_code != 200:
+            return None
+        try:
+            exact = {str(p.get("sheetId")): p.get("title") for p in
+                     (sh.get("properties") or {} for sh in json.loads(got[1]).get("sheets") or [])}
+        except (ValueError, AttributeError) as e:
+            logger.warning("Sheets API titles for %s unreadable: %s", sheet_id, e)
+            return None
+        titles = {gid: exact[gid] for gid in tabs if exact.get(gid)}
+        if not titles:
+            return None
+    if resp.status_code == 429 or (resp.status_code == 403 and b"rateLimitExceeded" in body):
+        _backoff_until = time.monotonic() + _retry_after(resp)
+        logger.warning("Sheets API quota hit (%d); htmlview only for a while", resp.status_code)
+        return None
+    if resp.status_code != 200:
+        logger.warning("Sheets API answered %d for %s", resp.status_code, sheet_id)
+        return None
+    try:
+        return await asyncio.to_thread(_rows_by_gid, body, set(tabs))
+    except (ValueError, AttributeError, TypeError) as e:
+        logger.warning("Sheets API body for %s unreadable: %s", sheet_id, e)
+        return None
