@@ -494,3 +494,122 @@ class TestCoverKeysNeverFailAParse:
         patch_sheets_client(workbook_client({**WORKBOOK, "100": _with_cover("tok")}, tab_names=TAB_NAMES))
         artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
         assert artist.eras[0].art_url.endswith("tok=w340-h339")
+
+
+class TestPartialLoadsAreVisible:
+    """A tab that fails to load parses cleanly into a smaller tracker, so the only trace is
+    a count: one WARNING per parse and a field on the sheet_timing line."""
+
+    @staticmethod
+    def _partial(caplog):
+        return [r for r in caplog.records if "failed_tabs=" in r.getMessage()]
+
+    async def test_a_failed_secondary_tab_is_counted_and_warned_once(
+        self, workbook_client, patch_sheets_client, caplog
+    ):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES, fail_gids={"300"}))
+        with caplog.at_level("WARNING", logger="src.fetcher"):
+            await async_fetch_and_parse(URL, use_cache=False, write_cache=False, timer=timer)
+
+        # Main tab, Misc and the failing Art tab.
+        assert "failed_tabs=1/3" in timer.log_line()
+        records = self._partial(caplog)
+        assert len(records) == 1
+        assert records[0].levelname == "WARNING"
+        assert "failed_tabs=1/3" in records[0].getMessage()
+
+    async def test_a_failed_hub_sibling_tab_is_counted(
+        self, workbook_client, patch_sheets_client, caplog
+    ):
+        from src.fetcher import PhaseTimer
+
+        workbook = dict(TestHubWorkbook.HUB_WORKBOOK, **{"600": read_synthetic("main_tab")})
+        names = dict(TestHubWorkbook.HUB_NAMES, **{"600": "Leaks"})
+        timer = PhaseTimer()
+        patch_sheets_client(workbook_client(workbook, tab_names=names, fail_gids={"500"}))
+        with caplog.at_level("WARNING", logger="src.fetcher"):
+            await async_fetch_and_parse(URL, use_cache=False, write_cache=False, timer=timer)
+
+        # The sibling is fetched in discovery and again by the hub merge: one tab, one failure.
+        assert "failed_tabs=1/3" in timer.log_line()
+        assert len(self._partial(caplog)) == 1
+
+    async def test_the_hub_merge_counts_its_own_fetches(self, workbook_client):
+        from src.fetcher import PhaseTimer, _aggregate_hub_workbook
+        from src.models import Artist
+
+        timer = PhaseTimer()
+        client = workbook_client({"500": read_synthetic("catalogue_tab")}, fail_gids={"600"})
+        await _aggregate_hub_workbook(
+            Artist(name="X", slug="x", eras=[]), [("500", "Rare"), ("600", "Lost")], URL, "T",
+            client=client, timeout=5, cache_ttl=0, use_cache=False, t=timer,
+        )
+        assert timer.tab_counts() == (1, 2)
+
+    async def test_a_clean_parse_reports_zero_and_does_not_warn(
+        self, workbook_client, patch_sheets_client, caplog
+    ):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES))
+        with caplog.at_level("WARNING", logger="src.fetcher"):
+            await async_fetch_and_parse(URL, use_cache=False, write_cache=False, timer=timer)
+
+        assert "failed_tabs=0/3" in timer.log_line()
+        assert not self._partial(caplog)
+
+    async def test_a_partial_parse_is_still_written(
+        self, workbook_client, patch_sheets_client, tmp_path
+    ):
+        # A tab that is permanently missing would otherwise keep its tracker out of the cache.
+        import src.fetcher as fetcher
+
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES, fail_gids={"300"}))
+        await async_fetch_and_parse(URL, use_cache=False, write_cache=True)
+        assert (fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json").exists()
+
+
+class TestFallbackParse:
+    """The last-resort path: no tab holds songs, so the base sheet is parsed as-is."""
+
+    VARIANT = "https://docs.google.com/spreadsheets/d/SYNTH123/edit?usp=sharing"
+
+    def _song_less_workbook(self, workbook_client, patch_sheets_client):
+        patch_sheets_client(
+            workbook_client({"100": read_synthetic("hub_tab")}, tab_names={"100": "Main"})
+        )
+
+    async def test_it_parses_with_the_normalized_url(
+        self, workbook_client, patch_sheets_client, monkeypatch
+    ):
+        import src.fetcher as fetcher
+
+        seen: list[str] = []
+        real = fetcher.parse_sheet
+
+        def spy(html, name, url, *args, **kwargs):
+            seen.append(url)
+            return real(html, name, url, *args, **kwargs)
+
+        monkeypatch.setattr(fetcher, "parse_sheet", spy)
+        self._song_less_workbook(workbook_client, patch_sheets_client)
+        artist = await async_fetch_and_parse(self.VARIANT, use_cache=False, write_cache=False)
+
+        assert artist.total_songs == 0, "the fixture must reach the fallback"
+        assert seen[-1] == URL
+        assert set(seen) == {URL}
+
+    async def test_an_empty_result_is_returned_but_not_cached(
+        self, workbook_client, patch_sheets_client
+    ):
+        import src.fetcher as fetcher
+
+        self._song_less_workbook(workbook_client, patch_sheets_client)
+        artist = await async_fetch_and_parse(self.VARIANT, use_cache=False, write_cache=True)
+
+        assert artist.total_songs == 0
+        assert not (fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json").exists()

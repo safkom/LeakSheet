@@ -851,6 +851,17 @@ served anyway, so a genuinely shrunken tracker recovers on its own instead of
 being frozen forever. The refusal is logged at WARNING so a systematically
 broken tab is visible rather than silent — which was the real defect here.
 
+An empty parse (zero versions) is refused before the no-entry early return, so the
+discovery fallback and the base-page branch are covered with the rest: cached, an
+empty result was served as a hit for an hour and then cached again by the app. It is
+refused even over an entry past `STALE_CACHE_TTL`.
+
+A partial load is only logged, never refused: a tab that is permanently missing would
+otherwise keep its tracker out of the cache for good, and a large drop is the ratio's
+job. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches; a
+later success clears an earlier failure, as hub siblings are fetched twice). One WARNING
+per parse and the `failed_tabs=failed/total` field on `sheet_timing` report it.
+
 ## api.py::payload-duplication — measured, kept on purpose (2026-08-26)
 
 A full Ye response is **11.56 MB raw / 1.86 MB gzipped**. Two parts of it are
