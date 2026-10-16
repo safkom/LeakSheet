@@ -247,3 +247,59 @@ class TestKrakenResolveCache:
         for _ in range(3):
             assert await streaming.resolve_kraken_cdn_url(self.KRAKEN_VIEW) == self.KRAKEN_CDN
         assert calls == [self.KRAKEN_VIEW]
+
+
+class TestResolverUpstreamStatus:
+    """A 4xx from the kraken page or the imgur API is the host answering about one file."""
+
+    KRAKEN_VIEW = "https://krakenfiles.com/view/WS7wzkrklJ/file.html"
+
+    def _serve(self, monkeypatch, handler):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", [401, 403, 451])
+    async def test_kraken_4xx_keeps_its_code(self, monkeypatch, code):
+        self._serve(monkeypatch, lambda request: httpx.Response(code))
+        with pytest.raises(streaming.UpstreamStatusError) as exc:
+            await streaming.resolve_kraken_cdn_url(self.KRAKEN_VIEW)
+        assert exc.value.status_code == code
+
+    @pytest.mark.asyncio
+    async def test_kraken_5xx_is_not_a_status_answer(self, monkeypatch):
+        self._serve(monkeypatch, lambda request: httpx.Response(502))
+        with pytest.raises(ValueError) as exc:
+            await streaming.resolve_kraken_cdn_url(self.KRAKEN_VIEW)
+        assert not isinstance(exc.value, streaming.UpstreamStatusError)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("statuses", "expected"), [
+        ((451, 451), 451),
+        ((401, 403), 403),
+        ((404, 451), 404),  # a relayed status beats the others: 429 > 410 > 404
+        ((451, 429), 429),
+    ])
+    async def test_imgur_4xx_on_every_host_keeps_a_code(self, monkeypatch, statuses, expected):
+        by_host = dict(zip(("imgur.gg", "temp.imgur.gg"), statuses))
+        self._serve(monkeypatch, lambda request: httpx.Response(by_host[request.url.host]))
+        with pytest.raises(streaming.UpstreamStatusError) as exc:
+            await streaming.resolve_imgur_cdn_url(API)
+        assert exc.value.status_code == expected
+
+    @pytest.mark.asyncio
+    async def test_imgur_4xx_beside_a_5xx_is_not_a_status_answer(self, monkeypatch):
+        by_host = {"imgur.gg": 451, "temp.imgur.gg": 502}
+        self._serve(monkeypatch, lambda request: httpx.Response(by_host[request.url.host]))
+        with pytest.raises(ValueError) as exc:
+            await streaming.resolve_imgur_cdn_url(API)
+        assert not isinstance(exc.value, streaming.UpstreamStatusError)
+
+    @pytest.mark.asyncio
+    async def test_a_page_without_media_is_non_media(self, monkeypatch):
+        self._serve(monkeypatch, lambda request: httpx.Response(200, content=b"<html>no player</html>"))
+        with pytest.raises(streaming.NonMediaError):
+            await streaming.resolve_kraken_cdn_url(self.KRAKEN_VIEW)
+        self._serve(monkeypatch, lambda request: httpx.Response(200, json={"name": "x"}))
+        with pytest.raises(streaming.NonMediaError):
+            await streaming.resolve_imgur_cdn_url(API)

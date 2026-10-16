@@ -953,5 +953,8 @@ agree), `/stream` lets requests through. A success marks the provider up; a fail
 `record_failure` records restarts the 300 s. `/hosts` says "down" until a success.
 A body that is not media (`NonMediaError`, the 415 sniff) is the host answering with a
 bad file: it counts as a success, never toward down, in `/stream` and in the probe.
-A bare ValueError from a resolver (kraken page, imgur API) still counts as a soft
-failure: those wrap transport errors and upstream 5xx.
+That includes the resolver steps: a kraken page with no audio URL and an imgur API
+answer without `cdnUrl`. A 4xx from the kraken page or from every imgur host is an
+`UpstreamStatusError` like one from the file itself. A bare ValueError from a resolver
+still counts as a soft failure: those wrap transport errors, upstream 5xx and the SSRF
+pre-flight.

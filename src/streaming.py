@@ -529,7 +529,7 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
                     "Referer": "https://krakenfiles.com/",
                 },
             )
-            if status in _RELAYED_STATUSES:
+            if 400 <= status < 500:
                 raise UpstreamStatusError(status)
             if status != 200:
                 raise ValueError(
@@ -540,7 +540,7 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
 
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
         if not m:
-            raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
+            raise NonMediaError(f"No audio URL found in krakenfiles.com page: {view_url}")
         return m.group(0)
 
     return await _cached_resolve(view_url, _do)
@@ -604,7 +604,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     continue
                 cdn_url = data.get("cdnUrl")
                 if not cdn_url:
-                    last_err = ValueError(
+                    last_err = NonMediaError(
                         f"imgur.gg API response missing cdnUrl: {url}"
                     )
                     continue
@@ -622,10 +622,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                 )
                 continue
 
-        # Gone (or throttled) on every host is that answer, not an outage; max() prefers
-        # 429 ("try later") over 410 over 404 when the hosts disagree.
-        if len(statuses) == len(urls_to_try) and set(statuses) <= _RELAYED_STATUSES:
-            raise UpstreamStatusError(max(statuses))
+        # A 4xx on every host is that answer, not an outage; max() prefers 429 ("try
+        # later") over 410 over 404, and a relayed status over any other 4xx.
+        if len(statuses) == len(urls_to_try) and all(400 <= s < 500 for s in statuses):
+            raise UpstreamStatusError(max(statuses, key=lambda s: (s in _RELAYED_STATUSES, s)))
         raise last_err  # type: ignore[misc]
 
     return await _cached_resolve(api_url, _do)

@@ -142,6 +142,47 @@ def test_non_media_bodies_never_mark_the_provider_down(api_client, monkeypatch, 
     assert host_health.down(provider) is None
 
 
+# Every step of a stream request that can see the host's answer: the file itself (pillows),
+# the kraken view page and the imgur metadata API (both resolve the CDN URL first).
+RESOLVER_LINKS = [
+    ("pillows", [PILLOWS, "https://pillows.su/f/def456"]),
+    ("kraken", [
+        "https://krakenfiles.com/view/AbCdEf1234/file.html",
+        "https://krakenfiles.com/view/GhIjKl5678/file.html",
+    ]),
+    ("imgur", ["https://imgur.gg/f/abc123", "https://imgur.gg/f/def456"]),
+]
+
+
+def _serve(monkeypatch, handler):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
+
+
+@pytest.mark.parametrize(("provider", "links"), RESOLVER_LINKS)
+@pytest.mark.parametrize("code", [451, 403])
+def test_a_4xx_at_any_step_reaches_the_client_and_never_marks_the_provider_down(
+    api_client, monkeypatch, provider, links, code
+):
+    _serve(monkeypatch, lambda request: httpx.Response(code))
+    for link in (links[0], links[0], links[1]):
+        assert api_client.get("/stream", params={"url": link}).status_code == code
+    assert host_health.down(provider) is None
+
+
+@pytest.mark.parametrize(("provider", "links", "answer"), [
+    ("kraken", RESOLVER_LINKS[1][1], lambda request: httpx.Response(200, content=b"<html>no player</html>")),
+    ("imgur", RESOLVER_LINKS[2][1], lambda request: httpx.Response(200, json={"name": "x"})),
+])
+def test_a_resolver_page_without_media_never_marks_the_provider_down(
+    api_client, monkeypatch, provider, links, answer
+):
+    _serve(monkeypatch, answer)
+    for link in (links[0], links[0], links[1]):
+        assert api_client.get("/stream", params={"url": link}).status_code == 503
+    assert host_health.down(provider) is None
+
+
 def test_a_sniffed_non_media_body_never_marks_the_provider_down(api_client, monkeypatch):
     class PdfResponse(AudioResponse):
         headers = {"content-type": "application/octet-stream"}
