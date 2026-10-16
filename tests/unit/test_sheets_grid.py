@@ -67,6 +67,11 @@ class TestShape:
         rows = extract_grid(_sheet([["tall", "x"], ["", ""], ["n", "m"]], cols=2, merges=[(0, 2, 0, 2)]))
         assert _texts(rows) == [["tall", "x"], ["n", "m"]]
 
+    def test_a_rowspan_in_a_hidden_row_covers_nothing(self):
+        # htmlview drops the hidden <tr> together with the <td rowspan> in it, so later rows are whole.
+        rows = extract_grid(_sheet([["tall", "a"], ["c", "d"]], cols=2, merges=[(0, 2, 0, 1)], hidden_rows={0}))
+        assert _texts(rows) == [["c", "d"]]
+
 
 class TestText:
     def test_text_is_stripped(self):
@@ -141,3 +146,21 @@ class TestParity:
         from_html = parse_misc_tab(self.HTML, "misc", [])
         assert [e.model_dump() for e in from_grid] == [e.model_dump() for e in from_html]
         assert from_grid
+
+
+class TestLinearCost:
+    # The API hands one cell to the parser on the event-loop's thread pool, GIL held:
+    # a quadratic cell stalls every request on the worker.
+    def test_a_cell_with_thousands_of_runs_is_linear(self):
+        import time  # noqa: PLC0415
+
+        from src.parser import _grid_cell  # noqa: PLC0415
+
+        text = "é" * 40_000
+        runs = [{"startIndex": i * 8, "format": {}} for i in range(5_000)]
+        links = [{"startIndex": i * 4, "format": {"link": {"uri": f"https://e.x/{i}"}}} for i in range(10_000)]
+        cell = {"formattedValue": "x\n" * 20_000, "textFormatRuns": links}
+        start = time.perf_counter()
+        _grid_cell({"formattedValue": text, "textFormatRuns": runs})
+        _grid_cell(cell)
+        assert time.perf_counter() - start < 1.0
