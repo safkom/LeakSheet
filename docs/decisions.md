@@ -252,6 +252,10 @@ The check covers every tab of a workbook, not just the URL it was handed: a shee
 page-switcher JavaScript can name absolute tab URLs, which are honoured only for an
 allowlisted host or the sheet's own site (`fetcher._build_sheet_html_url`).
 
+`drive.google.com` is not in the seed: it has no `/htmlview/sheet` path, so a Drive URL
+would build a request that drops the file id. The image proxy still reaches it through
+the `google.com` parent domain.
+
 ## config.py::curated_host_allowed — the image proxy does not trust the feed
 
 `/sheet` auto-accepts every host the ArtistGrid CSV lists, so a tracker added to the
@@ -607,6 +611,8 @@ sparse header whose only text cell is such a name is rejected outright.
 Comma-separated alias lists ("Mollyworld, Balaclava Era") register each alias in the
 fallback dict only — same shadowing rationale as slash-separated parts: a genuine
 standalone era declared elsewhere still claims the primary key.
+Every era-header site (stats-bearing, stats-less, multi-line and name-column) follows the
+same rule: it passes the fallback dict, so no header's slash or alias part claims a primary key.
 
 ## parser.py::name-cell-image — album art vs. image-based era name
 
