@@ -214,7 +214,8 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
     # Already decoded, so the encoding headers no longer describe the body.
     headers = [(k, v) for k, v in resp.headers.multi_items()
                if k.lower() not in ("content-encoding", "content-length")]
-    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+    # The final request, so .url says where a redirect chain ended.
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=resp.request)
 
 
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
@@ -1329,6 +1330,12 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # Async variants
 # ---------------------------------------------------------------------------
 
+def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
+    """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
+    if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
+        raise AccessDeniedError(f"Sign-in required: {url}")
+
+
 async def _fetch_base_html(
     client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
@@ -1338,6 +1345,7 @@ async def _fetch_base_html(
     TAB's page, which has no tab switcher.
     """
     r = await _get_capped(client, url_norm, timeout=timeout)
+    _raise_if_signed_out(r, url_norm)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1388,6 +1396,7 @@ async def async_fetch_sheet_html(
             if cached is not None:
                 return cached
         r = await _get_capped(client, url, timeout=timeout)
+        _raise_if_signed_out(r, url)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)

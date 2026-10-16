@@ -341,11 +341,16 @@ The window must not prolong content its source has revoked (DMCA). A failed reva
 only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
 for the whole week. `_background_revalidate` therefore calls `drop_cached_entry` (HTML,
 parse and metadata, under the entry lock) when the fetch fails with `SourceGoneError`
-(base page 404 or 410) or `AccessDeniedError` (403). Nothing else deletes: a timeout, a
-connection error, a 429 or any 5xx (all `NetworkError`), `NoTablesError` (it also covers
-every sub-page failing for transport reasons) and a disallowed host keep serving the
-stale copy. The next request is then a cold parse that returns the real 400 or 403.
-`SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is unchanged.
+(base page 404 or 410) or `AccessDeniedError`. That is a 403, or, for a docs.google.com
+sheet, a base page whose redirect chain ended on `accounts.google.com`: Google answers
+a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
+table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
+where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
+any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
+for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+serving the stale copy. The next request after a drop is a cold parse that returns the
+real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
+unchanged.
 
 ## api.py::google-size-suffix-regex — Google image URL suffix grammar
 

@@ -228,6 +228,30 @@ class TestRevalidationDropsGoneSources:
         second = api_client.post("/sheet", json={"url": URL}, headers=headers)
         assert second.status_code == status
 
+    def test_a_private_google_sheet_is_dropped_through_the_real_fetch(
+        self, api_client, artist, monkeypatch
+    ):
+        """Private means a redirect to the sign-in page and a 200 without tables:
+        the whole fetch pipeline runs, only the network is faked."""
+        import httpx
+
+        from src import fetcher
+        from src.fetcher import get_cached_etag
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "accounts.google.com":
+                return httpx.Response(200, html="<html><body>Sign in</body></html>")
+            return httpx.Response(302, headers={"location": "https://accounts.google.com/ServiceLogin"})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+        monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
+        _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+
+        first = api_client.post("/sheet", json={"url": URL})
+        assert first.headers["X-Cache-Status"] == "stale"
+        assert get_cached_etag(URL) is None
+        assert api_client.post("/sheet", json={"url": URL}).status_code == 403
+
     def test_a_failed_drop_does_not_escape_the_background_task(self, artist, monkeypatch):
         import asyncio
 

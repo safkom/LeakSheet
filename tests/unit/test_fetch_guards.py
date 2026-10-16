@@ -60,6 +60,52 @@ async def test_only_a_definitive_base_page_answer_means_the_source_is_gone(monke
     await client.aclose()
 
 
+SHEET = "https://docs.google.com/spreadsheets/d/SHEETABC/htmlview"
+SIGN_IN = "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fdocs.google.com%2F"
+
+
+def _signed_out_client() -> httpx.AsyncClient:
+    """The shape Google gives a private sheet: a redirect to a 200 sign-in page."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "accounts.google.com":
+            return httpx.Response(200, html="<html><body>Sign in</body></html>")
+        return httpx.Response(302, headers={"location": SIGN_IN})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+async def test_get_capped_reports_where_the_redirect_chain_ended():
+    async with _signed_out_client() as client:
+        r = await fetcher._get_capped(client, SHEET)
+    assert r.status_code == 200
+    assert r.url.host == "accounts.google.com"
+
+
+@pytest.mark.parametrize("fetch", ["async_fetch_and_parse", "async_fetch_sheet_html"])
+async def test_a_private_google_sheet_is_access_denied(monkeypatch, fetch):
+    """Google answers a private sheet with a redirect to the sign-in page, which
+    comes back as an ordinary 200 with no table. Left unmapped it parsed as
+    NoTablesError, which a background revalidation treats as transient."""
+    client = _signed_out_client()
+    monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
+    with pytest.raises(fetcher.AccessDeniedError):
+        await getattr(fetcher, fetch)(SHEET, use_cache=False)
+    await client.aclose()
+
+
+@pytest.mark.parametrize("fetch", ["async_fetch_and_parse", "async_fetch_sheet_html"])
+async def test_a_sign_in_redirect_from_a_mirror_is_not_access_denied(monkeypatch, fetch):
+    from src.config import register_tracker_hosts
+
+    register_tracker_hosts(["https://mirror.example/"])
+    client = _signed_out_client()
+    monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
+    # NoTablesError: the fetch ran and found nothing, rather than being refused up front.
+    with pytest.raises(fetcher.NoTablesError):
+        await getattr(fetcher, fetch)("https://mirror.example/tracker", use_cache=False)
+    await client.aclose()
+
+
 def test_a_disallowed_host_is_not_a_gone_source():
     assert not issubclass(fetcher.InvalidURLError, fetcher.SourceGoneError)
 
