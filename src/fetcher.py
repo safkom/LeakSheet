@@ -69,7 +69,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
-STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
+# Collapse-guard window (24h); the serve window is SERVE_STALE_TTL.
+# See docs/decisions.md::api.py::serve-stale-window
+STALE_CACHE_TTL = 86400
+SERVE_STALE_TTL = 7 * 86400  # max age served stale (and 304'd) while a revalidation runs
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Sheet HTML + parsed-JSON cache cap: see docs/decisions.md::fetcher.py — sheet cache size cap
@@ -1125,7 +1128,7 @@ def get_cached_age(url: str) -> float | None:
 
 
 def get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
@@ -1155,7 +1158,7 @@ def get_cached_parsed_bytes(
 
 
 async def async_get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)

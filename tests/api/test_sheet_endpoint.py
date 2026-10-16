@@ -101,7 +101,7 @@ class TestCacheHitAndValidation:
             return artist
 
         monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
-        # Older than DEFAULT_CACHE_TTL (1h) but within STALE_CACHE_TTL (24h).
+        # Older than DEFAULT_CACHE_TTL (1h) but within SERVE_STALE_TTL (7d).
         _populate_cache(URL, artist, age_seconds=2 * 3600)
         r = api_client.post("/sheet", json={"url": URL})
         assert r.status_code == 200
@@ -129,6 +129,66 @@ class TestCacheHitAndValidation:
         )
         assert r.status_code == 304
         assert names == [None, None]
+
+
+class TestServeStaleWindow:
+    """An entry is served (and 304'd) for a week while a background refresh runs;
+    past that the client waits for a cold parse."""
+
+    DAY = 86400
+
+    def test_two_day_old_entry_is_served_stale_and_revalidated(self, api_client, artist, monkeypatch):
+        calls: list[str] = []
+
+        async def fake_fetch(url, **kwargs):
+            calls.append(url)
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 200
+        assert r.headers["X-Cache-Status"] == "stale"
+        assert r.json()["total_songs"] == 4
+        assert calls == [URL]  # background revalidation scheduled
+
+    def test_matching_etag_at_two_days_gets_304_and_revalidates(self, api_client, artist, monkeypatch):
+        calls: list[str] = []
+
+        async def fake_fetch(url, **kwargs):
+            calls.append(url)
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        etag = _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        r = api_client.post(
+            "/sheet", json={"url": URL}, headers={"If-None-Match": f'"{etag}"'}
+        )
+        assert r.status_code == 304
+        assert r.headers["X-Cache-Status"] == "validated"
+        assert calls == [URL]
+
+    @pytest.mark.parametrize("with_etag", [False, True])
+    def test_eight_day_old_entry_is_a_cold_parse(self, api_client, artist, monkeypatch, with_etag):
+        calls: list[str] = []
+
+        async def fake_fetch(url, **kwargs):
+            calls.append(url)
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        etag = _populate_cache(URL, artist, age_seconds=8 * self.DAY)
+        headers = {"If-None-Match": f'"{etag}"'} if with_etag else {}
+        r = api_client.post("/sheet", json={"url": URL}, headers=headers)
+        assert r.status_code == 200
+        assert r.headers["X-Cache-Status"] == "miss"
+        assert calls == [URL]
+
+    def test_the_serve_window_is_a_week_and_outlives_the_collapse_guard(self):
+        from src import fetcher
+
+        assert fetcher.SERVE_STALE_TTL == 7 * self.DAY
+        assert fetcher.STALE_CACHE_TTL == self.DAY
 
 
 class TestForceRefresh:

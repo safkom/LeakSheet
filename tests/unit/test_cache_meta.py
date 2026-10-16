@@ -157,10 +157,25 @@ class TestCollapseGuard:
         _set_cached_parsed(URL, self._artist_with(10))
         assert self._cached_versions(tmp_path) == 10
 
+    @pytest.mark.parametrize(
+        ("age_hours", "kept"), [(23, 100), (25, 40)],
+    )
+    def test_the_guard_window_is_24h_not_the_serve_window(self, tmp_path, age_hours, kept):
+        """A 25 h entry is still served (SERVE_STALE_TTL is a week), but it no
+        longer outranks a smaller fresh parse."""
+        _set_cached_parsed(URL, self._artist_with(100))
+        meta_file = tmp_path / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - age_hours * 3600
+        meta_file.write_text(json.dumps(meta))
+
+        _set_cached_parsed(URL, self._artist_with(40))
+        assert self._cached_versions(tmp_path) == kept
+
     def test_a_genuinely_shrunken_tracker_recovers_once_the_entry_is_stale(self, tmp_path):
-        """The guard prefers the old copy only while it would still be served.
-        Past STALE_CACHE_TTL it is worthless, so a smaller parse must win or
-        the tracker is frozen forever."""
+        """The guard prefers the old copy only inside STALE_CACHE_TTL (24 h).
+        Past it a smaller parse must win, or a tracker that really shrank is
+        frozen for as long as the old entry is served."""
         _set_cached_parsed(URL, self._artist_with(100))
         key = _cache_key(URL)
         meta_file = tmp_path / f"{key}.meta.json"
