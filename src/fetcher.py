@@ -118,8 +118,8 @@ class PhaseTimer:
 
     def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
-        # gid → loaded, for every tab page fetched. A hub sibling is fetched twice, so
-        # the count is per tab and a later success clears an earlier failure.
+        # gid → whether its latest fetch loaded. A hub sibling is fetched twice (probe,
+        # then merge); the merge's page is the one kept, so the last result counts.
         self.tabs: dict[str, bool] = {}
         # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
         # the timer because the timer already reaches every stage of the pipeline.
@@ -140,7 +140,7 @@ class PhaseTimer:
         self.on_progress(event)
 
     def tab_loaded(self, gid: str, ok: bool) -> None:
-        self.tabs[gid] = ok or self.tabs.get(gid, False)
+        self.tabs[gid] = ok
 
     def tab_counts(self) -> tuple[int, int]:
         """(failed, total) tab pages of this parse."""
@@ -2102,7 +2102,8 @@ async def async_fetch_and_parse(
                     await _async_set_cached_parsed(url_norm, best_artist)
             return best_artist
 
-        # Fallback
+        # Fallback: no tab yielded songs, often because the tabs that held them failed.
+        _warn_failed_tabs(url_norm, t)
         html, title = await async_fetch_sheet_html(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )

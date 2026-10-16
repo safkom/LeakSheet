@@ -496,3 +496,32 @@ def test_the_rename_splice_matches_a_full_rewrite(artist):
         expected = {**json.loads(raw), "name": name, "slug": api.slugify(name)}
         assert data == expected
         assert tagged == api._display_etag(etag, name)
+
+
+class TestPartialLoadReachesTheTimingLine:
+    """The parse runs on a timer shared by every caller; the request logging sheet_timing
+    holds another, so the tab counts must be carried over or production always logs 0/0."""
+
+    @pytest.mark.parametrize("headers,marker", [
+        ({}, "status=miss "),
+        ({"Accept": "application/x-ndjson"}, "status=miss stream"),
+    ])
+    def test_sheet_timing_carries_the_failed_tab_count(
+        self, api_client, workbook_client, patch_sheets_client, caplog, headers, marker
+    ):
+        workbook = {
+            "100": read_synthetic("main_tab"),
+            "200": read_synthetic("misc_tab"),
+            "300": read_synthetic("art_tab"),
+        }
+        names = {"100": "Unreleased", "200": "Misc", "300": "Art"}
+        patch_sheets_client(workbook_client(workbook, tab_names=names, fail_gids={"300"}))
+
+        with caplog.at_level("INFO", logger="src.api"):
+            r = api_client.post("/sheet", json={"url": URL}, headers=headers)
+        assert r.status_code == 200
+
+        lines = [m for m in (rec.getMessage() for rec in caplog.records)
+                 if m.startswith("sheet_timing") and marker in m]
+        assert len(lines) == 1, caplog.text
+        assert "failed_tabs=1/3" in lines[0]

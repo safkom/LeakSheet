@@ -858,9 +858,12 @@ refused even over an entry past `STALE_CACHE_TTL`.
 
 A partial load is only logged, never refused: a tab that is permanently missing would
 otherwise keep its tracker out of the cache for good, and a large drop is the ratio's
-job. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches; a
-later success clears an earlier failure, as hub siblings are fetched twice). One WARNING
-per parse and the `failed_tabs=failed/total` field on `sheet_timing` report it.
+job. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches) and
+the last fetch of a gid wins: a hub sibling is fetched by the discovery probe and again by
+the merge, and the merge's page is the one whose songs are kept. `_parse_once` copies the
+shared parse timer's `tabs` into each caller's timer, as it does the phases. One WARNING
+per parse (also before the fallback parse) and the `failed_tabs=failed/total` field on
+`sheet_timing` report it.
 
 ## api.py::payload-duplication — measured, kept on purpose (2026-08-26)
 

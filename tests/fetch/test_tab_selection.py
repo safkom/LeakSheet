@@ -613,3 +613,78 @@ class TestFallbackParse:
 
         assert artist.total_songs == 0
         assert not (fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json").exists()
+
+
+class TestRevalidationRefetchesHubSiblings:
+    """With the cache bypassed (a background revalidation, force refresh) a hub sibling
+    is fetched by the discovery probe and again by the merge. The merge's page is the one
+    whose songs are kept, so its result is the one that counts."""
+
+    async def test_a_probe_success_then_a_failed_merge_fetch_is_a_failed_tab(
+        self, patch_sheets_client, caplog
+    ):
+        import httpx
+
+        from src.fetcher import PhaseTimer
+        from tests.conftest import make_workbook_handler
+
+        workbook = dict(TestHubWorkbook.HUB_WORKBOOK, **{"600": read_synthetic("main_tab")})
+        names = dict(TestHubWorkbook.HUB_NAMES, **{"600": "Leaks"})
+        inner = make_workbook_handler(workbook, tab_names=names)
+        requests_for_500 = 0
+
+        async def second_fetch_fails(request: httpx.Request) -> httpx.Response:
+            nonlocal requests_for_500
+            if request.url.params.get("gid") == "500":
+                requests_for_500 += 1
+                if requests_for_500 > 1:
+                    return httpx.Response(503, text="upstream error")
+            return await inner.handle_async_request(request)
+
+        patch_sheets_client(httpx.AsyncClient(
+            transport=httpx.MockTransport(second_fetch_fails), follow_redirects=True
+        ))
+        timer = PhaseTimer()
+        with caplog.at_level("WARNING", logger="src.fetcher"):
+            artist = await async_fetch_and_parse(
+                URL, cache_ttl=0, use_cache=True, write_cache=False, timer=timer
+            )
+
+        assert requests_for_500 == 2, "the fixture must reach the merge fetch"
+        assert artist.total_songs == 4, "the sibling's songs are missing"
+        assert "failed_tabs=1/3" in timer.log_line()
+        assert any("failed_tabs=1/3" in r.getMessage() for r in caplog.records)
+
+
+class TestFallbackReportsFailedTabs:
+    """The fallback runs when no tab yielded songs, which is exactly when a failed tab is
+    the likely cause: it must say so, or the empty result has no trace."""
+
+    async def test_a_hub_whose_siblings_failed_warns_before_the_fallback(
+        self, workbook_client, patch_sheets_client, caplog
+    ):
+        workbook = {k: v for k, v in TestHubWorkbook.HUB_WORKBOOK.items() if k != "400"}
+        names = {"100": "Main", "500": "Rare & Lost"}
+        patch_sheets_client(workbook_client(workbook, tab_names=names, fail_gids={"500"}))
+
+        with caplog.at_level("WARNING", logger="src.fetcher"):
+            artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+
+        assert artist.total_songs == 0, "the fixture must reach the fallback"
+        records = [r for r in caplog.records if "failed_tabs=" in r.getMessage()]
+        assert len(records) == 1
+        assert "failed_tabs=1/2" in records[0].getMessage()
+
+    async def test_it_warns_even_when_the_fallback_itself_fails(
+        self, workbook_client, patch_sheets_client, caplog
+    ):
+        from src.fetcher import FetchError
+
+        workbook = {"100": read_synthetic("main_tab")}
+        patch_sheets_client(
+            workbook_client(workbook, tab_names={"100": "Unreleased"}, fail_gids={"100"})
+        )
+        with caplog.at_level("WARNING", logger="src.fetcher"), pytest.raises(FetchError):
+            await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+
+        assert any("failed_tabs=1/1" in r.getMessage() for r in caplog.records)
