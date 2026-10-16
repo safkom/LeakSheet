@@ -19,6 +19,8 @@ from src.fetcher import (
     InvalidURLError,
     NetworkError,
     NoTablesError,
+    ParseError,
+    SourceGoneError,
     _cache_key,
     _normalize_url,
     _set_cache,
@@ -189,6 +191,80 @@ class TestServeStaleWindow:
 
         assert fetcher.SERVE_STALE_TTL == 7 * self.DAY
         assert fetcher.STALE_CACHE_TTL == self.DAY
+
+
+class TestRevalidationDropsGoneSources:
+    """The serve window must not prolong content its source has removed (DMCA):
+    a revalidation that finds the source gone or private deletes the entry.
+    Anything that may be transient leaves the stale copy serving."""
+
+    DAY = 86400
+
+    @staticmethod
+    def _failing_fetch(monkeypatch, exc):
+        async def fake_fetch(url, **kwargs):
+            raise exc
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+    @pytest.mark.parametrize(
+        ("exc", "status"),
+        [(SourceGoneError("404"), 400), (AccessDeniedError("403"), 403)],
+    )
+    @pytest.mark.parametrize("with_etag", [False, True])
+    def test_a_gone_source_stops_being_served(
+        self, api_client, artist, monkeypatch, exc, status, with_etag
+    ):
+        from src.fetcher import get_cached_etag
+
+        self._failing_fetch(monkeypatch, exc)
+        etag = _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        headers = {"If-None-Match": f'"{etag}"'} if with_etag else {}
+        first = api_client.post("/sheet", json={"url": URL}, headers=headers)
+        assert first.status_code in (200, 304)  # served stale; the check runs after it
+        assert get_cached_etag(URL) is None
+        assert not [p for p in api.CACHE_DIR.iterdir() if p.suffix != ".lock"]
+
+        second = api_client.post("/sheet", json={"url": URL}, headers=headers)
+        assert second.status_code == status
+
+    def test_a_failed_drop_does_not_escape_the_background_task(self, artist, monkeypatch):
+        import asyncio
+
+        def broken(url):
+            raise PermissionError("read-only cache")
+
+        self._failing_fetch(monkeypatch, SourceGoneError("404"))
+        monkeypatch.setattr(api, "drop_cached_entry", broken)
+        asyncio.run(api._background_revalidate(URL))
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            NetworkError("HTTP 503"),
+            NetworkError("HTTP 429"),
+            TimeoutError(),
+            NoTablesError("no tables"),
+            ParseError("zero eras"),
+            InvalidURLError("host not allowed for tracker fetching"),
+            RuntimeError("bug"),
+        ],
+    )
+    def test_a_transient_failure_keeps_serving_the_stale_copy(
+        self, api_client, artist, monkeypatch, exc
+    ):
+        from src.fetcher import get_cached_etag
+
+        self._failing_fetch(monkeypatch, exc)
+        etag = _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        first = api_client.post("/sheet", json={"url": URL})
+        assert first.headers["X-Cache-Status"] == "stale"
+        assert get_cached_etag(URL) == etag
+
+        second = api_client.post("/sheet", json={"url": URL})
+        assert second.status_code == 200
+        assert second.headers["X-Cache-Status"] == "stale"
+        assert second.json()["total_songs"] == 4
 
 
 class TestForceRefresh:

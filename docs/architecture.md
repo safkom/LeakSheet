@@ -47,7 +47,7 @@ through `flock`.
 3. The parsed cache decides the path:
    - **Fresh (under 1 h):** the stored bytes are served; a matching ETag gets a 304.
    - **Stale (1 h–7 days):** the stored bytes are served (a matching ETag still gets a 304);
-     a background task revalidates.
+     a background task revalidates, and drops the entry if the source is gone or private.
    - **Missing or older than 7 days:** a cold parse, while the client waits.
 4. A cold parse runs once per worker per URL (single-flight). It fetches the htmlview page,
    discovers the tabs, and tries the Unreleased tab alone first. Then it fetches the

@@ -38,6 +38,32 @@ def test_every_upstream_failure_is_a_network_error(exc):
         fetcher._raise_fetch_error(exc, "https://example.com/")
 
 
+@pytest.mark.parametrize(("status", "error"), [
+    (404, fetcher.SourceGoneError),
+    (410, fetcher.SourceGoneError),
+    (403, fetcher.AccessDeniedError),
+    (429, fetcher.NetworkError),
+    (500, fetcher.NetworkError),
+    (502, fetcher.NetworkError),
+    (503, fetcher.NetworkError),
+])
+async def test_only_a_definitive_base_page_answer_means_the_source_is_gone(monkeypatch, status, error):
+    """A background revalidation deletes the cached entry on SourceGoneError and
+    AccessDeniedError, so a throttle or an outage must never map to either."""
+    transport = httpx.MockTransport(lambda r: httpx.Response(status))
+    client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
+    with pytest.raises(error):
+        await fetcher.async_fetch_and_parse(
+            "https://docs.google.com/spreadsheets/d/SHEETABC/htmlview", use_cache=False
+        )
+    await client.aclose()
+
+
+def test_a_disallowed_host_is_not_a_gone_source():
+    assert not issubclass(fetcher.InvalidURLError, fetcher.SourceGoneError)
+
+
 async def test_concurrent_unknown_hosts_share_one_feed_refresh(monkeypatch):
     import asyncio
 

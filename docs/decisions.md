@@ -333,7 +333,19 @@ request refreshes the entry for the next one.
 is a different question: how long a *larger* old parse outranks a smaller new one. A
 week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
 while a day still covers a partial fetch landing on a recently refreshed copy. The two
-constants are not meant to be equal.
+constants are not meant to be equal. Known gap: a partial revalidation of a 1-7 day old
+entry is written, because the 24 h guard does not cover it; the next stale hit's
+revalidation repairs it.
+
+The window must not prolong content its source has revoked (DMCA). A failed revalidation
+only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
+for the whole week. `_background_revalidate` therefore calls `drop_cached_entry` (HTML,
+parse and metadata, under the entry lock) when the fetch fails with `SourceGoneError`
+(base page 404 or 410) or `AccessDeniedError` (403). Nothing else deletes: a timeout, a
+connection error, a 429 or any 5xx (all `NetworkError`), `NoTablesError` (it also covers
+every sub-page failing for transport reasons) and a disallowed host keep serving the
+stale copy. The next request is then a cold parse that returns the real 400 or 403.
+`SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is unchanged.
 
 ## api.py::google-size-suffix-regex — Google image URL suffix grammar
 

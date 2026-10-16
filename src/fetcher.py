@@ -1157,6 +1157,18 @@ def get_cached_parsed_bytes(
         return None
 
 
+def drop_cached_entry(url: str) -> None:
+    """Delete a tracker's cached HTML, parse and metadata.
+
+    For a source that is gone or private: see docs/decisions.md::api.py::serve-stale-window.
+    """
+    key = _cache_key(_normalize_url(url))
+    # The meta goes first: every reader needs it, so none sees a half-deleted entry.
+    with _entry_lock(key):
+        for suffix in (".meta.json", ".parsed.json", ".html"):
+            (CACHE_DIR / f"{key}{suffix}").unlink(missing_ok=True)
+
+
 async def async_get_cached_parsed_bytes(
     url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
@@ -1285,6 +1297,11 @@ class InvalidURLError(FetchError):
     pass
 
 
+class SourceGoneError(InvalidURLError):
+    """The source answered 404 or 410: the tracker no longer exists there."""
+    pass
+
+
 class AccessDeniedError(FetchError):
     """Sheet is private, banned, or access-restricted (HTTP 403)."""
     pass
@@ -1300,8 +1317,8 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         code = exc.response.status_code
         if code == 403:
             raise AccessDeniedError(f"Access denied (403): {url}") from exc
-        if code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        if code in (404, 410):
+            raise SourceGoneError(f"URL not found ({code}): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
     # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
     # upstream failing, none of them a server bug worth a 500.

@@ -185,3 +185,38 @@ class TestCollapseGuard:
 
         _set_cached_parsed(URL, self._artist_with(40))
         assert self._cached_versions(tmp_path) == 40
+
+
+class TestDropCachedEntry:
+    """A source that is gone must stop being served: the HTML, the parse and the
+    metadata all go, so nothing is served or kept as a collapse baseline."""
+
+    OTHER = "https://example.com/other"
+
+    def _files(self, tmp_path, url):
+        return sorted(p.name for p in tmp_path.glob(f"{_cache_key(url)}.*") if p.suffix != ".lock")
+
+    def test_drops_the_html_parse_and_meta(self, tmp_path):
+        _set_cache(URL, "<html></html>", "T")
+        _set_cached_parsed(URL, _artist())
+        assert len(self._files(tmp_path, URL)) == 3
+
+        fetcher.drop_cached_entry(URL)
+
+        assert self._files(tmp_path, URL) == []
+        assert fetcher.get_cached_parsed_bytes(URL) is None
+        assert fetcher.get_cached_etag(URL) is None
+        assert fetcher.get_cached_age(URL) is None
+
+    def test_leaves_other_trackers_and_tolerates_a_missing_entry(self, tmp_path):
+        _set_cached_parsed(self.OTHER, _artist("Other"))
+        fetcher.drop_cached_entry(URL)  # nothing cached: no error
+        fetcher.drop_cached_entry(URL)
+        assert len(self._files(tmp_path, self.OTHER)) == 2
+        assert fetcher.get_cached_parsed_bytes(self.OTHER) is not None
+
+    def test_a_dropped_entry_is_no_collapse_baseline(self, tmp_path):
+        _set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
+        fetcher.drop_cached_entry(URL)
+        _set_cached_parsed(URL, TestCollapseGuard._artist_with(40))
+        assert fetcher.get_cached_parsed_bytes(URL) is not None
