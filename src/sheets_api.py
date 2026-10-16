@@ -50,6 +50,15 @@ def _retry_after(resp: httpx.Response) -> float:
         return _DEFAULT_BACKOFF_S
 
 
+def _quota_hit(resp: httpx.Response, body: bytes) -> bool:
+    return resp.status_code == 429 or (resp.status_code == 403 and b"rateLimitExceeded" in body)
+
+
+def _pause(seconds: float) -> None:
+    global _backoff_until
+    _backoff_until = time.monotonic() + seconds
+
+
 def _rows_by_gid(body: bytes, gids: set[str]) -> dict[str, list[list[_Cell]]]:
     rows: dict[str, list[list[_Cell]]] = {}
     for sheet in json.loads(body).get("sheets") or []:
@@ -97,7 +106,6 @@ async def fetch_tabs(
 
     A tab missing from the result is the caller's to read from htmlview.
     """
-    global _backoff_until
     key = api_key()
     if not key or not tabs or time.monotonic() < _backoff_until:
         return None
@@ -113,7 +121,11 @@ async def fetch_tabs(
             break
         # The htmlview tab listing trims names; ask for the exact titles by sheet id.
         got = await get([("fields", "sheets.properties(sheetId,title)")])
-        if got is None or got[0].status_code != 200:
+        if got is None:
+            return None
+        if got[0].status_code != 200:
+            # Without a pause, a key this lookup cannot pass costs two calls on every parse.
+            _pause(_retry_after(got[0]) if _quota_hit(*got) else _DEFAULT_BACKOFF_S)
             return None
         try:
             exact = {str(p.get("sheetId")): p.get("title") for p in
@@ -124,8 +136,8 @@ async def fetch_tabs(
         titles = {gid: exact[gid] for gid in tabs if exact.get(gid)}
         if not titles:
             return None
-    if resp.status_code == 429 or (resp.status_code == 403 and b"rateLimitExceeded" in body):
-        _backoff_until = time.monotonic() + _retry_after(resp)
+    if _quota_hit(resp, body):
+        _pause(_retry_after(resp))
         logger.warning("Sheets API quota hit (%d); htmlview only for a while", resp.status_code)
         return None
     if resp.status_code != 200:
