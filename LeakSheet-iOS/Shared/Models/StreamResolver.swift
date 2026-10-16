@@ -135,8 +135,9 @@ enum StreamResolver {
         case .pillows(let id):
             return URL(string: "https://api.pillows.su/api/download/\(id)")
 
-        case .froste(let hash):
-            return URL(string: "https://music.froste.lol/song/\(hash)/download")
+        case .froste:
+            // The download endpoint needs a Referer, which only the backend proxy sends.
+            return streamURL(for: originalLink)
 
         case .imgur:
             // The /f/{id} link is an HTML page; only imgur's API, which the backend proxy

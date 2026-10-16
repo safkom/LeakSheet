@@ -70,9 +70,11 @@ struct StreamResolverTests {
         }
     }
 
-    @Test func `original quality maps froste to the download endpoint`() {
+    @Test func `original quality for froste routes through the stream proxy`() {
+        // froste needs a Referer that AVPlayer does not send; only the backend adds it.
         let url = StreamResolver.originalQualityURL(for: "https://music.froste.lol/song/0a1b2c")
-        #expect(url?.absoluteString == "https://music.froste.lol/song/0a1b2c/download")
+        #expect(url?.absoluteString.contains("/stream?url=") == true)
+        #expect(url?.host != "music.froste.lol")
     }
 
     @Test func `original quality for kraken routes through the stream proxy`() {

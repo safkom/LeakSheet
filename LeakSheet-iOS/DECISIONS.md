@@ -561,4 +561,6 @@ reads an unset key as true and an explicit choice as stored, so a user who turne
 keeps it off. Costs: lossless files stream whole (one WAV: 72 MB against 1.5 MB), and
 the original URL is fetched directly, so the backend's MIME sniffing, its 415 on non-media
 bodies and its host-health outcomes do not apply to pillows plays; a failed item shows
-its error and the Stream toggle is the manual fallback.
+its error and the Stream toggle is the manual fallback. froste stays proxied in original
+mode because its download needs a Referer that AVPlayer does not send; pixeldrain and
+pillows play direct.

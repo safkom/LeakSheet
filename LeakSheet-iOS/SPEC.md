@@ -419,9 +419,9 @@ streamable hosts.
 
 ### Original Quality URLs
 - pillows (all three aliases): `https://api.pillows.su/api/download/{id}`
-- froste: `https://music.froste.lol/song/{hash}/download`
 - pixeldrain: `https://pixeldrain.com/api/file/{id}?download`
 - imgur/kraken/gdrive: same URL (proxy serves original)
+- froste: the stream proxy too, because the download endpoint needs a Referer only the backend adds
 
 ### Queue
 - Max 200 items
