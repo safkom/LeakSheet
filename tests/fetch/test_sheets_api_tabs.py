@@ -126,6 +126,14 @@ class TestApiTabs:
         assert await _parse(rec, patch_sheets_client) == htmlview_only
         assert rec.api_requests() == []
 
+    @pytest.mark.parametrize("blank", ["", "   "])
+    async def test_an_empty_key_means_no_api_call(self, monkeypatch, blank, htmlview_only, patch_sheets_client):
+        # deploy.sh exports every named variable, so an unset key arrives as "".
+        monkeypatch.setenv("LEAKSHEET_GOOGLE_API_KEY", blank)
+        rec = Recorder()
+        assert await _parse(rec, patch_sheets_client) == htmlview_only
+        assert rec.api_requests() == []
+
     async def test_mirror_hosts_never_call_the_api(self, with_key, patch_sheets_client):
         rec = Recorder()
         await _parse(rec, patch_sheets_client, url="https://yetracker.net/")

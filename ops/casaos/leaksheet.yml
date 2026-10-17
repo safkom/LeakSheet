@@ -14,6 +14,7 @@ services:
       LEAKSHEET_TRUSTED_PROXY_HOPS: "${LEAKSHEET_TRUSTED_PROXY_HOPS}"
       LEAKSHEET_RATE_LIMIT_PER_MIN: "${LEAKSHEET_RATE_LIMIT_PER_MIN}"
       SENTRY_DSN: "${SENTRY_DSN}"
+      LEAKSHEET_GOOGLE_API_KEY: "${LEAKSHEET_GOOGLE_API_KEY}"
     volumes:
       - type: bind
         source: /DATA/AppData/leaksheet/cache
