@@ -9,13 +9,14 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from bisect import bisect_left
 from collections import Counter
 import unicodedata
 from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote_plus, urljoin, urlparse
+from urllib.parse import quote, unquote_plus, urljoin, urlparse
 
 
 from src.config import COLUMN_ALIASES
@@ -63,6 +64,10 @@ _MAX_HEADER_SCAN_ROWS = 11
 # Cap on unmatched rows recorded for diagnostics — prevents unbounded list growth
 # on trackers that have many footers, annotations, or oddly structured rows.
 _MAX_UNMATCHED_ROWS = 50
+
+# Rows scanned below a tagged heading for the era value that names it; bounds the scan
+# on a long run of label rows.
+_TAGGED_HEADING_LOOKAHEAD = 8
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +299,133 @@ def extract_table(html_content: str) -> list[list[_Cell]]:
         parser = _TableExtractor()
         parser.feed(html_content)
         rows = parser.rows
+    return rows
+
+
+_MAX_GRID_CELLS = 2_000_000
+# htmlview renders these as U+FFFD; "\n" and "\t" pass through.
+_GRID_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _grid_text(text: str) -> str:
+    return _GRID_CONTROL_RE.sub("\ufffd", text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _utf16_offsets(text: str) -> list[int]:
+    """UTF-16 offset of every character, then the total: API run offsets count astral characters twice."""
+    offsets = [0]
+    for ch in text:
+        offsets.append(offsets[-1] + (2 if ord(ch) > 0xFFFF else 1))
+    return offsets
+
+
+def _line_breaks_before(text: str) -> list[int]:
+    """Line breaks in text[:i] for every i, as _grid_text renders them: CRLF counts once."""
+    counts = [0]
+    for i, ch in enumerate(text):
+        counts.append(counts[-1] + (ch == "\r" or (ch == "\n" and (i == 0 or text[i - 1] != "\r"))))
+    return counts
+
+
+def _grid_link(uri: str) -> str:
+    # htmlview wraps every href once and _clean_link unwraps once, so a stored redirect survives.
+    return "https://www.google.com/url?q=" + quote(uri, safe="")
+
+
+def _grid_cell(value: dict) -> _Cell:
+    raw = value.get("formattedValue") or ""
+    if ((value.get("dataValidation") or {}).get("condition") or {}).get("type") == "BOOLEAN":
+        raw = ""  # a checkbox renders no text in htmlview
+    text = _grid_text(raw).strip()
+    if hyperlink := value.get("hyperlink"):
+        # htmlview renders a cell with a hyperlink as one anchor around all of it.
+        return _Cell(text=text, links=[_grid_link(hyperlink)], link_lines=[_grid_text(raw).count("\n")])
+    runs = value.get("textFormatRuns") or []
+    chips = value.get("chipRuns") or []
+    link_runs = [(i, uri) for i, run in enumerate(runs)
+                 if (uri := ((run.get("format") or {}).get("link") or {}).get("uri"))]
+    link_chips = [(chip.get("startIndex", 0), uri) for chip in chips
+                  if (uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"))]
+    if not link_runs and not link_chips:
+        return _Cell(text=text)
+    # Linear in the cell, not per run: a cell can hold thousands of runs.
+    offsets, breaks = _utf16_offsets(raw), _line_breaks_before(raw)
+
+    def index(units: int) -> int:
+        return min(bisect_left(offsets, units), len(raw))
+
+    spans: list[tuple[int, int, str]] = []
+    for i, uri in link_runs:
+        end = index(runs[i + 1].get("startIndex", 0)) if i + 1 < len(runs) else len(raw)
+        spans.append((index(runs[i].get("startIndex", 0)), end, uri))
+    for units, uri in link_chips:
+        start = index(units)
+        spans.append((start, start + 1, uri))
+    spans.sort()
+    return _Cell(
+        text=text,
+        links=[_grid_link(uri) for _start, _end, uri in spans],
+        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
+    )
+
+
+def extract_grid(sheet: dict) -> list[list[_Cell]]:
+    """The rows `extract_table` gives for this sheet's htmlview, from Sheets API v4 JSON.
+
+    In-cell images are not in the API, so no cell carries any. The htmlview quirks
+    mirrored here: docs/decisions.md::parser.py::extract_grid.
+    """
+    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
+    data = (sheet.get("data") or [{}])[0]
+    row_data = data.get("rowData") or []
+    row_meta = data.get("rowMetadata") or []
+    col_meta = data.get("columnMetadata") or []
+
+    def hidden(meta: list, i: int) -> bool:
+        m = meta[i] if i < len(meta) else {}
+        return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
+
+    n_rows = max(grid.get("rowCount", 0), len(row_data))
+    n_cols = grid.get("columnCount", 0)
+    # The body is trimmed but the grid size is not: an empty tab can declare millions of cells.
+    if max(n_rows, 1) * n_cols > _MAX_GRID_CELLS:
+        raise ValueError(f"grid of {n_rows} x {n_cols} cells is too large")
+    cols = [c for c in range(n_cols) if not hidden(col_meta, c)]
+    covered: set[tuple[int, int]] = set()
+    for m in sheet.get("merges") or []:
+        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
+        if hidden(row_meta, m.get("startRowIndex", 0)):
+            continue
+        for r in range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows)):
+            for c in range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols)):
+                covered.add((r, c))
+    frozen = grid.get("frozenRowCount", 0)
+    frozen_cols = grid.get("frozenColumnCount", 0)
+
+    def build(r: int, cell_of) -> list[_Cell]:
+        # htmlview puts an empty freezebar <td> after the frozen columns of every row.
+        row: list[_Cell] = []
+        placed = not frozen_cols
+        for c in cols:
+            if not placed and c >= frozen_cols:
+                row.append(_Cell())
+                placed = True
+            if (r, c) not in covered:
+                row.append(cell_of(c))
+        if not placed:
+            row.append(_Cell())
+        return row
+
+    rows: list[list[_Cell]] = []
+    for r in range(n_rows):
+        if frozen and r == frozen:
+            rows.append(build(-1, lambda _c: _Cell()))
+        if hidden(row_meta, r):
+            continue
+        values = (row_data[r].get("values") or []) if r < len(row_data) else []
+        row = build(r, lambda c: _grid_cell(values[c]) if c < len(values) else _Cell())
+        if row:
+            rows.append(row)
     return rows
 
 
@@ -1010,7 +1142,10 @@ def _transfer_era_metadata(source: Era, target: Era) -> None:
     for alt in source.alt_names:
         if alt not in target.alt_names:
             target.alt_names.append(alt)
-    # Prefer the longer/fuller name
+    # Prefer the longer/fuller name, unless both name different versions ([V1] vs [V10]).
+    source_tag, target_tag = _era_tag_key(source.name), _era_tag_key(target.name)
+    if source_tag and target_tag and source_tag != target_tag:
+        return
     if source.name and len(source.name) > len(target.name):
         target.name = source.name
 
@@ -1213,6 +1348,15 @@ def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> 
     return key
 
 
+def _era_tag_key(era_name: str) -> str:
+    """The stripped key plus every version tag ("Moon Tape [V2]" → "moon tape [v2]"), or ""
+    when the first line carries none. Tells apart siblings that share a stripped key."""
+    first = era_name.split("\n")[0]
+    tags = VERSION_TAG_PATTERN.findall(first)
+    key = _era_match_key(first) if tags else ""
+    return " ".join([key, *(f"[{t.lower()}]" for t in tags)]) if key else ""
+
+
 def _song_match_key(name: str) -> str:
     """Stable normalized song identity key for cross-era version linkage.
 
@@ -1308,9 +1452,81 @@ def _clean_link(url: str) -> str:
     return url
 
 
+# docs/decisions.md::parser.py::_split_links
+_URL_START_RE = re.compile(r"https?://", re.I)
+_ENCODED_WS = frozenset({"%20", "%09", "%0a", "%0d"})
+# A scheme right after one of these is a wrapper's payload (web.archive.org/web/<ts>/https://…,
+# href.li/?http://…), not a second link.
+_PAYLOAD_PREV = frozenset("/=?#:&@%+")
+# The same payload introducers, percent-encoded.
+_ENCODED_PAYLOAD_PREV = frozenset({"%3d", "%2f", "%3f", "%26", "%3a", "%23"})
+_GOOGLE_WRAPPER_RE = re.compile(r"https?://(?:www\.)?google\.com/url", re.I)
+
+
+def _netloc(url: str) -> str:
+    parts = url.split("/", 3)
+    return parts[2].lower() if len(parts) > 2 else ""
+
+
+def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
+    """Split *text* at each URL that starts after whitespace or glued onto the previous one.
+
+    *wrappers_only* splits an unwrapped href only at raw whitespace or a new Google wrapper:
+    a wrapper's own ``q=`` holds its URLs unencoded, and its tracking tail must stay with it.
+    """
+    text = text.strip()
+    pieces: list[str] = []
+    glued: list[bool] = []  # glued[k]: pieces[k] runs straight into pieces[k + 1]
+    start = 0
+    for m in _URL_START_RE.finditer(text, 1):
+        i = m.start()
+        j = i
+        while True:  # step back over whitespace, raw or percent-encoded
+            if j and text[j - 1].isspace():
+                j -= 1
+            elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
+                j -= 3
+            else:
+                break
+        if wrappers_only and not (
+            _GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])
+        ):
+            continue
+        if j == i:
+            prev = text[i - 1]
+            if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
+                continue
+            # A same-host scheme after "/" is a paste restarted, not a wrapper.
+            if prev in _PAYLOAD_PREV and not (
+                prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300])
+            ):
+                continue
+        if j > start:
+            pieces.append(text[start:j].rstrip(" ,;|"))
+            glued.append(j == i)
+        start = i
+    pieces.append(text[start:])
+    # A glued piece that is a prefix of the next one is an abandoned paste.
+    kept = [
+        p for k, p in enumerate(pieces)
+        if not (k < len(glued) and glued[k] and pieces[k + 1].startswith(p))
+    ]
+    return list(dict.fromkeys(p for p in kept if p))
+
+
+def _split_links(url: str) -> list[str]:
+    """One cleaned link per URL in *url*: a cell href or text can hold several.
+
+    Splits before unwrapping so each Google ``url?q=`` wrapper unwraps on its own, and after,
+    since a wrapper's payload can hold more URLs.
+    """
+    links = [link for part in _split_urls(url, wrappers_only=True) for link in _split_urls(_clean_link(part))]
+    return list(dict.fromkeys(links))
+
+
 def _extract_links_from_cell(cell: _Cell) -> list[str]:
-    """Get cleaned links from a cell."""
-    return [_clean_link(link) for link in cell.links if link]
+    """Get cleaned links from a cell, one per URL."""
+    return [link for raw in cell.links for link in _split_links(raw)]
 
 
 def _register_era_keys(
@@ -1375,7 +1591,8 @@ def _era_own_keys(era: Era) -> set[str]:
 
     Used by the positional-exact prior: a row value matching ANY of these
     belongs to this era when it is the current header, regardless of which
-    sibling era registered the shared key first in the global dicts.
+    sibling era registered the shared key first in the global dicts. The tag
+    keys also find a tagged row's sibling era.
     """
     keys: set[str] = set()
     primary = _era_match_key(era.name)
@@ -1384,6 +1601,9 @@ def _era_own_keys(era: Era) -> set[str]:
     full = _normalize_unicode(era.name).lower().strip()
     if full:
         keys.add(full)
+    tag_key = _era_tag_key(era.name)
+    if tag_key:
+        keys.add(tag_key)
     for alt in era.alt_names:
         alt_key = _era_match_key(alt)
         if alt_key:
@@ -1394,9 +1614,9 @@ def _era_own_keys(era: Era) -> set[str]:
                 keys.add(part_key)
     if " / " in era.name:
         for part in era.name.split(" / "):
-            part_key = _era_match_key(part)
-            if part_key:
-                keys.add(part_key)
+            for part_key in (_era_match_key(part), _era_tag_key(part)):
+                if part_key:
+                    keys.add(part_key)
     return keys
 
 
@@ -1600,38 +1820,87 @@ def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
 def _resolve_row_era(
     row_era: str,
     current_era: Era | None,
+    eras: list[Era],
     era_by_key: dict[str, Era],
     era_by_key_fallback: dict[str, Era],
     own_keys_cache: dict[int, set[str]],
-) -> tuple[Era | None, bool]:
-    """The era a row's era-column value names, and whether only a fuzzy match found it.
+) -> tuple[Era | None, bool, bool]:
+    """The era a row's era-column value names, whether only a fuzzy match found it, and
+    whether it is a tagged sibling of the current era (which then stays current).
 
-    Tried in order: the current era's own keys, the primary then the fallback keys
+    Tried in order: the current era's own keys, the nearest era whose own name carries the
+    row's version tags, the current era's stripped key, the primary then the fallback keys
     (each by full then stripped key), a fuzzy match on the current era, then on all.
     A positional fuzzy hit is registered as a fallback key for the rows that follow.
     """
+    def own_keys(era: Era) -> set[str]:
+        own = own_keys_cache.get(id(era))
+        if own is None:
+            own = own_keys_cache[id(era)] = _era_own_keys(era)
+        return own
+
     norm = _normalize_unicode(row_era).lower()
     stripped = _era_match_key(row_era)
-    if current_era is not None:
-        own = own_keys_cache.get(id(current_era))
-        if own is None:
-            own = own_keys_cache[id(current_era)] = _era_own_keys(current_era)
-        if norm in own or stripped in own:
-            return current_era, False
+    tag_key = _era_tag_key(row_era)
+    own = own_keys(current_era) if current_era is not None else set()
+    if norm in own or tag_key in own:
+        return current_era, False, False
+    # Own names only: a section-label alias never makes an era a tagged sibling.
+    tagged = next((e for e in reversed(eras) if tag_key in own_keys(e)), None) if tag_key else None
+    if tagged is not None:
+        return tagged, False, stripped in own
+    if stripped in own:
+        return current_era, False, False
     for keys in (era_by_key, era_by_key_fallback):
         for key in (norm, stripped):
             era = keys.get(key)
             if era is not None:
-                return era, False
+                return era, False, False
     cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
     if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
         era_by_key_fallback.setdefault(stripped, current_era)
         logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
-        return current_era, True
+        return current_era, True, False
     era = _fuzzy_era_match(norm, era_by_key)
     if era is not None:
         logger.debug("Fuzzy era match: %r → %r", norm, era.name)
-    return era, era is not None
+    return era, era is not None, False
+
+
+def _heads_tagged_era(
+    label: str,
+    rows: list[list[_Cell]],
+    row_idx: int,
+    col_map: dict[str, int],
+    current_era: Era,
+    declared_keys: set[str],
+) -> bool:
+    """Whether a single-line Name-column row such as "Album [V6]" starts an era, not a section.
+
+    The first Era-column value below it must carry the same version tags, and the label
+    must not repeat a declared era's tag or be a version group of the era above (the
+    untagged album it tags). See docs/decisions.md::parser.py::tagged-name-row-era.
+    """
+    tag_key = _era_tag_key(label)
+    if not tag_key:
+        return False
+    own = _era_own_keys(current_era)
+    if tag_key in own or tag_key in declared_keys:
+        return False
+    if not _era_tag_key(current_era.name) and _era_match_key(label) in own:
+        return False
+    era_col = col_map.get("era", 0)
+    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
+        if _is_empty_row(row) or _is_section_separator(row):
+            continue
+        if _is_era_header(row):
+            return False
+        row_era = _get_cell_text(row, era_col)
+        if row_era:
+            return _era_tag_key(row_era) == tag_key
+        if sum(1 for c in row if c.text.strip()) > 3:
+            return False
+    return False
 
 
 def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
@@ -1721,6 +1990,9 @@ def parse_sheet(
     _needs_name_backfill: set[int] = set()  # id(era) values
     # id(era) → its own key forms, for the positional-exact prior.
     _era_own_keys_cache: dict[int, set[str]] = {}
+    # Own keys of eras[:declared_upto], so a repeated tagged heading is found in O(1).
+    declared_keys: set[str] = set()
+    declared_upto = 0
     # (id(era), song base name) → Song, for O(1) version grouping
     song_index: dict[tuple[int, str], Song] = {}
     in_footer = False
@@ -1820,19 +2092,21 @@ def parse_sheet(
 
         if row_era:
             # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
-            matched_era, fuzzy = _resolve_row_era(
-                row_era, current_era, era_by_key, era_by_key_fallback, _era_own_keys_cache
+            matched_era, fuzzy, sibling = _resolve_row_era(
+                row_era, current_era, eras, era_by_key, era_by_key_fallback, _era_own_keys_cache
             )
             fuzzy_matched_rows += fuzzy
 
             if matched_era is not None:
-                current_era = matched_era
+                # A tagged row's hop to a sibling keeps the header it sits under current.
+                if not sibling:
+                    current_era = matched_era
                 version = _parse_song_row(row, col_map)
                 if version:
                     if _is_section_label_version(version, row, era_col):
-                        current_era.sections.append(Section(name=version.name, notes=version.notes))
+                        matched_era.sections.append(Section(name=version.name, notes=version.notes))
                     else:
-                        _add_version_to_era(current_era, version, song_index)
+                        _add_version_to_era(matched_era, version, song_index)
                         song_rows += 1
                 continue
 
@@ -1934,9 +2208,17 @@ def parse_sheet(
             has_multiline_name = "\n" in name_val
             non_empty = sum(1 for c in row if c.text.strip())
             if non_empty <= 3:
-                if has_multiline_name and _looks_like_era_name(name_first_line):
-                    # Stats-less era header with multi-line name (Travis style).
-                    # Create a new era, capture description, and scan for art image.
+                heads_tagged = False
+                if current_era is not None and not has_multiline_name:
+                    for era in eras[declared_upto:]:
+                        declared_keys |= _era_own_keys(era)
+                    declared_upto = len(eras)
+                    heads_tagged = _heads_tagged_era(
+                        name_first_line, rows, row_idx, col_map, current_era, declared_keys
+                    )
+                if heads_tagged or (has_multiline_name and _looks_like_era_name(name_first_line)):
+                    # Stats-less era header: multi-line name (Travis style) or a tagged heading
+                    # its rows name. Create a new era, capture description, and scan for art image.
                     notes_idx = col_map.get("notes", 2)
                     desc_text = _get_cell_text(row, notes_idx)
                     _era_art_url = _first_row_image(row, prefer_idx=name_col_idx)
@@ -1948,8 +2230,11 @@ def parse_sheet(
                     )
                     eras.append(new_era)
                     # Register full name_val so _era_match_key strips the
-                    # parenthetical year and matches e.g. "The Graduates"
-                    _register_era_keys(new_era, name_val, era_by_key, era_by_key_fallback)
+                    # parenthetical year and matches e.g. "The Graduates". A tagged heading
+                    # only aliases, so a later untagged "Album" era keeps its own key.
+                    _register_era_keys(
+                        new_era, name_val, era_by_key_fallback if heads_tagged else era_by_key, era_by_key_fallback
+                    )
                     current_era = new_era
                 elif current_era is not None:
                     # Single-line section label ("Other Media", "OG / Uncut Files"): a named section
@@ -2661,9 +2946,9 @@ def _looks_like_section_label(text: str) -> bool:
 
 
 def parse_misc_tab(
-    html: str, kind: str, artist_eras: Iterable[str] = ()
+    html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
-    """Parse a Misc or Music Videos tab HTML export into MiscEntry rows.
+    """Parse a Misc or Music Videos tab (htmlview HTML, or rows from extract_grid) into MiscEntry rows.
 
     ``kind`` is ``"misc"`` or ``"music_videos"`` and is stamped on each entry
     as ``source_tab``. ``artist_eras`` are the main tab's era names, used to
@@ -2672,7 +2957,7 @@ def parse_misc_tab(
     keep the literal era label from their era column (or the last era header);
     no fuzzy matching against main-tab eras.
     """
-    rows = extract_table(html)
+    rows = extract_table(html) if isinstance(html, str) else html
     if not rows:
         return []
 
@@ -2765,11 +3050,11 @@ def parse_misc_tab(
         links_idx = col_map.get("links", -1)
         if 0 <= links_idx < len(row):
             cell = row[links_idx]
-            links.extend(_clean_link(l) for l in cell.links)
+            links.extend(l for raw in cell.links for l in _split_links(raw))
             if not links:
                 text = cell.text.strip()
                 if text.startswith(("http://", "https://")):
-                    links.append(text)
+                    links.extend(_split_links(text))
         links = [l for l in links if l]
 
         streaming_text = cell_text(row, "streaming").lower()

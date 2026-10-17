@@ -23,11 +23,14 @@ version carries one, so filters like No Snippets don't strip a song's badge enti
 
 A Google Sheet is its id: every spelling collapses to `.../d/{id}/htmlview`, found in
 `docs.google.com` + path only when the host is docs.google.com (a mirror or a lookalike
-keeps its own URL). Scheme and host fold, userinfo and the scheme's default port go, the
-fragment goes, and a bare host gets a trailing slash. The cache key and the recents
-dedup compare these strings, so a rule the backend reads differently splits one tracker in two.
-`Fixtures/stream_links.json` replays the backend's answers; differences that remain are
-pinned there as known differences.
+keeps its own URL). A published sheet (`/d/e/{id}`) is the exception: its own id space
+collapses to `.../d/e/{id}/pubhtml`, because htmlview 404s for it. Scheme and host fold,
+userinfo and the scheme's default port go, the fragment goes, and a bare host gets a trailing
+slash. The cache key and the recents dedup compare these strings, so a rule the backend reads
+differently splits one tracker in two.
+`Fixtures/stream_links.json` replays the backend's answers; the few differences that remain
+(Foundation encoding and parsing a URL where Python passes it raw; a Drive id escaped with
+`%` in a query that also holds an invalid character) are pinned there as known differences.
 
 ## APIClient.swift::chunked-download — chunked delegate download
 

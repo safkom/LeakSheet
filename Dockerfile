@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14.8-slim
 
 # Pinned, not :latest — a floating installer would undo the point of uv.lock.
 COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv

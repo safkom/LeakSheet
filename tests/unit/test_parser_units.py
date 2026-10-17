@@ -9,6 +9,8 @@ dumps live in tests/quality/ behind the ``accuracy`` marker.
 from __future__ import annotations
 
 
+from urllib.parse import quote
+
 import pytest
 
 from src.models import Badge, extract_badge, extract_version_tag
@@ -151,10 +153,10 @@ class TestFetcherHelpers:
         assert _infer_artist_name("Playboi Carti Tracker [Currently in Use] - Google Drive") == "Playboi Carti"
         assert _infer_artist_name("Kendrick Lamar Music Tracker - Google Drive") == "Kendrick Lamar"
 
-    def test_extract_sheet_id(self):
-        from src.fetcher import _extract_sheet_id
-        url = "https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/htmlview"
-        assert _extract_sheet_id(url) == "1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ"
+    def test_sheet_page_path(self):
+        from src.fetcher import _sheet_page_path
+        url = "https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/edit"
+        assert _sheet_page_path(url) == "/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/htmlview"
 
     def test_normalize_url(self):
         from src.fetcher import _normalize_url
@@ -892,6 +894,155 @@ class TestLinkCleaning:
         assert _clean_link("https://www.google.com/url?q=x#[invalid")
 
 
+class TestLinkSplitting:
+    """One wire link per URL when a cell holds several."""
+
+    A = "https://pillows.su/f/aaa111"
+    B = "https://pillows.su/f/bbb222"
+
+    @pytest.mark.parametrize("sep", ["\n", " ", "\r\n", "\t", " \n\n ", "%20", "%0A"])
+    def test_separated_urls_split(self, sep):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A}{sep}{self.B}") == [self.A, self.B]
+
+    def test_glued_urls_split_at_the_second_scheme(self):
+        from src.parser import _split_links
+        assert _split_links(self.A + self.B) == [self.A, self.B]
+        assert _split_links(self.A + "http://example.test/x") == [self.A, "http://example.test/x"]
+
+    def test_three_urls_keep_order(self):
+        from src.parser import _split_links
+        c = "https://pixeldrain.com/u/ccc333"
+        assert _split_links(f"{self.A}\n{self.B}{c}") == [self.A, self.B, c]
+
+    def test_separators_around_the_ends_are_dropped(self):
+        from src.parser import _split_links
+        assert _split_links(f"  {self.A} \n {self.B}\n") == [self.A, self.B]
+
+    def test_a_single_url_is_untouched(self):
+        from src.parser import _split_links
+        assert _split_links(self.A) == [self.A]
+
+    def test_space_inside_a_url_without_a_second_url_stays(self):
+        from src.parser import _split_links
+        url = "https://genius.com/search?q=Some Artist Some Song"
+        assert _split_links(url) == [url]
+
+    @pytest.mark.parametrize("url", [
+        "https://web.archive.org/web/20250101000000/https://site.test/page#frag",
+        "https://web.archive.org/web/2025if_/http://site.test/page",
+        "https://archive.ph/20250101000000/https://site.test/page",
+        "https://href.li/?http://site.test/a.mp3",
+        "https://redirect.test/go?url=https://site.test/a",
+        "https://mega.nz/folder/AbCd1234#https://site.test/a",
+        "https://web.archive.org/web/2025/https://www.google.com/url?q%3Dhttps://site.test/a",
+    ])
+    def test_a_wrapper_around_one_url_is_one_link(self, url):
+        from src.parser import _split_links
+        assert _split_links(url) == [url]
+
+    def test_google_wrapper_is_unwrapped(self):
+        from src.parser import _split_links
+        wrapped = "https://www.google.com/url?q=https%3A%2F%2Fpillows.su%2Ff%2Faaa111&sa=D"
+        assert _split_links(wrapped) == [self.A]
+
+    def test_google_wrapper_holding_two_urls_splits(self):
+        from src.parser import _split_links
+        wrapped = "https://www.google.com/url?q=" + quote(f"{self.A} {self.B}") + "&sa=D"
+        assert _split_links(wrapped) == [self.A, self.B]
+
+    def test_two_google_wrappers_in_one_href_split(self):
+        from src.parser import _split_links
+        w = "https://www.google.com/url?q=%s&sa=D"
+        both = w % quote(self.A) + "\n" + w % quote(self.B)
+        assert _split_links(both) == [self.A, self.B]
+
+    TAIL = "&sa=D&source=editors&ust=1&usg=x"
+
+    @pytest.mark.parametrize("sep", ["%0A", "%20", "", "+"])
+    def test_htmlview_wrapper_with_raw_scheme_inside_q_unwraps_every_link(self, sep):
+        from src.parser import _split_links
+        wrapped = f"https://www.google.com/url?q={self.A}{sep}{self.B}{self.TAIL}"
+        assert _split_links(wrapped) == [self.A, self.B]
+
+    def test_raw_whitespace_between_htmlview_wrappers_splits(self):
+        from src.parser import _split_links
+        w = "https://www.google.com/url?q=%s" + self.TAIL
+        assert _split_links(w % self.A + "\n" + w % self.B) == [self.A, self.B]
+        assert _split_links(w % self.A + w % self.B) == [self.A, self.B]
+
+    def test_htmlview_and_grid_hrefs_give_the_same_links(self):
+        from src.parser import _grid_link, _split_links
+        uri = f"{self.A}\n{self.B}"
+        htmlview = f"https://www.google.com/url?q={self.A}%0A{self.B}{self.TAIL}"
+        assert _split_links(_grid_link(uri)) == _split_links(htmlview) == [self.A, self.B]
+
+    @pytest.mark.parametrize("sep", [", ", ",", "; ", " | ", " ,"])
+    def test_list_punctuation_is_not_left_on_the_earlier_link(self, sep):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A}{sep}{self.B}") == [self.A, self.B]
+
+    def test_text_between_urls_stays_with_the_earlier_link(self):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A} (mirror) {self.B}") == [f"{self.A} (mirror)", self.B]
+
+    def test_a_repeated_url_is_listed_once(self):
+        from src.parser import _split_links
+        assert _split_links(self.A + self.A) == [self.A]
+        assert _split_links(f"{self.A}\n{self.A}") == [self.A]
+
+    def test_a_restarted_paste_keeps_the_complete_url(self):
+        from src.parser import _split_links
+        assert _split_links("https://pillows.su/f/" + self.B) == [self.B]
+        assert _split_links("https://pillows.su/f/" + self.A + self.B) == [self.A, self.B]
+
+    def test_a_shorter_url_before_a_longer_one_across_whitespace_stays(self):
+        from src.parser import _split_links
+        profile, track = "https://site.test/artist", "https://site.test/artist/track"
+        assert _split_links(f"{profile}\n{track}") == [profile, track]
+
+    def test_empty_and_blank_input(self):
+        from src.parser import _split_links
+        assert _split_links("") == []
+        assert _split_links(" \n ") == []
+
+    def test_main_tab_anchor_holding_two_urls_yields_two_links(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Link(s)</td></tr>"
+            "<tr><td>Era One</td><td>Song One</td><td>n</td>"
+            f"<td><a href='{self.A}\n{self.B}'>l</a></td></tr>"
+            "</table>"
+        )
+        version = parse_sheet(html, "Test").eras[0].songs[0].versions[0]
+        assert version.links == [self.A, self.B]
+
+    def test_notes_cell_anchor_is_split_too(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Link(s)</td></tr>"
+            "<tr><td>Era One</td><td>Song One</td>"
+            f"<td>see <a href='{self.A}{self.B}'>here</a></td><td></td></tr>"
+            "</table>"
+        )
+        version = parse_sheet(html, "Test").eras[0].songs[0].versions[0]
+        assert version.links == [self.A, self.B]
+
+    def test_misc_tab_anchor_and_text_fallback_split(self):
+        from src.parser import parse_misc_tab
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Type</td><td>Link(s)</td></tr>"
+            f"<tr><td>Era One</td><td>Entry A</td><td>Video</td><td><a href='{self.A} {self.B}'>l</a></td></tr>"
+            f"<tr><td>Era One</td><td>Entry B</td><td>Video</td><td>{self.A}<br>{self.B}</td></tr>"
+            "</table>"
+        )
+        entries = parse_misc_tab(html, "misc")
+        assert [e.links for e in entries] == [[self.A, self.B], [self.A, self.B]]
+
+
 class TestSlashEraRegistration:
     @staticmethod
     def _register(era_name, primary, fallback):
@@ -1212,6 +1363,263 @@ class TestSiblingEraKeyCollision:
         artist = parse_sheet(html, "Test")
         by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
         assert by_name["Fre3$tyle [V2]"] == ["Song A", "Song C"]
+
+
+class TestVersionTaggedRowsFindTheirSibling:
+    """A row whose era value carries a version tag belongs to the sibling era with
+    that tag, not to the current header that merely shares the stripped key."""
+
+    HEADERS = {
+        "stats": "<tr><td>1 Full</td><td>Moon Tape {tag}</td><td></td><td></td></tr>",
+        "multiline_name": "<tr><td></td><td>Moon Tape {tag}<br>(Moon Tape {tag}, 2016)</td><td></td><td></td></tr>",
+        "slash_name": "<tr><td>1 Full</td><td>Moon Tape {tag} / Side {tag}</td><td></td><td></td></tr>",
+    }
+
+    @pytest.mark.parametrize("shape", HEADERS)
+    def test_interleaved_tagged_rows(self, shape):
+        from src.parser import parse_sheet
+        header = self.HEADERS[shape]
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            + header.format(tag="[V1]")
+            + "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td></td></tr>"
+            + header.format(tag="[V2]")
+            + "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song C</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape</td><td>Song D</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Unrelated Era</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song E</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        v1, v2 = (e for e in artist.eras if e.name.startswith("Moon Tape"))
+        assert [s.base_name for s in v1.songs] == ["Song A", "Song B"]
+        # A bare row keeps the positional prior; a far tagged row still finds its era.
+        assert [s.base_name for s in v2.songs] == ["Song C", "Song D", "Song E"]
+
+    def test_rows_after_a_hop_stay_with_their_header(self):
+        # The hop is per row: a bare row and a blank-era row right after it keep the
+        # positional prior, so the V2 header is not emptied and merged away.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+            "<tr><td></td><td>Moon Tape [V1]<br>(2016)</td><td></td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td></td><td>Moon Tape [V2]<br>(2017)</td><td></td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td>Moon Tape</td><td>Song C</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td></td><td>Song D</td><td>note</td><td>CD Quality</td><td>https://example.com/d</td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name == {"Moon Tape [V1]": ["Song A", "Song B"], "Moon Tape [V2]": ["Song C", "Song D"]}
+
+    def test_nearest_same_tag_era_wins(self):
+        # Repeated headers: a tagged row goes to the latest era with its tag, and an
+        # extra tag ("[V1] [Alt]") is a different era from the plain "[V1]".
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1] [Alt]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1] [Alt]</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song C</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song D</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song E</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song F</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V1] [Alt]</td><td>Song G</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        assert [[s.base_name for s in e.songs] for e in artist.eras] == [
+            ["Song A", "Song G"], ["Song B"], ["Song C"], ["Song D", "Song E"], ["Song F"],
+        ]
+
+    def test_emptied_sibling_header_does_not_rename_its_merge_target(self):
+        # Every row under the V10 header is tagged V1, so the empty V10 stub merges
+        # into V1; V1 keeps its own name rather than the longer stub name.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V10]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        assert [(e.name, [s.base_name for s in e.songs]) for e in artist.eras] == [
+            ("Moon Tape [V1]", ["Song A", "Song B"]),
+        ]
+
+
+class TestTaggedNameRowHeadsAnEra:
+    """A single-line Name-column row carrying a version tag ("Moon Tape [V3]") is an era
+    heading when the rows below name that tag, and a section otherwise."""
+
+    HEAD = "<table><tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+
+    @staticmethod
+    def _song(era, name):
+        return f"<tr><td>{era}</td><td>{name}</td><td>note</td><td>CD Quality</td><td>https://example.com/s</td></tr>"
+
+    @staticmethod
+    def _label(name):
+        return f"<tr><td></td><td>{name}</td><td></td><td></td></tr>"
+
+    def _eras(self, *rows):
+        from src.parser import parse_sheet
+        artist = parse_sheet(self.HEAD + "".join(rows) + "</table>", "Test")
+        return [(e.name, [s.base_name for s in e.songs]) for e in artist.eras]
+
+    def test_tagged_heading_after_an_unrelated_era_starts_an_era(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("Moon Tape [V3]", "Song B"),
+            self._song("Moon Tape", "Song C"),
+        )
+        # The bare row after the heading keeps the positional prior.
+        assert eras == [("Star Tape", ["Song A"]), ("Moon Tape [V3]", ["Song B", "Song C"])]
+
+    def test_tagged_heading_after_a_sibling_version_starts_an_era(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V1]", "Song A"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song B"),
+        )
+        assert eras == [("Moon Tape [V1]", ["Song A"]), ("Moon Tape [V2]", ["Song B"])]
+
+    def test_a_run_of_tagged_headings_each_start_an_era(self):
+        # Sub-labels between a heading and its rows do not hide the reference.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V1]"),
+            "<tr><td></td><td></td><td></td><td></td></tr>",
+            self._label("Never Recorded"),
+            self._song("Moon Tape [V1]", "Song B"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song C"),
+        )
+        assert eras == [
+            ("Star Tape", ["Song A"]), ("Moon Tape [V1]", ["Song B"]), ("Moon Tape [V2]", ["Song C"]),
+        ]
+
+    def test_version_group_of_an_untagged_album_stays_a_section(self):
+        # "Moon Tape [V1]" under the stats header "Moon Tape" is that album's version group.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song B"),
+        )
+        assert eras == [("Moon Tape", ["Song A", "Song B"])]
+
+    def test_heading_restating_the_current_header_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song A"),
+        )
+        assert eras == [("Moon Tape [V2]", ["Song A"])]
+
+    def test_heading_nothing_below_refers_to_stays_a_section(self):
+        # Blank-era rows under the label carry no evidence that it is an era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("", "Song B"),
+            self._song("Star Tape", "Song C"),
+        )
+        assert eras == [("Star Tape", ["Song A", "Song B", "Song C"])]
+
+    def test_heading_followed_by_another_tag_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("Moon Tape [V4]", "Song B"),
+        )
+        assert eras == [("Star Tape", ["Song A", "Song B"])]
+
+    def test_repeated_heading_reuses_the_era_it_started(self):
+        # The second "Moon Tape [V1]" heading is a section; its row goes to the existing era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song B"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V1]", ["Song A", "Song B"]), ("Sun Tape", [])]
+
+    def test_heading_does_not_claim_the_bare_name_of_a_later_era(self):
+        # The heading's stripped key is a fallback alias only, so a later stats era
+        # "Moon Tape" still owns its bare rows from another era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Moon Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song B"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song C"),
+        )
+        assert eras == [
+            ("Star Tape", []), ("Moon Tape [V1]", ["Song A"]), ("Moon Tape", ["Song B", "Song C"]), ("Sun Tape", []),
+        ]
+
+    def test_stats_header_inside_the_window_stops_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert [name for name, _ in eras] == ["Star Tape", "Sun Tape"]
+
+    def test_separator_row_is_skipped_by_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td></td><td>Instrumentals</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V3]", ["Song A"])]
+
+    @pytest.mark.parametrize(("labels_between", "is_era"), [(7, True), (8, False)])
+    def test_search_reaches_eight_rows_below_the_heading(self, labels_between, is_era):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            *(self._label(f"Group {i}") for i in range(labels_between)),
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert ("Moon Tape [V3]" in [name for name, _ in eras]) is is_era
+
+    def test_untagged_name_row_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape"),
+            self._song("Moon Tape", "Song B"),
+        )
+        assert [name for name, _ in eras] == ["Star Tape"]
 
 
 class TestStatsLessHeaderAliasesStayFallback:

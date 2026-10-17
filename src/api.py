@@ -102,6 +102,29 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# Secrets this process holds. Frame locals are scrubbed only by variable name, so these
+# are also replaced by value anywhere in an event or log line.
+_SECRET_ENV = ("LEAKSHEET_GOOGLE_API_KEY", "LEAKSHEET_ADMIN_TOKEN")
+
+
+def _redact(value, secrets: list[str]):
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[Filtered]")
+        return value
+    if isinstance(value, dict):
+        return {k: _redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact(v, secrets) for v in value]
+    return value
+
+
+def _scrub_secrets(payload: dict, _hint: dict) -> dict:
+    # Short values would blank unrelated text; real keys and tokens are long.
+    secrets = [v for name in _SECRET_ENV if len(v := os.environ.get(name, "").strip()) >= 8]
+    return _redact(payload, secrets) if secrets else payload
+
+
 def _sentry_options(dsn: str) -> dict:
     """GlitchTip settings: errors and INFO+ log lines, no request PII.
 
@@ -120,8 +143,10 @@ def _sentry_options(dsn: str) -> dict:
         send_default_pii=False,
         # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
         event_scrubber=EventScrubber(
-            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token"]
+            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token", "x-goog-api-key"]
         ),
+        before_send=_scrub_secrets,
+        before_send_log=_scrub_secrets,
         integrations=[
             StarletteIntegration(failed_request_status_codes=set()),
             FastApiIntegration(failed_request_status_codes=set()),
@@ -999,7 +1024,7 @@ _IMAGE_MAX_DECODE_PIXELS = MAX_DECODE_PIXELS  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
 # sheets-images 302s to login for N>0, so those take the Pillow path.
-_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
+_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com\Z", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
 

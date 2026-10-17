@@ -14,7 +14,7 @@ direct audio stream URLs.  Supported hosts:
     https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/file
 
   krakenfiles.com
-    https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  krakencloud.net CDN URL
+    https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  {shard}.krakenfiles.com CDN URL
     Requires Referer: https://krakenfiles.com/ when streaming from CDN.
 
   pixeldrain.com
@@ -40,7 +40,7 @@ import re
 import socket
 import time
 from collections.abc import Awaitable, Callable
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
 
 import httpx
 
@@ -224,9 +224,10 @@ _KRAKEN_PATTERN = re.compile(
     re.IGNORECASE | re.ASCII,
 )
 
-# krakencloud.net CDN audio URLs (used internally for validation only)
+# Shard hosts (hs3.krakenfiles.com) serving the page's audio; also the SSRF gate on the
+# scraped URL.
 _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
-    r"https://[a-z0-9]+\.krakencloud\.net/uploads/[^\s\"'<>]+"
+    r"https://[a-z0-9]+\.krakenfiles\.com/uploads/[^\s\"'<>]+"
     r"/music\.(?:m4a|mp3|ogg|flac|wav|aac)",
     re.IGNORECASE,
 )
@@ -242,7 +243,7 @@ _GDRIVE_FILE_D_PATTERN = re.compile(
     r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
-_GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_GDRIVE_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 # Every host `resolve_stream_url` can emit. The API's stream-proxy allowlist
 # is this set, so resolver and allowlist can't drift.
@@ -384,11 +385,13 @@ def _extract_gdrive_id(link: str) -> str | None:
     """
     m = _GDRIVE_FILE_D_PATTERN.match(link)
     if m:
-        file_id = m.group(1)
-        return file_id if _GDRIVE_ID_RE.match(file_id) else None
+        return m.group(1)
 
+    # urlsplit drops tab/CR/LF and leading control characters, so a link broken by one would resolve.
+    if any(c in link for c in "\t\r\n") or not link.lower().startswith(("http://", "https://")):
+        return None
     try:
-        parsed = urlparse(link)
+        parsed = urlsplit(link)  # not urlparse: it cuts ";params" off the path
     except ValueError:  # unclosed "[" in the host
         return None
     # netloc, not hostname: a port or userinfo is no more welcome here than in the regex forms.
@@ -400,9 +403,7 @@ def _extract_gdrive_id(link: str) -> str | None:
     if not ids:
         return None
     file_id = ids[0]
-    if not _GDRIVE_ID_RE.match(file_id):
-        return None
-    return file_id
+    return file_id if _GDRIVE_ID_RE.fullmatch(file_id) else None
 
 
 def resolve_metadata_url(link: str) -> dict[str, str] | None:
@@ -517,35 +518,31 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
     """Fetch krakenfiles.com view page and return the CDN audio stream URL.
 
     The audio URL is embedded directly in the page HTML and always follows
-    the pattern: https://{cdn}.krakencloud.net/uploads/{date}/{id}/music.{ext}
+    the pattern: https://{shard}.krakenfiles.com/uploads/{date}/{id}/music.{ext}
 
     Args:
         view_url: e.g. ``https://krakenfiles.com/view/WS7wzkrklJ/file.html``
 
     Returns:
-        Direct CDN audio URL (krakencloud.net).
+        Direct CDN audio URL (a krakenfiles.com shard).
 
-    Raises ValueError if the page cannot be fetched or no audio URL is found.
+    Raises ValueError if the page answers badly or carries no audio URL; a connection
+    failure propagates as httpx.HTTPError so host health sees it as hard.
     """
     async def _do() -> str:
         client = _get_shared_client()
-        try:
-            status, html = await _get_text_capped(
-                client,
-                view_url,
-                {
-                    "User-Agent": _STREAM_USER_AGENT,
-                    "Referer": "https://krakenfiles.com/",
-                },
-            )
-            if 400 <= status < 500:
-                raise UpstreamStatusError(status)
-            if status != 200:
-                raise ValueError(
-                    f"krakenfiles.com returned {status} for {view_url}"
-                )
-        except httpx.HTTPError as exc:
-            raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
+        status, html = await _get_text_capped(
+            client,
+            view_url,
+            {
+                "User-Agent": _STREAM_USER_AGENT,
+                "Referer": "https://krakenfiles.com/",
+            },
+        )
+        if 400 <= status < 500:
+            raise UpstreamStatusError(status)
+        if status != 200:
+            raise ValueError(f"krakenfiles.com returned {status} for {view_url}")
 
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
         if not m:
@@ -642,7 +639,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
 _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
-_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
+_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com\Z")
 
 
 # Upstream answers the API relays (as 404 or 429) instead of a generic 502.
@@ -845,8 +842,8 @@ async def stream_audio(
     if "music.froste.lol/song/" in stream_url:
         req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
 
-    # krakencloud.net requires Referer: https://krakenfiles.com/
-    if "krakencloud.net" in stream_url:
+    # The kraken CDN requires Referer: https://krakenfiles.com/
+    if _KRAKEN_CDN_AUDIO_PATTERN.match(stream_url):
         req_headers["Referer"] = "https://krakenfiles.com/"
 
     client = _get_shared_client()

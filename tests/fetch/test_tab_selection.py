@@ -13,10 +13,11 @@ the (already tmp-isolated) file cache.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from src.fetcher import async_fetch_and_parse
-from tests.conftest import read_synthetic
+from tests.conftest import make_workbook_handler, read_synthetic
 
 URL = "https://docs.google.com/spreadsheets/d/SYNTH123/htmlview"
 
@@ -33,6 +34,25 @@ TAB_NAMES = {"100": "Unreleased", "200": "Misc", "300": "Art", "400": "Recent"}
 async def _fetch(client, patch_sheets_client, **kwargs):
     patch_sheets_client(client)
     return await async_fetch_and_parse(URL, use_cache=False, write_cache=False, **kwargs)
+
+
+class TestPublishedSheet:
+    async def test_every_request_stays_under_the_published_pubhtml_path(self, patch_sheets_client):
+        # htmlview 404s for a /d/e/ id, so one request off pubhtml fails the whole load.
+        inner = make_workbook_handler(WORKBOOK, tab_names=TAB_NAMES)
+        paths: list[str] = []
+
+        def spy(request: httpx.Request) -> httpx.Response:
+            paths.append(request.url.path)
+            return inner.handler(request)
+
+        patch_sheets_client(httpx.AsyncClient(transport=httpx.MockTransport(spy), follow_redirects=True))
+        artist = await async_fetch_and_parse(
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vSYNTH/pubhtml",
+            use_cache=False, write_cache=False,
+        )
+        assert artist.total_songs == 4
+        assert paths and all(p.startswith("/spreadsheets/d/e/2PACX-1vSYNTH/pubhtml") for p in paths), paths
 
 
 class TestPrimaryTabSelection:

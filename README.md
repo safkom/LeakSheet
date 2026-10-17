@@ -14,7 +14,7 @@ LeakSheet is split into three pieces:
 
 | Piece | Path | Stack |
 |---|---|---|
-| **Backend / parser** | `src/` | Python 3.11+, FastAPI, httpx, lxml |
+| **Backend / parser** | `src/` | Python 3.14+, FastAPI, httpx, lxml |
 | **nginx front** | `web/` | Proxies `/api/*` to the backend; serves nothing else |
 | **Apple apps** | `LeakSheet-iOS/` | SwiftUI (iOS 27 / macOS 27 / tvOS 27), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
@@ -40,7 +40,7 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 ## Quick Start
 
-You'll need [uv](https://docs.astral.sh/uv/). It installs Python 3.11 itself, from
+You'll need [uv](https://docs.astral.sh/uv/). It installs Python 3.14 itself, from
 `.python-version`, so there is nothing else to set up.
 
 ```bash
@@ -82,6 +82,7 @@ Apple targets on every push (`.github/workflows/tests.yml`), and the live tracke
 | Source | Example |
 |---|---|
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` (any `/edit`/`/view` form is normalized) |
+| Google Sheets published | `docs.google.com/spreadsheets/d/e/2PACX-…/pubhtml` (a "publish to web" link; its id works only on `pubhtml`) |
 | Custom tracker domain | sites with embedded sheets, e.g. `yetracker.net` |
 | ArtistGrid registry | `GET /trackers` — live list of community trackers with up-to-date flags |
 | Local HTML export | `Trackers/.../sheet.html` (dev only, gitignored) |
@@ -125,6 +126,7 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 | `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed. `/image-proxy` trusts only the seed plus this list — never the feed — so a feed-only tracker with self-hosted covers must be added here for its art to load |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 | `LEAKSHEET_GID_FETCH_CONCURRENCY` | `6` | Concurrent tab-page fetches across all requests. Each holds a full response body in memory |
+| `LEAKSHEET_GOOGLE_API_KEY` | *(unset)* | Google API key with the Sheets API enabled. Set ⇒ a docs.google.com workbook's content tabs (Misc, Released, Best Of, …) come from one Sheets API v4 call instead of one htmlview page each; main and Art tabs stay on htmlview for their images. Any API failure falls back to htmlview, and a 429 pauses API use for that worker. Unset ⇒ htmlview only |
 | `LEAKSHEET_HUB_LOAD_CONCURRENCY` | `3` | Concurrent hub-workbook tab loads — fetched *and* parsed, so tighter than the above |
 | `LEAKSHEET_IMAGE_RESIZE_CONCURRENCY` | `3` | Concurrent Pillow decodes in `/image-proxy`; each can hold a 15 MB input plus a 20 MP decode |
 
