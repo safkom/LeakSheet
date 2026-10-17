@@ -1503,7 +1503,9 @@ def _start_api_tabs(
     Main, Art and hub tabs stay on htmlview: the API has no in-cell images.
     See docs/decisions.md::sheets_api.py.
     """
-    sheet_id = _extract_sheet_id(url_norm) if _is_google_sheets_url(url_norm) else None
+    m = SHEET_ID_PATTERN.search(url_norm) if _is_google_sheets_url(url_norm) else None
+    # A published (/d/e/) id is not a spreadsheet id the API accepts.
+    sheet_id = m.group(2) if m and not m.group(1) else None
     if not sheet_id or not content_tabs or not sheets_api.api_key():
         return None
     return asyncio.create_task(sheets_api.fetch_tabs(
