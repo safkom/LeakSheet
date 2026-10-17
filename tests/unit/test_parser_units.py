@@ -1310,24 +1310,165 @@ class TestVersionTaggedRowsFindTheirSibling:
             ("Moon Tape [V1]", ["Song A", "Song B"]),
         ]
 
-    def test_section_label_is_not_a_tagged_sibling(self):
-        # A single-line "Moon Tape [V3]" name row is a section of the era above it,
-        # so its tagged rows must not jump into that unrelated era.
+
+class TestTaggedNameRowHeadsAnEra:
+    """A single-line Name-column row carrying a version tag ("Moon Tape [V3]") is an era
+    heading when the rows below name that tag, and a section otherwise."""
+
+    HEAD = "<table><tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+
+    @staticmethod
+    def _song(era, name):
+        return f"<tr><td>{era}</td><td>{name}</td><td>note</td><td>CD Quality</td><td>https://example.com/s</td></tr>"
+
+    @staticmethod
+    def _label(name):
+        return f"<tr><td></td><td>{name}</td><td></td><td></td></tr>"
+
+    def _eras(self, *rows):
         from src.parser import parse_sheet
-        html = (
-            "<table>"
-            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
-            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
-            "<tr><td>Moon Tape [V2]</td><td>Song A</td><td>note</td><td></td></tr>"
-            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>"
-            "<tr><td>Star Tape</td><td>Song B</td><td>note</td><td></td></tr>"
-            "<tr><td></td><td>Moon Tape [V3]</td><td></td><td></td></tr>"
-            "<tr><td>Moon Tape [V3]</td><td>Song C</td><td>note</td><td></td></tr>"
-            "</table>"
+        artist = parse_sheet(self.HEAD + "".join(rows) + "</table>", "Test")
+        return [(e.name, [s.base_name for s in e.songs]) for e in artist.eras]
+
+    def test_tagged_heading_after_an_unrelated_era_starts_an_era(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("Moon Tape [V3]", "Song B"),
+            self._song("Moon Tape", "Song C"),
         )
-        artist = parse_sheet(html, "Test")
-        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
-        assert by_name["Star Tape"] == ["Song B"]
+        # The bare row after the heading keeps the positional prior.
+        assert eras == [("Star Tape", ["Song A"]), ("Moon Tape [V3]", ["Song B", "Song C"])]
+
+    def test_tagged_heading_after_a_sibling_version_starts_an_era(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V1]", "Song A"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song B"),
+        )
+        assert eras == [("Moon Tape [V1]", ["Song A"]), ("Moon Tape [V2]", ["Song B"])]
+
+    def test_a_run_of_tagged_headings_each_start_an_era(self):
+        # Sub-labels between a heading and its rows do not hide the reference.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V1]"),
+            "<tr><td></td><td></td><td></td><td></td></tr>",
+            self._label("Never Recorded"),
+            self._song("Moon Tape [V1]", "Song B"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song C"),
+        )
+        assert eras == [
+            ("Star Tape", ["Song A"]), ("Moon Tape [V1]", ["Song B"]), ("Moon Tape [V2]", ["Song C"]),
+        ]
+
+    def test_version_group_of_an_untagged_album_stays_a_section(self):
+        # "Moon Tape [V1]" under the stats header "Moon Tape" is that album's version group.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song B"),
+        )
+        assert eras == [("Moon Tape", ["Song A", "Song B"])]
+
+    def test_heading_restating_the_current_header_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V2]"),
+            self._song("Moon Tape [V2]", "Song A"),
+        )
+        assert eras == [("Moon Tape [V2]", ["Song A"])]
+
+    def test_heading_nothing_below_refers_to_stays_a_section(self):
+        # Blank-era rows under the label carry no evidence that it is an era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("", "Song B"),
+            self._song("Star Tape", "Song C"),
+        )
+        assert eras == [("Star Tape", ["Song A", "Song B", "Song C"])]
+
+    def test_heading_followed_by_another_tag_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape [V3]"),
+            self._song("Moon Tape [V4]", "Song B"),
+        )
+        assert eras == [("Star Tape", ["Song A", "Song B"])]
+
+    def test_repeated_heading_reuses_the_era_it_started(self):
+        # The second "Moon Tape [V1]" heading is a section; its row goes to the existing era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song B"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V1]", ["Song A", "Song B"]), ("Sun Tape", [])]
+
+    def test_heading_does_not_claim_the_bare_name_of_a_later_era(self):
+        # The heading's stripped key is a fallback alias only, so a later stats era
+        # "Moon Tape" still owns its bare rows from another era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Moon Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song B"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song C"),
+        )
+        assert eras == [
+            ("Star Tape", []), ("Moon Tape [V1]", ["Song A"]), ("Moon Tape", ["Song B", "Song C"]), ("Sun Tape", []),
+        ]
+
+    def test_stats_header_inside_the_window_stops_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert [name for name, _ in eras] == ["Star Tape", "Sun Tape"]
+
+    def test_separator_row_is_skipped_by_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td></td><td>Instrumentals</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V3]", ["Song A"])]
+
+    @pytest.mark.parametrize(("labels_between", "is_era"), [(7, True), (8, False)])
+    def test_search_reaches_eight_rows_below_the_heading(self, labels_between, is_era):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            *(self._label(f"Group {i}") for i in range(labels_between)),
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert ("Moon Tape [V3]" in [name for name, _ in eras]) is is_era
+
+    def test_untagged_name_row_stays_a_section(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._song("Star Tape", "Song A"),
+            self._label("Moon Tape"),
+            self._song("Moon Tape", "Song B"),
+        )
+        assert [name for name, _ in eras] == ["Star Tape"]
 
 
 class TestStatsLessHeaderAliasesStayFallback:

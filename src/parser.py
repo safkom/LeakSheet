@@ -65,6 +65,10 @@ _MAX_HEADER_SCAN_ROWS = 11
 # on trackers that have many footers, annotations, or oddly structured rows.
 _MAX_UNMATCHED_ROWS = 50
 
+# Rows scanned below a tagged heading for the era value that names it; bounds the scan
+# on a long run of label rows.
+_TAGGED_HEADING_LOOKAHEAD = 8
+
 
 # ---------------------------------------------------------------------------
 # Low-level HTML table extraction
@@ -1791,6 +1795,42 @@ def _resolve_row_era(
     return era, era is not None, False
 
 
+def _heads_tagged_era(
+    label: str,
+    rows: list[list[_Cell]],
+    row_idx: int,
+    col_map: dict[str, int],
+    current_era: Era,
+    declared_keys: set[str],
+) -> bool:
+    """Whether a single-line Name-column row such as "Album [V6]" starts an era, not a section.
+
+    The first Era-column value below it must carry the same version tags, and the label
+    must not repeat a declared era's tag or be a version group of the era above (the
+    untagged album it tags). See docs/decisions.md::parser.py::tagged-name-row-era.
+    """
+    tag_key = _era_tag_key(label)
+    if not tag_key:
+        return False
+    own = _era_own_keys(current_era)
+    if tag_key in own or tag_key in declared_keys:
+        return False
+    if not _era_tag_key(current_era.name) and _era_match_key(label) in own:
+        return False
+    era_col = col_map.get("era", 0)
+    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
+        if _is_empty_row(row) or _is_section_separator(row):
+            continue
+        if _is_era_header(row):
+            return False
+        row_era = _get_cell_text(row, era_col)
+        if row_era:
+            return _era_tag_key(row_era) == tag_key
+        if sum(1 for c in row if c.text.strip()) > 3:
+            return False
+    return False
+
+
 def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
     """An era from a header row with no stats cell: timeline from Notes, else Name."""
     timeline_raw = _get_cell_text(row, col_map.get("notes", 2)) or _get_cell_text(
@@ -1878,6 +1918,9 @@ def parse_sheet(
     _needs_name_backfill: set[int] = set()  # id(era) values
     # id(era) → its own key forms, for the positional-exact prior.
     _era_own_keys_cache: dict[int, set[str]] = {}
+    # Own keys of eras[:declared_upto], so a repeated tagged heading is found in O(1).
+    declared_keys: set[str] = set()
+    declared_upto = 0
     # (id(era), song base name) → Song, for O(1) version grouping
     song_index: dict[tuple[int, str], Song] = {}
     in_footer = False
@@ -2093,9 +2136,17 @@ def parse_sheet(
             has_multiline_name = "\n" in name_val
             non_empty = sum(1 for c in row if c.text.strip())
             if non_empty <= 3:
-                if has_multiline_name and _looks_like_era_name(name_first_line):
-                    # Stats-less era header with multi-line name (Travis style).
-                    # Create a new era, capture description, and scan for art image.
+                heads_tagged = False
+                if current_era is not None and not has_multiline_name:
+                    for era in eras[declared_upto:]:
+                        declared_keys |= _era_own_keys(era)
+                    declared_upto = len(eras)
+                    heads_tagged = _heads_tagged_era(
+                        name_first_line, rows, row_idx, col_map, current_era, declared_keys
+                    )
+                if heads_tagged or (has_multiline_name and _looks_like_era_name(name_first_line)):
+                    # Stats-less era header: multi-line name (Travis style) or a tagged heading
+                    # its rows name. Create a new era, capture description, and scan for art image.
                     notes_idx = col_map.get("notes", 2)
                     desc_text = _get_cell_text(row, notes_idx)
                     _era_art_url = _first_row_image(row, prefer_idx=name_col_idx)
@@ -2107,8 +2158,11 @@ def parse_sheet(
                     )
                     eras.append(new_era)
                     # Register full name_val so _era_match_key strips the
-                    # parenthetical year and matches e.g. "The Graduates"
-                    _register_era_keys(new_era, name_val, era_by_key, era_by_key_fallback)
+                    # parenthetical year and matches e.g. "The Graduates". A tagged heading
+                    # only aliases, so a later untagged "Album" era keeps its own key.
+                    _register_era_keys(
+                        new_era, name_val, era_by_key_fallback if heads_tagged else era_by_key, era_by_key_fallback
+                    )
                     current_era = new_era
                 elif current_era is not None:
                     # Single-line section label ("Other Media", "OG / Uncut Files"): a named section
