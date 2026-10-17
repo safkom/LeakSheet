@@ -1138,7 +1138,10 @@ def _transfer_era_metadata(source: Era, target: Era) -> None:
     for alt in source.alt_names:
         if alt not in target.alt_names:
             target.alt_names.append(alt)
-    # Prefer the longer/fuller name
+    # Prefer the longer/fuller name, unless both name different versions ([V1] vs [V10]).
+    source_tag, target_tag = _era_tag_key(source.name), _era_tag_key(target.name)
+    if source_tag and target_tag and source_tag != target_tag:
+        return
     if source.name and len(source.name) > len(target.name):
         target.name = source.name
 
@@ -1341,6 +1344,15 @@ def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> 
     return key
 
 
+def _era_tag_key(era_name: str) -> str:
+    """The stripped key plus every version tag ("Moon Tape [V2]" → "moon tape [v2]"), or ""
+    when the first line carries none. Tells apart siblings that share a stripped key."""
+    first = era_name.split("\n")[0]
+    tags = VERSION_TAG_PATTERN.findall(first)
+    key = _era_match_key(first) if tags else ""
+    return " ".join([key, *(f"[{t.lower()}]" for t in tags)]) if key else ""
+
+
 def _song_match_key(name: str) -> str:
     """Stable normalized song identity key for cross-era version linkage.
 
@@ -1503,7 +1515,8 @@ def _era_own_keys(era: Era) -> set[str]:
 
     Used by the positional-exact prior: a row value matching ANY of these
     belongs to this era when it is the current header, regardless of which
-    sibling era registered the shared key first in the global dicts.
+    sibling era registered the shared key first in the global dicts. The tag
+    keys also find a tagged row's sibling era.
     """
     keys: set[str] = set()
     primary = _era_match_key(era.name)
@@ -1512,6 +1525,9 @@ def _era_own_keys(era: Era) -> set[str]:
     full = _normalize_unicode(era.name).lower().strip()
     if full:
         keys.add(full)
+    tag_key = _era_tag_key(era.name)
+    if tag_key:
+        keys.add(tag_key)
     for alt in era.alt_names:
         alt_key = _era_match_key(alt)
         if alt_key:
@@ -1522,9 +1538,9 @@ def _era_own_keys(era: Era) -> set[str]:
                 keys.add(part_key)
     if " / " in era.name:
         for part in era.name.split(" / "):
-            part_key = _era_match_key(part)
-            if part_key:
-                keys.add(part_key)
+            for part_key in (_era_match_key(part), _era_tag_key(part)):
+                if part_key:
+                    keys.add(part_key)
     return keys
 
 
@@ -1728,38 +1744,51 @@ def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
 def _resolve_row_era(
     row_era: str,
     current_era: Era | None,
+    eras: list[Era],
     era_by_key: dict[str, Era],
     era_by_key_fallback: dict[str, Era],
     own_keys_cache: dict[int, set[str]],
-) -> tuple[Era | None, bool]:
-    """The era a row's era-column value names, and whether only a fuzzy match found it.
+) -> tuple[Era | None, bool, bool]:
+    """The era a row's era-column value names, whether only a fuzzy match found it, and
+    whether it is a tagged sibling of the current era (which then stays current).
 
-    Tried in order: the current era's own keys, the primary then the fallback keys
+    Tried in order: the current era's own keys, the nearest era whose own name carries the
+    row's version tags, the current era's stripped key, the primary then the fallback keys
     (each by full then stripped key), a fuzzy match on the current era, then on all.
     A positional fuzzy hit is registered as a fallback key for the rows that follow.
     """
+    def own_keys(era: Era) -> set[str]:
+        own = own_keys_cache.get(id(era))
+        if own is None:
+            own = own_keys_cache[id(era)] = _era_own_keys(era)
+        return own
+
     norm = _normalize_unicode(row_era).lower()
     stripped = _era_match_key(row_era)
-    if current_era is not None:
-        own = own_keys_cache.get(id(current_era))
-        if own is None:
-            own = own_keys_cache[id(current_era)] = _era_own_keys(current_era)
-        if norm in own or stripped in own:
-            return current_era, False
+    tag_key = _era_tag_key(row_era)
+    own = own_keys(current_era) if current_era is not None else set()
+    if norm in own or tag_key in own:
+        return current_era, False, False
+    # Own names only: a section-label alias never makes an era a tagged sibling.
+    tagged = next((e for e in reversed(eras) if tag_key in own_keys(e)), None) if tag_key else None
+    if tagged is not None:
+        return tagged, False, stripped in own
+    if stripped in own:
+        return current_era, False, False
     for keys in (era_by_key, era_by_key_fallback):
         for key in (norm, stripped):
             era = keys.get(key)
             if era is not None:
-                return era, False
+                return era, False, False
     cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
     if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
         era_by_key_fallback.setdefault(stripped, current_era)
         logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
-        return current_era, True
+        return current_era, True, False
     era = _fuzzy_era_match(norm, era_by_key)
     if era is not None:
         logger.debug("Fuzzy era match: %r → %r", norm, era.name)
-    return era, era is not None
+    return era, era is not None, False
 
 
 def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
@@ -1948,19 +1977,21 @@ def parse_sheet(
 
         if row_era:
             # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
-            matched_era, fuzzy = _resolve_row_era(
-                row_era, current_era, era_by_key, era_by_key_fallback, _era_own_keys_cache
+            matched_era, fuzzy, sibling = _resolve_row_era(
+                row_era, current_era, eras, era_by_key, era_by_key_fallback, _era_own_keys_cache
             )
             fuzzy_matched_rows += fuzzy
 
             if matched_era is not None:
-                current_era = matched_era
+                # A tagged row's hop to a sibling keeps the header it sits under current.
+                if not sibling:
+                    current_era = matched_era
                 version = _parse_song_row(row, col_map)
                 if version:
                     if _is_section_label_version(version, row, era_col):
-                        current_era.sections.append(Section(name=version.name, notes=version.notes))
+                        matched_era.sections.append(Section(name=version.name, notes=version.notes))
                     else:
-                        _add_version_to_era(current_era, version, song_index)
+                        _add_version_to_era(matched_era, version, song_index)
                         song_rows += 1
                 continue
 
