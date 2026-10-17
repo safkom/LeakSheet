@@ -727,6 +727,17 @@ OOM the worker — reads are capped at 512 KiB decompressed.
 and `uc?id=...` forms are handled via query-string parsing in `_extract_gdrive_id`
 instead, since the id can appear alongside other params in any order there.
 
+## streaming.py::url-pattern-case — links match in any case
+
+Hosts and path keywords (`/f/`, `/song/`, `/view/…/file.html`, `/u/`, `/file/d/`, drive
+`/open` and `/uc`) match case-insensitively, so a tracker's `HTTPS://Pillows.SU/F/x` plays.
+File ids keep their case: the providers' ids are case-sensitive.
+
+Folding is ASCII-only (`re.ASCII`). Under Unicode ignore-case `ſ` and the Kelvin sign
+would pass for `s` and `k` in a host. Foundation does fold them, so Swift's
+`StreamResolver` refuses a non-ASCII authority. `tests/parse/test_link_rule_contract.py`
+pins the Python and Swift rules together.
+
 ## streaming.py::no-metadata-hosts — kraken and gdrive have no metadata API
 
 krakenfiles has no metadata API (the view page only yields a filename); clients fall

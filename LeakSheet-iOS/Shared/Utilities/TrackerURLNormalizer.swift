@@ -1,10 +1,11 @@
 import Foundation
 
 /// Canonicalizes tracker URLs so variants of the same tracker compare equal
-/// (edit vs htmlview, gid fragments, share query params, scheme/host case).
-/// Mirrors the backend's `_normalize_url`: for Google Sheets the spreadsheet
-/// ID is the identity and the canonical form is `/htmlview`; for other hosts
-/// the bare host canonicalizes to a trailing slash.
+/// (edit vs htmlview, gid fragments, share query params, scheme/host case, userinfo,
+/// default ports). Mirrors the backend's `_normalize_url`: for Google Sheets the
+/// spreadsheet ID is the identity and the canonical form is `/htmlview`; for other
+/// hosts the bare host canonicalizes to a trailing slash. Both sides are pinned by
+/// Fixtures/stream_links.json.
 nonisolated enum TrackerURLNormalizer {
     static func normalize(_ raw: String) -> String {
         var input = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -15,15 +16,20 @@ nonisolated enum TrackerURLNormalizer {
             input = "https://" + input
         }
 
-        if let id = sheetID(in: input) {
+        guard var components = URLComponents(string: input), let host = components.host?.lowercased() else {
+            return input
+        }
+        let scheme = (components.scheme ?? "https").lowercased()
+
+        if host == "docs.google.com", let id = sheetID(inPath: components.percentEncodedPath) {
             return "https://docs.google.com/spreadsheets/d/\(id)/htmlview"
         }
 
-        guard var components = URLComponents(string: input), let host = components.host else {
-            return input
-        }
-        components.scheme = components.scheme?.lowercased()
-        components.host = host.lowercased()
+        components.scheme = scheme
+        components.host = host
+        components.user = nil
+        components.password = nil
+        if components.port == (scheme == "https" ? 443 : 80) { components.port = nil }
         components.fragment = nil
         if components.path.isEmpty && components.query == nil {
             components.path = "/"
@@ -31,12 +37,11 @@ nonisolated enum TrackerURLNormalizer {
         return components.url?.absoluteString ?? input
     }
 
-    // Mirrors backend SHEET_ID_PATTERN:
+    // Mirrors backend SHEET_ID_PATTERN, searched in "docs.google.com" + path:
     // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)
-    private static func sheetID(in url: String) -> String? {
+    private static func sheetID(inPath path: String) -> String? {
         let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/([A-Za-z0-9_-]+)/
-            .ignoresCase()
-        guard let match = url.firstMatch(of: pattern) else { return nil }
+        guard let match = ("docs.google.com" + path).firstMatch(of: pattern) else { return nil }
         return String(match.output.1)
     }
 }

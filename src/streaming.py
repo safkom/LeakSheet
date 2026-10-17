@@ -196,25 +196,32 @@ async def _get_text_capped(
 # URL patterns — order matters (most specific first)
 # ---------------------------------------------------------------------------
 
+# Every pattern below ignores ASCII case in the host and path keywords (ids keep theirs):
+# docs/decisions.md::streaming.py::url-pattern-case
+
 # pillows.su / pillowcase.su / plwcse.top: one id space, all served by api.pillows.su
 _PILLOWS_PATTERN = re.compile(
     r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([A-Za-z0-9_-]+)",
+    re.IGNORECASE | re.ASCII,
 )
 
 # imgur.gg / temp.imgur.gg
 _IMGUR_PATTERN = re.compile(
     r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
+    re.IGNORECASE | re.ASCII,
 )
 # music.froste.lol
 # The lookahead stops a non-hex id resolving to its hex prefix; "&sa=…" tracking
 # glued onto the path still matches.
 _FROSTE_PATTERN = re.compile(
     r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?![A-Za-z0-9])",
+    re.IGNORECASE | re.ASCII,
 )
 
 # krakenfiles.com
 _KRAKEN_PATTERN = re.compile(
     r"https?://(?:www\.)?krakenfiles\.com/view/([A-Za-z0-9_-]+)/file\.html",
+    re.IGNORECASE | re.ASCII,
 )
 
 # krakencloud.net CDN audio URLs (used internally for validation only)
@@ -227,11 +234,13 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
 # pixeldrain.com: /u/ is a single file; /l/ lists are deliberately unsupported.
 _PIXELDRAIN_PATTERN = re.compile(
     r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
+    re.IGNORECASE | re.ASCII,
 )
 
 # gdrive URL forms — see docs/decisions.md::streaming.py::gdrive-url-forms
 _GDRIVE_FILE_D_PATTERN = re.compile(
     r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
+    re.IGNORECASE | re.ASCII,
 )
 _GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -385,7 +394,7 @@ def _extract_gdrive_id(link: str) -> str | None:
     host = (parsed.hostname or "").lower()
     if host not in ("drive.google.com", "www.drive.google.com"):
         return None
-    if parsed.path not in ("/open", "/uc"):
+    if parsed.path.lower() not in ("/open", "/uc"):
         return None
     ids = parse_qs(parsed.query).get("id")
     if not ids:

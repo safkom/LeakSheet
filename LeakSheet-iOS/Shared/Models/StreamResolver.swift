@@ -23,7 +23,14 @@ enum StreamResolver {
     }
 
     private nonisolated static func isHex(_ s: String) -> Bool {
-        !s.isEmpty && s.allSatisfy(\.isHexDigit)
+        !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isHexDigit }
+    }
+
+    /// Foundation maps look-alike hosts (`ſ`, the Kelvin sign) onto ASCII letters; the
+    /// backend's patterns don't, so a link whose authority isn't plain ASCII doesn't stream.
+    private nonisolated static func hasASCIIAuthority(_ link: String) -> Bool {
+        guard let sep = link.range(of: "://") else { return false }
+        return link[sep.upperBound...].prefix { !"/?#".contains($0) }.allSatisfy(\.isASCII)
     }
 
     /// Query keys Google Docs glues onto every link it rewrites through its redirector:
@@ -50,11 +57,13 @@ enum StreamResolver {
     /// Classify a link. Trailing path segments are ignored, so
     /// `/file/d/{id}/view?usp=sharing` still resolves.
     nonisolated static func target(for link: String) -> Target? {
-        guard let comps = URLComponents(string: canonical(link)),
+        let link = canonical(link)
+        guard hasASCIIAuthority(link), let comps = URLComponents(string: link),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
               var host = comps.host?.lowercased()
         else { return nil }
-        if host.hasPrefix("www.") { host = String(host.dropFirst(4)) }
+        let hasWWW = host.hasPrefix("www.")
+        if hasWWW { host = String(host.dropFirst(4)) }
 
         let path = comps.path.split(separator: "/").map(String.init)
 
@@ -68,7 +77,8 @@ enum StreamResolver {
             return .imgur(id: path[1])
 
         case "music.froste.lol":
-            guard path.count >= 2, path[0].lowercased() == "song", isHex(path[1]) else { return nil }
+            // The backend's froste pattern has no www. form, unlike every other host.
+            guard !hasWWW, path.count >= 2, path[0].lowercased() == "song", isHex(path[1]) else { return nil }
             return .froste(hash: path[1])
 
         case "krakenfiles.com":
@@ -90,8 +100,8 @@ enum StreamResolver {
                isID(path[2]) {
                 return .gdrive
             }
-            if path.count >= 1, ["open", "uc"].contains(path[0].lowercased()),
-               let id = comps.queryItems?.first(where: { $0.name.lowercased() == "id" })?.value,
+            if ["/open", "/uc"].contains(comps.path.lowercased()),
+               let id = comps.queryItems?.first(where: { $0.name == "id" })?.value,
                isID(id) {
                 return .gdrive
             }
