@@ -15,7 +15,8 @@ from urllib.parse import unquote
 import httpx
 import pytest
 
-from src.fetcher import async_fetch_and_parse
+from src import sheets_api
+from src.fetcher import _start_api_tabs, async_fetch_and_parse
 from src.parser import _clean_link, extract_table
 from tests.conftest import make_workbook_handler, read_synthetic
 
@@ -138,6 +139,32 @@ class TestApiTabs:
         rec = Recorder()
         await _parse(rec, patch_sheets_client, url="https://yetracker.net/")
         assert rec.api_requests() == []
+
+
+class TestApiSheetId:
+    """The API takes the bare id of a /d/<id> sheet; a published /d/e/ id is not one."""
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://docs.google.com/spreadsheets/d/SYNTH123/htmlview", "SYNTH123"),
+            ("https://docs.google.com/spreadsheets/d/e/2PACX-SYNTH/pubhtml", None),
+            ("https://yetracker.net/", None),
+        ],
+    )
+    async def test_only_a_normal_sheet_id_reaches_the_api(self, with_key, monkeypatch, url, expected):
+        ids = []
+
+        async def fetch_tabs(client, sheet_id, *args, **kwargs):
+            ids.append(sheet_id)
+
+        monkeypatch.setattr(sheets_api, "fetch_tabs", fetch_tabs)
+        async with httpx.AsyncClient() as client:
+            task = _start_api_tabs(url, [("200", "misc", "Misc")], client, 5.0)
+            assert (task is not None) == (expected is not None)
+            if task:
+                await task
+        assert ids == ([expected] if expected else [])
 
 
 class TestFallback:
