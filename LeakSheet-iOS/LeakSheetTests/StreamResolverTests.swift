@@ -7,6 +7,8 @@ struct StreamResolverTests {
     @Test(arguments: [
         "https://pillows.su/f/58876d9f36b768640439466088764e87",
         "https://www.pillowcase.su/f/abc123",
+        "https://plwcse.top/f/abc123",
+        "https://www.plwcse.top/f/abc123",
         "https://pillows.su/f/abc123?x=1",
         "https://imgur.gg/f/wGLEqSB",
         "https://temp.imgur.gg/f/wGLEqSB",
@@ -34,6 +36,8 @@ struct StreamResolverTests {
         "https://mega.nz/file/abc",
         "https://pillows.su/about",              // wrong path shape
         "https://notpillows.su/f/abc123",        // wrong host
+        "https://plwcse.top/about",              // alias, wrong path shape
+        "https://notplwcse.top/f/abc123",        // alias lookalike
         "https://krakenfiles.com/view/X/other",  // missing file.html
         "https://music.froste.lol/song/XYZ",     // non-hex hash
         "https://pixeldrain.com/l/abc123",       // pixeldrain LIST, not a file
@@ -42,6 +46,13 @@ struct StreamResolverTests {
     ])
     func `unknown hosts and malformed links are not streamable`(url: String) {
         #expect(!StreamResolver.isStreamableURL(url))
+    }
+
+    @Test func `host and path keyword ignore case but the file id keeps it`() {
+        #expect(StreamResolver.target(for: "HTTPS://PILLOWS.SU/F/AbC123") == .pillows(id: "AbC123"))
+        #expect(StreamResolver.target(for: "https://IMGUR.GG/F/AbC12") == .imgur(id: "AbC12"))
+        #expect(StreamResolver.target(for: "https://MUSIC.FROSTE.LOL/SONG/0123ABCD") == .froste(hash: "0123ABCD"))
+        #expect(StreamResolver.target(for: "https://PIXELDRAIN.COM/U/aBc123") == .pixeldrain(id: "aBc123"))
     }
 
     @Test func `pixeldrain original quality is the direct file API`() {
@@ -59,9 +70,18 @@ struct StreamResolverTests {
         #expect(url?.absoluteString == "https://api.pillows.su/api/download/abc123")
     }
 
-    @Test func `original quality maps froste to the download endpoint`() {
+    @Test func `original quality maps every pillows alias to the download API`() {
+        for host in ["pillows.su", "pillowcase.su", "plwcse.top", "www.plwcse.top"] {
+            let url = StreamResolver.originalQualityURL(for: "https://\(host)/f/abc123")
+            #expect(url?.absoluteString == "https://api.pillows.su/api/download/abc123", "\(host)")
+        }
+    }
+
+    @Test func `original quality for froste routes through the stream proxy`() {
+        // froste needs a Referer that AVPlayer does not send; only the backend adds it.
         let url = StreamResolver.originalQualityURL(for: "https://music.froste.lol/song/0a1b2c")
-        #expect(url?.absoluteString == "https://music.froste.lol/song/0a1b2c/download")
+        #expect(url?.absoluteString.contains("/stream?url=") == true)
+        #expect(url?.host != "music.froste.lol")
     }
 
     @Test func `original quality for kraken routes through the stream proxy`() {
@@ -84,6 +104,7 @@ struct StreamResolverTests {
         // endpoint or the proxy, never a human-facing page.
         let links = [
             "https://pillows.su/f/abc123",
+            "https://plwcse.top/f/abc123",
             "https://music.froste.lol/song/0a1b2c",
             "https://imgur.gg/f/002XdG5",
             "https://krakenfiles.com/view/FJmpAhYHMp/file.html",
@@ -187,6 +208,7 @@ struct VersionSourceTests {
     /// never dims its rows.
     @Test(arguments: [
         ("https://pillows.su/f/abc123", "pillows"),
+        ("https://plwcse.top/f/abc123", "pillows"),
         ("https://imgur.gg/f/wGLEqSB", "imgur"),
         ("https://music.froste.lol/song/0a1b2c3d", "froste"),
         ("https://www.krakenfiles.com/view/FJmpAhYHMp/file.html", "kraken"),

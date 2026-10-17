@@ -45,6 +45,7 @@ from src.config import (
     sheet_host_allowed,
     tracker_hosts_are_stale,
 )
+from src import sheets_api
 from src.models import Artist, Section, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
@@ -69,7 +70,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
-STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
+# Collapse-guard window (24h); the serve window is SERVE_STALE_TTL.
+# See docs/decisions.md::api.py::serve-stale-window
+STALE_CACHE_TTL = 86400
+SERVE_STALE_TTL = 7 * 86400  # max age served stale (and 304'd) while a revalidation runs
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Sheet HTML + parsed-JSON cache cap: see docs/decisions.md::fetcher.py — sheet cache size cap
@@ -221,7 +225,8 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
     # Already decoded, so the encoding headers no longer describe the body.
     headers = [(k, v) for k, v in resp.headers.multi_items()
                if k.lower() not in ("content-encoding", "content-length")]
-    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+    # The final request, so .url says where a redirect chain ended.
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=resp.request)
 
 
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
@@ -364,10 +369,10 @@ _UNRELEASED_TAB_NAMES = frozenset({
     "off streaming / unreleased", "unreleased / off streaming",
 })
 
-# Regex to extract spreadsheet ID from Google Sheets URLs
-# Handles both /d/ID and /u/N/d/ID paths (user-scoped URLs)
+# Regex to extract the spreadsheet ID from Google Sheets URLs: /d/ID, /u/N/d/ID (user-scoped)
+# and /d/e/ID (published; group 1 is the "e/"). See docs/decisions.md::fetcher.py::published-sheets
 SHEET_ID_PATTERN = re.compile(
-    r"docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)"
+    r"docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+)"
 )
 
 # Regex to extract GID from URL fragment (#gid=...) or query param (?gid=...)
@@ -413,7 +418,7 @@ TITLE_PREFIXES = [
 # ---------------------------------------------------------------------------
 
 def _normalize_url(url: str) -> str:
-    """Ensure URL has a scheme and normalize Google Sheets paths to /htmlview.
+    """Ensure URL has a scheme and normalize Google Sheets paths to /htmlview (/pubhtml if published).
 
     Google Sheets URLs come in many forms (/edit, /view, /pubhtml, etc.).
     The /htmlview endpoint is the only one that:
@@ -440,11 +445,11 @@ def _normalize_url(url: str) -> str:
     default = port is None or (scheme, port) in (("https", 443), ("http", 80))
     netloc = host if default else f"{host}:{port}"
 
-    # Normalize Google Sheets URLs to /htmlview for reliable GID discovery
+    # Normalize Google Sheets URLs to their tab-listing page (htmlview, or pubhtml if published)
     if host == "docs.google.com":
-        sheet_id = _extract_sheet_id(f"docs.google.com{parsed.path}")
-        if sheet_id:
-            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        page_path = _sheet_page_path(f"docs.google.com{parsed.path}")
+        if page_path:
+            return f"https://docs.google.com{page_path}"
     url = parsed._replace(scheme=scheme, netloc=netloc, fragment="").geturl()
     # 'host' and 'host/' are the same resource.
     if not parsed.path and not parsed.query:
@@ -458,10 +463,16 @@ def _is_google_sheets_url(url: str) -> bool:
     return (parsed.hostname or "").lower() == "docs.google.com" and parsed.path.startswith("/spreadsheets")
 
 
-def _extract_sheet_id(url: str) -> str | None:
-    """Extract the spreadsheet ID from a Google Sheets URL."""
+def _sheet_page_path(url: str) -> str | None:
+    """Path of the page that lists a Google Sheet's tabs, or None for another URL.
+
+    A published sheet (/d/e/) has its own id space that htmlview 404s for.
+    """
     m = SHEET_ID_PATTERN.search(url)
-    return m.group(1) if m else None
+    if not m:
+        return None
+    published, sheet_id = m.groups()
+    return f"/spreadsheets/d/e/{sheet_id}/pubhtml" if published else f"/spreadsheets/d/{sheet_id}/htmlview"
 
 
 def _same_site(host: str | None, base_host: str | None) -> bool:
@@ -490,6 +501,7 @@ def _build_sheet_html_url(
     query form:
 
     For Google Sheets: /spreadsheets/d/{id}/htmlview/sheet?headers=true&gid={gid}
+    (published sheets: /spreadsheets/d/e/{id}/pubhtml/sheet?...)
     For custom domains: /htmlview/sheet?headers=true&gid={gid}
     """
     parsed = urlparse(base_url)
@@ -508,10 +520,10 @@ def _build_sheet_html_url(
             return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     if _is_google_sheets_url(base_url):
-        sheet_id = _extract_sheet_id(base_url)
-        if not sheet_id:
+        page_path = _sheet_page_path(base_url)
+        if not page_path:
             raise ValueError(f"Cannot extract sheet ID from URL: {base_url}")
-        path = f"/spreadsheets/d/{sheet_id}/htmlview/sheet"
+        path = f"{page_path}/sheet"
     else:
         # Custom domain — append /htmlview/sheet
         path = "/htmlview/sheet"
@@ -1138,7 +1150,7 @@ def get_cached_age(url: str) -> float | None:
 
 
 def get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
@@ -1167,8 +1179,20 @@ def get_cached_parsed_bytes(
         return None
 
 
+def drop_cached_entry(url: str) -> None:
+    """Delete a tracker's cached HTML, parse and metadata.
+
+    For a source that is gone or private: see docs/decisions.md::api.py::serve-stale-window.
+    """
+    key = _cache_key(_normalize_url(url))
+    # The meta goes first: every reader needs it, so none sees a half-deleted entry.
+    with _entry_lock(key):
+        for suffix in (".meta.json", ".parsed.json", ".html"):
+            (CACHE_DIR / f"{key}{suffix}").unlink(missing_ok=True)
+
+
 async def async_get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
@@ -1295,6 +1319,11 @@ class InvalidURLError(FetchError):
     pass
 
 
+class SourceGoneError(InvalidURLError):
+    """The source answered 404 or 410: the tracker no longer exists there."""
+    pass
+
+
 class AccessDeniedError(FetchError):
     """Sheet is private, banned, or access-restricted (HTTP 403)."""
     pass
@@ -1310,8 +1339,8 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         code = exc.response.status_code
         if code == 403:
             raise AccessDeniedError(f"Access denied (403): {url}") from exc
-        if code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        if code in (404, 410):
+            raise SourceGoneError(f"URL not found ({code}): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
     # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
     # upstream failing, none of them a server bug worth a 500.
@@ -1322,6 +1351,12 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # Async variants
 # ---------------------------------------------------------------------------
 
+def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
+    """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
+    if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
+        raise AccessDeniedError(f"Sign-in required: {url}")
+
+
 async def _fetch_base_html(
     client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
@@ -1331,6 +1366,7 @@ async def _fetch_base_html(
     TAB's page, which has no tab switcher.
     """
     r = await _get_capped(client, url_norm, timeout=timeout)
+    _raise_if_signed_out(r, url_norm)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1381,6 +1417,7 @@ async def async_fetch_sheet_html(
             if cached is not None:
                 return cached
         r = await _get_capped(client, url, timeout=timeout)
+        _raise_if_signed_out(r, url)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)
@@ -1455,6 +1492,28 @@ async def _fetch_gid_page(
         return None
 
 
+def _start_api_tabs(
+    url_norm: str,
+    content_tabs: list[tuple[str, str, str]],
+    client: httpx.AsyncClient,
+    timeout: float,
+) -> asyncio.Task | None:
+    """Content tabs from one Sheets API call, started early to overlap the main tab's fetch.
+
+    Main, Art and hub tabs stay on htmlview: the API has no in-cell images.
+    See docs/decisions.md::sheets_api.py.
+    """
+    m = SHEET_ID_PATTERN.search(url_norm) if _is_google_sheets_url(url_norm) else None
+    # A published (/d/e/) id is not a spreadsheet id the API accepts.
+    sheet_id = m.group(2) if m and not m.group(1) else None
+    if not sheet_id or not content_tabs or not sheets_api.api_key():
+        return None
+    return asyncio.create_task(sheets_api.fetch_tabs(
+        client, sheet_id, {gid: name for gid, _kind, name in content_tabs},
+        timeout=timeout, max_bytes=sheets_api.MAX_BODY_BYTES,
+    ))
+
+
 def _warn_failed_tabs(url_norm: str, t: PhaseTimer) -> None:
     """One WARNING per parse that lost tab pages; see docs/decisions.md::fetcher.py::cache-collapse-guard."""
     failed, total = t.tab_counts()
@@ -1475,15 +1534,19 @@ async def _load_secondary_tabs(
     use_cache: bool,
     t: PhaseTimer,
     page_paths: dict[str, str] | None = None,
+    api_tabs: asyncio.Task | None = None,
 ) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
     Everything here is optional — a failure never fails the request. Misc/MV
     entries also stay in the flat ``misc_entries`` list for backward
-    compatibility; every non-empty tab lands in ``Artist.tabs``.
+    compatibility; every non-empty tab lands in ``Artist.tabs``. Content tabs
+    come from ``api_tabs`` when it has them, else from htmlview.
     """
     if not art_gid and not content_tabs:
         return
+    if api_tabs is None:
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
 
     total = len(content_tabs) + (1 if art_gid else 0)
     done = 0
@@ -1520,15 +1583,29 @@ async def _load_secondary_tabs(
 
     tab_results: dict[str, list] = {}
 
+    async def _api_rows(gid_val: str) -> list | None:
+        if api_tabs is None:
+            return None
+        try:
+            rows = ((await api_tabs) or {}).get(gid_val)
+        except Exception as e:  # the API never costs a tab: htmlview can still read it
+            logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
+            return None
+        if rows is not None:
+            t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
+        return rows
+
     async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
         try:
-            with t.phase("misc_fetch"):
-                result = await _fetch(gid_val)
-            if result:
-                _, tab_html = result
+            source = await _api_rows(gid_val)
+            if source is None:
+                with t.phase("misc_fetch"):
+                    result = await _fetch(gid_val)
+                source = result[1] if result else None
+            if source is not None:
                 with t.phase("misc_parse"):
                     tab_results[gid_val] = await asyncio.to_thread(
-                        parse_misc_tab, tab_html, kind,
+                        parse_misc_tab, source, kind,
                         [era.name for era in artist.eras],
                     )
         except Exception as e:
@@ -1929,6 +2006,7 @@ async def async_fetch_and_parse(
             pass  # GID failed — fall through to GID discovery
 
     # Discover all GIDs and try them
+    api_tabs: asyncio.Task | None = None
     try:
         with t.phase("base_fetch"):
             base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
@@ -1957,6 +2035,7 @@ async def async_fetch_and_parse(
         gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
             base_html, gids
         )
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
         first_tab = named_tabs.get(gids[0]) if gids else None
         t.report(
             "fetching",
@@ -2088,6 +2167,7 @@ async def async_fetch_and_parse(
                     best_artist, art_gid, content_tabs, url_norm, title,
                     client=client, timeout=timeout, cache_ttl=cache_ttl,
                     use_cache=use_cache, t=t, page_paths=page_paths,
+                    api_tabs=api_tabs,
                 )
 
             _warn_failed_tabs(url_norm, t)
@@ -2116,3 +2196,6 @@ async def async_fetch_and_parse(
 
     except httpx.HTTPError as e:
         _raise_fetch_error(e, url)
+    finally:
+        if api_tabs is not None:
+            api_tabs.cancel()  # a no-op once consumed; frees the request on every other exit

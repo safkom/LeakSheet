@@ -9,13 +9,14 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from bisect import bisect_left
 from collections import Counter
 import unicodedata
 from functools import lru_cache
 from typing import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote_plus, urljoin, urlparse
+from urllib.parse import quote, unquote_plus, urljoin, urlparse
 
 
 from src.config import COLUMN_ALIASES
@@ -298,6 +299,133 @@ def extract_table(html_content: str) -> list[list[_Cell]]:
         parser = _TableExtractor()
         parser.feed(html_content)
         rows = parser.rows
+    return rows
+
+
+_MAX_GRID_CELLS = 2_000_000
+# htmlview renders these as U+FFFD; "\n" and "\t" pass through.
+_GRID_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _grid_text(text: str) -> str:
+    return _GRID_CONTROL_RE.sub("\ufffd", text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _utf16_offsets(text: str) -> list[int]:
+    """UTF-16 offset of every character, then the total: API run offsets count astral characters twice."""
+    offsets = [0]
+    for ch in text:
+        offsets.append(offsets[-1] + (2 if ord(ch) > 0xFFFF else 1))
+    return offsets
+
+
+def _line_breaks_before(text: str) -> list[int]:
+    """Line breaks in text[:i] for every i, as _grid_text renders them: CRLF counts once."""
+    counts = [0]
+    for i, ch in enumerate(text):
+        counts.append(counts[-1] + (ch == "\r" or (ch == "\n" and (i == 0 or text[i - 1] != "\r"))))
+    return counts
+
+
+def _grid_link(uri: str) -> str:
+    # htmlview wraps every href once and _clean_link unwraps once, so a stored redirect survives.
+    return "https://www.google.com/url?q=" + quote(uri, safe="")
+
+
+def _grid_cell(value: dict) -> _Cell:
+    raw = value.get("formattedValue") or ""
+    if ((value.get("dataValidation") or {}).get("condition") or {}).get("type") == "BOOLEAN":
+        raw = ""  # a checkbox renders no text in htmlview
+    text = _grid_text(raw).strip()
+    if hyperlink := value.get("hyperlink"):
+        # htmlview renders a cell with a hyperlink as one anchor around all of it.
+        return _Cell(text=text, links=[_grid_link(hyperlink)], link_lines=[_grid_text(raw).count("\n")])
+    runs = value.get("textFormatRuns") or []
+    chips = value.get("chipRuns") or []
+    link_runs = [(i, uri) for i, run in enumerate(runs)
+                 if (uri := ((run.get("format") or {}).get("link") or {}).get("uri"))]
+    link_chips = [(chip.get("startIndex", 0), uri) for chip in chips
+                  if (uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"))]
+    if not link_runs and not link_chips:
+        return _Cell(text=text)
+    # Linear in the cell, not per run: a cell can hold thousands of runs.
+    offsets, breaks = _utf16_offsets(raw), _line_breaks_before(raw)
+
+    def index(units: int) -> int:
+        return min(bisect_left(offsets, units), len(raw))
+
+    spans: list[tuple[int, int, str]] = []
+    for i, uri in link_runs:
+        end = index(runs[i + 1].get("startIndex", 0)) if i + 1 < len(runs) else len(raw)
+        spans.append((index(runs[i].get("startIndex", 0)), end, uri))
+    for units, uri in link_chips:
+        start = index(units)
+        spans.append((start, start + 1, uri))
+    spans.sort()
+    return _Cell(
+        text=text,
+        links=[_grid_link(uri) for _start, _end, uri in spans],
+        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
+    )
+
+
+def extract_grid(sheet: dict) -> list[list[_Cell]]:
+    """The rows `extract_table` gives for this sheet's htmlview, from Sheets API v4 JSON.
+
+    In-cell images are not in the API, so no cell carries any. The htmlview quirks
+    mirrored here: docs/decisions.md::parser.py::extract_grid.
+    """
+    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
+    data = (sheet.get("data") or [{}])[0]
+    row_data = data.get("rowData") or []
+    row_meta = data.get("rowMetadata") or []
+    col_meta = data.get("columnMetadata") or []
+
+    def hidden(meta: list, i: int) -> bool:
+        m = meta[i] if i < len(meta) else {}
+        return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
+
+    n_rows = max(grid.get("rowCount", 0), len(row_data))
+    n_cols = grid.get("columnCount", 0)
+    # The body is trimmed but the grid size is not: an empty tab can declare millions of cells.
+    if max(n_rows, 1) * n_cols > _MAX_GRID_CELLS:
+        raise ValueError(f"grid of {n_rows} x {n_cols} cells is too large")
+    cols = [c for c in range(n_cols) if not hidden(col_meta, c)]
+    covered: set[tuple[int, int]] = set()
+    for m in sheet.get("merges") or []:
+        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
+        if hidden(row_meta, m.get("startRowIndex", 0)):
+            continue
+        for r in range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows)):
+            for c in range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols)):
+                covered.add((r, c))
+    frozen = grid.get("frozenRowCount", 0)
+    frozen_cols = grid.get("frozenColumnCount", 0)
+
+    def build(r: int, cell_of) -> list[_Cell]:
+        # htmlview puts an empty freezebar <td> after the frozen columns of every row.
+        row: list[_Cell] = []
+        placed = not frozen_cols
+        for c in cols:
+            if not placed and c >= frozen_cols:
+                row.append(_Cell())
+                placed = True
+            if (r, c) not in covered:
+                row.append(cell_of(c))
+        if not placed:
+            row.append(_Cell())
+        return row
+
+    rows: list[list[_Cell]] = []
+    for r in range(n_rows):
+        if frozen and r == frozen:
+            rows.append(build(-1, lambda _c: _Cell()))
+        if hidden(row_meta, r):
+            continue
+        values = (row_data[r].get("values") or []) if r < len(row_data) else []
+        row = build(r, lambda c: _grid_cell(values[c]) if c < len(values) else _Cell())
+        if row:
+            rows.append(row)
     return rows
 
 
@@ -2746,9 +2874,9 @@ def _looks_like_section_label(text: str) -> bool:
 
 
 def parse_misc_tab(
-    html: str, kind: str, artist_eras: Iterable[str] = ()
+    html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
-    """Parse a Misc or Music Videos tab HTML export into MiscEntry rows.
+    """Parse a Misc or Music Videos tab (htmlview HTML, or rows from extract_grid) into MiscEntry rows.
 
     ``kind`` is ``"misc"`` or ``"music_videos"`` and is stamped on each entry
     as ``source_tab``. ``artist_eras`` are the main tab's era names, used to
@@ -2757,7 +2885,7 @@ def parse_misc_tab(
     keep the literal era label from their era column (or the last era header);
     no fuzzy matching against main-tab eras.
     """
-    rows = extract_table(html)
+    rows = extract_table(html) if isinstance(html, str) else html
     if not rows:
         return []
 

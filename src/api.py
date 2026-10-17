@@ -7,6 +7,8 @@ Endpoints:
   GET  /stream      — proxy audio/video from supported file hosts (Range support)
   GET  /image-proxy — proxy images through backend (width buckets, disk cache)
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
+  GET  /hosts       — which stream providers are down right now
+  GET  /health      — liveness, no I/O
   POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
 In production nginx serves these under /api/* and strips the prefix.
@@ -63,6 +65,7 @@ from src.fetcher import (
     async_get_cached_parsed_bytes,
     clear_cache,
     close_sheets_client,
+    drop_cached_entry,
     fetch_artistgrid_entries,
     serialize_artist,
     content_hash,
@@ -73,12 +76,14 @@ from src.fetcher import (
     NoTablesError,
     ParseError,
     PhaseTimer,
-    STALE_CACHE_TTL,
+    SERVE_STALE_TTL,
+    SourceGoneError,
     unlink_if_older,
 )
 from src.streaming import (
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
+    NonMediaError,
     PublicOnlyAsyncTransport,
     TTLCache,
     UpstreamStatusError,
@@ -96,6 +101,29 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 # One line per upstream or client request would drown the rest; nginx logs requests.
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+# Secrets this process holds. Frame locals are scrubbed only by variable name, so these
+# are also replaced by value anywhere in an event or log line.
+_SECRET_ENV = ("LEAKSHEET_GOOGLE_API_KEY", "LEAKSHEET_ADMIN_TOKEN")
+
+
+def _redact(value, secrets: list[str]):
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[Filtered]")
+        return value
+    if isinstance(value, dict):
+        return {k: _redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact(v, secrets) for v in value]
+    return value
+
+
+def _scrub_secrets(payload: dict, _hint: dict) -> dict:
+    # Short values would blank unrelated text; real keys and tokens are long.
+    secrets = [v for name in _SECRET_ENV if len(v := os.environ.get(name, "").strip()) >= 8]
+    return _redact(payload, secrets) if secrets else payload
+
 
 def _sentry_options(dsn: str) -> dict:
     """GlitchTip settings: errors and INFO+ log lines, no request PII.
@@ -115,8 +143,10 @@ def _sentry_options(dsn: str) -> dict:
         send_default_pii=False,
         # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
         event_scrubber=EventScrubber(
-            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token"]
+            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token", "x-goog-api-key"]
         ),
+        before_send=_scrub_secrets,
+        before_send_log=_scrub_secrets,
         integrations=[
             StarletteIntegration(failed_request_status_codes=set()),
             FastApiIntegration(failed_request_status_codes=set()),
@@ -201,6 +231,9 @@ def _sniff_audio_format(header: bytes) -> str | None:
     return None
 
 _MP4_BOXES = {b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
+
+# Enough for every signature above (WAVE needs 12) and the head of an HTML page.
+_SNIFF_BYTES = 16
 
 # Map file extensions to MIME types — used to resolve generic upstream types
 # (application/octet-stream) when the URL contains a recognisable extension.
@@ -592,6 +625,12 @@ async def _background_revalidate(url: str) -> None:
     except Exception as e:
         _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
+        # Gone or private at the source: a stale copy must not outlive it (serve-stale-window).
+        if isinstance(e, (AccessDeniedError, SourceGoneError)):
+            try:
+                await asyncio.to_thread(drop_cached_entry, url)
+            except OSError as exc:
+                logger.error("Could not drop the cached entry for %s: %s", url[:80], exc)
 
 
 # Per worker, like _parses. Keyed by normalized URL.
@@ -635,8 +674,10 @@ async def parse_sheet(
     """Fetch and parse a tracker spreadsheet.
 
     Supports ETag-based conditional requests (If-None-Match header) and
-    stale-while-revalidate: cached data up to 24h old is served instantly
-    while a background refresh is triggered.
+    stale-while-revalidate: cached data up to 7 days old is served instantly
+    (a matching ETag gets a 304) while a background refresh is triggered once
+    it is over an hour old. Older data is a cold parse. A refresh that finds the
+    source gone or private deletes the cached entry.
     """
     use_cache = req.use_cache and not req.force_refresh
     # Up front: every path below normalizes the URL, and an invalid one must be a
@@ -655,7 +696,7 @@ async def parse_sheet(
                 server_etag = _display_etag(server_etag, req.artist_name)
             if server_etag and server_etag == if_none_match:
                 age = await async_get_cached_age(req.url)
-                if age is not None and age < STALE_CACHE_TTL:
+                if age is not None and age < SERVE_STALE_TTL:
                     if age > DEFAULT_CACHE_TTL:
                         bg.add_task(_background_revalidate, req.url)
                     return Response(
@@ -672,7 +713,7 @@ async def parse_sheet(
     if use_cache:
         timer = PhaseTimer()
         with timer.phase("cache_read"):
-            cached = await async_get_cached_parsed_bytes(req.url, max_age=STALE_CACHE_TTL)
+            cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
         if cached is not None:
             raw, etag, age = cached
             if req.artist_name:
@@ -976,7 +1017,7 @@ _IMAGE_MAX_DECODE_PIXELS = MAX_DECODE_PIXELS  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
 # sheets-images 302s to login for N>0, so those take the Pillow path.
-_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
+_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com\Z", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
 
@@ -1211,7 +1252,8 @@ def _log_upstream_failure(what: str, url: str, exc: Exception) -> None:
     logging integration files it as an issue.
     """
     # NetworkError: fetcher's wrapper for an upstream non-200 or transport failure.
-    if isinstance(exc, (httpx.TransportError, NetworkError)):
+    # TimeoutError: a deadline of ours (asyncio.timeout) that a slow upstream hit.
+    if isinstance(exc, (httpx.TransportError, NetworkError, TimeoutError)):
         logger.warning("%s: upstream unreachable for %s: %r", what, url[:80], exc)
     else:
         logger.error("%s for %s: %s", what, url[:80], exc, exc_info=exc)
@@ -1495,6 +1537,10 @@ async def _get_image_capped(
 # ---------------------------------------------------------------------------
 
 _METADATA_USER_AGENT = USER_AGENT
+# Total deadline over all of /metadata's upstream calls, not the shared client's 120 s audio
+# read timeout: see docs/decisions.md::api.py::metadata-deadline.
+_METADATA_DEADLINE_S = 10.0
+_METADATA_TIMEOUT = httpx.Timeout(_METADATA_DEADLINE_S, connect=5.0)
 
 # Provider metadata rarely changes for a given file, so parsed results are cached.
 _metadata_cache = TTLCache(ttl=3600.0, max_entries=500)
@@ -1653,6 +1699,7 @@ async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
             stream_url,
             headers={"User-Agent": _METADATA_USER_AGENT, "Referer": "https://pillows.su/"},
             follow_redirects=True,
+            timeout=_METADATA_TIMEOUT,
         )
         if resp.status_code != 200:
             return None
@@ -1704,57 +1751,58 @@ async def proxy_metadata(
         headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
 
     try:
-        client = _get_shared_client()
-        resp = await client.get(meta_url, headers=headers)
-        if resp.status_code != 200:
-            # pillows' metadata .txt endpoint 404s for some files — notably
-            # videos. The CDN's Content-Type on the stream URL is accurate,
-            # so fall back to a HEAD probe before giving up.
-            if provider == "pillows":
-                fallback = await _pillows_stream_head_fallback(url)
-                if fallback is not None:
-                    payload = json.dumps(fallback)
-                    _metadata_cache.set(meta_url, payload)
-                    return Response(
-                        content=payload,
-                        media_type="application/json",
-                        headers={
-                            "Cache-Control": _CC_METADATA,
-                            "X-Cache-Status": "miss",
-                        },
-                    )
-            raise HTTPException(
-                status_code=503,
-                detail=f"Provider returned {resp.status_code}",
+        async with asyncio.timeout(_METADATA_DEADLINE_S):
+            client = _get_shared_client()
+            resp = await client.get(meta_url, headers=headers, timeout=_METADATA_TIMEOUT)
+            if resp.status_code != 200:
+                # pillows' metadata .txt endpoint 404s for some files — notably
+                # videos. The CDN's Content-Type on the stream URL is accurate,
+                # so fall back to a HEAD probe before giving up.
+                if provider == "pillows":
+                    fallback = await _pillows_stream_head_fallback(url)
+                    if fallback is not None:
+                        payload = json.dumps(fallback)
+                        _metadata_cache.set(meta_url, payload)
+                        return Response(
+                            content=payload,
+                            media_type="application/json",
+                            headers={
+                                "Cache-Control": _CC_METADATA,
+                                "X-Cache-Status": "miss",
+                            },
+                        )
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Provider returned {resp.status_code}",
+                )
+
+            try:
+                if provider == "pillows":
+                    result = _parse_pillows_metadata(resp.text)
+                elif provider == "froste":
+                    result = _parse_froste_metadata(resp.json())
+                elif provider == "imgur":
+                    result = _parse_imgur_metadata(resp.json())
+                elif provider == "pixeldrain":
+                    result = _parse_pixeldrain_metadata(resp.json())
+                else:
+                    result = {"provider": provider}
+            # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
+            # provider's outage, not a bug of ours.
+            except (ValueError, TypeError, KeyError, AttributeError) as e:
+                logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
+                raise HTTPException(status_code=503, detail="Metadata fetch failed")
+
+            payload = json.dumps(result)
+            _metadata_cache.set(meta_url, payload)
+            return Response(
+                content=payload,
+                media_type="application/json",
+                headers={
+                    "Cache-Control": _CC_METADATA,
+                    "X-Cache-Status": "miss",
+                },
             )
-
-        try:
-            if provider == "pillows":
-                result = _parse_pillows_metadata(resp.text)
-            elif provider == "froste":
-                result = _parse_froste_metadata(resp.json())
-            elif provider == "imgur":
-                result = _parse_imgur_metadata(resp.json())
-            elif provider == "pixeldrain":
-                result = _parse_pixeldrain_metadata(resp.json())
-            else:
-                result = {"provider": provider}
-        # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
-        # provider's outage, not a bug of ours.
-        except (ValueError, TypeError, KeyError, AttributeError) as e:
-            logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-            raise HTTPException(status_code=503, detail="Metadata fetch failed")
-
-        payload = json.dumps(result)
-        _metadata_cache.set(meta_url, payload)
-        return Response(
-            content=payload,
-            media_type="application/json",
-            headers={
-                "Cache-Control": _CC_METADATA,
-                "X-Cache-Status": "miss",
-            },
-        )
     except HTTPException:
         raise
     except Exception as e:
@@ -1972,7 +2020,9 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     """Feed one /stream upstream outcome into the shared provider health."""
     if provider is None:
         return
-    if exc is None or (isinstance(exc, UpstreamStatusError) and exc.status_code < 500):
+    if exc is None or isinstance(exc, NonMediaError) or (
+        isinstance(exc, UpstreamStatusError) and exc.status_code < 500
+    ):
         await asyncio.to_thread(host_health.record_success, provider)  # the host answered
         return
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
@@ -2016,9 +2066,10 @@ async def proxy_stream(
     if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
 
-    # A provider known to be down is refused at once: see docs/decisions.md::host_health.py.
+    # A provider known to be down is refused at once, until a retry is due: see
+    # docs/decisions.md::host_health.py.
     provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.down, provider)):
+    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
         raise HTTPException(
             status_code=503,
             detail=f"{outage['host']} is temporarily unavailable",
@@ -2048,8 +2099,8 @@ async def proxy_stream(
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
-        # Relay upstream's status so a client can tell "gone" from "throttled"; only the
-        # code crosses over (see UpstreamStatusError). Everything else is 503.
+        # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
+        # crosses over (see UpstreamStatusError). Everything else is 503.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
         await _record_stream_outcome(provider, url, e)
         if e.status_code in (404, 410):
@@ -2060,6 +2111,8 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
+        if 400 <= e.status_code < 500:
+            raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
         raise HTTPException(status_code=503, detail="Upstream error")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
@@ -2094,8 +2147,8 @@ async def proxy_stream(
     ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
     total_size = _parse_content_length(resp.headers.get("content-length"))
 
-    # MIME sniffing on first chunk — see docs/decisions.md::api.py::mime-sniffing
-    _stream_iter = resp.aiter_bytes(chunk_size=65536)
+    # MIME sniffing on the first bytes — see docs/decisions.md::api.py::mime-sniffing
+    _stream_iter = resp.aiter_bytes()
     _prepend_chunk: bytes = b""
 
     # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
@@ -2105,16 +2158,17 @@ async def proxy_stream(
     )
     if _body_starts_at_zero:
         try:
-            _prepend_chunk = await _stream_iter.__anext__()
+            while len(_prepend_chunk) < _SNIFF_BYTES:
+                _prepend_chunk += await _stream_iter.__anext__()
         except StopAsyncIteration:
-            _prepend_chunk = b""
+            pass
         except Exception as exc:
             # A read error while sniffing would leak `resp`'s pooled connection: close it and
             # surface a 503.
             await resp.aclose()
             logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
             raise HTTPException(status_code=503, detail="Upstream read error") from exc
-        sniffed = _sniff_audio_format(_prepend_chunk[:16] if _prepend_chunk else b"")
+        sniffed = _sniff_audio_format(_prepend_chunk[:_SNIFF_BYTES])
         if sniffed:
             ct = sniffed
         elif _is_non_media(_prepend_chunk):

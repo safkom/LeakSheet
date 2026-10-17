@@ -310,6 +310,16 @@ Those hosts do emit `gid:` on every switcher entry too, so merging names from th
 pageUrl-keyed switcher is a no-op for them. It stays as a cheap fallback for a host
 that omits `gid`, which has not been observed.
 
+## fetcher.py::published-sheets — /d/e/ links keep their own id space
+
+`.../spreadsheets/d/e/2PACX-…/pubhtml` is a published-to-web sheet. Its id is not a sheet
+id: `.../d/e/{id}/htmlview` answers 404, and `pubhtml` answers 200 with the same tab
+switcher (`items.push`, no `<table>`) that htmlview pages carry. Tabs are served at
+`.../pubhtml/sheet?headers=true&gid={gid}`, which the parser reads like any htmlview tab
+(checked against a public published sheet on 2026-10-17). `SHEET_ID_PATTERN` therefore
+captures the `e/` and `_sheet_page_path` maps a published sheet to `pubhtml` and any other
+to `htmlview`. `TrackerURLNormalizer` mirrors it.
+
 ## models.py — fields kept on the wire with no client reader
 
 `stats` / `stats_raw` / `highlighted_producers` stay in the payload even though no
@@ -334,6 +344,38 @@ browser sees an opaque network error instead of a clean 429 response.
 The fast path returns the cached JSON bytes as-is: no pydantic validation, no
 re-serialization, no content re-hash. Those steps cost ~400ms on a 6.5MB artist
 payload and were the bulk of warm-request latency.
+
+## api.py::serve-stale-window — a cached tracker is served for 7 days
+
+`/sheet` answers a 304 or serves the stored bytes while the entry is younger than
+`SERVE_STALE_TTL` (7 days); a background revalidation starts once it is over an hour
+old. Past 24 h the server used to do neither, so a client holding its own copy waited
+for a full cold parse anyway: production cold opens took 7.8-20.5 s. The app keeps its
+copy for days, so a week of stale-but-instant matches how it is used, and each served
+request refreshes the entry for the next one.
+
+`STALE_CACHE_TTL` (24 h) stays as the window of `fetcher.py::cache-collapse-guard`. It
+is a different question: how long a *larger* old parse outranks a smaller new one. A
+week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
+while a day still covers a partial fetch landing on a recently refreshed copy. The two
+constants are not meant to be equal. Known gap: a partial revalidation of a 1-7 day old
+entry is written, because the 24 h guard does not cover it; the next stale hit's
+revalidation repairs it.
+
+The window must not prolong content its source has revoked (DMCA). A failed revalidation
+only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
+for the whole week. `_background_revalidate` therefore calls `drop_cached_entry` (HTML,
+parse and metadata, under the entry lock) when the fetch fails with `SourceGoneError`
+(base page 404 or 410) or `AccessDeniedError`. That is a 403, or, for a docs.google.com
+sheet, a base page whose redirect chain ended on `accounts.google.com`: Google answers
+a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
+table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
+where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
+any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
+for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+serving the stale copy. The next request after a drop is a cold parse that returns the
+real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
+unchanged.
 
 ## api.py::google-size-suffix-regex — Google image URL suffix grammar
 
@@ -370,8 +412,8 @@ fails, a stored copy of the same picture is kept rather than downgraded.
 Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
 is minted on every page fetch, and it stops working: one fetched directly from Google
 still loaded after 28 minutes, and every page served 42 or more minutes after Google
-rendered it had dead tokens. A parse, though, is served for 1–24 hours and clients keep
-it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
+rendered it had dead tokens. A parse, though, is served for up to 7 days and clients
+keep it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
 production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
 Keem were fine.
 
@@ -449,8 +491,22 @@ Some file hosts (e.g. pillows.su) always report `Content-Type: audio/mp4` regard
 of the actual container. Chrome lenient-decodes the bytes; Safari strictly validates
 Content-Type against the data and shows "source not supported" when an Ogg file is
 served as `audio/mp4`. Because the range starts at byte 0 on a fresh request, the
-first chunk is read, the real format is sniffed from magic bytes, `Content-Type` is
-corrected, and the chunk is prepended back into the stream so no bytes are lost.
+first 16 bytes are read, the real format is sniffed from magic bytes, `Content-Type`
+is corrected, and those bytes are prepended back into the stream so none are lost.
+
+The upstream is read with `aiter_bytes()` and no chunk size: httpx buffers a fixed
+chunk size in full before its first yield, which delayed the response headers (the
+sniff gates them) by a 64 KiB download. A read may return fewer than 16 bytes, so the
+sniff accumulates reads until it has 16 or the body ends; every later chunk is relayed
+as it arrives.
+
+## api.py::metadata-deadline — /metadata gives up after 10 s
+
+The shared httpx client is tuned for audio (120 s read timeout), so a provider that
+accepts the connection and never answers held a worker for two minutes per call.
+`/metadata` bounds all its upstream calls (the metadata fetch and the pillows HEAD
+fallback) with one `asyncio.timeout` of 10 s, plus a per-call 5 s connect timeout. A
+timeout answers 503 like any other provider failure and logs at WARNING.
 
 ## api.py::range-fallback — HTTP 200, not a synthesized 206, when length is unknown
 
@@ -770,6 +826,38 @@ OOM the worker — reads are capped at 512 KiB decompressed.
 `drive.google.com/file/d/{id}/...` has the id captured directly; the `open?id=...`
 and `uc?id=...` forms are handled via query-string parsing in `_extract_gdrive_id`
 instead, since the id can appear alongside other params in any order there.
+Both forms are covered by `streaming.py::id-terminator`.
+
+## streaming.py::url-pattern-case — links match in any case
+
+Hosts and path keywords (`/f/`, `/song/`, `/view/…/file.html`, `/u/`, `/file/d/`, drive
+`/open` and `/uc`) match case-insensitively, so a tracker's `HTTPS://Pillows.SU/F/x` plays.
+File ids keep their case: the providers' ids are case-sensitive.
+Drive's `/open` and `/uc` forms compare the netloc, not the hostname, so a port or
+userinfo is refused there exactly as in the regex forms.
+
+Folding is ASCII-only (`re.ASCII`). Under Unicode ignore-case `ſ` and the Kelvin sign
+would pass for `s` and `k` in a host. Foundation does fold them, so Swift's
+`StreamResolver` refuses a non-ASCII authority. `tests/parse/test_link_rule_contract.py`
+pins the Python and Swift rules together.
+
+## streaming.py::id-terminator — an id is the leading run of id characters
+
+`/f/abc.mp3`, `/f/abc123)` and `/u/a-b` resolve to `abc`, `abc123` and `a`: the regexes
+take the leading run and ignore what follows. Swift's resolver reads the same rule
+(`StreamResolver.idPrefix`) off the percent-encoded path, so a literal `%61`, `%2F` or `%6F`
+never decodes into a match, and a tab, newline or space ends the id as any other character.
+
+Measured over the 112,088 host links in the local parsed corpus (2026-10-17): 64 (0.06%)
+have anything glued after the id. 47 are a first link followed by whitespace or `)`/`.`
+(the right file), 17 are two links glued together (`abc123https://…`, a wrong id on either
+side). Whole-segment matching would hide Play on the 47 and rescue the 17 from a file-level
+404; the prefix rule needs no change in Python and was kept. The parser could split
+multi-link cells, which would shrink both groups.
+
+The Drive `/open` and `/uc` forms are different: `id` is a whole query value
+(`fullmatch`), and a tab, CR or LF anywhere in the link refuses it, because `urlparse` would
+drop the character silently. Their scheme must be http or https, as in the regex forms.
 
 ## streaming.py::no-metadata-hosts — kraken and gdrive have no metadata API
 
@@ -890,10 +978,11 @@ plausible, no error was raised, and only a forced refresh cleared it.
 
 The guard is deliberately one-sided. Growth always writes, a modest shrink
 always writes (trackers do lose tracks — DMCA, restructures), and the old copy
-wins only while it is still inside `STALE_CACHE_TTL`; past that it would not be
-served anyway, so a genuinely shrunken tracker recovers on its own instead of
-being frozen forever. The refusal is logged at WARNING so a systematically
-broken tab is visible rather than silent — which was the real defect here.
+wins only while it is still inside `STALE_CACHE_TTL` (24 h, deliberately shorter
+than the 7-day serve window, see `api.py::serve-stale-window`); past that a
+genuinely shrunken tracker recovers on its own instead of being frozen for days.
+The refusal is logged at WARNING so a systematically broken tab is visible rather
+than silent — which was the real defect here.
 
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an
@@ -970,12 +1059,59 @@ byte-identical output, and serializing once per miss removed two of the three
 serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
 NDJSON progress lines to clients that ask for `application/x-ndjson`.
 
+**Re-assessed 2026-10-16 (ADR, accepted): stay on Python 3 + FastAPI + gunicorn/uvicorn-worker
++ lxml.** Measured on ten trackers loaded cold one at a time: wall time 1.6-11.8 s, of which
+parsing (`parse` + `misc_parse` + `art_parse` + `hub_parse`) was 0.05-1.5 s. Production app cold
+opens took 7.8-20.5 s with parse at 59-403 ms. On the 20 largest corpus tabs, `extract_table`
+is 55 % of parse time, mostly building one `_Cell` per `<td>` (~1.1 M per pass). Python 3.14
+parsed them 5 % faster than 3.11, which is inside run-to-run noise.
+
+| Option | Cold-load gain | Cost |
+|---|---|---|
+| Keep Python/FastAPI | none | none |
+| Litestar, plain Starlette, Granian | none measurable at ~50 loads/day | migration churn |
+| Go, ASP.NET Core, TypeScript, Rust | at most the parse share (≤1.5 s of 12 s) | port ~3,000 lines of heuristics and ~1,200 tests; per-worker state redesign |
+| selectolax instead of lxml | only part of the 55 % in `extract_table` | 1.0 API break (2026-10); parity risk |
+
+Cold loads wait on Google, so the levers are the request plan and the data source (see
+fetcher.py::data-source), not the runtime. Move off 3.11 before its security support ends in
+2027-10 for the support window, not for speed. Revisit a port when `sheet_timing` shows parse
+above half of cold time, or the Python runtime itself becomes the operational problem.
+Research: `docs/reviews/2026-10-16/` (local, untracked).
+
+## fetcher.py::data-source — htmlview stays; Sheets API v4 is the candidate (ADR, proposed)
+
+Measured 2026-10-16 on three public workbooks, per path, against the htmlview HTML:
+
+| | htmlview (today) | XLSX export | Sheets API v4 `spreadsheets.get` |
+|---|---|---|---|
+| Requests, time | 12-22, 12-24 s sequential | 2, 10-14 s | 1, 1.3-4.2 s |
+| Bytes on the wire | 0.75-1.3 MB | 83-108 MB (embeds media) | 0.7-1.2 MB gzip (13-34 MB JSON) |
+| Hyperlinks | baseline | loses secondary links in multi-link cells | all on 2 of 3; 5 URLs missing on the third |
+| Era covers (in-cell images) | 47 / 262 / 382 | 0 / 262 / 381 | none: v4 has no image field |
+| Notes, conditional colours | no | notes yes, conditional colours no | both |
+| Refusals | none | 401 when the owner disabled downloads | none |
+
+XLSX is rejected: too large, refused by download-disabled sheets, and it drops links. The API
+is the fastest and richest path for cell data, but it cannot see covers. It needs an API key
+(anonymous calls get 403) with quotas of 300 reads/min per project and 60 per user, no daily
+cap. Mirror domains (yetracker.net, `*tracker.net`) are not Google URLs, so the API cannot read
+them. The decision is to keep htmlview, and prototype a hybrid behind the existing cell
+model: the API for every tab's cells and links, htmlview only for tabs that carry covers. That
+cuts a cold load from 8-16 Google page fetches to one API call plus one or two pages. Adopt it
+only if the hybrid's output matches htmlview on the accuracy labels and the yetracker diff.
+
 ## api.py::upstream-503 — proxy failures answer 503, not 502
 
 Cloudflare replaces an origin's 502 (and 504) with its own HTML error page, so a
 proxy's JSON `detail` never reached a client: `/stream` for a pillows outage arrived
 as Cloudflare's page. `/sheet` already answered 503 for this reason; `/stream`,
 `/image-proxy` and `/metadata` now do too. The relayed 404, 409 and 429 stay.
+
+An upstream 4xx is the host answering about one file (451 takedown, 401, 403), not a
+proxy failure: `/stream` relays it as the same code, and only 5xx and transport errors
+are 503. A 503 says "try again later" about a file the host refused for good, and hides
+the code from the client.
 
 ## api.py::non-media-415 — /stream refuses a body that is plainly not media
 
@@ -999,3 +1135,72 @@ with the recent failing links (`bytes=0-0`); any answer, a 404 included, means u
 Only /stream feeds it: on that day pillows' metadata API was healthy while its stream
 endpoint returned 500, so metadata outcomes would mislabel the stream path. Links are
 never crawled: tens of thousands of probes would invite rate limits and bans.
+
+Probe links can be permanently broken files, so the down state also expires: 300 s
+after it was set (`HALF_OPEN_AFTER_S`, `retry_at` in the shared file, so all workers
+agree), `/stream` lets requests through. A success marks the provider up; a failure that
+`record_failure` records restarts the 300 s. `/hosts` says "down" until a success.
+A body that is not media (`NonMediaError`, the 415 sniff) is the host answering with a
+bad file: it counts as a success, never toward down, in `/stream` and in the probe.
+That includes the resolver steps: a kraken page with no audio URL and an imgur API
+answer without `cdnUrl`. A 4xx from the kraken page or from every imgur host is an
+`UpstreamStatusError` like one from the file itself. A bare ValueError from a resolver
+still counts as a soft failure: those wrap transport errors, upstream 5xx and the SSRF
+pre-flight.
+
+## sheets_api.py — content tabs through the Sheets API, the rest on htmlview
+
+Cold loads are network-bound: 8–16 htmlview pages per workbook. One `spreadsheets.get`
+with `includeGridData` and a `ranges=` entry per content tab returns all those tabs at
+once. It is used only for content tabs (Misc, Released, Best Of, Grails, Stems, …).
+The API has no in-cell images, so the main tab (era covers, and `_is_era_header`
+reads images), the Art tab and hub sibling tabs stay on htmlview. The main tab's
+htmlview is needed for covers in any case, so moving it to the API would not shorten
+the critical path. The call starts right after tab discovery, so it overlaps the main
+tab's fetch.
+
+Measured 2026-10-16 on 9 workbooks: the API cells match htmlview's on 1,132,135 cells.
+The exceptions are one cell edited between the two fetches and one trailing empty row.
+All 79 content tabs parse identically. The live cold A/B ran both orders on the same 9
+workbooks. All 18 parses were byte-identical to htmlview-only. Google requests fell from
+8–16 (median 12) to 3–6 (median 4). Median wall time went from 6.1 s to 3.2 s, comparing
+each mode's first run. With the warm upstream cache handed to htmlview, the speedup is
+still 1.36×.
+Google APIs gzip only when the User-Agent contains "gzip"; without it, the full workbook
+was up to 42 MB on the wire.
+
+htmlview's tab listing trims names, so a title with edge spaces is not a valid `ranges=`
+entry and the call returns 400. That 400 triggers one metadata call for the exact titles
+by sheet id, then one retry.
+
+The key travels only in `X-Goog-Api-Key`, and redirects are not followed, so it cannot
+reach another host. Quota is 60 reads/min per user and 300 per project. A 429 (or a 403
+`rateLimitExceeded`) pauses the API for that worker for Retry-After, or 60 s. Any failure,
+or a tab missing from the response, falls back to that tab's htmlview page.
+
+## parser.py::extract_grid — htmlview quirks the API rows reproduce
+
+Each rule was found by diffing API cells against `extract_table` on real workbooks.
+- Hidden rows/columns are absent from htmlview. Hidden sheets are absent from its tab list.
+- An empty "freezebar" row follows the frozen rows.
+- htmlview renders the grid to `rowCount` and `columnCount`, including empty or
+  formula-padded rows. The one exception seen: a trailing row with nothing in it at all.
+- Merges: colspan leaves empty cells. A rowspan's covered `<td>`s are omitted from later
+  rows, so their cells shift left.
+- `\r\n` and lone `\r` render as line breaks. C0/C1 control characters render as U+FFFD.
+- A cell with `hyperlink` renders as one anchor around all its text, whatever its runs say.
+  Otherwise each link run (and smart chip) is an anchor. Run offsets are UTF-16 units.
+- Every href comes wrapped in `google.com/url?q=`, and `_clean_link` unwraps it exactly
+  once. API links are wrapped the same way, so a link the sheet stores as a pasted Google
+  redirect stays as htmlview shows it instead of being unwrapped twice.
+- Frozen columns: htmlview puts an empty freezebar `<td>` after the frozen columns of every
+  row (the horizontal freezebar row gets one too).
+- A checkbox renders no text in htmlview; the API's `formattedValue` is TRUE/FALSE, so cells
+  with a BOOLEAN `dataValidation` are blanked.
+- The API trims empty rows but reports the full grid size: a grid over 2,000,000 cells raises,
+  and that tab alone reads from htmlview. Merge extents are clamped to the grid.
+
+`sheets_api.py` limits: the whole call has a 15 s deadline (`TIMEOUT_S`), so a slow API
+cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
+enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
+one private workbook.

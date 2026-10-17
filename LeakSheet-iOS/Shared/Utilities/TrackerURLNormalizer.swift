@@ -1,10 +1,7 @@
 import Foundation
 
-/// Canonicalizes tracker URLs so variants of the same tracker compare equal
-/// (edit vs htmlview, gid fragments, share query params, scheme/host case).
-/// Mirrors the backend's `_normalize_url`: for Google Sheets the spreadsheet
-/// ID is the identity and the canonical form is `/htmlview`; for other hosts
-/// the bare host canonicalizes to a trailing slash.
+/// Canonicalizes tracker URLs so variants of one tracker compare equal, as the backend's
+/// `_normalize_url` does: see DECISIONS.md::TrackerURLNormalizer.swift::mirrors-backend
 nonisolated enum TrackerURLNormalizer {
     static func normalize(_ raw: String) -> String {
         var input = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -14,29 +11,38 @@ nonisolated enum TrackerURLNormalizer {
         if !lower.hasPrefix("http://") && !lower.hasPrefix("https://") {
             input = "https://" + input
         }
+        // urlparse drops tab/CR/LF anywhere in the URL; a host or id broken by one still names the tracker.
+        input.unicodeScalars.removeAll { $0 == "\t" || $0 == "\r" || $0 == "\n" }
 
-        if let id = sheetID(in: input) {
-            return "https://docs.google.com/spreadsheets/d/\(id)/htmlview"
-        }
-
-        guard var components = URLComponents(string: input), let host = components.host else {
+        guard var components = URLComponents(string: input), let host = components.host?.lowercased() else {
             return input
         }
-        components.scheme = components.scheme?.lowercased()
-        components.host = host.lowercased()
+        let scheme = (components.scheme ?? "https").lowercased()
+
+        if host == "docs.google.com", let page = sheetPagePath(inPath: components.percentEncodedPath) {
+            return "https://docs.google.com" + page
+        }
+
+        components.scheme = scheme
+        components.host = host
+        components.user = nil
+        components.password = nil
+        if components.port == (scheme == "https" ? 443 : 80) { components.port = nil }
         components.fragment = nil
+        if components.query?.isEmpty == true { components.query = nil }
         if components.path.isEmpty && components.query == nil {
             components.path = "/"
         }
         return components.url?.absoluteString ?? input
     }
 
-    // Mirrors backend SHEET_ID_PATTERN:
-    // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)
-    private static func sheetID(in url: String) -> String? {
-        let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/([A-Za-z0-9_-]+)/
-            .ignoresCase()
-        guard let match = url.firstMatch(of: pattern) else { return nil }
-        return String(match.output.1)
+    // Mirrors backend SHEET_ID_PATTERN and _sheet_page_path, searched in "docs.google.com" + path:
+    // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+). A published sheet (/d/e/)
+    // is its own id space and only pubhtml serves it.
+    private static func sheetPagePath(inPath path: String) -> String? {
+        let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/(e\/)?([A-Za-z0-9_-]+)/
+        guard let match = ("docs.google.com" + path).firstMatch(of: pattern) else { return nil }
+        let id = match.output.2
+        return match.output.1 == nil ? "/spreadsheets/d/\(id)/htmlview" : "/spreadsheets/d/e/\(id)/pubhtml"
     }
 }

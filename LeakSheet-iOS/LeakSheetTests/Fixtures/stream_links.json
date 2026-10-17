@@ -1,0 +1,830 @@
+{
+  "stream_links": [
+    {
+      "link": "https://pillows.su/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://www.pillows.su/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillowcase.su/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://www.pillowcase.su/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://plwcse.top/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://www.plwcse.top/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "http://pillows.su/f/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/a-b_C9",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123/",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123/extra",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123?x=1",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123#t=5",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123&sa=D&source=editors&ust=1&usg=X",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123&keep=me",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc.mp3",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123)",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123;x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123 ",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abcé",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123\nhttps://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123 https://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123https://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/ab\tc",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%zz",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%C3%A9",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc[x]",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc{x}",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc\"x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc<x>",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc|x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc^x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc`x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc\\x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://imgur.gg/f/AbC12",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://temp.imgur.gg/f/AbC12",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://www.imgur.gg/f/AbC12",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://www.temp.imgur.gg/f/AbC12",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://imgur.gg/f/abc.png",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123ABCD",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd&sa=D&ust=1",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd.mp3",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd_x",
+      "provider": "froste"
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file.html",
+      "provider": "kraken"
+    },
+    {
+      "link": "https://www.krakenfiles.com/view/AbC123xyz/file.html",
+      "provider": "kraken"
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file.html?x=1",
+      "provider": "kraken"
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file.htmlx",
+      "provider": "kraken"
+    },
+    {
+      "link": "https://pixeldrain.com/u/aBc123",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://www.pixeldrain.com/u/aBc123",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/a-b",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/a_b",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/abc.flac",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://drive.google.com/file/d/1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://www.drive.google.com/file/d/1AbC-x_9/view",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9&usp=drive_copy",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9#frag",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/uc?id=1AbC-x_9&export=download",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/uc?export=download&id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://www.drive.google.com/uc?id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/file/d/abc.def",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=&id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC%2Dx",
+      "provider": "gdrive"
+    },
+    {
+      "link": "HTTPS://PILLOWS.SU/F/ABC123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://Pillows.SU/f/AbC123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://PLWCSE.TOP/F/abc123",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://IMGUR.GG/F/AbC12",
+      "provider": "imgur"
+    },
+    {
+      "link": "https://MUSIC.FROSTE.LOL/SONG/0123ABCD",
+      "provider": "froste"
+    },
+    {
+      "link": "https://KrakenFiles.com/VIEW/AbC123xyz/FILE.HTML",
+      "provider": "kraken"
+    },
+    {
+      "link": "https://PIXELDRAIN.COM/U/aBc123",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://DRIVE.GOOGLE.COM/FILE/D/1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://Drive.Google.com/Open?id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/UC?id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://youtube.com/watch?v=abc",
+      "provider": null
+    },
+    {
+      "link": "https://mega.nz/file/abc",
+      "provider": null
+    },
+    {
+      "link": "https://example.com/a.mp3",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/about",
+      "provider": null
+    },
+    {
+      "link": "https://pillowſ.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://Krakenfiles.com/view/AbC123xyz/file.html",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f/",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su.evil.example/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://evil.example/pillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://notpillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://plwcse.top/about",
+      "provider": null
+    },
+    {
+      "link": "https://notplwcse.top/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://imgur.gg/about",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/NOTHEX",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcdzz",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/０１２３",
+      "provider": null
+    },
+    {
+      "link": "https://froste.lol/song/0123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://www.music.froste.lol/song/0123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/other",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com/view/file.html",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com/l/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com/u/",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/drive/folders/1AbCdEf",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=abc/def",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?ID=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/uc/x?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open/?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC.mp3",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC+x",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=%0A&id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "ftp://drive.google.com/open?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "ftp://drive.google.com/uc?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC%0A",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9\n",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/op\ten?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/%6Fpen?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/file/%64/1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f/%61bc",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f%2Fabc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/%66/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/%30123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file%2Ehtml",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com/u/%61bc",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su:443/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su:/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://user@pillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows%2Esu/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su//f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f//abc123",
+      "provider": null
+    },
+    {
+      "link": "https://imgur.gg:443/f/AbC12",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol:443/song/0123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com:443/view/AbC123xyz/file.html",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com:443/u/aBc123",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com:443/file/d/1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com:443/open?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://user@drive.google.com/uc?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "ftp://pillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "pillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "",
+      "provider": null
+    }
+  ],
+  "tracker_urls": [
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit#gid=0",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit?usp=sharing",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/view",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/pubhtml?gid=0&single=true",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview#gid=123",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview/sheet?headers=true&gid=1",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/u/0/d/1AbC_d-42xYz/htmlview",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "http://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "  https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit  ",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml?gid=0&single=true",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml#gid=5",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml/sheet?headers=true&gid=1",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pub?output=html",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/u/0/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/AAA/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/AAA/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e1AbC/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/e1AbC/htmlview"
+    },
+    {
+      "raw": "https://user:pw@docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com:443/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "http://docs.google.com:80/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/AAA/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/AAA/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/BBB/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/BBB/htmlview"
+    },
+    {
+      "raw": "https://mirror.example/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://mirror.example/spreadsheets/d/1AbC_d-42xYz/edit"
+    },
+    {
+      "raw": "https://docs.google.com.evil.example/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com.evil.example/spreadsheets/d/1AbC_d-42xYz/edit"
+    },
+    {
+      "raw": "https://evil.example/?u=docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://evil.example/?u=docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit"
+    },
+    {
+      "raw": "https://evil.example/docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://evil.example/docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit"
+    },
+    {
+      "raw": "https://docs.google.com/document/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/document/d/1AbC_d-42xYz/edit"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/ed\nit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.go\togle.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_\r\nd-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://yetra\tcker.net/a\nb?c=\r1",
+      "normalized": "https://yetracker.net/ab?c=1"
+    },
+    {
+      "raw": "yetracker.net",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "https://yetracker.net",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "https://yetracker.net/",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "yetracker.net/#top",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "HTTPS://YETRACKER.NET/",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "https://yetracker.net/other",
+      "normalized": "https://yetracker.net/other"
+    },
+    {
+      "raw": "https://example.com/a?b=1",
+      "normalized": "https://example.com/a?b=1"
+    },
+    {
+      "raw": "https://example.com?b=1",
+      "normalized": "https://example.com?b=1"
+    },
+    {
+      "raw": "https://example.com/a#frag",
+      "normalized": "https://example.com/a"
+    },
+    {
+      "raw": "https://example.com/a?",
+      "normalized": "https://example.com/a"
+    },
+    {
+      "raw": "https://example.com/?",
+      "normalized": "https://example.com/"
+    },
+    {
+      "raw": "https://example.com?",
+      "normalized": "https://example.com/"
+    },
+    {
+      "raw": "https://u:p@YeTracker.NET:443/#top",
+      "normalized": "https://yetracker.net/"
+    },
+    {
+      "raw": "https://example.com:8443/x",
+      "normalized": "https://example.com:8443/x"
+    },
+    {
+      "raw": "https://example.com:80/x",
+      "normalized": "https://example.com:80/x"
+    },
+    {
+      "raw": "http://example.com:443/x",
+      "normalized": "http://example.com:443/x"
+    },
+    {
+      "raw": "http://EXAMPLE.com:80/x",
+      "normalized": "http://example.com/x"
+    },
+    {
+      "raw": "https://[::1]:8080/x",
+      "normalized": "https://[::1]:8080/x"
+    }
+  ],
+  "known_differences": [
+    {
+      "link": "https://drive.google.com/uc?id=%611AbC-x_9&x{=1",
+      "python": "gdrive",
+      "swift": null,
+      "reason": "Foundation re-escapes the % of a query that also holds an invalid character"
+    }
+  ],
+  "known_url_differences": [
+    {
+      "raw": "https://example.com/a b",
+      "python": "https://example.com/a b",
+      "swift": "https://example.com/a%20b",
+      "reason": "Swift percent-encodes the path"
+    },
+    {
+      "raw": "https://example.com/é",
+      "python": "https://example.com/é",
+      "swift": "https://example.com/%C3%A9",
+      "reason": "Swift percent-encodes the path"
+    },
+    {
+      "raw": "https://example.com/a?q=x y",
+      "python": "https://example.com/a?q=x y",
+      "swift": "https://example.com/a?q=x%20y",
+      "reason": "Swift percent-encodes the query"
+    },
+    {
+      "raw": "https://bücher.example/x",
+      "python": "https://bücher.example/x",
+      "swift": "https://xn--bcher-kva.example/x",
+      "reason": "Swift punycodes the host"
+    },
+    {
+      "raw": "not a url at all",
+      "python": "https://not a url at all/",
+      "swift": "https://not a url at all",
+      "reason": "Swift cannot parse it and returns the input"
+    },
+    {
+      "raw": "https://docs.google.com:99999/spreadsheets/d/ABC123/edit",
+      "python": null,
+      "swift": "https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+      "reason": "Python rejects an out-of-range port"
+    },
+    {
+      "raw": "https://[::1/x",
+      "python": null,
+      "swift": "https://[::1/x",
+      "reason": "Python rejects an unclosed bracket"
+    }
+  ]
+}

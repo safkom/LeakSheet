@@ -8,8 +8,8 @@
 name = "leaksheet"
 version = "0.4.0"
 description = "Parses Google Sheets leak trackers into a structured API."
-# 3.11 for asyncio.timeout (api.py's parse deadline) and tomllib (config.VERSION).
-requires-python = ">=3.11"
+# The image and CI run 3.14; older Pythons are untested.
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -37,7 +37,7 @@ dev = [
 package = false
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py314"
 extend-exclude = [".cache", "Trackers", "web", "LeakSheet-iOS"]
 
 [tool.ruff.lint]

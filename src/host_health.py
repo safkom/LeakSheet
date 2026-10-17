@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from src import fetcher
-from src.streaming import UpstreamStatusError, resolve_stream_url, stream_audio
+from src.streaming import NonMediaError, UpstreamStatusError, resolve_stream_url, stream_audio
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ _SOFT_WINDOW_S = 120.0
 _SOFT_FAILURES = 3
 _SOFT_DISTINCT_LINKS = 2
 PROBE_INTERVAL_S = 60.0
+HALF_OPEN_AFTER_S = 300
 _PROBE_TIMEOUT_S = 15.0
 
 # (path, inode, mtime_ns, state): a re-read only when another worker wrote the file.
@@ -108,6 +109,12 @@ def down(provider: str) -> dict | None:
     return {**entry, "host": PROVIDERS[provider]} if entry and entry.get("status") == "down" else None
 
 
+def refusing(provider: str) -> dict | None:
+    """The entry when /stream should refuse *provider*: down and not yet due a retry."""
+    entry = down(provider)
+    return entry if entry and time.time() < entry.get("retry_at", 0) else None
+
+
 def record_success(provider: str) -> None:
     entry = _read().get(provider)
     if not entry or (entry.get("status") != "down" and not entry.get("failures")):
@@ -124,6 +131,8 @@ def record_failure(provider: str, link: str, *, hard: bool, error: str) -> None:
         entry = state.setdefault(provider, {"status": "up", "since": now})
         entry["checked"] = now
         if entry["status"] == "down":
+            if now >= entry.get("retry_at", 0):
+                entry["retry_at"] = now + HALF_OPEN_AFTER_S  # a half-open request failed
             return
         failures = [f for f in entry.get("failures", []) if now - f[0] <= _SOFT_WINDOW_S]
         failures.append([now, link])
@@ -137,6 +146,7 @@ def record_failure(provider: str, link: str, *, hard: bool, error: str) -> None:
             links = list(dict.fromkeys(f[1] for f in reversed(failures)))[:_SOFT_DISTINCT_LINKS + 1]
             state[provider] = {
                 "status": "down", "since": now, "checked": now, "probe": links, "error": error,
+                "retry_at": now + HALF_OPEN_AFTER_S,
             }
             logger.warning("stream host %s is down: %s", PROVIDERS[provider], error)
 
@@ -170,6 +180,8 @@ async def _answers(link: str) -> bool:
         return True
     except UpstreamStatusError as e:
         return e.status_code < 500  # a missing or forbidden file is not an outage
+    except NonMediaError:
+        return True  # the host served a file, just not media
     except (httpx.HTTPError, ValueError, TimeoutError, OSError) as e:
         logger.debug("stream host probe of %s failed: %r", link[:80], e)
         return False

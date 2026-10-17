@@ -8,6 +8,7 @@ ignored, 416 relay, magic-byte MIME correction, and the download disposition.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -49,6 +50,12 @@ def _patch_stream(monkeypatch, resp):
 class TestHostResolution:
     def test_unsupported_host_is_400(self, api_client):
         r = api_client.get("/stream", params={"url": "https://example.com/x.mp3"})
+        assert r.status_code == 400
+
+    @pytest.mark.parametrize("tail", ["%0A", "%0D%0A", "%09"])
+    def test_a_drive_id_with_trailing_control_characters_is_400(self, api_client, tail):
+        # `$` matched before a trailing newline, so the id passed and httpx then failed: a 503.
+        r = api_client.get("/stream", params={"url": f"https://drive.google.com/open?id=1AbC{tail}"})
         assert r.status_code == 400
 
     def test_disallowed_resolved_domain_is_403(self, api_client, monkeypatch):
@@ -303,3 +310,97 @@ class TestNonMediaBodyIsRefused:
         resp = FakeStreamResponse(200, {"content-type": "application/octet-stream"}, [head + b"x" * 64])
         _patch_stream(monkeypatch, resp)
         assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 200
+
+
+def _split(data: bytes, n: int) -> list[bytes]:
+    return [data[i : i + n] for i in range(0, len(data), n)]
+
+
+# (name, leading bytes, MIME the sniff must set, a wrong MIME the upstream claims)
+_FORMATS = [
+    ("flac", b"fLaC\x00\x00\x00\x22", "audio/flac", "audio/mp4"),
+    ("mp4", b"\x00\x00\x00\x18ftypM4A ", "audio/mp4", "audio/mpeg"),
+    ("id3", b"ID3\x04\x00\x00\x00\x00\x00\x00", "audio/mpeg", "audio/mp4"),
+    ("mp3-sync", b"\xff\xfb\x90\x00\x00\x00\x00\x00", "audio/mpeg", "audio/mp4"),
+    ("wav", b"RIFF\x24\x00\x00\x00WAVEfmt ", "audio/wav", "audio/mp4"),
+    ("ogg", b"OggS\x00\x02\x00\x00\x00\x00\x00\x00", "audio/ogg", "audio/mp4"),
+]
+
+
+class TestSniffSurvivesTinyChunks:
+    """The sniff reads the first 16 bytes, so an upstream that trickles them in
+    1-5 byte reads must still be classified (and refused) correctly."""
+
+    @pytest.mark.parametrize("chunk", [1, 2, 3, 4, 5, 1000])
+    @pytest.mark.parametrize("name,head,mime,wrong", _FORMATS, ids=[f[0] for f in _FORMATS])
+    def test_content_type_is_corrected(self, api_client, monkeypatch, name, head, mime, wrong, chunk):
+        body = head + b"x" * 40
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": wrong, "content-length": str(len(body))}, _split(body, chunk),
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith(mime)
+        assert r.content == body
+
+    @pytest.mark.parametrize("head", [b"%PDF-1.2\n", b"PK\x03\x04\x14\x00", b"<!DOCTYPE html>", b"<HTML><body>"])
+    def test_non_media_is_415(self, api_client, monkeypatch, head):
+        body = head + b"x" * 40
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "application/octet-stream"}, _split(body, 1),
+        ))
+        assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 415
+
+    def test_synthesised_range_slices_after_a_trickled_sniff(self, api_client, monkeypatch):
+        body = b"fLaC" + bytes(range(60))
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "audio/mp4", "content-length": str(len(body))}, _split(body, 1),
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS}, headers={"Range": "bytes=2-30"})
+        assert r.status_code == 206
+        assert r.content == body[2:31]
+        assert r.headers["content-type"].startswith("audio/flac")
+
+    def test_two_byte_ogg_probe_is_still_ogg(self, api_client, monkeypatch):
+        # Safari's bytes=0-1 probe: the whole body is a prefix of "OggS".
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            206, {"content-type": "audio/mp4", "content-range": "bytes 0-1/100"}, [b"O", b"g"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS}, headers={"Range": "bytes=0-1"})
+        assert r.status_code == 206
+        assert r.headers["content-type"].startswith("audio/ogg")
+
+
+class _TrickleThenHang(httpx.AsyncByteStream):
+    """Yields *chunks*, then blocks: a download still in flight."""
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    async def __aiter__(self):
+        for c in self._chunks:
+            yield c
+        await asyncio.Event().wait()
+
+
+class TestFirstByteDoesNotWaitForABuffer:
+    def test_first_chunks_are_relayed_as_they_arrive(self, monkeypatch):
+        # A real httpx.Response: a fixed aiter_bytes(chunk_size=...) would hold the
+        # 30 bytes below until 64 KiB had arrived, which on a stalled download is never.
+        first, second = b"ID3\x04" + b"a" * 26, b"b" * 10
+        upstream = httpx.Response(
+            200,
+            headers={"content-type": "audio/mpeg"},
+            stream=_TrickleThenHang([first, second]),
+            request=httpx.Request("GET", "https://api.pillows.su/api/get/abc123"),
+        )
+        _patch_stream(monkeypatch, upstream)
+
+        async def run():
+            request = api.Request({"type": "http", "method": "GET", "headers": [], "query_string": b""})
+            resp = await api.proxy_stream(request, url=PILLOWS, download=False)
+            got = [await anext(resp.body_iterator), await anext(resp.body_iterator)]
+            await resp.body_iterator.aclose()
+            return got
+
+        assert asyncio.run(asyncio.wait_for(run(), timeout=3)) == [first, second]
