@@ -70,7 +70,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
-STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
+# Collapse-guard window (24h); the serve window is SERVE_STALE_TTL.
+# See docs/decisions.md::api.py::serve-stale-window
+STALE_CACHE_TTL = 86400
+SERVE_STALE_TTL = 7 * 86400  # max age served stale (and 304'd) while a revalidation runs
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Sheet HTML + parsed-JSON cache cap: see docs/decisions.md::fetcher.py — sheet cache size cap
@@ -119,6 +122,9 @@ class PhaseTimer:
 
     def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
+        # gid → whether its latest fetch loaded. A hub sibling is fetched twice (probe,
+        # then merge); the merge's page is the one kept, so the last result counts.
+        self.tabs: dict[str, bool] = {}
         # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
         # the timer because the timer already reaches every stage of the pipeline.
         self.on_progress = on_progress
@@ -137,6 +143,13 @@ class PhaseTimer:
             event["done"], event["total"] = done or 0, total
         self.on_progress(event)
 
+    def tab_loaded(self, gid: str, ok: bool) -> None:
+        self.tabs[gid] = ok
+
+    def tab_counts(self) -> tuple[int, int]:
+        """(failed, total) tab pages of this parse."""
+        return sum(not ok for ok in self.tabs.values()), len(self.tabs)
+
     @contextmanager
     def phase(self, name: str):
         start = time.perf_counter()
@@ -153,7 +166,7 @@ class PhaseTimer:
     def log_line(self) -> str:
         total = sum(self.phases.values())
         parts = " ".join(f"{n}={d * 1000:.0f}ms" for n, d in self.phases.items())
-        return f"{parts} total={total * 1000:.0f}ms"
+        return f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
 
 # ---------------------------------------------------------------------------
 # Shared async HTTP client (connection-pooled, reused across requests)
@@ -212,7 +225,8 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
     # Already decoded, so the encoding headers no longer describe the body.
     headers = [(k, v) for k, v in resp.headers.multi_items()
                if k.lower() not in ("content-encoding", "content-length")]
-    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+    # The final request, so .url says where a redirect chain ended.
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=resp.request)
 
 
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
@@ -978,12 +992,15 @@ CACHE_COLLAPSE_RATIO = 0.8
 
 
 def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
-    """Why a parse of *new* versions must not overwrite the cached one, or None if it may.
+    """Why a parse of *new* versions must not be cached, or None if it may.
 
-    A partial fetch parses cleanly and looks like any other result: see
-    docs/decisions.md::fetcher.py::cache-collapse-guard. Past ``STALE_CACHE_TTL``
-    the old entry is never preferred, so a tracker that genuinely shrank recovers.
+    An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
+    and looks like any other result: see docs/decisions.md::fetcher.py::cache-collapse-guard.
+    Past ``STALE_CACHE_TTL`` the old entry is never preferred, so a tracker that genuinely
+    shrank recovers.
     """
+    if new <= 0:
+        return f"empty parse, {new_eras} eras"
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
         return None
@@ -1126,7 +1143,7 @@ def get_cached_age(url: str) -> float | None:
 
 
 def get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
@@ -1155,8 +1172,20 @@ def get_cached_parsed_bytes(
         return None
 
 
+def drop_cached_entry(url: str) -> None:
+    """Delete a tracker's cached HTML, parse and metadata.
+
+    For a source that is gone or private: see docs/decisions.md::api.py::serve-stale-window.
+    """
+    key = _cache_key(_normalize_url(url))
+    # The meta goes first: every reader needs it, so none sees a half-deleted entry.
+    with _entry_lock(key):
+        for suffix in (".meta.json", ".parsed.json", ".html"):
+            (CACHE_DIR / f"{key}{suffix}").unlink(missing_ok=True)
+
+
 async def async_get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
@@ -1283,6 +1312,11 @@ class InvalidURLError(FetchError):
     pass
 
 
+class SourceGoneError(InvalidURLError):
+    """The source answered 404 or 410: the tracker no longer exists there."""
+    pass
+
+
 class AccessDeniedError(FetchError):
     """Sheet is private, banned, or access-restricted (HTTP 403)."""
     pass
@@ -1298,8 +1332,8 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         code = exc.response.status_code
         if code == 403:
             raise AccessDeniedError(f"Access denied (403): {url}") from exc
-        if code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        if code in (404, 410):
+            raise SourceGoneError(f"URL not found ({code}): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
     # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
     # upstream failing, none of them a server bug worth a 500.
@@ -1310,6 +1344,12 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # Async variants
 # ---------------------------------------------------------------------------
 
+def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
+    """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
+    if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
+        raise AccessDeniedError(f"Sign-in required: {url}")
+
+
 async def _fetch_base_html(
     client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
@@ -1319,6 +1359,7 @@ async def _fetch_base_html(
     TAB's page, which has no tab switcher.
     """
     r = await _get_capped(client, url_norm, timeout=timeout)
+    _raise_if_signed_out(r, url_norm)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1369,6 +1410,7 @@ async def async_fetch_sheet_html(
             if cached is not None:
                 return cached
         r = await _get_capped(client, url, timeout=timeout)
+        _raise_if_signed_out(r, url)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)
@@ -1428,14 +1470,18 @@ async def _fetch_gid_page(
                 if use_cache and cache_ttl > 0:
                     cached = await _async_get_cached(sheet_url, cache_ttl)
                     if cached is not None:
+                        t.tab_loaded(gid_val, True)
                         return (gid_val, cached[0])
                 resp = await _get_capped(client, sheet_url, timeout=timeout)
                 if resp.status_code != 200 or "<table" not in resp.text.lower():
+                    t.tab_loaded(gid_val, False)
                     return None
                 if use_cache and cache_ttl > 0:
                     await _async_set_cache(sheet_url, resp.text, title)
+                t.tab_loaded(gid_val, True)
                 return (gid_val, resp.text)
     except (httpx.HTTPError, ValueError, KeyError):
+        t.tab_loaded(gid_val, False)
         return None
 
 
@@ -1457,6 +1503,13 @@ def _start_api_tabs(
         client, sheet_id, {gid: name for gid, _kind, name in content_tabs},
         timeout=timeout, max_bytes=sheets_api.MAX_BODY_BYTES,
     ))
+
+
+def _warn_failed_tabs(url_norm: str, t: PhaseTimer) -> None:
+    """One WARNING per parse that lost tab pages; see docs/decisions.md::fetcher.py::cache-collapse-guard."""
+    failed, total = t.tab_counts()
+    if failed:
+        logger.warning("Partial load for %s: failed_tabs=%d/%d", url_norm[:80], failed, total)
 
 
 async def _load_secondary_tabs(
@@ -1525,10 +1578,13 @@ async def _load_secondary_tabs(
         if api_tabs is None:
             return None
         try:
-            return ((await api_tabs) or {}).get(gid_val)
+            rows = ((await api_tabs) or {}).get(gid_val)
         except Exception as e:  # the API never costs a tab: htmlview can still read it
             logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
             return None
+        if rows is not None:
+            t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
+        return rows
 
     async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
         try:
@@ -1924,6 +1980,7 @@ async def async_fetch_and_parse(
                                 cache_ttl=cache_ttl, use_cache=use_cache, t=t,
                                 page_paths=base_page_paths,
                             )
+                        _warn_failed_tabs(url_norm, t)
                         await asyncio.to_thread(_finalize, artist, url_norm)
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
@@ -2104,6 +2161,7 @@ async def async_fetch_and_parse(
                     api_tabs=api_tabs,
                 )
 
+            _warn_failed_tabs(url_norm, t)
             await asyncio.to_thread(_finalize, best_artist, url_norm)
 
             if write_cache:
@@ -2115,12 +2173,13 @@ async def async_fetch_and_parse(
                     await _async_set_cached_parsed(url_norm, best_artist)
             return best_artist
 
-        # Fallback
+        # Fallback: no tab yielded songs, often because the tabs that held them failed.
+        _warn_failed_tabs(url_norm, t)
         html, title = await async_fetch_sheet_html(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )
         name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name, url)
+        artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
         await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)

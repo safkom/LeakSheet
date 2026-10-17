@@ -56,9 +56,9 @@ def _api_sheet(gid: str) -> dict:
 class Recorder:
     """A mock transport serving both htmlview and the API; records every request."""
 
-    def __init__(self, api=None):
+    def __init__(self, api=None, fail_gids=None):
         self.requests: list[httpx.Request] = []
-        self._htmlview = make_workbook_handler(WORKBOOK, tab_names=TAB_NAMES)
+        self._htmlview = make_workbook_handler(WORKBOOK, tab_names=TAB_NAMES, fail_gids=fail_gids)
         self._api = api or self.ok
 
     @staticmethod
@@ -83,9 +83,9 @@ class Recorder:
         return {g for r in self.requests if (g := r.url.params.get("gid"))}
 
 
-async def _parse(recorder, patch_sheets_client, url=URL):
+async def _parse(recorder, patch_sheets_client, url=URL, timer=None):
     patch_sheets_client(recorder.client())
-    artist = await async_fetch_and_parse(url, use_cache=False, write_cache=False)
+    artist = await async_fetch_and_parse(url, use_cache=False, write_cache=False, timer=timer)
     return json.loads(artist.model_dump_json())
 
 
@@ -214,3 +214,32 @@ class TestFallback:
         assert await _parse(rec, patch_sheets_client, url=URL + "#gid=100") == expected
         assert len(rec.api_requests()) == 1
         assert not rec.htmlview_gids() & CONTENT_GIDS
+
+
+class TestFailedTabs:
+    """The failed_tabs count (docs/decisions.md::fetcher.py::cache-collapse-guard) covers API tabs."""
+
+    async def test_tabs_read_through_the_api_are_counted_as_loaded(self, with_key, patch_sheets_client):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        await _parse(Recorder(), patch_sheets_client, timer=timer)
+        # Main and Art over htmlview, Misc and Grails / Wanted over the API.
+        assert timer.tab_counts() == (0, 4)
+
+    async def test_a_tab_the_api_lacks_and_htmlview_fails_is_a_failed_tab(self, with_key, patch_sheets_client):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        rec = Recorder(api=lambda r: httpx.Response(200, json={"sheets": [_api_sheet("200")]}), fail_gids={"500"})
+        await _parse(rec, patch_sheets_client, timer=timer)
+        assert timer.tab_counts() == (1, 4)
+
+    async def test_a_failed_api_call_leaves_the_htmlview_accounting_alone(self, with_key, patch_sheets_client):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        rec = Recorder(api=lambda r: httpx.Response(429), fail_gids={"500"})
+        await _parse(rec, patch_sheets_client, timer=timer)
+        assert timer.tab_counts() == (1, 4)
+

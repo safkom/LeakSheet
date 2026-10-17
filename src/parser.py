@@ -2026,7 +2026,7 @@ def parse_sheet(
                     # No song data — stats-less era header (Kid Cudi style)
                     new_era = _stats_less_era(row, row_era, col_map)
                     eras.append(new_era)
-                    _register_era_keys(new_era, row_era, era_by_key)
+                    _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
                     current_era = new_era
                 continue
 
@@ -2057,7 +2057,7 @@ def parse_sheet(
                     eras.append(new_era)
                     # Register full name_val so _era_match_key strips the
                     # parenthetical year and matches e.g. "The Graduates"
-                    _register_era_keys(new_era, name_val, era_by_key)
+                    _register_era_keys(new_era, name_val, era_by_key, era_by_key_fallback)
                     current_era = new_era
                 elif current_era is not None:
                     # Single-line section label ("Other Media", "OG / Uncut Files"): a named section
@@ -2071,7 +2071,7 @@ def parse_sheet(
                     # This handles Yung Lean style trackers.
                     new_era = Era(name=name_first_line, sections=[Section()])
                     eras.append(new_era)
-                    _register_era_keys(new_era, name_val, era_by_key)
+                    _register_era_keys(new_era, name_val, era_by_key, era_by_key_fallback)
                     current_era = new_era
                 continue
 

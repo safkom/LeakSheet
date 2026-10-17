@@ -470,7 +470,7 @@ def main() -> int:
     ap.add_argument("--corpus", default=".cache", help="directory of captured *.html")
     ap.add_argument("--limit", type=int, default=0, help="max tabs (0 = all)")
     ap.add_argument("--min-size", type=int, default=20_000)
-    ap.add_argument("--max-size", type=int, default=4_000_000)
+    ap.add_argument("--max-size", type=int, default=16_000_000)
     ap.add_argument("--out", help="write metrics JSON here")
     ap.add_argument(
         "--detail",

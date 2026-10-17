@@ -12,6 +12,9 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 - `uv run uvicorn src.api:app --reload` — local API on :8000.
 - `uv run python -m tests.parse.test_wire_contract` — regenerate the Swift contract fixture
   after an intended change to the `/sheet` wire format.
+- `uv run python -m tests.parse.test_link_rule_contract` — regenerate `stream_links.json`, the
+  stream-host and tracker-URL vectors the Swift resolver and normalizer replay, after an
+  intended change to a link rule.
 - `uv run python tests/tools/yetracker_diff.py` — diff the Ye parse against yetracker.cc, an
   independent parser. Run it after parser changes.
 - `k6 run tests/load/api.js` — load test of the hot paths; CI runs it on the Docker image
