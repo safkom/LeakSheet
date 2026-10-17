@@ -31,6 +31,8 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
   `/trackers`, `/stream`, `/image-proxy`, `/metadata`, `/cache/clear`, `/health`
 - `src/fetcher.py` — fetching, tab discovery, disk cache · `src/parser.py` — HTML → `Artist`
 - `src/models.py` — Pydantic models; their `dict()` overrides define the wire format
+- `src/sheets_api.py` — content tabs via one Sheets API v4 call (`LEAKSHEET_GOOGLE_API_KEY`);
+  `parser.extract_grid` turns its JSON into the rows `extract_table` gives for htmlview
 - `src/streaming.py` — stream URL resolution and the SSRF-guarded httpx transport
 - `src/config.py` — column aliases, host allowlists, `VERSION` (read from pyproject.toml)
 - `tests/` — `unit/`, `parse/`, `fetch/`, `api/` (offline gate), `live/`, `quality/`

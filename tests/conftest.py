@@ -49,6 +49,7 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     import src.api as api
     import src.config as config
     import src.fetcher as fetcher
+    import src.sheets_api as sheets_api
     import src.streaming as streaming
 
     cache_dir = tmp_path_factory.mktemp("leaksheet-cache")
@@ -68,6 +69,9 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
     monkeypatch.setattr(streaming, "_cdn_url_cache", streaming.TTLCache(ttl=streaming._CDN_URL_TTL, max_entries=500))
     monkeypatch.setattr(streaming, "_inflight_resolves", {})
+    monkeypatch.setattr(sheets_api, "_backoff_until", 0.0)
+    # A developer's real key must never turn an offline test into an API call.
+    monkeypatch.delenv("LEAKSHEET_GOOGLE_API_KEY", raising=False)
     return cache_dir
 
 

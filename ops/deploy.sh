@@ -9,7 +9,8 @@ git fetch -q origin && git reset -q --hard refs/remotes/origin/main
 docker compose build -q api web
 set -a; [ -f .env ] && . ./.env; set +a
 export LEAKSHEET_TRUSTED_PROXY_HOPS="${LEAKSHEET_TRUSTED_PROXY_HOPS:-}" \
-       LEAKSHEET_RATE_LIMIT_PER_MIN="${LEAKSHEET_RATE_LIMIT_PER_MIN:-}" SENTRY_DSN="${SENTRY_DSN:-}"
+       LEAKSHEET_RATE_LIMIT_PER_MIN="${LEAKSHEET_RATE_LIMIT_PER_MIN:-}" SENTRY_DSN="${SENTRY_DSN:-}" \
+       LEAKSHEET_GOOGLE_API_KEY="${LEAKSHEET_GOOGLE_API_KEY:-}"
 python3 -c 'import os, sys; sys.stdout.write(os.path.expandvars(open(sys.argv[1]).read()))' \
   ops/casaos/leaksheet.yml |
   docker run --rm -i -v /var/lib/casaos/apps:/apps alpine \
