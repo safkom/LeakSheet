@@ -19,6 +19,16 @@ the whole song's badge through made Best Of display 🗑️ on songs kept for a 
 (Ye "Hurricane" in DONDA [V3]). Falls back to the song badge only when no kept
 version carries one, so filters like No Snippets don't strip a song's badge entirely.
 
+## TrackerURLNormalizer.swift::mirrors-backend — same identity as `_normalize_url`
+
+A Google Sheet is its id: every spelling collapses to `.../d/{id}/htmlview`, found in
+`docs.google.com` + path only when the host is docs.google.com (a mirror or a lookalike
+keeps its own URL). Scheme and host fold, userinfo and the scheme's default port go, the
+fragment goes, and a bare host gets a trailing slash. The cache key and the recents
+dedup compare these strings, so a rule the backend reads differently splits one tracker in two.
+`Fixtures/stream_links.json` replays the backend's answers; differences that remain are
+pinned there as known differences.
+
 ## APIClient.swift::chunked-download — chunked delegate download
 
 `URLSession` hands the body over in Data chunks (one memcpy each). The previous

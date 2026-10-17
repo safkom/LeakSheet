@@ -301,6 +301,19 @@ def test_case_folding_is_ascii_only(link):
     assert resolve_stream_url(link) is None
 
 
+@pytest.mark.parametrize("link", [
+    "https://drive.google.com:443/open?id=1AbC-x_9",
+    "https://user@drive.google.com/uc?id=1AbC-x_9",
+    "https://drive.google.com:/open?id=1AbC-x_9",
+    "https://drive.google.com:443/file/d/1AbC-x_9",
+    "https://pillows.su:443/f/abc123",
+    "https://user@pillows.su/f/abc123",
+])
+def test_a_port_or_userinfo_is_not_a_stream_host(link):
+    # Every form goes through the same authority rule, whether it is a regex or a query form.
+    assert resolve_stream_url(link) is None
+
+
 def test_metadata_matches_in_any_case_too():
     assert resolve_metadata_url("HTTPS://PILLOWS.SU/F/AbC123") == {
         "url": "https://api.pillows.su/api/metadata/AbC123.txt",

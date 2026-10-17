@@ -732,6 +732,8 @@ instead, since the id can appear alongside other params in any order there.
 Hosts and path keywords (`/f/`, `/song/`, `/view/…/file.html`, `/u/`, `/file/d/`, drive
 `/open` and `/uc`) match case-insensitively, so a tracker's `HTTPS://Pillows.SU/F/x` plays.
 File ids keep their case: the providers' ids are case-sensitive.
+Drive's `/open` and `/uc` forms compare the netloc, not the hostname, so a port or
+userinfo is refused there exactly as in the regex forms.
 
 Folding is ASCII-only (`re.ASCII`). Under Unicode ignore-case `ſ` and the Kelvin sign
 would pass for `s` and `k` in a host. Foundation does fold them, so Swift's

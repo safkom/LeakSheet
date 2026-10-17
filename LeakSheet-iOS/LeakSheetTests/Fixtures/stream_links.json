@@ -33,6 +33,10 @@
       "provider": "pillows"
     },
     {
+      "link": "https://pillows.su/f/abc123/",
+      "provider": "pillows"
+    },
+    {
       "link": "https://pillows.su/f/abc123/extra",
       "provider": "pillows"
     },
@@ -114,6 +118,10 @@
     },
     {
       "link": "https://drive.google.com/open?id=1AbC-x_9&usp=drive_copy",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9#frag",
       "provider": "gdrive"
     },
     {
@@ -289,6 +297,58 @@
       "provider": null
     },
     {
+      "link": "https://pillows.su:443/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su:/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://user@pillows.su/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows%2Esu/f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su//f/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f//abc123",
+      "provider": null
+    },
+    {
+      "link": "https://imgur.gg:443/f/AbC12",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol:443/song/0123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com:443/view/AbC123xyz/file.html",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com:443/u/aBc123",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com:443/file/d/1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com:443/open?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://user@drive.google.com/uc?id=1AbC-x_9",
+      "provider": null
+    },
+    {
       "link": "ftp://pillows.su/f/abc123",
       "provider": null
     },
@@ -461,6 +521,160 @@
     {
       "raw": "https://[::1]:8080/x",
       "normalized": "https://[::1]:8080/x"
+    }
+  ],
+  "known_differences": [
+    {
+      "link": "https://pillows.su/f/abc.mp3",
+      "python": "pillows",
+      "swift": null,
+      "reason": "id ends at the dot in Python"
+    },
+    {
+      "link": "https://pillows.su/f/abc123)",
+      "python": "pillows",
+      "swift": null,
+      "reason": "id ends at the paren in Python"
+    },
+    {
+      "link": "https://pillows.su/f/abc123;x",
+      "python": "pillows",
+      "swift": null,
+      "reason": "id ends at the semicolon in Python"
+    },
+    {
+      "link": "https://pillows.su/f/abc123&keep=me",
+      "python": "pillows",
+      "swift": null,
+      "reason": "Swift strips only an all-Google-tracking tail"
+    },
+    {
+      "link": "https://pillows.su/f/abc123 ",
+      "python": "pillows",
+      "swift": null,
+      "reason": "trailing space is not part of the id in Python"
+    },
+    {
+      "link": "https://pillows.su/f/abcé",
+      "python": "pillows",
+      "swift": null,
+      "reason": "id ends at the first non-ASCII letter in Python"
+    },
+    {
+      "link": "https://imgur.gg/f/abc.png",
+      "python": "imgur",
+      "swift": null,
+      "reason": "id ends at the dot in Python"
+    },
+    {
+      "link": "https://pixeldrain.com/u/a-b",
+      "python": "pixeldrain",
+      "swift": null,
+      "reason": "pixeldrain ids stop at the hyphen in Python"
+    },
+    {
+      "link": "https://pixeldrain.com/u/abc.flac",
+      "python": "pixeldrain",
+      "swift": null,
+      "reason": "id ends at the dot in Python"
+    },
+    {
+      "link": "https://drive.google.com/file/d/abc.def",
+      "python": "gdrive",
+      "swift": null,
+      "reason": "id ends at the dot in Python"
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file.htmlx",
+      "python": "kraken",
+      "swift": null,
+      "reason": "Python matches file.html as a prefix"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd.mp3",
+      "python": "froste",
+      "swift": null,
+      "reason": "Python's lookahead rejects only letters and digits"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd_x",
+      "python": "froste",
+      "swift": null,
+      "reason": "Python's lookahead rejects only letters and digits"
+    },
+    {
+      "link": "https://drive.google.com/open?id=&id=1AbC-x_9",
+      "python": "gdrive",
+      "swift": null,
+      "reason": "Python's parse_qs drops the blank id"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC%0A",
+      "python": "gdrive",
+      "swift": null,
+      "reason": "Python's $ matches before a trailing newline"
+    },
+    {
+      "link": "ftp://drive.google.com/open?id=1AbC-x_9",
+      "python": "gdrive",
+      "swift": null,
+      "reason": "Python's query forms never check the scheme"
+    }
+  ],
+  "known_url_differences": [
+    {
+      "raw": "https://example.com/a?",
+      "python": "https://example.com/a",
+      "swift": "https://example.com/a?",
+      "reason": "Python drops an empty query's ?"
+    },
+    {
+      "raw": "https://example.com/?",
+      "python": "https://example.com/",
+      "swift": "https://example.com/?",
+      "reason": "Python drops an empty query's ?"
+    },
+    {
+      "raw": "https://example.com/a b",
+      "python": "https://example.com/a b",
+      "swift": "https://example.com/a%20b",
+      "reason": "Swift percent-encodes the path"
+    },
+    {
+      "raw": "https://example.com/é",
+      "python": "https://example.com/é",
+      "swift": "https://example.com/%C3%A9",
+      "reason": "Swift percent-encodes the path"
+    },
+    {
+      "raw": "https://example.com/a?q=x y",
+      "python": "https://example.com/a?q=x y",
+      "swift": "https://example.com/a?q=x%20y",
+      "reason": "Swift percent-encodes the query"
+    },
+    {
+      "raw": "https://bücher.example/x",
+      "python": "https://bücher.example/x",
+      "swift": "https://xn--bcher-kva.example/x",
+      "reason": "Swift punycodes the host"
+    },
+    {
+      "raw": "not a url at all",
+      "python": "https://not a url at all/",
+      "swift": "https://not a url at all",
+      "reason": "Swift cannot parse it and returns the input"
+    },
+    {
+      "raw": "https://docs.google.com:99999/spreadsheets/d/ABC123/edit",
+      "python": null,
+      "swift": "https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+      "reason": "Python rejects an out-of-range port"
+    },
+    {
+      "raw": "https://[::1/x",
+      "python": null,
+      "swift": "https://[::1/x",
+      "reason": "Python rejects an unclosed bracket"
     }
   ]
 }

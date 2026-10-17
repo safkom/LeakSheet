@@ -26,11 +26,12 @@ enum StreamResolver {
         !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isHexDigit }
     }
 
-    /// Foundation maps look-alike hosts (`ſ`, the Kelvin sign) onto ASCII letters; the
-    /// backend's patterns don't, so a link whose authority isn't plain ASCII doesn't stream.
-    private nonisolated static func hasASCIIAuthority(_ link: String) -> Bool {
+    /// The backend reads the authority literally: no userinfo or port, and Foundation's folding of
+    /// look-alikes (`ſ`, the Kelvin sign) onto ASCII doesn't count. Only host characters pass.
+    private nonisolated static func hasPlainAuthority(_ link: String) -> Bool {
         guard let sep = link.range(of: "://") else { return false }
-        return link[sep.upperBound...].prefix { !"/?#".contains($0) }.allSatisfy(\.isASCII)
+        return link[sep.upperBound...].prefix { !"/?#".contains($0) }
+            .allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }
     }
 
     /// Query keys Google Docs glues onto every link it rewrites through its redirector:
@@ -58,14 +59,15 @@ enum StreamResolver {
     /// `/file/d/{id}/view?usp=sharing` still resolves.
     nonisolated static func target(for link: String) -> Target? {
         let link = canonical(link)
-        guard hasASCIIAuthority(link), let comps = URLComponents(string: link),
+        guard hasPlainAuthority(link), let comps = URLComponents(string: link),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
               var host = comps.host?.lowercased()
         else { return nil }
         let hasWWW = host.hasPrefix("www.")
         if hasWWW { host = String(host.dropFirst(4)) }
 
-        let path = comps.path.split(separator: "/").map(String.init)
+        // Empty segments stay: the backend's patterns need the literal /f/{id} shape.
+        let path = comps.path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
 
         switch host {
         case "pillows.su", "pillowcase.su", "plwcse.top":

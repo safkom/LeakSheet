@@ -5,6 +5,10 @@ TrackerURLNormalizer) to decide what plays and which tracker a URL names. The ex
 values come from the real Python functions over invented links; the Swift suite replays
 the committed file (LeakSheetTests/Fixtures/stream_links.json). Regenerate it after an
 intended rule change with: uv run python -m tests.parse.test_link_rule_contract
+
+KNOWN_DIFFERENCES / KNOWN_URL_DIFFERENCES record where the two sides still disagree, with the
+Swift answer pinned by hand: a change on either side fails a test until it is re-recorded or
+the difference is closed and the case moves into the shared vectors.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from __future__ import annotations
 import json
 
 from src.config import ROOT_DIR
-from src.fetcher import _normalize_url
+from src.fetcher import InvalidURLError, _normalize_url
 from src.host_health import PROVIDERS, provider_for
 
 FIXTURE = ROOT_DIR / "LeakSheet-iOS" / "LeakSheetTests" / "Fixtures" / "stream_links.json"
@@ -27,6 +31,7 @@ STREAM_LINKS = [
     "https://www.plwcse.top/f/abc123",
     "http://pillows.su/f/abc123",
     "https://pillows.su/f/a-b_C9",
+    "https://pillows.su/f/abc123/",
     "https://pillows.su/f/abc123/extra",
     "https://pillows.su/f/abc123?x=1",
     "https://pillows.su/f/abc123#t=5",
@@ -53,6 +58,7 @@ STREAM_LINKS = [
     "https://www.drive.google.com/file/d/1AbC-x_9/view",
     "https://drive.google.com/open?id=1AbC-x_9",
     "https://drive.google.com/open?id=1AbC-x_9&usp=drive_copy",
+    "https://drive.google.com/open?id=1AbC-x_9#frag",
     "https://drive.google.com/uc?id=1AbC-x_9&export=download",
     "https://drive.google.com/uc?export=download&id=1AbC-x_9",
     "https://www.drive.google.com/uc?id=1AbC-x_9",
@@ -98,6 +104,20 @@ STREAM_LINKS = [
     "https://drive.google.com/open?ID=1AbC-x_9",
     "https://drive.google.com/uc/x?id=1AbC-x_9",
     "https://drive.google.com/open/?id=1AbC-x_9",
+    # a port, userinfo, an escaped host or an empty path segment is not the literal shape
+    "https://pillows.su:443/f/abc123",
+    "https://pillows.su:/f/abc123",
+    "https://user@pillows.su/f/abc123",
+    "https://pillows%2Esu/f/abc123",
+    "https://pillows.su//f/abc123",
+    "https://pillows.su/f//abc123",
+    "https://imgur.gg:443/f/AbC12",
+    "https://music.froste.lol:443/song/0123abcd",
+    "https://krakenfiles.com:443/view/AbC123xyz/file.html",
+    "https://pixeldrain.com:443/u/aBc123",
+    "https://drive.google.com:443/file/d/1AbC-x_9",
+    "https://drive.google.com:443/open?id=1AbC-x_9",
+    "https://user@drive.google.com/uc?id=1AbC-x_9",
     "ftp://pillows.su/f/abc123",
     "pillows.su/f/abc123",
     "",
@@ -152,10 +172,64 @@ TRACKER_URLS = [
 ]
 
 
+# (link, what Swift answers, why the sides differ). Python takes the leading run of id
+# characters and ignores what follows; Swift needs the whole path segment to be an id.
+KNOWN_DIFFERENCES = [
+    ("https://pillows.su/f/abc.mp3", None, "id ends at the dot in Python"),
+    ("https://pillows.su/f/abc123)", None, "id ends at the paren in Python"),
+    ("https://pillows.su/f/abc123;x", None, "id ends at the semicolon in Python"),
+    ("https://pillows.su/f/abc123&keep=me", None, "Swift strips only an all-Google-tracking tail"),
+    ("https://pillows.su/f/abc123 ", None, "trailing space is not part of the id in Python"),
+    ("https://pillows.su/f/abc\u00e9", None, "id ends at the first non-ASCII letter in Python"),
+    ("https://imgur.gg/f/abc.png", None, "id ends at the dot in Python"),
+    ("https://pixeldrain.com/u/a-b", None, "pixeldrain ids stop at the hyphen in Python"),
+    ("https://pixeldrain.com/u/abc.flac", None, "id ends at the dot in Python"),
+    ("https://drive.google.com/file/d/abc.def", None, "id ends at the dot in Python"),
+    ("https://krakenfiles.com/view/AbC123xyz/file.htmlx", None, "Python matches file.html as a prefix"),
+    ("https://music.froste.lol/song/0123abcd.mp3", None, "Python's lookahead rejects only letters and digits"),
+    ("https://music.froste.lol/song/0123abcd_x", None, "Python's lookahead rejects only letters and digits"),
+    ("https://drive.google.com/open?id=&id=1AbC-x_9", None, "Python's parse_qs drops the blank id"),
+    ("https://drive.google.com/open?id=1AbC%0A", None, "Python's $ matches before a trailing newline"),
+    ("ftp://drive.google.com/open?id=1AbC-x_9", None, "Python's query forms never check the scheme"),
+]
+
+# (raw, what Swift answers, why). A Python result of None means InvalidURLError.
+KNOWN_URL_DIFFERENCES = [
+    ("https://example.com/a?", "https://example.com/a?", "Python drops an empty query's ?"),
+    ("https://example.com/?", "https://example.com/?", "Python drops an empty query's ?"),
+    ("https://example.com/a b", "https://example.com/a%20b", "Swift percent-encodes the path"),
+    ("https://example.com/\u00e9", "https://example.com/%C3%A9", "Swift percent-encodes the path"),
+    ("https://example.com/a?q=x y", "https://example.com/a?q=x%20y", "Swift percent-encodes the query"),
+    ("https://b\u00fccher.example/x", "https://xn--bcher-kva.example/x", "Swift punycodes the host"),
+    ("not a url at all", "https://not a url at all", "Swift cannot parse it and returns the input"),
+    (
+        "https://docs.google.com:99999/spreadsheets/d/ABC123/edit",
+        "https://docs.google.com/spreadsheets/d/ABC123/htmlview",
+        "Python rejects an out-of-range port",
+    ),
+    ("https://[::1/x", "https://[::1/x", "Python rejects an unclosed bracket"),
+]
+
+
+def _python_normalized(raw: str) -> str | None:
+    try:
+        return _normalize_url(raw)
+    except InvalidURLError:
+        return None
+
+
 def contract_payload() -> dict:
     return {
         "stream_links": [{"link": link, "provider": provider_for(link)} for link in STREAM_LINKS],
         "tracker_urls": [{"raw": raw, "normalized": _normalize_url(raw)} for raw in TRACKER_URLS],
+        "known_differences": [
+            {"link": link, "python": provider_for(link), "swift": swift, "reason": reason}
+            for link, swift, reason in KNOWN_DIFFERENCES
+        ],
+        "known_url_differences": [
+            {"raw": raw, "python": _python_normalized(raw), "swift": swift, "reason": reason}
+            for raw, swift, reason in KNOWN_URL_DIFFERENCES
+        ],
     }
 
 
@@ -169,6 +243,19 @@ def test_the_shared_fixture_matches_the_python_rules():
 def test_the_vectors_cover_every_provider_and_the_unsupported_case():
     seen = {e["provider"] for e in contract_payload()["stream_links"]}
     assert seen == set(PROVIDERS) | {None}
+
+
+def test_a_known_difference_is_still_a_difference():
+    payload = contract_payload()
+    for entry in payload["known_differences"] + payload["known_url_differences"]:
+        assert entry["python"] != entry["swift"], (
+            f"{entry} no longer differs: move it into the shared vectors"
+        )
+
+
+def test_no_vector_is_also_a_known_difference():
+    shared = set(STREAM_LINKS) | set(TRACKER_URLS)
+    assert not shared & {e[0] for e in KNOWN_DIFFERENCES + KNOWN_URL_DIFFERENCES}
 
 
 if __name__ == "__main__":

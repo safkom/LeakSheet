@@ -1,11 +1,7 @@
 import Foundation
 
-/// Canonicalizes tracker URLs so variants of the same tracker compare equal
-/// (edit vs htmlview, gid fragments, share query params, scheme/host case, userinfo,
-/// default ports). Mirrors the backend's `_normalize_url`: for Google Sheets the
-/// spreadsheet ID is the identity and the canonical form is `/htmlview`; for other
-/// hosts the bare host canonicalizes to a trailing slash. Both sides are pinned by
-/// Fixtures/stream_links.json.
+/// Canonicalizes tracker URLs so variants of one tracker compare equal, as the backend's
+/// `_normalize_url` does: see DECISIONS.md::TrackerURLNormalizer.swift::mirrors-backend
 nonisolated enum TrackerURLNormalizer {
     static func normalize(_ raw: String) -> String {
         var input = raw.trimmingCharacters(in: .whitespacesAndNewlines)

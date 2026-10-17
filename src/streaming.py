@@ -391,8 +391,8 @@ def _extract_gdrive_id(link: str) -> str | None:
         parsed = urlparse(link)
     except ValueError:  # unclosed "[" in the host
         return None
-    host = (parsed.hostname or "").lower()
-    if host not in ("drive.google.com", "www.drive.google.com"):
+    # netloc, not hostname: a port or userinfo is no more welcome here than in the regex forms.
+    if parsed.netloc.lower() not in ("drive.google.com", "www.drive.google.com"):
         return None
     if parsed.path.lower() not in ("/open", "/uc"):
         return None
