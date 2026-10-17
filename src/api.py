@@ -102,6 +102,29 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# Secrets this process holds. Frame locals are scrubbed only by variable name, so these
+# are also replaced by value anywhere in an event or log line.
+_SECRET_ENV = ("LEAKSHEET_GOOGLE_API_KEY", "LEAKSHEET_ADMIN_TOKEN")
+
+
+def _redact(value, secrets: list[str]):
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[Filtered]")
+        return value
+    if isinstance(value, dict):
+        return {k: _redact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact(v, secrets) for v in value]
+    return value
+
+
+def _scrub_secrets(payload: dict, _hint: dict) -> dict:
+    # Short values would blank unrelated text; real keys and tokens are long.
+    secrets = [v for name in _SECRET_ENV if len(v := os.environ.get(name, "").strip()) >= 8]
+    return _redact(payload, secrets) if secrets else payload
+
+
 def _sentry_options(dsn: str) -> dict:
     """GlitchTip settings: errors and INFO+ log lines, no request PII.
 
@@ -120,8 +143,10 @@ def _sentry_options(dsn: str) -> dict:
         send_default_pii=False,
         # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
         event_scrubber=EventScrubber(
-            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token"]
+            denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token", "x-goog-api-key"]
         ),
+        before_send=_scrub_secrets,
+        before_send_log=_scrub_secrets,
         integrations=[
             StarletteIntegration(failed_request_status_codes=set()),
             FastApiIntegration(failed_request_status_codes=set()),

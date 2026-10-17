@@ -39,9 +39,8 @@ Over a 70-tab corpus the rule changed no other tab's songs.
 
 ## parser.py::parse_sheet — positional-prior era matching
 
-Two rules, both from the 2026-07-20 review, both guarding the same failure: a
-similarly-named **sibling era** stealing every row from the era a song actually
-sits under, starving it.
+Three rules, all guarding the same failure: a similarly-named **sibling era**
+stealing every row from the era a song actually sits under, starving it.
 
 1. **Exact positional prior.** If a row's era value names the era we are currently
    under — any of that era's own key forms — it belongs there, full stop. Sibling
@@ -55,6 +54,17 @@ sits under, starving it.
    `Get Rich Or Die Tryin' Soundtrack` header. The global search would let a
    similarly-worded sibling outscore it (`Get Rich Or Die Tryin'` scores 4/4 = 1.0
    against the header's 4/5 = 0.8) and silently steal the lot. Case: 50 Cent.
+
+3. **A tagged row names its version.** A row-era value carrying version tags
+   (`Album [V1]`) goes to the nearest era declared so far whose own name (or slash part)
+   carries the same tags (`_era_tag_key`), even when the current header shares the
+   stripped key. Trackers that sort by recording date interleave V1 rows under the V2
+   header; rule 1 alone sent them all to whichever header was current. The hop is per
+   row: the header stays current, so the bare and blank-era rows after it keep rule 1.
+   Only own names count: a single-line `Album [V3]` heading that parses as a section
+   label is not one, so its rows keep the old routing. Tag keys never enter
+   `era_by_key`, so they cannot shadow a later era's name or feed fuzzy matching. A row
+   placed before its version's header still lands in the current era (one pass).
 
 **When touching era matching, verify PLACEMENT, not just counts** — the accuracy
 suite counts totals, so a wholesale re-attribution between two eras passes it.
@@ -1089,3 +1099,61 @@ A scheme after `/ = ? # : & @ % +` is a wrapper payload (web.archive.org, href.l
 stays whole; a same-host scheme after `/` is a restarted paste. A glued piece that prefixes the
 next one is an abandoned paste and is dropped. Whitespace inside a URL with no second scheme
 (`genius.com/search?q=A B`) is kept. Notice and source links stay single-valued (`_clean_link`).
+=======
+## sheets_api.py — content tabs through the Sheets API, the rest on htmlview
+
+Cold loads are network-bound: 8–16 htmlview pages per workbook. One `spreadsheets.get`
+with `includeGridData` and a `ranges=` entry per content tab returns all those tabs at
+once. It is used only for content tabs (Misc, Released, Best Of, Grails, Stems, …).
+The API has no in-cell images, so the main tab (era covers, and `_is_era_header`
+reads images), the Art tab and hub sibling tabs stay on htmlview. The main tab's
+htmlview is needed for covers in any case, so moving it to the API would not shorten
+the critical path. The call starts right after tab discovery, so it overlaps the main
+tab's fetch.
+
+Measured 2026-10-16 on 9 workbooks: the API cells match htmlview's on 1,132,135 cells.
+The exceptions are one cell edited between the two fetches and one trailing empty row.
+All 79 content tabs parse identically. The live cold A/B ran both orders on the same 9
+workbooks. All 18 parses were byte-identical to htmlview-only. Google requests fell from
+8–16 (median 12) to 3–6 (median 4). Median wall time went from 6.1 s to 3.2 s, comparing
+each mode's first run. With the warm upstream cache handed to htmlview, the speedup is
+still 1.36×.
+Google APIs gzip only when the User-Agent contains "gzip"; without it, the full workbook
+was up to 42 MB on the wire.
+
+htmlview's tab listing trims names, so a title with edge spaces is not a valid `ranges=`
+entry and the call returns 400. That 400 triggers one metadata call for the exact titles
+by sheet id, then one retry.
+
+The key travels only in `X-Goog-Api-Key`, and redirects are not followed, so it cannot
+reach another host. Quota is 60 reads/min per user and 300 per project. A 429 (or a 403
+`rateLimitExceeded`) pauses the API for that worker for Retry-After, or 60 s. Any failure,
+or a tab missing from the response, falls back to that tab's htmlview page.
+
+## parser.py::extract_grid — htmlview quirks the API rows reproduce
+
+Each rule was found by diffing API cells against `extract_table` on real workbooks.
+- Hidden rows/columns are absent from htmlview. Hidden sheets are absent from its tab list.
+- An empty "freezebar" row follows the frozen rows.
+- htmlview renders the grid to `rowCount` and `columnCount`, including empty or
+  formula-padded rows. The one exception seen: a trailing row with nothing in it at all.
+- Merges: colspan leaves empty cells. A rowspan's covered `<td>`s are omitted from later
+  rows, so their cells shift left.
+- `\r\n` and lone `\r` render as line breaks. C0/C1 control characters render as U+FFFD.
+- A cell with `hyperlink` renders as one anchor around all its text, whatever its runs say.
+  Otherwise each link run (and smart chip) is an anchor. Run offsets are UTF-16 units.
+- Every href comes wrapped in `google.com/url?q=`, and `_clean_link` unwraps it exactly
+  once. API links are wrapped the same way, so a link the sheet stores as a pasted Google
+  redirect stays as htmlview shows it instead of being unwrapped twice.
+- Frozen columns: htmlview puts an empty freezebar `<td>` after the frozen columns of every
+  row (the horizontal freezebar row gets one too).
+- A checkbox renders no text in htmlview; the API's `formattedValue` is TRUE/FALSE, so cells
+  with a BOOLEAN `dataValidation` are blanked.
+- The API trims empty rows but reports the full grid size: a grid over 2,000,000 cells raises,
+  and that tab alone reads from htmlview. Merge extents are clamped to the grid.
+
+`sheets_api.py` limits: the whole call has a 15 s deadline (`TIMEOUT_S`), so a slow API
+cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
+enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
+one private workbook.
+>>>>>>> 95c226431a6e0ce8bcca9659c15accf128be0417

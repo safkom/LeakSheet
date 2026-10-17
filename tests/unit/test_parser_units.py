@@ -1335,6 +1335,122 @@ class TestSiblingEraKeyCollision:
         assert by_name["Fre3$tyle [V2]"] == ["Song A", "Song C"]
 
 
+class TestVersionTaggedRowsFindTheirSibling:
+    """A row whose era value carries a version tag belongs to the sibling era with
+    that tag, not to the current header that merely shares the stripped key."""
+
+    HEADERS = {
+        "stats": "<tr><td>1 Full</td><td>Moon Tape {tag}</td><td></td><td></td></tr>",
+        "multiline_name": "<tr><td></td><td>Moon Tape {tag}<br>(Moon Tape {tag}, 2016)</td><td></td><td></td></tr>",
+        "slash_name": "<tr><td>1 Full</td><td>Moon Tape {tag} / Side {tag}</td><td></td><td></td></tr>",
+    }
+
+    @pytest.mark.parametrize("shape", HEADERS)
+    def test_interleaved_tagged_rows(self, shape):
+        from src.parser import parse_sheet
+        header = self.HEADERS[shape]
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            + header.format(tag="[V1]")
+            + "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td></td></tr>"
+            + header.format(tag="[V2]")
+            + "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song C</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape</td><td>Song D</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Unrelated Era</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song E</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        v1, v2 = (e for e in artist.eras if e.name.startswith("Moon Tape"))
+        assert [s.base_name for s in v1.songs] == ["Song A", "Song B"]
+        # A bare row keeps the positional prior; a far tagged row still finds its era.
+        assert [s.base_name for s in v2.songs] == ["Song C", "Song D", "Song E"]
+
+    def test_rows_after_a_hop_stay_with_their_header(self):
+        # The hop is per row: a bare row and a blank-era row right after it keep the
+        # positional prior, so the V2 header is not emptied and merged away.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Quality</td><td>Link(s)</td></tr>"
+            "<tr><td></td><td>Moon Tape [V1]<br>(2016)</td><td></td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td></td><td>Moon Tape [V2]<br>(2017)</td><td></td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td>Moon Tape</td><td>Song C</td><td>note</td><td>CD Quality</td><td></td></tr>"
+            "<tr><td></td><td>Song D</td><td>note</td><td>CD Quality</td><td>https://example.com/d</td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name == {"Moon Tape [V1]": ["Song A", "Song B"], "Moon Tape [V2]": ["Song C", "Song D"]}
+
+    def test_nearest_same_tag_era_wins(self):
+        # Repeated headers: a tagged row goes to the latest era with its tag, and an
+        # extra tag ("[V1] [Alt]") is a different era from the plain "[V1]".
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1] [Alt]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1] [Alt]</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song C</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song D</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song E</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song F</td><td>note</td><td></td></tr>"
+            "<tr><td>Moon Tape [V1] [Alt]</td><td>Song G</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        assert [[s.base_name for s in e.songs] for e in artist.eras] == [
+            ["Song A", "Song G"], ["Song B"], ["Song C"], ["Song D", "Song E"], ["Song F"],
+        ]
+
+    def test_emptied_sibling_header_does_not_rename_its_merge_target(self):
+        # Every row under the V10 header is tagged V1, so the empty V10 stub merges
+        # into V1; V1 keeps its own name rather than the longer stub name.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V1]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V10]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V1]</td><td>Song B</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        assert [(e.name, [s.base_name for s in e.songs]) for e in artist.eras] == [
+            ("Moon Tape [V1]", ["Song A", "Song B"]),
+        ]
+
+    def test_section_label_is_not_a_tagged_sibling(self):
+        # A single-line "Moon Tape [V3]" name row is a section of the era above it,
+        # so its tagged rows must not jump into that unrelated era.
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            "<tr><td>1 Full</td><td>Moon Tape [V2]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V2]</td><td>Song A</td><td>note</td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>"
+            "<tr><td>Star Tape</td><td>Song B</td><td>note</td><td></td></tr>"
+            "<tr><td></td><td>Moon Tape [V3]</td><td></td><td></td></tr>"
+            "<tr><td>Moon Tape [V3]</td><td>Song C</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["Star Tape"] == ["Song B"]
+
+
 class TestStatsLessHeaderAliasesStayFallback:
     """Slash parts of a stats-less era header never claim a primary key, so a
     genuine era of that name declared later still owns its own rows."""
