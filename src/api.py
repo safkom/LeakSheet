@@ -1017,7 +1017,7 @@ _IMAGE_MAX_DECODE_PIXELS = MAX_DECODE_PIXELS  # ~80MB peak as RGBA
 
 # Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
 # sheets-images 302s to login for N>0, so those take the Pillow path.
-_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com$", re.IGNORECASE)
+_GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com\Z", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
 

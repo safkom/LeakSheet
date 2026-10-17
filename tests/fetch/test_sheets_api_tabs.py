@@ -9,6 +9,7 @@ back to htmlview.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from urllib.parse import unquote
 
@@ -293,3 +294,19 @@ class TestBoundsAndPauses:
         await _parse(again, patch_sheets_client)
         assert len(again.api_requests()) == 1
 
+
+
+class TestApiSheetId:
+    """Only a plain spreadsheet id reaches the API; a published (/d/e/) id falls back."""
+
+    async def test_published_sheet_stays_on_htmlview(self, with_key):
+        from src.fetcher import _start_api_tabs
+        tabs = [("200", "misc", "Misc")]
+        async with httpx.AsyncClient() as client:
+            published = "https://docs.google.com/spreadsheets/d/e/2PACX-synth/pubhtml"
+            assert _start_api_tabs(published, tabs, client, 5) is None
+            task = _start_api_tabs(URL, tabs, client, 5)
+            assert task is not None
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task

@@ -153,10 +153,10 @@ class TestFetcherHelpers:
         assert _infer_artist_name("Playboi Carti Tracker [Currently in Use] - Google Drive") == "Playboi Carti"
         assert _infer_artist_name("Kendrick Lamar Music Tracker - Google Drive") == "Kendrick Lamar"
 
-    def test_extract_sheet_id(self):
-        from src.fetcher import _extract_sheet_id
-        url = "https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/htmlview"
-        assert _extract_sheet_id(url) == "1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ"
+    def test_sheet_page_path(self):
+        from src.fetcher import _sheet_page_path
+        url = "https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/edit"
+        assert _sheet_page_path(url) == "/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/htmlview"
 
     def test_normalize_url(self):
         from src.fetcher import _normalize_url
