@@ -121,6 +121,9 @@ class PhaseTimer:
 
     def __init__(self, on_progress: "Callable[[dict], None] | None" = None) -> None:
         self.phases: dict[str, float] = {}
+        # gid → whether its latest fetch loaded. A hub sibling is fetched twice (probe,
+        # then merge); the merge's page is the one kept, so the last result counts.
+        self.tabs: dict[str, bool] = {}
         # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
         # the timer because the timer already reaches every stage of the pipeline.
         self.on_progress = on_progress
@@ -139,6 +142,13 @@ class PhaseTimer:
             event["done"], event["total"] = done or 0, total
         self.on_progress(event)
 
+    def tab_loaded(self, gid: str, ok: bool) -> None:
+        self.tabs[gid] = ok
+
+    def tab_counts(self) -> tuple[int, int]:
+        """(failed, total) tab pages of this parse."""
+        return sum(not ok for ok in self.tabs.values()), len(self.tabs)
+
     @contextmanager
     def phase(self, name: str):
         start = time.perf_counter()
@@ -155,7 +165,7 @@ class PhaseTimer:
     def log_line(self) -> str:
         total = sum(self.phases.values())
         parts = " ".join(f"{n}={d * 1000:.0f}ms" for n, d in self.phases.items())
-        return f"{parts} total={total * 1000:.0f}ms"
+        return f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
 
 # ---------------------------------------------------------------------------
 # Shared async HTTP client (connection-pooled, reused across requests)
@@ -981,12 +991,15 @@ CACHE_COLLAPSE_RATIO = 0.8
 
 
 def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
-    """Why a parse of *new* versions must not overwrite the cached one, or None if it may.
+    """Why a parse of *new* versions must not be cached, or None if it may.
 
-    A partial fetch parses cleanly and looks like any other result: see
-    docs/decisions.md::fetcher.py::cache-collapse-guard. Past ``STALE_CACHE_TTL``
-    the old entry is never preferred, so a tracker that genuinely shrank recovers.
+    An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
+    and looks like any other result: see docs/decisions.md::fetcher.py::cache-collapse-guard.
+    Past ``STALE_CACHE_TTL`` the old entry is never preferred, so a tracker that genuinely
+    shrank recovers.
     """
+    if new <= 0:
+        return f"empty parse, {new_eras} eras"
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
         return None
@@ -1456,15 +1469,26 @@ async def _fetch_gid_page(
                 if use_cache and cache_ttl > 0:
                     cached = await _async_get_cached(sheet_url, cache_ttl)
                     if cached is not None:
+                        t.tab_loaded(gid_val, True)
                         return (gid_val, cached[0])
                 resp = await _get_capped(client, sheet_url, timeout=timeout)
                 if resp.status_code != 200 or "<table" not in resp.text.lower():
+                    t.tab_loaded(gid_val, False)
                     return None
                 if use_cache and cache_ttl > 0:
                     await _async_set_cache(sheet_url, resp.text, title)
+                t.tab_loaded(gid_val, True)
                 return (gid_val, resp.text)
     except (httpx.HTTPError, ValueError, KeyError):
+        t.tab_loaded(gid_val, False)
         return None
+
+
+def _warn_failed_tabs(url_norm: str, t: PhaseTimer) -> None:
+    """One WARNING per parse that lost tab pages; see docs/decisions.md::fetcher.py::cache-collapse-guard."""
+    failed, total = t.tab_counts()
+    if failed:
+        logger.warning("Partial load for %s: failed_tabs=%d/%d", url_norm[:80], failed, total)
 
 
 async def _load_secondary_tabs(
@@ -1917,6 +1941,7 @@ async def async_fetch_and_parse(
                                 cache_ttl=cache_ttl, use_cache=use_cache, t=t,
                                 page_paths=base_page_paths,
                             )
+                        _warn_failed_tabs(url_norm, t)
                         await asyncio.to_thread(_finalize, artist, url_norm)
                         if write_cache:
                             await _async_set_cached_parsed(url_norm, artist)
@@ -2094,6 +2119,7 @@ async def async_fetch_and_parse(
                     use_cache=use_cache, t=t, page_paths=page_paths,
                 )
 
+            _warn_failed_tabs(url_norm, t)
             await asyncio.to_thread(_finalize, best_artist, url_norm)
 
             if write_cache:
@@ -2105,12 +2131,13 @@ async def async_fetch_and_parse(
                     await _async_set_cached_parsed(url_norm, best_artist)
             return best_artist
 
-        # Fallback
+        # Fallback: no tab yielded songs, often because the tabs that held them failed.
+        _warn_failed_tabs(url_norm, t)
         html, title = await async_fetch_sheet_html(
             url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
         )
         name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name, url)
+        artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
         await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist)

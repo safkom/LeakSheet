@@ -252,6 +252,10 @@ The check covers every tab of a workbook, not just the URL it was handed: a shee
 page-switcher JavaScript can name absolute tab URLs, which are honoured only for an
 allowlisted host or the sheet's own site (`fetcher._build_sheet_html_url`).
 
+`drive.google.com` is not in the seed: it has no `/htmlview/sheet` path, so a Drive URL
+would build a request that drops the file id. The image proxy still reaches it through
+the `google.com` parent domain.
+
 ## config.py::curated_host_allowed — the image proxy does not trust the feed
 
 `/sheet` auto-accepts every host the ArtistGrid CSV lists, so a tracker added to the
@@ -653,6 +657,8 @@ sparse header whose only text cell is such a name is rejected outright.
 Comma-separated alias lists ("Mollyworld, Balaclava Era") register each alias in the
 fallback dict only — same shadowing rationale as slash-separated parts: a genuine
 standalone era declared elsewhere still claims the primary key.
+Every era-header site (stats-bearing, stats-less, multi-line and name-column) follows the
+same rule: it passes the fallback dict, so no header's slash or alias part claims a primary key.
 
 ## parser.py::name-cell-image — album art vs. image-based era name
 
@@ -910,6 +916,20 @@ than the 7-day serve window, see `api.py::serve-stale-window`); past that a
 genuinely shrunken tracker recovers on its own instead of being frozen for days.
 The refusal is logged at WARNING so a systematically broken tab is visible rather
 than silent — which was the real defect here.
+
+An empty parse (zero versions) is refused before the no-entry early return, so the
+discovery fallback and the base-page branch are covered with the rest: cached, an
+empty result was served as a hit for an hour and then cached again by the app. It is
+refused even over an entry past `STALE_CACHE_TTL`.
+
+A partial load is only logged, never refused: a tab that is permanently missing would
+otherwise keep its tracker out of the cache for good, and a large drop is the ratio's
+job. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches) and
+the last fetch of a gid wins: a hub sibling is fetched by the discovery probe and again by
+the merge, and the merge's page is the one whose songs are kept. `_parse_once` copies the
+shared parse timer's `tabs` into each caller's timer, as it does the phases. One WARNING
+per parse (also before the fallback parse) and the `failed_tabs=failed/total` field on
+`sheet_timing` report it.
 
 ## api.py::payload-duplication — measured, kept on purpose (2026-08-26)
 

@@ -1214,6 +1214,34 @@ class TestSiblingEraKeyCollision:
         assert by_name["Fre3$tyle [V2]"] == ["Song A", "Song C"]
 
 
+class TestStatsLessHeaderAliasesStayFallback:
+    """Slash parts of a stats-less era header never claim a primary key, so a
+    genuine era of that name declared later still owns its own rows."""
+
+    HEADERS = {
+        "stats_less": "<tr><td>Alpha / Beta</td><td></td><td>early demos</td><td></td></tr>",
+        "multiline_name": "<tr><td></td><td>Alpha / Beta<br>(2007 - 2009)</td><td></td><td></td></tr>",
+        "name_column": "<tr><td></td><td>Alpha / Beta</td><td></td><td></td></tr>",
+    }
+
+    @pytest.mark.parametrize("shape", HEADERS)
+    def test_genuine_era_beats_slash_part(self, shape):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Links</td></tr>"
+            + self.HEADERS[shape]
+            + "<tr><td>1 Full</td><td>Beta</td><td></td><td></td></tr>"
+            "<tr><td>1 Full</td><td>Gamma</td><td></td><td></td></tr>"
+            "<tr><td>Beta</td><td>Song B</td><td>note</td><td></td></tr>"
+            "</table>"
+        )
+        artist = parse_sheet(html, "Test")
+        by_name = {e.name: [s.base_name for s in e.songs] for e in artist.eras}
+        assert by_name["Beta"] == ["Song B"]
+        assert by_name["Alpha / Beta"] == []
+
+
 class TestStatsHeaderBeatsSeparator:
     """A row carrying era stats in col 0 is an era header even when its name
     matches a section-separator keyword (2026-07-20 review).

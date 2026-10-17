@@ -15,7 +15,7 @@ import pytest
 
 import src.fetcher as fetcher
 from src.fetcher import _cache_key, _set_cache, _set_cached_parsed
-from src.models import Artist
+from src.models import Artist, Era, Section, Song, SongVersion
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,10 @@ def _tmp_cache(tmp_path, monkeypatch):
 
 
 def _artist(name: str = "SynthWave") -> Artist:
-    return Artist(name=name, slug=name.lower(), eras=[])
+    song = Song(base_name="Intro", versions=[SongVersion(name="Intro")])
+    return Artist(
+        name=name, slug=name.lower(), eras=[Era(name="Era", sections=[Section(songs=[song])])]
+    )
 
 
 URL = "https://docs.google.com/spreadsheets/d/ABC/htmlview"
@@ -185,6 +188,45 @@ class TestCollapseGuard:
 
         _set_cached_parsed(URL, self._artist_with(40))
         assert self._cached_versions(tmp_path) == 40
+
+
+class TestEmptyParseIsNeverCached:
+    """A parse with no tracks is a failed load, not a tracker: cached, it is served as a
+    hit for an hour and the app caches it too. The check sits before the no-entry early
+    return so every write path is covered at once."""
+
+    @staticmethod
+    def _empty() -> Artist:
+        return Artist(name="Ye", slug="ye", eras=[])
+
+    def test_not_written_when_no_entry_exists(self, tmp_path):
+        artist = self._empty()
+        _set_cached_parsed(URL, artist)
+        assert not (tmp_path / f"{_cache_key(URL)}.parsed.json").exists()
+        assert artist._wire is None
+
+    def test_eras_without_songs_are_empty_too(self, tmp_path):
+        # A hub tab parses to eras with no songs.
+        _set_cached_parsed(URL, Artist(name="Ye", slug="ye", eras=[Era(name="Index", sections=[])]))
+        assert not (tmp_path / f"{_cache_key(URL)}.parsed.json").exists()
+
+    def test_does_not_replace_a_good_entry(self, tmp_path):
+        _set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
+        _set_cached_parsed(URL, self._empty())
+        raw = json.loads((tmp_path / f"{_cache_key(URL)}.parsed.json").read_text())
+        assert raw["total_versions"] == 100
+
+    def test_does_not_replace_an_entry_past_the_stale_window(self, tmp_path):
+        # The collapse ratio stands down for an old entry; emptiness never does.
+        _set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
+        meta_file = tmp_path / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - (fetcher.STALE_CACHE_TTL + 60)
+        meta_file.write_text(json.dumps(meta))
+
+        _set_cached_parsed(URL, self._empty())
+        raw = json.loads((tmp_path / f"{_cache_key(URL)}.parsed.json").read_text())
+        assert raw["total_versions"] == 100
 
 
 class TestDropCachedEntry:
