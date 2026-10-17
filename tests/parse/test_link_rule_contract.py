@@ -36,22 +36,51 @@ STREAM_LINKS = [
     "https://pillows.su/f/abc123?x=1",
     "https://pillows.su/f/abc123#t=5",
     "https://pillows.su/f/abc123&sa=D&source=editors&ust=1&usg=X",
+    # the id is the leading run of id characters; whatever follows it never changes the file
+    "https://pillows.su/f/abc123&keep=me",
+    "https://pillows.su/f/abc.mp3",
+    "https://pillows.su/f/abc123)",
+    "https://pillows.su/f/abc123;x",
+    "https://pillows.su/f/abc123 ",
+    "https://pillows.su/f/abc\u00e9",
+    "https://pillows.su/f/abc123\nhttps://pillows.su/f/def456",
+    "https://pillows.su/f/abc123 https://pillows.su/f/def456",
+    "https://pillows.su/f/abc123https://pillows.su/f/def456",
+    "https://pillows.su/f/ab\tc",
+    "https://pillows.su/f/abc%",
+    "https://pillows.su/f/abc%zz",
+    "https://pillows.su/f/abc%C3%A9",
+    "https://pillows.su/f/abc[x]",
+    "https://pillows.su/f/abc{x}",
+    'https://pillows.su/f/abc"x',
+    "https://pillows.su/f/abc<x>",
+    "https://pillows.su/f/abc|x",
+    "https://pillows.su/f/abc^x",
+    "https://pillows.su/f/abc`x",
+    "https://pillows.su/f/abc\\x",
     # imgur
     "https://imgur.gg/f/AbC12",
     "https://temp.imgur.gg/f/AbC12",
     "https://www.imgur.gg/f/AbC12",
     "https://www.temp.imgur.gg/f/AbC12",
+    "https://imgur.gg/f/abc.png",
     # froste: the id is a hex hash
     "https://music.froste.lol/song/0123abcd",
     "https://music.froste.lol/song/0123ABCD",
     "https://music.froste.lol/song/0123abcd&sa=D&ust=1",
+    "https://music.froste.lol/song/0123abcd.mp3",
+    "https://music.froste.lol/song/0123abcd_x",
     # kraken
     "https://krakenfiles.com/view/AbC123xyz/file.html",
     "https://www.krakenfiles.com/view/AbC123xyz/file.html",
     "https://krakenfiles.com/view/AbC123xyz/file.html?x=1",
+    "https://krakenfiles.com/view/AbC123xyz/file.htmlx",
     # pixeldrain: single files only, ids are alphanumeric
     "https://pixeldrain.com/u/aBc123",
     "https://www.pixeldrain.com/u/aBc123",
+    "https://pixeldrain.com/u/a-b",
+    "https://pixeldrain.com/u/a_b",
+    "https://pixeldrain.com/u/abc.flac",
     # drive: /file/d/{id}, /open?id= and /uc?id= (the id may sit anywhere in the query)
     "https://drive.google.com/file/d/1AbC-x_9",
     "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing",
@@ -62,6 +91,9 @@ STREAM_LINKS = [
     "https://drive.google.com/uc?id=1AbC-x_9&export=download",
     "https://drive.google.com/uc?export=download&id=1AbC-x_9",
     "https://www.drive.google.com/uc?id=1AbC-x_9",
+    "https://drive.google.com/file/d/abc.def",
+    "https://drive.google.com/open?id=&id=1AbC-x_9",
+    "https://drive.google.com/open?id=1AbC%2Dx",
     # case: hosts and the path keyword are case-insensitive, ids are not
     "HTTPS://PILLOWS.SU/F/ABC123",
     "https://Pillows.SU/f/AbC123",
@@ -104,6 +136,24 @@ STREAM_LINKS = [
     "https://drive.google.com/open?ID=1AbC-x_9",
     "https://drive.google.com/uc/x?id=1AbC-x_9",
     "https://drive.google.com/open/?id=1AbC-x_9",
+    "https://drive.google.com/open?id=1AbC.mp3",
+    "https://drive.google.com/open?id=1AbC+x",
+    "https://drive.google.com/open?id=%0A&id=1AbC-x_9",
+    "ftp://drive.google.com/open?id=1AbC-x_9",
+    "ftp://drive.google.com/uc?id=1AbC-x_9",
+    # tab, CR and LF break a query form (urlparse would drop them)
+    "https://drive.google.com/open?id=1AbC%0A",
+    "https://drive.google.com/open?id=1AbC-x_9\n",
+    "https://drive.google.com/op\ten?id=1AbC-x_9",
+    # a percent-escape in the path is never decoded into the literal shape
+    "https://drive.google.com/%6Fpen?id=1AbC-x_9",
+    "https://drive.google.com/file/%64/1AbC-x_9",
+    "https://pillows.su/f/%61bc",
+    "https://pillows.su/f%2Fabc123",
+    "https://pillows.su/%66/abc123",
+    "https://music.froste.lol/song/%30123abcd",
+    "https://krakenfiles.com/view/AbC123xyz/file%2Ehtml",
+    "https://pixeldrain.com/u/%61bc",
     # a port, userinfo, an escaped host or an empty path segment is not the literal shape
     "https://pillows.su:443/f/abc123",
     "https://pillows.su:/f/abc123",
@@ -140,6 +190,16 @@ TRACKER_URLS = [
     "docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
     "  https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit  ",
     "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit",
+    # a published sheet is its own id space: htmlview 404s for it, only pubhtml serves
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml?gid=0&single=true",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml#gid=5",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml/sheet?headers=true&gid=1",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pub?output=html",
+    "https://docs.google.com/spreadsheets/u/0/d/e/2PACX-1vAbC_d-9/pubhtml",
+    "docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+    "https://docs.google.com/spreadsheets/d/e/AAA/pubhtml",
+    "https://docs.google.com/spreadsheets/d/e1AbC/edit",
     # userinfo and a default port don't change what is fetched
     "https://user:pw@docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
     "https://docs.google.com:443/spreadsheets/d/1AbC_d-42xYz/edit",
@@ -153,6 +213,11 @@ TRACKER_URLS = [
     "https://evil.example/?u=docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
     "https://evil.example/docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
     "https://docs.google.com/document/d/1AbC_d-42xYz/edit",
+    # urlparse drops tab, CR and LF anywhere, so they don't change the tracker either
+    "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/ed\nit",
+    "https://docs.go\togle.com/spreadsheets/d/1AbC_d-42xYz/edit",
+    "https://docs.google.com/spreadsheets/d/1AbC_\r\nd-42xYz/edit",
+    "https://yetra\tcker.net/a\nb?c=\r1",
     # other hosts: scheme and host fold, the fragment goes, a bare host gets a slash
     "yetracker.net",
     "https://yetracker.net",
@@ -163,6 +228,9 @@ TRACKER_URLS = [
     "https://example.com/a?b=1",
     "https://example.com?b=1",
     "https://example.com/a#frag",
+    "https://example.com/a?",
+    "https://example.com/?",
+    "https://example.com?",
     "https://u:p@YeTracker.NET:443/#top",
     "https://example.com:8443/x",
     "https://example.com:80/x",
@@ -172,31 +240,17 @@ TRACKER_URLS = [
 ]
 
 
-# (link, what Swift answers, why the sides differ). Python takes the leading run of id
-# characters and ignores what follows; Swift needs the whole path segment to be an id.
+# (link, what Swift answers, why the sides differ). Swift may only be the stricter side.
 KNOWN_DIFFERENCES = [
-    ("https://pillows.su/f/abc.mp3", None, "id ends at the dot in Python"),
-    ("https://pillows.su/f/abc123)", None, "id ends at the paren in Python"),
-    ("https://pillows.su/f/abc123;x", None, "id ends at the semicolon in Python"),
-    ("https://pillows.su/f/abc123&keep=me", None, "Swift strips only an all-Google-tracking tail"),
-    ("https://pillows.su/f/abc123 ", None, "trailing space is not part of the id in Python"),
-    ("https://pillows.su/f/abc\u00e9", None, "id ends at the first non-ASCII letter in Python"),
-    ("https://imgur.gg/f/abc.png", None, "id ends at the dot in Python"),
-    ("https://pixeldrain.com/u/a-b", None, "pixeldrain ids stop at the hyphen in Python"),
-    ("https://pixeldrain.com/u/abc.flac", None, "id ends at the dot in Python"),
-    ("https://drive.google.com/file/d/abc.def", None, "id ends at the dot in Python"),
-    ("https://krakenfiles.com/view/AbC123xyz/file.htmlx", None, "Python matches file.html as a prefix"),
-    ("https://music.froste.lol/song/0123abcd.mp3", None, "Python's lookahead rejects only letters and digits"),
-    ("https://music.froste.lol/song/0123abcd_x", None, "Python's lookahead rejects only letters and digits"),
-    ("https://drive.google.com/open?id=&id=1AbC-x_9", None, "Python's parse_qs drops the blank id"),
-    ("https://drive.google.com/open?id=1AbC%0A", None, "Python's $ matches before a trailing newline"),
-    ("ftp://drive.google.com/open?id=1AbC-x_9", None, "Python's query forms never check the scheme"),
+    (
+        "https://drive.google.com/uc?id=%611AbC-x_9&x{=1",
+        None,
+        "Foundation re-escapes the % of a query that also holds an invalid character",
+    ),
 ]
 
 # (raw, what Swift answers, why). A Python result of None means InvalidURLError.
 KNOWN_URL_DIFFERENCES = [
-    ("https://example.com/a?", "https://example.com/a?", "Python drops an empty query's ?"),
-    ("https://example.com/?", "https://example.com/?", "Python drops an empty query's ?"),
     ("https://example.com/a b", "https://example.com/a%20b", "Swift percent-encodes the path"),
     ("https://example.com/\u00e9", "https://example.com/%C3%A9", "Swift percent-encodes the path"),
     ("https://example.com/a?q=x y", "https://example.com/a?q=x%20y", "Swift percent-encodes the query"),

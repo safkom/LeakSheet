@@ -40,7 +40,7 @@ import re
 import socket
 import time
 from collections.abc import Awaitable, Callable
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
 
 import httpx
 
@@ -243,7 +243,7 @@ _GDRIVE_FILE_D_PATTERN = re.compile(
     r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
-_GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_GDRIVE_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 # Every host `resolve_stream_url` can emit. The API's stream-proxy allowlist
 # is this set, so resolver and allowlist can't drift.
@@ -385,11 +385,13 @@ def _extract_gdrive_id(link: str) -> str | None:
     """
     m = _GDRIVE_FILE_D_PATTERN.match(link)
     if m:
-        file_id = m.group(1)
-        return file_id if _GDRIVE_ID_RE.match(file_id) else None
+        return m.group(1)
 
+    # urlsplit drops tab/CR/LF and leading control characters, so a link broken by one would resolve.
+    if any(c in link for c in "\t\r\n") or not link.lower().startswith(("http://", "https://")):
+        return None
     try:
-        parsed = urlparse(link)
+        parsed = urlsplit(link)  # not urlparse: it cuts ";params" off the path
     except ValueError:  # unclosed "[" in the host
         return None
     # netloc, not hostname: a port or userinfo is no more welcome here than in the regex forms.
@@ -401,9 +403,7 @@ def _extract_gdrive_id(link: str) -> str | None:
     if not ids:
         return None
     file_id = ids[0]
-    if not _GDRIVE_ID_RE.match(file_id):
-        return None
-    return file_id
+    return file_id if _GDRIVE_ID_RE.fullmatch(file_id) else None
 
 
 def resolve_metadata_url(link: str) -> dict[str, str] | None:
@@ -639,7 +639,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
 _GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
-_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com$")
+_GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com\Z")
 
 
 # Upstream answers the API relays (as 404 or 429) instead of a generic 502.
