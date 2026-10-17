@@ -243,3 +243,53 @@ class TestFailedTabs:
         await _parse(rec, patch_sheets_client, timer=timer)
         assert timer.tab_counts() == (1, 4)
 
+
+class TestBoundsAndPauses:
+    async def test_one_oversized_tab_falls_back_alone(self, with_key, htmlview_only, patch_sheets_client):
+        huge = _api_sheet("500")
+        huge["properties"]["gridProperties"] = {"rowCount": 1000, "columnCount": 18278}
+        rec = Recorder(api=lambda r: httpx.Response(200, json={"sheets": [_api_sheet("200"), huge]}))
+        assert await _parse(rec, patch_sheets_client) == htmlview_only
+        assert "500" in rec.htmlview_gids() and "200" not in rec.htmlview_gids()
+
+    def test_the_field_mask_asks_for_checkbox_validation(self):
+        import src.sheets_api as sheets_api
+
+        assert "dataValidation" in sheets_api._FIELDS
+
+    async def test_a_hanging_api_gives_up_after_its_own_deadline(self, with_key):
+        import asyncio
+        import time
+
+        import src.sheets_api as sheets_api
+
+        async def hang(request):
+            await asyncio.sleep(10)
+
+        sheets_api.TIMEOUT_S, saved = 0.2, sheets_api.TIMEOUT_S
+        try:
+            client = httpx.AsyncClient(transport=httpx.MockTransport(hang))
+            t0 = time.monotonic()
+            out = await sheets_api.fetch_tabs(client, "S", {"200": "Misc"}, timeout=60, max_bytes=1 << 20)
+        finally:
+            sheets_api.TIMEOUT_S = saved
+        assert out is None
+        assert time.monotonic() - t0 < 3
+
+    @pytest.mark.parametrize("body", [
+        {"error": {"status": "PERMISSION_DENIED", "details": [{"reason": "SERVICE_DISABLED"}]}},
+        {"error": {"status": "PERMISSION_DENIED", "details": [{"reason": "API_KEY_IP_ADDRESS_BLOCKED"}]}},
+    ])
+    async def test_a_key_the_api_refuses_pauses_it(self, with_key, patch_sheets_client, body):
+        await _parse(Recorder(api=lambda r: httpx.Response(403, json=body)), patch_sheets_client)
+        again = Recorder()
+        await _parse(again, patch_sheets_client)
+        assert again.api_requests() == []
+
+    async def test_a_private_workbook_403_does_not_pause_the_api(self, with_key, patch_sheets_client):
+        denied = {"error": {"status": "PERMISSION_DENIED", "message": "The caller does not have permission"}}
+        await _parse(Recorder(api=lambda r: httpx.Response(403, json=denied)), patch_sheets_client)
+        again = Recorder()
+        await _parse(again, patch_sheets_client)
+        assert len(again.api_requests()) == 1
+

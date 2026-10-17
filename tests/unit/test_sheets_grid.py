@@ -6,13 +6,17 @@ Each rule here was found by diffing both sources cell by cell on real workbooks
 
 from __future__ import annotations
 
+import pytest
+
 from src.parser import _clean_link, extract_grid, extract_table, parse_misc_tab
 
 
-def _sheet(rows, *, cols=3, frozen=0, merges=(), hidden_rows=(), hidden_cols=(), row_count=None):
+def _sheet(rows, *, cols=3, frozen=0, frozen_cols=0, merges=(), hidden_rows=(), hidden_cols=(), row_count=None):
     grid = {"rowCount": row_count if row_count is not None else len(rows), "columnCount": cols}
     if frozen:
         grid["frozenRowCount"] = frozen
+    if frozen_cols:
+        grid["frozenColumnCount"] = frozen_cols
     n = grid["rowCount"]
     return {
         "properties": {"sheetId": 7, "title": "Misc", "gridProperties": grid},
@@ -164,3 +168,44 @@ class TestLinearCost:
         _grid_cell({"formattedValue": text, "textFormatRuns": runs})
         _grid_cell(cell)
         assert time.perf_counter() - start < 1.0
+
+
+class TestBounds:
+    def test_a_grid_too_large_to_materialize_is_refused(self):
+        # An empty 55 x 18,278 tab is a tiny body that would cost ~1M _Cell objects.
+        sheet = _sheet([["a"]], cols=18278, row_count=1000)
+        with pytest.raises(ValueError):
+            extract_grid(sheet)
+
+    def test_a_merge_far_past_the_grid_costs_nothing(self):
+        import time
+
+        t0 = time.monotonic()
+        rows = extract_grid(_sheet([["a", "b"], ["c", "d"]], cols=2, merges=[(0, 50_000_000, 0, 2)]))
+        assert time.monotonic() - t0 < 1
+        assert _texts(rows) == [["a", "b"]]
+
+
+class TestFrozenColumns:
+    def test_a_freezebar_cell_follows_the_frozen_columns_of_every_row(self):
+        rows = extract_grid(_sheet([["Era", "Name", "x"], ["e1", "s1", "y"]], frozen_cols=1))
+        assert _texts(rows) == [["Era", "", "Name", "x"], ["e1", "", "s1", "y"]]
+
+    def test_the_horizontal_freezebar_row_gets_it_too(self):
+        rows = extract_grid(_sheet([["a", "b"], ["c", "d"]], cols=2, frozen=1, frozen_cols=1))
+        assert _texts(rows) == [["a", "", "b"], ["", "", ""], ["c", "", "d"]]
+
+    def test_a_rowspan_over_a_frozen_column_keeps_the_freezebar_cell(self):
+        rows = extract_grid(_sheet([["Alpha", "a", "b"], ["", "c", "d"]], frozen_cols=1, merges=[(0, 2, 0, 1)]))
+        assert _texts(rows) == [["Alpha", "", "a", "b"], ["", "c", "d"]]
+
+
+class TestCheckboxes:
+    def test_a_checkbox_renders_no_text(self):
+        box = {"formattedValue": "TRUE", "dataValidation": {"condition": {"type": "BOOLEAN"}}}
+        assert _texts(extract_grid(_sheet([[box, "TRUE"]], cols=2))) == [["", "TRUE"]]
+
+    def test_other_validations_keep_their_text(self):
+        pick = {"formattedValue": "Full", "dataValidation": {"condition": {"type": "ONE_OF_LIST"}}}
+        assert _texts(extract_grid(_sheet([[pick]], cols=1))) == [["Full"]]
+

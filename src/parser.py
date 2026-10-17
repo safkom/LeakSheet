@@ -298,6 +298,7 @@ def extract_table(html_content: str) -> list[list[_Cell]]:
     return rows
 
 
+_MAX_GRID_CELLS = 2_000_000
 # htmlview renders these as U+FFFD; "\n" and "\t" pass through.
 _GRID_CONTROL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
@@ -329,6 +330,8 @@ def _grid_link(uri: str) -> str:
 
 def _grid_cell(value: dict) -> _Cell:
     raw = value.get("formattedValue") or ""
+    if ((value.get("dataValidation") or {}).get("condition") or {}).get("type") == "BOOLEAN":
+        raw = ""  # a checkbox renders no text in htmlview
     text = _grid_text(raw).strip()
     if hyperlink := value.get("hyperlink"):
         # htmlview renders a cell with a hyperlink as one anchor around all of it.
@@ -378,28 +381,45 @@ def extract_grid(sheet: dict) -> list[list[_Cell]]:
         m = meta[i] if i < len(meta) else {}
         return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
 
-    cols = [c for c in range(grid.get("columnCount", 0)) if not hidden(col_meta, c)]
+    n_rows = max(grid.get("rowCount", 0), len(row_data))
+    n_cols = grid.get("columnCount", 0)
+    # The body is trimmed but the grid size is not: an empty tab can declare millions of cells.
+    if max(n_rows, 1) * n_cols > _MAX_GRID_CELLS:
+        raise ValueError(f"grid of {n_rows} x {n_cols} cells is too large")
+    cols = [c for c in range(n_cols) if not hidden(col_meta, c)]
     covered: set[tuple[int, int]] = set()
     for m in sheet.get("merges") or []:
         # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
         if hidden(row_meta, m.get("startRowIndex", 0)):
             continue
-        for r in range(m.get("startRowIndex", 0) + 1, m.get("endRowIndex", 0)):
-            for c in range(m.get("startColumnIndex", 0), m.get("endColumnIndex", 0)):
+        for r in range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows)):
+            for c in range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols)):
                 covered.add((r, c))
     frozen = grid.get("frozenRowCount", 0)
+    frozen_cols = grid.get("frozenColumnCount", 0)
+
+    def build(r: int, cell_of) -> list[_Cell]:
+        # htmlview puts an empty freezebar <td> after the frozen columns of every row.
+        row: list[_Cell] = []
+        placed = not frozen_cols
+        for c in cols:
+            if not placed and c >= frozen_cols:
+                row.append(_Cell())
+                placed = True
+            if (r, c) not in covered:
+                row.append(cell_of(c))
+        if not placed:
+            row.append(_Cell())
+        return row
+
     rows: list[list[_Cell]] = []
-    for r in range(max(grid.get("rowCount", 0), len(row_data))):
+    for r in range(n_rows):
         if frozen and r == frozen:
-            rows.append([_Cell() for _ in cols])
+            rows.append(build(-1, lambda _c: _Cell()))
         if hidden(row_meta, r):
             continue
         values = (row_data[r].get("values") or []) if r < len(row_data) else []
-        row = [
-            _grid_cell(values[c]) if c < len(values) else _Cell()
-            for c in cols
-            if (r, c) not in covered
-        ]
+        row = build(r, lambda c: _grid_cell(values[c]) if c < len(values) else _Cell())
         if row:
             rows.append(row)
     return rows

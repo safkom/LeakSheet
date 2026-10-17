@@ -1126,3 +1126,14 @@ Each rule was found by diffing API cells against `extract_table` on real workboo
 - Every href comes wrapped in `google.com/url?q=`, and `_clean_link` unwraps it exactly
   once. API links are wrapped the same way, so a link the sheet stores as a pasted Google
   redirect stays as htmlview shows it instead of being unwrapped twice.
+- Frozen columns: htmlview puts an empty freezebar `<td>` after the frozen columns of every
+  row (the horizontal freezebar row gets one too).
+- A checkbox renders no text in htmlview; the API's `formattedValue` is TRUE/FALSE, so cells
+  with a BOOLEAN `dataValidation` are blanked.
+- The API trims empty rows but reports the full grid size: a grid over 2,000,000 cells raises,
+  and that tab alone reads from htmlview. Merge extents are clamped to the grid.
+
+`sheets_api.py` limits: the whole call has a 15 s deadline (`TIMEOUT_S`), so a slow API
+cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
+enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
+one private workbook.

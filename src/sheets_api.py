@@ -27,10 +27,12 @@ API_URL = "https://sheets.googleapis.com/v4/spreadsheets/"
 _FIELDS = (
     "sheets(properties(sheetId,title,gridProperties),merges,"
     "data(rowMetadata(hiddenByUser,hiddenByFilter),columnMetadata(hiddenByUser,hiddenByFilter),"
-    "rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format/link/uri),chipRuns))))"
+    "rowData(values(formattedValue,hyperlink,dataValidation/condition/type,textFormatRuns(startIndex,format/link/uri),chipRuns))))"
 )
 # Decoded JSON costs ~7x its size in memory; a larger body falls back to htmlview.
 MAX_BODY_BYTES = 16 * 1024 * 1024
+# Whole-call deadline: a slow API must not delay every tab's htmlview fallback.
+TIMEOUT_S = 15.0
 _DEFAULT_BACKOFF_S = 60.0
 _MAX_BACKOFF_S = 3600.0
 # Per worker, like every process global here: each of the 3 workers backs off on its own 429.
@@ -56,6 +58,15 @@ def _quota_hit(resp: httpx.Response, body: bytes) -> bool:
     return resp.status_code == 429 or (resp.status_code == 403 and b"rateLimitExceeded" in body)
 
 
+def _key_refused(resp: httpx.Response, body: bytes) -> bool:
+    """The API turned the key itself away (disabled API, restriction, invalid key): pause it."""
+    if resp.status_code != 200 and (b"SERVICE_DISABLED" in body or b"API_KEY_" in body):
+        _pause(_DEFAULT_BACKOFF_S)
+        logger.warning("Sheets API refused the key (%d); htmlview only for a while", resp.status_code)
+        return True
+    return False
+
+
 def _pause(seconds: float) -> None:
     global _backoff_until
     _backoff_until = time.monotonic() + seconds
@@ -66,7 +77,10 @@ def _rows_by_gid(body: bytes, gids: set[str]) -> dict[str, list[list[_Cell]]]:
     for sheet in json.loads(body).get("sheets") or []:
         gid = str((sheet.get("properties") or {}).get("sheetId"))
         if gid in gids:
-            rows[gid] = extract_grid(sheet)
+            try:
+                rows[gid] = extract_grid(sheet)
+            except ValueError as e:  # this tab alone falls back to htmlview
+                logger.warning("Sheets API tab %s skipped: %s", gid, e)
     return rows
 
 
@@ -112,32 +126,47 @@ async def fetch_tabs(
     if not key or not tabs or time.monotonic() < _backoff_until:
         return None
     get = functools.partial(_get, client, sheet_id, key, timeout=timeout, max_bytes=max_bytes)
-    titles = tabs
-    for attempt in range(2):
-        params = [("includeGridData", "true"), ("fields", _FIELDS)]
-        got = await get(params + [("ranges", _a1(title)) for title in titles.values()])
-        if got is None:
-            return None
-        resp, body = got
-        if resp.status_code != 400 or attempt:
-            break
-        # The htmlview tab listing trims names; ask for the exact titles by sheet id.
-        got = await get([("fields", "sheets.properties(sheetId,title)")])
-        if got is None:
-            return None
-        if got[0].status_code != 200:
-            # Without a pause, a key this lookup cannot pass costs two calls on every parse.
-            _pause(_retry_after(got[0]) if _quota_hit(*got) else _DEFAULT_BACKOFF_S)
-            return None
-        try:
-            exact = {str(p.get("sheetId")): p.get("title") for p in
-                     (sh.get("properties") or {} for sh in json.loads(got[1]).get("sheets") or [])}
-        except (ValueError, AttributeError) as e:
-            logger.warning("Sheets API titles for %s unreadable: %s", sheet_id, e)
-            return None
-        titles = {gid: exact[gid] for gid in tabs if exact.get(gid)}
-        if not titles:
-            return None
+
+    async def request() -> tuple[httpx.Response, bytes] | None:
+        titles = tabs
+        for attempt in range(2):
+            params = [("includeGridData", "true"), ("fields", _FIELDS)]
+            got = await get(params + [("ranges", _a1(title)) for title in titles.values()])
+            if got is None:
+                return None
+            resp, body = got
+            if _key_refused(resp, body):
+                return None
+            if resp.status_code != 400 or attempt:
+                return resp, body
+            # The htmlview tab listing trims names; ask for the exact titles by sheet id.
+            got = await get([("fields", "sheets.properties(sheetId,title)")])
+            if got is None:
+                return None
+            if got[0].status_code != 200:
+                # Without a pause, a key this lookup cannot pass costs two calls on every parse.
+                _pause(_retry_after(got[0]) if _quota_hit(*got) else _DEFAULT_BACKOFF_S)
+                return None
+            try:
+                exact = {str(p.get("sheetId")): p.get("title") for p in
+                         (sh.get("properties") or {} for sh in json.loads(got[1]).get("sheets") or [])}
+            except (ValueError, AttributeError) as e:
+                logger.warning("Sheets API titles for %s unreadable: %s", sheet_id, e)
+                return None
+            titles = {gid: exact[gid] for gid in tabs if exact.get(gid)}
+            if not titles:
+                return None
+        return None
+
+    try:
+        async with asyncio.timeout(min(timeout, TIMEOUT_S)):
+            got = await request()
+    except TimeoutError:
+        logger.warning("Sheets API for %s timed out; reading htmlview", sheet_id)
+        return None
+    if got is None:
+        return None
+    resp, body = got
     if _quota_hit(resp, body):
         _pause(_retry_after(resp))
         logger.warning("Sheets API quota hit (%d); htmlview only for a while", resp.status_code)
