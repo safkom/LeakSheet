@@ -65,6 +65,7 @@ from src.fetcher import (
     async_get_cached_parsed_bytes,
     clear_cache,
     close_sheets_client,
+    drop_cached_entry,
     fetch_artistgrid_entries,
     serialize_artist,
     content_hash,
@@ -75,7 +76,8 @@ from src.fetcher import (
     NoTablesError,
     ParseError,
     PhaseTimer,
-    STALE_CACHE_TTL,
+    SERVE_STALE_TTL,
+    SourceGoneError,
     unlink_if_older,
 )
 from src.streaming import (
@@ -593,6 +595,12 @@ async def _background_revalidate(url: str) -> None:
     except Exception as e:
         _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
+        # Gone or private at the source: a stale copy must not outlive it (serve-stale-window).
+        if isinstance(e, (AccessDeniedError, SourceGoneError)):
+            try:
+                await asyncio.to_thread(drop_cached_entry, url)
+            except OSError as exc:
+                logger.error("Could not drop the cached entry for %s: %s", url[:80], exc)
 
 
 # Per worker, like _parses. Keyed by normalized URL.
@@ -636,8 +644,10 @@ async def parse_sheet(
     """Fetch and parse a tracker spreadsheet.
 
     Supports ETag-based conditional requests (If-None-Match header) and
-    stale-while-revalidate: cached data up to 24h old is served instantly
-    while a background refresh is triggered.
+    stale-while-revalidate: cached data up to 7 days old is served instantly
+    (a matching ETag gets a 304) while a background refresh is triggered once
+    it is over an hour old. Older data is a cold parse. A refresh that finds the
+    source gone or private deletes the cached entry.
     """
     use_cache = req.use_cache and not req.force_refresh
     # Up front: every path below normalizes the URL, and an invalid one must be a
@@ -656,7 +666,7 @@ async def parse_sheet(
                 server_etag = _display_etag(server_etag, req.artist_name)
             if server_etag and server_etag == if_none_match:
                 age = await async_get_cached_age(req.url)
-                if age is not None and age < STALE_CACHE_TTL:
+                if age is not None and age < SERVE_STALE_TTL:
                     if age > DEFAULT_CACHE_TTL:
                         bg.add_task(_background_revalidate, req.url)
                     return Response(
@@ -673,7 +683,7 @@ async def parse_sheet(
     if use_cache:
         timer = PhaseTimer()
         with timer.phase("cache_read"):
-            cached = await async_get_cached_parsed_bytes(req.url, max_age=STALE_CACHE_TTL)
+            cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
         if cached is not None:
             raw, etag, age = cached
             if req.artist_name:

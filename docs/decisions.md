@@ -320,6 +320,38 @@ The fast path returns the cached JSON bytes as-is: no pydantic validation, no
 re-serialization, no content re-hash. Those steps cost ~400ms on a 6.5MB artist
 payload and were the bulk of warm-request latency.
 
+## api.py::serve-stale-window — a cached tracker is served for 7 days
+
+`/sheet` answers a 304 or serves the stored bytes while the entry is younger than
+`SERVE_STALE_TTL` (7 days); a background revalidation starts once it is over an hour
+old. Past 24 h the server used to do neither, so a client holding its own copy waited
+for a full cold parse anyway: production cold opens took 7.8-20.5 s. The app keeps its
+copy for days, so a week of stale-but-instant matches how it is used, and each served
+request refreshes the entry for the next one.
+
+`STALE_CACHE_TTL` (24 h) stays as the window of `fetcher.py::cache-collapse-guard`. It
+is a different question: how long a *larger* old parse outranks a smaller new one. A
+week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
+while a day still covers a partial fetch landing on a recently refreshed copy. The two
+constants are not meant to be equal. Known gap: a partial revalidation of a 1-7 day old
+entry is written, because the 24 h guard does not cover it; the next stale hit's
+revalidation repairs it.
+
+The window must not prolong content its source has revoked (DMCA). A failed revalidation
+only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
+for the whole week. `_background_revalidate` therefore calls `drop_cached_entry` (HTML,
+parse and metadata, under the entry lock) when the fetch fails with `SourceGoneError`
+(base page 404 or 410) or `AccessDeniedError`. That is a 403, or, for a docs.google.com
+sheet, a base page whose redirect chain ended on `accounts.google.com`: Google answers
+a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
+table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
+where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
+any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
+for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+serving the stale copy. The next request after a drop is a cold parse that returns the
+real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
+unchanged.
+
 ## api.py::google-size-suffix-regex — Google image URL suffix grammar
 
 Google's sizing suffix (`=s0-c-rw...`) is a `"="`-prefixed, `"-"`-joined list of
@@ -355,8 +387,8 @@ fails, a stored copy of the same picture is kept rather than downgraded.
 Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
 is minted on every page fetch, and it stops working: one fetched directly from Google
 still loaded after 28 minutes, and every page served 42 or more minutes after Google
-rendered it had dead tokens. A parse, though, is served for 1–24 hours and clients keep
-it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
+rendered it had dead tokens. A parse, though, is served for up to 7 days and clients
+keep it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
 production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
 Keem were fine.
 
@@ -846,10 +878,11 @@ plausible, no error was raised, and only a forced refresh cleared it.
 
 The guard is deliberately one-sided. Growth always writes, a modest shrink
 always writes (trackers do lose tracks — DMCA, restructures), and the old copy
-wins only while it is still inside `STALE_CACHE_TTL`; past that it would not be
-served anyway, so a genuinely shrunken tracker recovers on its own instead of
-being frozen forever. The refusal is logged at WARNING so a systematically
-broken tab is visible rather than silent — which was the real defect here.
+wins only while it is still inside `STALE_CACHE_TTL` (24 h, deliberately shorter
+than the 7-day serve window, see `api.py::serve-stale-window`); past that a
+genuinely shrunken tracker recovers on its own instead of being frozen for days.
+The refusal is logged at WARNING so a systematically broken tab is visible rather
+than silent — which was the real defect here.
 
 ## api.py::payload-duplication — measured, kept on purpose (2026-08-26)
 
