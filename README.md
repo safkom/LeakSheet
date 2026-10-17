@@ -14,7 +14,7 @@ LeakSheet is split into three pieces:
 
 | Piece | Path | Stack |
 |---|---|---|
-| **Backend / parser** | `src/` | Python 3.11+, FastAPI, httpx, lxml |
+| **Backend / parser** | `src/` | Python 3.14+, FastAPI, httpx, lxml |
 | **nginx front** | `web/` | Proxies `/api/*` to the backend; serves nothing else |
 | **Apple apps** | `LeakSheet-iOS/` | SwiftUI (iOS 27 / macOS 27 / tvOS 27), Swift 6 — see [LeakSheet-iOS/README.md](LeakSheet-iOS/README.md) |
 
@@ -40,7 +40,7 @@ Native SwiftUI client with Liquid Glass design, AVPlayer-based playback, lock-sc
 
 ## Quick Start
 
-You'll need [uv](https://docs.astral.sh/uv/). It installs Python 3.11 itself, from
+You'll need [uv](https://docs.astral.sh/uv/). It installs Python 3.14 itself, from
 `.python-version`, so there is nothing else to set up.
 
 ```bash
