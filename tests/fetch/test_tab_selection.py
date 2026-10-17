@@ -573,6 +573,44 @@ class TestPartialLoadsAreVisible:
         assert (fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json").exists()
 
 
+class TestPartialLoadsKeepAnOlderEntry:
+    """The pipeline hands its failed-tab count to the collapse guard on every write path,
+    so a partial revalidation of a days-old (still served) entry cannot replace it."""
+
+    @staticmethod
+    def _seed_bigger_entry(days: float) -> None:
+        import json
+        import time
+
+        import src.fetcher as fetcher
+        from tests.unit.test_cache_meta import TestCollapseGuard
+
+        fetcher._set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
+        meta_file = fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - days * 86400
+        meta_file.write_text(json.dumps(meta))
+
+    @staticmethod
+    def _cached_versions() -> int:
+        import json
+
+        import src.fetcher as fetcher
+
+        path = fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json"
+        return json.loads(path.read_text())["total_versions"]
+
+    @pytest.mark.parametrize("gid", [None, "100"], ids=["discovery", "gid"])
+    @pytest.mark.parametrize(("fail_gids", "kept"), [({"300"}, 100), (set(), 5)])
+    async def test_a_partial_parse_does_not_replace_a_served_entry(
+        self, workbook_client, patch_sheets_client, gid, fail_gids, kept
+    ):
+        self._seed_bigger_entry(days=3)
+        patch_sheets_client(workbook_client(WORKBOOK, tab_names=TAB_NAMES, fail_gids=fail_gids))
+        await async_fetch_and_parse(URL, gid=gid, use_cache=False, write_cache=True)
+        assert self._cached_versions() == kept
+
+
 class TestFallbackParse:
     """The last-resort path: no tab holds songs, so the base sheet is parsed as-is."""
 

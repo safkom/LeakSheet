@@ -990,13 +990,13 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 CACHE_COLLAPSE_RATIO = 0.8
 
 
-def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
+def _collapse_reason(key: str, new: int, new_eras: int, failed_tabs: int) -> str | None:
     """Why a parse of *new* versions must not be cached, or None if it may.
 
     An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
     and looks like any other result: see docs/decisions.md::fetcher.py::cache-collapse-guard.
-    Past ``COLLAPSE_GUARD_TTL`` the old entry is never preferred, so a tracker that genuinely
-    shrank recovers.
+    Past ``COLLAPSE_GUARD_TTL`` (``SERVE_STALE_TTL`` when tab loads failed) the old entry is
+    never preferred, so a tracker that genuinely shrank recovers.
     """
     if new <= 0:
         return f"empty parse, {new_eras} eras"
@@ -1012,7 +1012,7 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
         age = 0.0
-    if age > COLLAPSE_GUARD_TTL:
+    if age > (SERVE_STALE_TTL if failed_tabs else COLLAPSE_GUARD_TTL):
         return None
 
     # The counts live in the small meta sidecar, sparing a multi-MB json.loads per write.
@@ -1025,11 +1025,11 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         return None
 
     return (
-        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}"
+        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}, {failed_tabs} failed tabs"
     )
 
 
-def _set_cached_parsed(url: str, artist: Artist) -> None:
+def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
     """Write parsed Artist JSON to cache, with content hash in metadata.
 
     On success the written bytes and ETag are left on ``artist._wire``, so the
@@ -1040,7 +1040,7 @@ def _set_cached_parsed(url: str, artist: Artist) -> None:
     try:
         # The collapse check needs two counts, not the whole dump — so it runs
         # before any serialization, and a refused parse costs none.
-        reason = _collapse_reason(key, artist.total_versions, len(artist.eras))
+        reason = _collapse_reason(key, artist.total_versions, len(artist.eras), failed_tabs)
         if reason is not None:
             # Served to this caller, but not persisted: the good copy stays,
             # and the next request is not poisoned by a transient failure.
@@ -1079,8 +1079,8 @@ async def _async_get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TT
     return await asyncio.to_thread(_get_cached_parsed, url, cache_ttl)
 
 
-async def _async_set_cached_parsed(url: str, artist: "Artist") -> None:
-    await asyncio.to_thread(_set_cached_parsed, url, artist)
+async def _async_set_cached_parsed(url: str, artist: "Artist", *, t: PhaseTimer) -> None:
+    await asyncio.to_thread(_set_cached_parsed, url, artist, t.tab_counts()[0])
 
 
 def clear_cache() -> tuple[int, int]:
@@ -1944,7 +1944,7 @@ async def async_fetch_and_parse(
                         _warn_failed_tabs(url_norm, t)
                         await asyncio.to_thread(_finalize, artist, url_norm)
                         if write_cache:
-                            await _async_set_cached_parsed(url_norm, artist)
+                            await _async_set_cached_parsed(url_norm, artist, t=t)
                         return artist
                     # A better "Unreleased" tab exists — fall through to full discovery
                 # GID produced 0 eras or 0 songs — fall through to discovery
@@ -1972,7 +1972,7 @@ async def async_fetch_and_parse(
                 await asyncio.to_thread(_finalize, artist, url_norm)
                 if write_cache:
                     await _async_set_cache(url_norm, base_html, title)
-                    await _async_set_cached_parsed(url_norm, artist)
+                    await _async_set_cached_parsed(url_norm, artist, t=t)
                 return artist
 
         # The page-switcher is authoritative for both tab names and sub-page
@@ -2128,7 +2128,7 @@ async def async_fetch_and_parse(
                 if write_cache and best_html:
                     await _async_set_cache(url_norm, best_html, title)
                 if write_cache:
-                    await _async_set_cached_parsed(url_norm, best_artist)
+                    await _async_set_cached_parsed(url_norm, best_artist, t=t)
             return best_artist
 
         # Fallback: no tab yielded songs, often because the tabs that held them failed.
@@ -2140,7 +2140,7 @@ async def async_fetch_and_parse(
         artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
         await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
-            await _async_set_cached_parsed(url_norm, artist)
+            await _async_set_cached_parsed(url_norm, artist, t=t)
         return artist
 
     except httpx.HTTPError as e:
