@@ -273,6 +273,55 @@ class TestImgurResolution:
 
 
 # ---------------------------------------------------------------------------
+# Case: hosts and path keywords match in any case, file ids keep theirs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("link,resolved", [
+    ("HTTPS://PILLOWS.SU/F/AbC123", "https://api.pillows.su/api/get/AbC123"),
+    ("https://PLWCSE.TOP/F/AbC123", "https://api.pillows.su/api/get/AbC123"),
+    ("https://IMGUR.GG/F/AbC12", "https://imgur.gg/api/file/AbC12"),
+    ("https://MUSIC.FROSTE.LOL/SONG/0123ABCD", "https://music.froste.lol/song/0123ABCD/file"),
+    ("https://KrakenFiles.com/VIEW/AbC123xyz/FILE.HTML", "https://krakenfiles.com/view/AbC123xyz/file.html"),
+    ("https://PIXELDRAIN.COM/U/aBc123", "https://pixeldrain.com/api/file/aBc123"),
+    ("https://DRIVE.GOOGLE.COM/FILE/D/1AbC-x_9", "https://drive.google.com/uc?export=download&id=1AbC-x_9"),
+    ("https://Drive.Google.com/Open?id=1AbC-x_9", "https://drive.google.com/uc?export=download&id=1AbC-x_9"),
+    ("https://drive.google.com/UC?id=1AbC-x_9", "https://drive.google.com/uc?export=download&id=1AbC-x_9"),
+])
+def test_links_match_in_any_case_and_keep_their_id_case(link, resolved):
+    assert resolve_stream_url(link) == resolved
+
+
+@pytest.mark.parametrize("link", [
+    "https://pillow\u017f.su/f/abc123",  # long s folds to s under Unicode ignore-case
+    "https://\u212arakenfiles.com/view/AbC123xyz/file.html",  # Kelvin sign folds to k
+    "https://pillows.su/f/\u017f",
+])
+def test_case_folding_is_ascii_only(link):
+    assert resolve_stream_url(link) is None
+
+
+@pytest.mark.parametrize("link", [
+    "https://drive.google.com:443/open?id=1AbC-x_9",
+    "https://user@drive.google.com/uc?id=1AbC-x_9",
+    "https://drive.google.com:/open?id=1AbC-x_9",
+    "https://drive.google.com:443/file/d/1AbC-x_9",
+    "https://pillows.su:443/f/abc123",
+    "https://user@pillows.su/f/abc123",
+])
+def test_a_port_or_userinfo_is_not_a_stream_host(link):
+    # Every form goes through the same authority rule, whether it is a regex or a query form.
+    assert resolve_stream_url(link) is None
+
+
+def test_metadata_matches_in_any_case_too():
+    assert resolve_metadata_url("HTTPS://PILLOWS.SU/F/AbC123") == {
+        "url": "https://api.pillows.su/api/metadata/AbC123.txt",
+        "provider": "pillows",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Stream-proxy domain allowlist
 # ---------------------------------------------------------------------------
 

@@ -48,6 +48,13 @@ struct StreamResolverTests {
         #expect(!StreamResolver.isStreamableURL(url))
     }
 
+    @Test func `host and path keyword ignore case but the file id keeps it`() {
+        #expect(StreamResolver.target(for: "HTTPS://PILLOWS.SU/F/AbC123") == .pillows(id: "AbC123"))
+        #expect(StreamResolver.target(for: "https://IMGUR.GG/F/AbC12") == .imgur(id: "AbC12"))
+        #expect(StreamResolver.target(for: "https://MUSIC.FROSTE.LOL/SONG/0123ABCD") == .froste(hash: "0123ABCD"))
+        #expect(StreamResolver.target(for: "https://PIXELDRAIN.COM/U/aBc123") == .pixeldrain(id: "aBc123"))
+    }
+
     @Test func `pixeldrain original quality is the direct file API`() {
         let url = StreamResolver.originalQualityURL(for: "https://pixeldrain.com/u/aBc123")
         #expect(url?.absoluteString == "https://pixeldrain.com/api/file/aBc123?download")
