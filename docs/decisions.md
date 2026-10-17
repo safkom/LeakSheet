@@ -1080,3 +1080,12 @@ answer without `cdnUrl`. A 4xx from the kraken page or from every imgur host is 
 `UpstreamStatusError` like one from the file itself. A bare ValueError from a resolver
 still counts as a soft failure: those wrap transport errors, upstream 5xx and the SSRF
 pre-flight.
+
+## parser.py::_split_links — one wire link per URL
+
+A cell href or text can hold several URLs (newline, space, `%20`, or glued: `…/f/abc123https://…`).
+The backend resolves by id prefix, so a glued tail was dropped or produced a bogus id.
+A scheme after `/ = ? # : & @ % +` is a wrapper payload (web.archive.org, href.li, `?url=`) and
+stays whole; a same-host scheme after `/` is a restarted paste. A glued piece that prefixes the
+next one is an abandoned paste and is dropped. Whitespace inside a URL with no second scheme
+(`genius.com/search?q=A B`) is kept. Notice and source links stay single-valued (`_clean_link`).

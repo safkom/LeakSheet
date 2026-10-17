@@ -9,6 +9,8 @@ dumps live in tests/quality/ behind the ``accuracy`` marker.
 from __future__ import annotations
 
 
+from urllib.parse import quote
+
 import pytest
 
 from src.models import Badge, extract_badge, extract_version_tag
@@ -890,6 +892,125 @@ class TestLinkCleaning:
     def test_malformed_url_does_not_raise(self):
         from src.parser import _clean_link
         assert _clean_link("https://www.google.com/url?q=x#[invalid")
+
+
+class TestLinkSplitting:
+    """One wire link per URL when a cell holds several."""
+
+    A = "https://pillows.su/f/aaa111"
+    B = "https://pillows.su/f/bbb222"
+
+    @pytest.mark.parametrize("sep", ["\n", " ", "\r\n", "\t", " \n\n ", "%20", "%0A"])
+    def test_separated_urls_split(self, sep):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A}{sep}{self.B}") == [self.A, self.B]
+
+    def test_glued_urls_split_at_the_second_scheme(self):
+        from src.parser import _split_links
+        assert _split_links(self.A + self.B) == [self.A, self.B]
+        assert _split_links(self.A + "http://example.test/x") == [self.A, "http://example.test/x"]
+
+    def test_three_urls_keep_order(self):
+        from src.parser import _split_links
+        c = "https://pixeldrain.com/u/ccc333"
+        assert _split_links(f"{self.A}\n{self.B}{c}") == [self.A, self.B, c]
+
+    def test_separators_around_the_ends_are_dropped(self):
+        from src.parser import _split_links
+        assert _split_links(f"  {self.A} \n {self.B}\n") == [self.A, self.B]
+
+    def test_a_single_url_is_untouched(self):
+        from src.parser import _split_links
+        assert _split_links(self.A) == [self.A]
+
+    def test_space_inside_a_url_without_a_second_url_stays(self):
+        from src.parser import _split_links
+        url = "https://genius.com/search?q=Some Artist Some Song"
+        assert _split_links(url) == [url]
+
+    @pytest.mark.parametrize("url", [
+        "https://web.archive.org/web/20250101000000/https://site.test/page#frag",
+        "https://web.archive.org/web/2025if_/http://site.test/page",
+        "https://archive.ph/20250101000000/https://site.test/page",
+        "https://href.li/?http://site.test/a.mp3",
+        "https://redirect.test/go?url=https://site.test/a",
+        "https://mega.nz/folder/AbCd1234#https://site.test/a",
+    ])
+    def test_a_wrapper_around_one_url_is_one_link(self, url):
+        from src.parser import _split_links
+        assert _split_links(url) == [url]
+
+    def test_google_wrapper_is_unwrapped(self):
+        from src.parser import _split_links
+        wrapped = "https://www.google.com/url?q=https%3A%2F%2Fpillows.su%2Ff%2Faaa111&sa=D"
+        assert _split_links(wrapped) == [self.A]
+
+    def test_google_wrapper_holding_two_urls_splits(self):
+        from src.parser import _split_links
+        wrapped = "https://www.google.com/url?q=" + quote(f"{self.A} {self.B}") + "&sa=D"
+        assert _split_links(wrapped) == [self.A, self.B]
+
+    def test_two_google_wrappers_in_one_href_split(self):
+        from src.parser import _split_links
+        w = "https://www.google.com/url?q=%s&sa=D"
+        both = w % quote(self.A) + "\n" + w % quote(self.B)
+        assert _split_links(both) == [self.A, self.B]
+
+    def test_a_repeated_url_is_listed_once(self):
+        from src.parser import _split_links
+        assert _split_links(self.A + self.A) == [self.A]
+        assert _split_links(f"{self.A}\n{self.A}") == [self.A]
+
+    def test_a_restarted_paste_keeps_the_complete_url(self):
+        from src.parser import _split_links
+        assert _split_links("https://pillows.su/f/" + self.B) == [self.B]
+        assert _split_links("https://pillows.su/f/" + self.A + self.B) == [self.A, self.B]
+
+    def test_a_shorter_url_before_a_longer_one_across_whitespace_stays(self):
+        from src.parser import _split_links
+        profile, track = "https://site.test/artist", "https://site.test/artist/track"
+        assert _split_links(f"{profile}\n{track}") == [profile, track]
+
+    def test_empty_and_blank_input(self):
+        from src.parser import _split_links
+        assert _split_links("") == []
+        assert _split_links(" \n ") == []
+
+    def test_main_tab_anchor_holding_two_urls_yields_two_links(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Link(s)</td></tr>"
+            "<tr><td>Era One</td><td>Song One</td><td>n</td>"
+            f"<td><a href='{self.A}\n{self.B}'>l</a></td></tr>"
+            "</table>"
+        )
+        version = parse_sheet(html, "Test").eras[0].songs[0].versions[0]
+        assert version.links == [self.A, self.B]
+
+    def test_notes_cell_anchor_is_split_too(self):
+        from src.parser import parse_sheet
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Notes</td><td>Link(s)</td></tr>"
+            "<tr><td>Era One</td><td>Song One</td>"
+            f"<td>see <a href='{self.A}{self.B}'>here</a></td><td></td></tr>"
+            "</table>"
+        )
+        version = parse_sheet(html, "Test").eras[0].songs[0].versions[0]
+        assert version.links == [self.A, self.B]
+
+    def test_misc_tab_anchor_and_text_fallback_split(self):
+        from src.parser import parse_misc_tab
+        html = (
+            "<table>"
+            "<tr><td>Era</td><td>Name</td><td>Type</td><td>Link(s)</td></tr>"
+            f"<tr><td>Era One</td><td>Entry A</td><td>Video</td><td><a href='{self.A} {self.B}'>l</a></td></tr>"
+            f"<tr><td>Era One</td><td>Entry B</td><td>Video</td><td>{self.A}<br>{self.B}</td></tr>"
+            "</table>"
+        )
+        entries = parse_misc_tab(html, "misc")
+        assert [e.links for e in entries] == [[self.A, self.B], [self.A, self.B]]
 
 
 class TestSlashEraRegistration:

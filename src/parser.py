@@ -1308,9 +1308,68 @@ def _clean_link(url: str) -> str:
     return url
 
 
+# docs/decisions.md::parser.py::_split_links
+_URL_START_RE = re.compile(r"https?://", re.I)
+_ENCODED_WS = frozenset({"%20", "%09", "%0a", "%0d"})
+# A scheme right after one of these is a wrapper's payload (web.archive.org/web/<ts>/https://…,
+# href.li/?http://…), not a second link.
+_PAYLOAD_PREV = frozenset("/=?#:&@%+")
+
+
+def _netloc(url: str) -> str:
+    parts = url.split("/", 3)
+    return parts[2].lower() if len(parts) > 2 else ""
+
+
+def _split_urls(text: str) -> list[str]:
+    """Split *text* at each URL that starts after whitespace or glued onto the previous one."""
+    text = text.strip()
+    pieces: list[str] = []
+    glued: list[bool] = []  # glued[k]: pieces[k] runs straight into pieces[k + 1]
+    start = 0
+    for m in _URL_START_RE.finditer(text, 1):
+        i = m.start()
+        j = i
+        while True:  # step back over whitespace, raw or percent-encoded
+            if j and text[j - 1].isspace():
+                j -= 1
+            elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
+                j -= 3
+            else:
+                break
+        if j == i:
+            prev = text[i - 1]
+            # A same-host scheme after "/" is a paste restarted, not a wrapper.
+            if prev in _PAYLOAD_PREV and not (
+                prev == "/" and _netloc(text[start:i]) == _netloc(text[i:])
+            ):
+                continue
+        if j > start:
+            pieces.append(text[start:j])
+            glued.append(j == i)
+        start = i
+    pieces.append(text[start:])
+    # A glued piece that is a prefix of the next one is an abandoned paste.
+    kept = [
+        p for k, p in enumerate(pieces)
+        if not (k < len(glued) and glued[k] and pieces[k + 1].startswith(p))
+    ]
+    return list(dict.fromkeys(p for p in kept if p))
+
+
+def _split_links(url: str) -> list[str]:
+    """One cleaned link per URL in *url*: a cell href or text can hold several.
+
+    Splits before unwrapping so each Google ``url?q=`` wrapper unwraps on its own, and after,
+    since a wrapper's payload can hold more URLs.
+    """
+    links = [link for part in _split_urls(url) for link in _split_urls(_clean_link(part))]
+    return list(dict.fromkeys(links))
+
+
 def _extract_links_from_cell(cell: _Cell) -> list[str]:
-    """Get cleaned links from a cell."""
-    return [_clean_link(link) for link in cell.links if link]
+    """Get cleaned links from a cell, one per URL."""
+    return [link for raw in cell.links for link in _split_links(raw)]
 
 
 def _register_era_keys(
@@ -2765,11 +2824,11 @@ def parse_misc_tab(
         links_idx = col_map.get("links", -1)
         if 0 <= links_idx < len(row):
             cell = row[links_idx]
-            links.extend(_clean_link(l) for l in cell.links)
+            links.extend(l for raw in cell.links for l in _split_links(raw))
             if not links:
                 text = cell.text.strip()
                 if text.startswith(("http://", "https://")):
-                    links.append(text)
+                    links.extend(_split_links(text))
         links = [l for l in links if l]
 
         streaming_text = cell_text(row, "streaming").lower()
