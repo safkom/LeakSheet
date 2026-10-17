@@ -466,8 +466,22 @@ Some file hosts (e.g. pillows.su) always report `Content-Type: audio/mp4` regard
 of the actual container. Chrome lenient-decodes the bytes; Safari strictly validates
 Content-Type against the data and shows "source not supported" when an Ogg file is
 served as `audio/mp4`. Because the range starts at byte 0 on a fresh request, the
-first chunk is read, the real format is sniffed from magic bytes, `Content-Type` is
-corrected, and the chunk is prepended back into the stream so no bytes are lost.
+first 16 bytes are read, the real format is sniffed from magic bytes, `Content-Type`
+is corrected, and those bytes are prepended back into the stream so none are lost.
+
+The upstream is read with `aiter_bytes()` and no chunk size: httpx buffers a fixed
+chunk size in full before its first yield, which delayed the response headers (the
+sniff gates them) by a 64 KiB download. A read may return fewer than 16 bytes, so the
+sniff accumulates reads until it has 16 or the body ends; every later chunk is relayed
+as it arrives.
+
+## api.py::metadata-deadline — /metadata gives up after 10 s
+
+The shared httpx client is tuned for audio (120 s read timeout), so a provider that
+accepts the connection and never answers held a worker for two minutes per call.
+`/metadata` bounds all its upstream calls (the metadata fetch and the pillows HEAD
+fallback) with one `asyncio.timeout` of 10 s, plus a per-call 5 s connect timeout. A
+timeout answers 503 like any other provider failure and logs at WARNING.
 
 ## api.py::range-fallback — HTTP 200, not a synthesized 206, when length is unknown
 
