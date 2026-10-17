@@ -19,6 +19,16 @@ the whole song's badge through made Best Of display 🗑️ on songs kept for a 
 (Ye "Hurricane" in DONDA [V3]). Falls back to the song badge only when no kept
 version carries one, so filters like No Snippets don't strip a song's badge entirely.
 
+## TrackerURLNormalizer.swift::mirrors-backend — same identity as `_normalize_url`
+
+A Google Sheet is its id: every spelling collapses to `.../d/{id}/htmlview`, found in
+`docs.google.com` + path only when the host is docs.google.com (a mirror or a lookalike
+keeps its own URL). Scheme and host fold, userinfo and the scheme's default port go, the
+fragment goes, and a bare host gets a trailing slash. The cache key and the recents
+dedup compare these strings, so a rule the backend reads differently splits one tracker in two.
+`Fixtures/stream_links.json` replays the backend's answers; differences that remain are
+pinned there as known differences.
+
 ## APIClient.swift::chunked-download — chunked delegate download
 
 `URLSession` hands the body over in Data chunks (one memcpy each). The previous
@@ -546,3 +556,23 @@ The status only ever informs: Play stays enabled and nothing is skipped client-s
 because the list refreshes at most once a minute and the host may already be back. The
 store refreshes when a tracker loads, before each play (throttled), and forced after a
 failed play or a load timeout. A failed `/hosts` fetch keeps the last known state.
+
+## AudioEngine.swift::original-quality-default — Original quality plays unless switched off
+
+pillows is about 47 % of all sheet links, and the proxied path (`/api/get`) serves an
+Ogg transcode of every file: 11 of 11 probed links answered `OggS`, at 2 to 43 % of the
+original's size across six paired probes (one file: 1.3 MB against 3.6 MB). The owner
+chose the original file as the default. `StreamResolver.originalQualityURL` sends pillows
+to `/api/download/{id}`, which answers ranged requests with 206.
+
+`@AppStorage(...) = true` only sets the default a view reads; it never writes the key, so
+`UserDefaults.bool(forKey:)` still reads an unset key as false. `prefersOriginalQuality`
+reads an unset key as true and an explicit choice as stored, so a user who turned it off
+keeps it off. Costs: lossless files stream whole (one WAV: 72 MB against 1.5 MB), and
+the original URL is fetched directly, so the backend's MIME sniffing, its 415 on non-media
+bodies and its host-health outcomes do not apply to pillows plays; a failed item shows
+its error and the Stream toggle is the manual fallback. froste stays proxied in original
+mode because its download needs a Referer that AVPlayer does not send; pixeldrain and
+pillows play direct. For froste the original and streaming URLs are therefore the same,
+so the Playback Quality toggle changes nothing there, and whether the proxied
+`/song/{hash}/file` is the original file is unverified.

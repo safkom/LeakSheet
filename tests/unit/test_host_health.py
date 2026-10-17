@@ -10,7 +10,7 @@ import fcntl
 import httpx
 import pytest
 
-from src import fetcher, host_health
+from src import fetcher, host_health, streaming
 from src.streaming import UpstreamStatusError
 
 PILLOWS = "https://pillows.su/f/abc"
@@ -26,6 +26,7 @@ def clock(monkeypatch):
 
 def test_provider_of_each_supported_link():
     assert host_health.provider_for("https://pillows.su/f/abc") == "pillows"
+    assert host_health.provider_for("https://plwcse.top/f/abc") == "pillows"
     assert host_health.provider_for("https://www.krakenfiles.com/view/AbC/file.html") == "kraken"
     assert host_health.provider_for("https://music.froste.lol/song/abc123") == "froste"
     assert host_health.provider_for("https://imgur.gg/f/abc") == "imgur"
@@ -140,3 +141,14 @@ class TestProber:
             fcntl.flock(other_worker, fcntl.LOCK_EX)
             await host_health.probe_once()
         assert called == []
+
+    async def test_a_non_media_body_means_the_host_answers(self, clock, monkeypatch):
+        # A probe link can be a permanent PDF or HTML page: the host still served it.
+        host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+        client = httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"%PDF-1.2")
+        ))
+        monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
+        await host_health.probe_once()
+        await client.aclose()
+        assert host_health.down("pillows") is None
