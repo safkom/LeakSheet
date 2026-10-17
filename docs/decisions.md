@@ -39,9 +39,8 @@ Over a 70-tab corpus the rule changed no other tab's songs.
 
 ## parser.py::parse_sheet — positional-prior era matching
 
-Two rules, both from the 2026-07-20 review, both guarding the same failure: a
-similarly-named **sibling era** stealing every row from the era a song actually
-sits under, starving it.
+Three rules, all guarding the same failure: a similarly-named **sibling era**
+stealing every row from the era a song actually sits under, starving it.
 
 1. **Exact positional prior.** If a row's era value names the era we are currently
    under — any of that era's own key forms — it belongs there, full stop. Sibling
@@ -55,6 +54,17 @@ sits under, starving it.
    `Get Rich Or Die Tryin' Soundtrack` header. The global search would let a
    similarly-worded sibling outscore it (`Get Rich Or Die Tryin'` scores 4/4 = 1.0
    against the header's 4/5 = 0.8) and silently steal the lot. Case: 50 Cent.
+
+3. **A tagged row names its version.** A row-era value carrying version tags
+   (`Album [V1]`) goes to the nearest era declared so far whose own name (or slash part)
+   carries the same tags (`_era_tag_key`), even when the current header shares the
+   stripped key. Trackers that sort by recording date interleave V1 rows under the V2
+   header; rule 1 alone sent them all to whichever header was current. The hop is per
+   row: the header stays current, so the bare and blank-era rows after it keep rule 1.
+   Only own names count: a single-line `Album [V3]` heading that parses as a section
+   label is not one, so its rows keep the old routing. Tag keys never enter
+   `era_by_key`, so they cannot shadow a later era's name or feed fuzzy matching. A row
+   placed before its version's header still lands in the current era (one pass).
 
 **When touching era matching, verify PLACEMENT, not just counts** — the accuracy
 suite counts totals, so a wholesale re-attribution between two eras passes it.
