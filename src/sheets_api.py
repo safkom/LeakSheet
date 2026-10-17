@@ -29,6 +29,8 @@ _FIELDS = (
     "data(rowMetadata(hiddenByUser,hiddenByFilter),columnMetadata(hiddenByUser,hiddenByFilter),"
     "rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format/link/uri),chipRuns))))"
 )
+# Decoded JSON costs ~7x its size in memory; a larger body falls back to htmlview.
+MAX_BODY_BYTES = 16 * 1024 * 1024
 _DEFAULT_BACKOFF_S = 60.0
 _MAX_BACKOFF_S = 3600.0
 # Per worker, like every process global here: each of the 3 workers backs off on its own 429.

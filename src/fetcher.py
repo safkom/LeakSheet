@@ -1455,7 +1455,7 @@ def _start_api_tabs(
         return None
     return asyncio.create_task(sheets_api.fetch_tabs(
         client, sheet_id, {gid: name for gid, _kind, name in content_tabs},
-        timeout=timeout, max_bytes=_MAX_SHEET_BYTES,
+        timeout=timeout, max_bytes=sheets_api.MAX_BODY_BYTES,
     ))
 
 
