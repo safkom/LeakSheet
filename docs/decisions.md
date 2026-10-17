@@ -333,7 +333,7 @@ for a full cold parse anyway: production cold opens took 7.8-20.5 s. The app kee
 copy for days, so a week of stale-but-instant matches how it is used, and each served
 request refreshes the entry for the next one.
 
-`STALE_CACHE_TTL` (24 h) stays as the window of `fetcher.py::cache-collapse-guard`. It
+`COLLAPSE_GUARD_TTL` (24 h) is the window of `fetcher.py::cache-collapse-guard`. It
 is a different question: how long a *larger* old parse outranks a smaller new one. A
 week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
 while a day still covers a partial fetch landing on a recently refreshed copy. The two
@@ -911,7 +911,7 @@ plausible, no error was raised, and only a forced refresh cleared it.
 
 The guard is deliberately one-sided. Growth always writes, a modest shrink
 always writes (trackers do lose tracks — DMCA, restructures), and the old copy
-wins only while it is still inside `STALE_CACHE_TTL` (24 h, deliberately shorter
+wins only while it is still inside `COLLAPSE_GUARD_TTL` (24 h, deliberately shorter
 than the 7-day serve window, see `api.py::serve-stale-window`); past that a
 genuinely shrunken tracker recovers on its own instead of being frozen for days.
 The refusal is logged at WARNING so a systematically broken tab is visible rather
@@ -920,7 +920,7 @@ than silent — which was the real defect here.
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an
 empty result was served as a hit for an hour and then cached again by the app. It is
-refused even over an entry past `STALE_CACHE_TTL`.
+refused even over an entry past `COLLAPSE_GUARD_TTL`.
 
 A partial load is only logged, never refused: a tab that is permanently missing would
 otherwise keep its tracker out of the cache for good, and a large drop is the ratio's

@@ -190,7 +190,7 @@ class TestServeStaleWindow:
         from src import fetcher
 
         assert fetcher.SERVE_STALE_TTL == 7 * self.DAY
-        assert fetcher.STALE_CACHE_TTL == self.DAY
+        assert fetcher.COLLAPSE_GUARD_TTL == self.DAY
 
 
 class TestRevalidationDropsGoneSources:

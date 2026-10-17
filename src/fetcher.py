@@ -69,9 +69,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
-# Collapse-guard window (24h); the serve window is SERVE_STALE_TTL.
+# How long a larger cached parse outranks a smaller new one; not the serve window.
 # See docs/decisions.md::api.py::serve-stale-window
-STALE_CACHE_TTL = 86400
+COLLAPSE_GUARD_TTL = 86400
 SERVE_STALE_TTL = 7 * 86400  # max age served stale (and 304'd) while a revalidation runs
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
@@ -995,7 +995,7 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
 
     An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
     and looks like any other result: see docs/decisions.md::fetcher.py::cache-collapse-guard.
-    Past ``STALE_CACHE_TTL`` the old entry is never preferred, so a tracker that genuinely
+    Past ``COLLAPSE_GUARD_TTL`` the old entry is never preferred, so a tracker that genuinely
     shrank recovers.
     """
     if new <= 0:
@@ -1012,7 +1012,7 @@ def _collapse_reason(key: str, new: int, new_eras: int) -> str | None:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
         age = 0.0
-    if age > STALE_CACHE_TTL:
+    if age > COLLAPSE_GUARD_TTL:
         return None
 
     # The counts live in the small meta sidecar, sparing a multi-MB json.loads per write.
