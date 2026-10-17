@@ -1099,7 +1099,11 @@ A scheme after `/ = ? # : & @ % +` is a wrapper payload (web.archive.org, href.l
 stays whole; a same-host scheme after `/` is a restarted paste. A glued piece that prefixes the
 next one is an abandoned paste and is dropped. Whitespace inside a URL with no second scheme
 (`genius.com/search?q=A B`) is kept. Notice and source links stay single-valued (`_clean_link`).
-=======
+Before unwrapping, a Google wrapper is split only at raw whitespace or a new wrapper: htmlview keeps
+the scheme unencoded inside `q=`, so splitting there would strand the `&sa=…&ust=…` tail on the second
+link. The grid path (`%0A`-encoded `q=`) and htmlview give the same links. List punctuation (`, ; |`)
+is trimmed off the earlier link.
+
 ## sheets_api.py — content tabs through the Sheets API, the rest on htmlview
 
 Cold loads are network-bound: 8–16 htmlview pages per workbook. One `spreadsheets.get`
@@ -1156,4 +1160,3 @@ Each rule was found by diffing API cells against `extract_table` on real workboo
 cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
 enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
 one private workbook.
->>>>>>> 95c226431a6e0ce8bcca9659c15accf128be0417

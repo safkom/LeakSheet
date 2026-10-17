@@ -935,6 +935,7 @@ class TestLinkSplitting:
         "https://href.li/?http://site.test/a.mp3",
         "https://redirect.test/go?url=https://site.test/a",
         "https://mega.nz/folder/AbCd1234#https://site.test/a",
+        "https://web.archive.org/web/2025/https://www.google.com/url?q%3Dhttps://site.test/a",
     ])
     def test_a_wrapper_around_one_url_is_one_link(self, url):
         from src.parser import _split_links
@@ -955,6 +956,35 @@ class TestLinkSplitting:
         w = "https://www.google.com/url?q=%s&sa=D"
         both = w % quote(self.A) + "\n" + w % quote(self.B)
         assert _split_links(both) == [self.A, self.B]
+
+    TAIL = "&sa=D&source=editors&ust=1&usg=x"
+
+    @pytest.mark.parametrize("sep", ["%0A", "%20", "", "+"])
+    def test_htmlview_wrapper_with_raw_scheme_inside_q_unwraps_every_link(self, sep):
+        from src.parser import _split_links
+        wrapped = f"https://www.google.com/url?q={self.A}{sep}{self.B}{self.TAIL}"
+        assert _split_links(wrapped) == [self.A, self.B]
+
+    def test_raw_whitespace_between_htmlview_wrappers_splits(self):
+        from src.parser import _split_links
+        w = "https://www.google.com/url?q=%s" + self.TAIL
+        assert _split_links(w % self.A + "\n" + w % self.B) == [self.A, self.B]
+        assert _split_links(w % self.A + w % self.B) == [self.A, self.B]
+
+    def test_htmlview_and_grid_hrefs_give_the_same_links(self):
+        from src.parser import _grid_link, _split_links
+        uri = f"{self.A}\n{self.B}"
+        htmlview = f"https://www.google.com/url?q={self.A}%0A{self.B}{self.TAIL}"
+        assert _split_links(_grid_link(uri)) == _split_links(htmlview) == [self.A, self.B]
+
+    @pytest.mark.parametrize("sep", [", ", ",", "; ", " | ", " ,"])
+    def test_list_punctuation_is_not_left_on_the_earlier_link(self, sep):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A}{sep}{self.B}") == [self.A, self.B]
+
+    def test_text_between_urls_stays_with_the_earlier_link(self):
+        from src.parser import _split_links
+        assert _split_links(f"{self.A} (mirror) {self.B}") == [f"{self.A} (mirror)", self.B]
 
     def test_a_repeated_url_is_listed_once(self):
         from src.parser import _split_links

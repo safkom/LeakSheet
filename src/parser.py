@@ -1454,6 +1454,9 @@ _ENCODED_WS = frozenset({"%20", "%09", "%0a", "%0d"})
 # A scheme right after one of these is a wrapper's payload (web.archive.org/web/<ts>/https://…,
 # href.li/?http://…), not a second link.
 _PAYLOAD_PREV = frozenset("/=?#:&@%+")
+# The same payload introducers, percent-encoded.
+_ENCODED_PAYLOAD_PREV = frozenset({"%3d", "%2f", "%3f", "%26", "%3a", "%23"})
+_GOOGLE_WRAPPER_RE = re.compile(r"https?://(?:www\.)?google\.com/url", re.I)
 
 
 def _netloc(url: str) -> str:
@@ -1461,8 +1464,12 @@ def _netloc(url: str) -> str:
     return parts[2].lower() if len(parts) > 2 else ""
 
 
-def _split_urls(text: str) -> list[str]:
-    """Split *text* at each URL that starts after whitespace or glued onto the previous one."""
+def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
+    """Split *text* at each URL that starts after whitespace or glued onto the previous one.
+
+    *wrappers_only* splits an unwrapped href only at raw whitespace or a new Google wrapper:
+    a wrapper's own ``q=`` holds its URLs unencoded, and its tracking tail must stay with it.
+    """
     text = text.strip()
     pieces: list[str] = []
     glued: list[bool] = []  # glued[k]: pieces[k] runs straight into pieces[k + 1]
@@ -1477,15 +1484,21 @@ def _split_urls(text: str) -> list[str]:
                 j -= 3
             else:
                 break
+        if wrappers_only and not (
+            _GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])
+        ):
+            continue
         if j == i:
             prev = text[i - 1]
+            if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
+                continue
             # A same-host scheme after "/" is a paste restarted, not a wrapper.
             if prev in _PAYLOAD_PREV and not (
-                prev == "/" and _netloc(text[start:i]) == _netloc(text[i:])
+                prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300])
             ):
                 continue
         if j > start:
-            pieces.append(text[start:j])
+            pieces.append(text[start:j].rstrip(" ,;|"))
             glued.append(j == i)
         start = i
     pieces.append(text[start:])
@@ -1503,7 +1516,7 @@ def _split_links(url: str) -> list[str]:
     Splits before unwrapping so each Google ``url?q=`` wrapper unwraps on its own, and after,
     since a wrapper's payload can hold more URLs.
     """
-    links = [link for part in _split_urls(url) for link in _split_urls(_clean_link(part))]
+    links = [link for part in _split_urls(url, wrappers_only=True) for link in _split_urls(_clean_link(part))]
     return list(dict.fromkeys(links))
 
 
