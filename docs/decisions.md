@@ -666,13 +666,18 @@ Some trackers head every version of an album with a single-line Name-column row
 section label that heading left the run's rows in whichever era came before it, and
 each later heading chained into that same era. `_heads_tagged_era` starts an era when:
 
-1. the label carries version tags,
+1. the label carries version tags and is a single line,
 2. the first Era-column value below it (within `_TAGGED_HEADING_LOOKAHEAD` rows; blank
    rows, separators and other label rows skipped) carries the same tags, and
-3. the label is not a version group of the era above: that era's own keys already hold
-   the tag, or it is an untagged era with the label's stripped key. A stats header
-   `Album` with `Album [V1]`/`[V2]` groups beneath it is one album; splitting it cut a
-   225-version era into pieces.
+3. no declared era already owns that tag, and the label is not a version group of the
+   era above: an untagged era with the label's stripped key. A stats header `Album` with
+   `Album [V1]`/`[V2]` groups beneath it is one album; splitting it cut a 225-version era
+   into pieces. A repeated `Album [V1]` heading under another era is a section, and rule 3
+   above routes its rows to the first `Album [V1]` era instead of a `(2)` duplicate.
+
+The new era registers its stripped key in `era_by_key_fallback` only, like a section
+label, so a later untagged `Album` era keeps the primary key and its bare rows
+(era-key-shadowing). The era keeps its tag through `_era_own_keys`.
 
 Left as sections on purpose. A tagged label no later row names: it is a version group
 and its rows keep naming the album (dropping condition 2 moved 25 more tabs, several of

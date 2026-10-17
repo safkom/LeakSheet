@@ -1403,8 +1403,63 @@ class TestTaggedNameRowHeadsAnEra:
             self._label("Moon Tape [V3]"),
             self._song("Moon Tape [V4]", "Song B"),
         )
-        assert [name for name, _ in eras][0] == "Star Tape"
-        assert "Moon Tape [V3]" not in [name for name, _ in eras]
+        assert eras == [("Star Tape", ["Song A", "Song B"])]
+
+    def test_repeated_heading_reuses_the_era_it_started(self):
+        # The second "Moon Tape [V1]" heading is a section; its row goes to the existing era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song B"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V1]", ["Song A", "Song B"]), ("Sun Tape", [])]
+
+    def test_heading_does_not_claim_the_bare_name_of_a_later_era(self):
+        # The heading's stripped key is a fallback alias only, so a later stats era
+        # "Moon Tape" still owns its bare rows from another era.
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V1]"),
+            self._song("Moon Tape [V1]", "Song A"),
+            "<tr><td>1 Full</td><td>Moon Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song B"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape", "Song C"),
+        )
+        assert eras == [
+            ("Star Tape", []), ("Moon Tape [V1]", ["Song A"]), ("Moon Tape", ["Song B", "Song C"]), ("Sun Tape", []),
+        ]
+
+    def test_stats_header_inside_the_window_stops_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td>1 Full</td><td>Sun Tape</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert [name for name, _ in eras] == ["Star Tape", "Sun Tape"]
+
+    def test_separator_row_is_skipped_by_the_search(self):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            "<tr><td></td><td>Instrumentals</td><td></td><td></td></tr>",
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert eras == [("Star Tape", []), ("Moon Tape [V3]", ["Song A"])]
+
+    @pytest.mark.parametrize(("labels_between", "is_era"), [(7, True), (8, False)])
+    def test_search_reaches_eight_rows_below_the_heading(self, labels_between, is_era):
+        eras = self._eras(
+            "<tr><td>1 Full</td><td>Star Tape</td><td></td><td></td></tr>",
+            self._label("Moon Tape [V3]"),
+            *(self._label(f"Group {i}") for i in range(labels_between)),
+            self._song("Moon Tape [V3]", "Song A"),
+        )
+        assert ("Moon Tape [V3]" in [name for name, _ in eras]) is is_era
 
     def test_untagged_name_row_stays_a_section(self):
         eras = self._eras(
