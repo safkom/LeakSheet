@@ -11,14 +11,16 @@ nonisolated enum TrackerURLNormalizer {
         if !lower.hasPrefix("http://") && !lower.hasPrefix("https://") {
             input = "https://" + input
         }
+        // urlparse drops tab/CR/LF anywhere in the URL; a host or id broken by one still names the tracker.
+        input.unicodeScalars.removeAll { $0 == "\t" || $0 == "\r" || $0 == "\n" }
 
         guard var components = URLComponents(string: input), let host = components.host?.lowercased() else {
             return input
         }
         let scheme = (components.scheme ?? "https").lowercased()
 
-        if host == "docs.google.com", let id = sheetID(inPath: components.percentEncodedPath) {
-            return "https://docs.google.com/spreadsheets/d/\(id)/htmlview"
+        if host == "docs.google.com", let page = sheetPagePath(inPath: components.percentEncodedPath) {
+            return "https://docs.google.com" + page
         }
 
         components.scheme = scheme
@@ -27,17 +29,20 @@ nonisolated enum TrackerURLNormalizer {
         components.password = nil
         if components.port == (scheme == "https" ? 443 : 80) { components.port = nil }
         components.fragment = nil
+        if components.query?.isEmpty == true { components.query = nil }
         if components.path.isEmpty && components.query == nil {
             components.path = "/"
         }
         return components.url?.absoluteString ?? input
     }
 
-    // Mirrors backend SHEET_ID_PATTERN, searched in "docs.google.com" + path:
-    // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)
-    private static func sheetID(inPath path: String) -> String? {
-        let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/([A-Za-z0-9_-]+)/
+    // Mirrors backend SHEET_ID_PATTERN and _sheet_page_path, searched in "docs.google.com" + path:
+    // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+). A published sheet (/d/e/)
+    // is its own id space and only pubhtml serves it.
+    private static func sheetPagePath(inPath path: String) -> String? {
+        let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/(e\/)?([A-Za-z0-9_-]+)/
         guard let match = ("docs.google.com" + path).firstMatch(of: pattern) else { return nil }
-        return String(match.output.1)
+        let id = match.output.2
+        return match.output.1 == nil ? "/spreadsheets/d/\(id)/htmlview" : "/spreadsheets/d/e/\(id)/pubhtml"
     }
 }

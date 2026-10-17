@@ -13,12 +13,12 @@ from src.fetcher import (
     _discover_gids,
     _discover_named_tabs,
     _extract_gid_from_url,
-    _extract_sheet_id,
     _get_art_tab_gid,
     _get_content_tabs,
     _get_unreleased_tab_gid,
     _normalize_url,
     _prioritize_gids,
+    _sheet_page_path,
 )
 from tests.conftest import build_htmlview_base
 
@@ -33,6 +33,22 @@ class TestNormalizeUrl:
         ):
             assert _normalize_url(variant) == "https://docs.google.com/spreadsheets/d/ABC123/htmlview"
 
+    def test_published_sheet_keeps_its_own_id_space(self):
+        # /d/e/2PACX-… ids are not sheet ids: htmlview 404s for them, only pubhtml serves.
+        want = "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+        for variant in (
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml?gid=0&single=true",
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pub?output=html",
+            "docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml#gid=5",
+        ):
+            assert _normalize_url(variant) == want
+
+    def test_a_published_and_a_plain_sheet_are_different_trackers(self):
+        assert _normalize_url("https://docs.google.com/spreadsheets/d/e/AAA/pubhtml") != _normalize_url(
+            "https://docs.google.com/spreadsheets/d/AAA/htmlview"
+        )
+
     def test_custom_domain_gets_scheme_and_trailing_slash(self):
         assert _normalize_url("yetracker.net") == "https://yetracker.net/"
         assert _normalize_url("https://yetracker.net") == "https://yetracker.net/"
@@ -42,10 +58,11 @@ class TestNormalizeUrl:
 
 
 class TestSheetIdAndGid:
-    def test_extract_sheet_id(self):
-        assert _extract_sheet_id("https://docs.google.com/spreadsheets/d/ABC123/htmlview") == "ABC123"
-        assert _extract_sheet_id("https://docs.google.com/spreadsheets/u/2/d/XYZ789/edit") == "XYZ789"
-        assert _extract_sheet_id("https://yetracker.net/") is None
+    def test_sheet_page_path(self):
+        assert _sheet_page_path("https://docs.google.com/spreadsheets/d/ABC123/htmlview") == "/spreadsheets/d/ABC123/htmlview"
+        assert _sheet_page_path("https://docs.google.com/spreadsheets/u/2/d/XYZ789/edit") == "/spreadsheets/d/XYZ789/htmlview"
+        assert _sheet_page_path("https://docs.google.com/spreadsheets/d/e/2PACX-1v/pubhtml") == "/spreadsheets/d/e/2PACX-1v/pubhtml"
+        assert _sheet_page_path("https://yetracker.net/") is None
 
     def test_extract_gid_from_url(self):
         assert _extract_gid_from_url("https://x/htmlview#gid=123") == "123"
@@ -57,6 +74,10 @@ class TestBuildSheetHtmlUrl:
     def test_google(self):
         out = _build_sheet_html_url("https://docs.google.com/spreadsheets/d/ABC/htmlview", "77")
         assert out == "https://docs.google.com/spreadsheets/d/ABC/htmlview/sheet?headers=true&gid=77"
+
+    def test_published_sheet_tabs_live_under_pubhtml(self):
+        out = _build_sheet_html_url("https://docs.google.com/spreadsheets/d/e/2PACX-1v/pubhtml", "77")
+        assert out == "https://docs.google.com/spreadsheets/d/e/2PACX-1v/pubhtml/sheet?headers=true&gid=77"
 
     def test_custom_domain(self):
         out = _build_sheet_html_url("https://yetracker.net/", "5")

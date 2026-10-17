@@ -368,10 +368,10 @@ _UNRELEASED_TAB_NAMES = frozenset({
     "off streaming / unreleased", "unreleased / off streaming",
 })
 
-# Regex to extract spreadsheet ID from Google Sheets URLs
-# Handles both /d/ID and /u/N/d/ID paths (user-scoped URLs)
+# Regex to extract the spreadsheet ID from Google Sheets URLs: /d/ID, /u/N/d/ID (user-scoped)
+# and /d/e/ID (published; group 1 is the "e/"). See docs/decisions.md::fetcher.py::published-sheets
 SHEET_ID_PATTERN = re.compile(
-    r"docs\.google\.com/spreadsheets(?:/u/\d+)?/d/([A-Za-z0-9_-]+)"
+    r"docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+)"
 )
 
 # Regex to extract GID from URL fragment (#gid=...) or query param (?gid=...)
@@ -417,7 +417,7 @@ TITLE_PREFIXES = [
 # ---------------------------------------------------------------------------
 
 def _normalize_url(url: str) -> str:
-    """Ensure URL has a scheme and normalize Google Sheets paths to /htmlview.
+    """Ensure URL has a scheme and normalize Google Sheets paths to /htmlview (/pubhtml if published).
 
     Google Sheets URLs come in many forms (/edit, /view, /pubhtml, etc.).
     The /htmlview endpoint is the only one that:
@@ -444,11 +444,11 @@ def _normalize_url(url: str) -> str:
     default = port is None or (scheme, port) in (("https", 443), ("http", 80))
     netloc = host if default else f"{host}:{port}"
 
-    # Normalize Google Sheets URLs to /htmlview for reliable GID discovery
+    # Normalize Google Sheets URLs to their tab-listing page (htmlview, or pubhtml if published)
     if host == "docs.google.com":
-        sheet_id = _extract_sheet_id(f"docs.google.com{parsed.path}")
-        if sheet_id:
-            return f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview"
+        page_path = _sheet_page_path(f"docs.google.com{parsed.path}")
+        if page_path:
+            return f"https://docs.google.com{page_path}"
     url = parsed._replace(scheme=scheme, netloc=netloc, fragment="").geturl()
     # 'host' and 'host/' are the same resource.
     if not parsed.path and not parsed.query:
@@ -462,10 +462,16 @@ def _is_google_sheets_url(url: str) -> bool:
     return (parsed.hostname or "").lower() == "docs.google.com" and parsed.path.startswith("/spreadsheets")
 
 
-def _extract_sheet_id(url: str) -> str | None:
-    """Extract the spreadsheet ID from a Google Sheets URL."""
+def _sheet_page_path(url: str) -> str | None:
+    """Path of the page that lists a Google Sheet's tabs, or None for another URL.
+
+    A published sheet (/d/e/) has its own id space that htmlview 404s for.
+    """
     m = SHEET_ID_PATTERN.search(url)
-    return m.group(1) if m else None
+    if not m:
+        return None
+    published, sheet_id = m.groups()
+    return f"/spreadsheets/d/e/{sheet_id}/pubhtml" if published else f"/spreadsheets/d/{sheet_id}/htmlview"
 
 
 def _same_site(host: str | None, base_host: str | None) -> bool:
@@ -494,6 +500,7 @@ def _build_sheet_html_url(
     query form:
 
     For Google Sheets: /spreadsheets/d/{id}/htmlview/sheet?headers=true&gid={gid}
+    (published sheets: /spreadsheets/d/e/{id}/pubhtml/sheet?...)
     For custom domains: /htmlview/sheet?headers=true&gid={gid}
     """
     parsed = urlparse(base_url)
@@ -512,10 +519,10 @@ def _build_sheet_html_url(
             return f"{parsed.scheme}://{parsed.netloc}/{path.lstrip('/')}"
 
     if _is_google_sheets_url(base_url):
-        sheet_id = _extract_sheet_id(base_url)
-        if not sheet_id:
+        page_path = _sheet_page_path(base_url)
+        if not page_path:
             raise ValueError(f"Cannot extract sheet ID from URL: {base_url}")
-        path = f"/spreadsheets/d/{sheet_id}/htmlview/sheet"
+        path = f"{page_path}/sheet"
     else:
         # Custom domain — append /htmlview/sheet
         path = "/htmlview/sheet"

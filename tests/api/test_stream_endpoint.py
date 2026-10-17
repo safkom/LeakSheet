@@ -52,6 +52,12 @@ class TestHostResolution:
         r = api_client.get("/stream", params={"url": "https://example.com/x.mp3"})
         assert r.status_code == 400
 
+    @pytest.mark.parametrize("tail", ["%0A", "%0D%0A", "%09"])
+    def test_a_drive_id_with_trailing_control_characters_is_400(self, api_client, tail):
+        # `$` matched before a trailing newline, so the id passed and httpx then failed: a 503.
+        r = api_client.get("/stream", params={"url": f"https://drive.google.com/open?id=1AbC{tail}"})
+        assert r.status_code == 400
+
     def test_disallowed_resolved_domain_is_403(self, api_client, monkeypatch):
         # Defence in depth: if the resolver ever yields a non-allowlisted host,
         # the endpoint must still refuse it.

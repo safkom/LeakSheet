@@ -299,6 +299,16 @@ Those hosts do emit `gid:` on every switcher entry too, so merging names from th
 pageUrl-keyed switcher is a no-op for them. It stays as a cheap fallback for a host
 that omits `gid`, which has not been observed.
 
+## fetcher.py::published-sheets — /d/e/ links keep their own id space
+
+`.../spreadsheets/d/e/2PACX-…/pubhtml` is a published-to-web sheet. Its id is not a sheet
+id: `.../d/e/{id}/htmlview` answers 404, and `pubhtml` answers 200 with the same tab
+switcher (`items.push`, no `<table>`) that htmlview pages carry. Tabs are served at
+`.../pubhtml/sheet?headers=true&gid={gid}`, which the parser reads like any htmlview tab
+(checked against a public published sheet on 2026-10-17). `SHEET_ID_PATTERN` therefore
+captures the `e/` and `_sheet_page_path` maps a published sheet to `pubhtml` and any other
+to `htmlview`. `TrackerURLNormalizer` mirrors it.
+
 ## models.py — fields kept on the wire with no client reader
 
 `stats` / `stats_raw` / `highlighted_producers` stay in the payload even though no
@@ -778,6 +788,7 @@ OOM the worker — reads are capped at 512 KiB decompressed.
 `drive.google.com/file/d/{id}/...` has the id captured directly; the `open?id=...`
 and `uc?id=...` forms are handled via query-string parsing in `_extract_gdrive_id`
 instead, since the id can appear alongside other params in any order there.
+Both forms are covered by `streaming.py::id-terminator`.
 
 ## streaming.py::url-pattern-case — links match in any case
 
@@ -791,6 +802,24 @@ Folding is ASCII-only (`re.ASCII`). Under Unicode ignore-case `ſ` and the Kelvi
 would pass for `s` and `k` in a host. Foundation does fold them, so Swift's
 `StreamResolver` refuses a non-ASCII authority. `tests/parse/test_link_rule_contract.py`
 pins the Python and Swift rules together.
+
+## streaming.py::id-terminator — an id is the leading run of id characters
+
+`/f/abc.mp3`, `/f/abc123)` and `/u/a-b` resolve to `abc`, `abc123` and `a`: the regexes
+take the leading run and ignore what follows. Swift's resolver reads the same rule
+(`StreamResolver.idPrefix`) off the percent-encoded path, so a literal `%61`, `%2F` or `%6F`
+never decodes into a match, and a tab, newline or space ends the id as any other character.
+
+Measured over the 112,088 host links in the local parsed corpus (2026-10-17): 64 (0.06%)
+have anything glued after the id. 47 are a first link followed by whitespace or `)`/`.`
+(the right file), 17 are two links glued together (`abc123https://…`, a wrong id on either
+side). Whole-segment matching would hide Play on the 47 and rescue the 17 from a file-level
+404; the prefix rule needs no change in Python and was kept. The parser could split
+multi-link cells, which would shrink both groups.
+
+The Drive `/open` and `/uc` forms are different: `id` is a whole query value
+(`fullmatch`), and a tab, CR or LF anywhere in the link refuses it, because `urlparse` would
+drop the character silently. Their scheme must be http or https, as in the regex forms.
 
 ## streaming.py::no-metadata-hosts — kraken and gdrive have no metadata API
 

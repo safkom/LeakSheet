@@ -314,6 +314,37 @@ def test_a_port_or_userinfo_is_not_a_stream_host(link):
     assert resolve_stream_url(link) is None
 
 
+@pytest.mark.parametrize("link", [
+    "ftp://drive.google.com/open?id=1AbC-x_9",
+    "javascript://drive.google.com/uc?id=1AbC-x_9",
+    "https://drive.google.com/open?id=1AbC-x_9\n",
+    "https://drive.google.com/open?id=1AbC%0A",
+    "https://drive.google.com/open?id=1AbC%0D%0A",
+    "https://drive.google.com/op\ten?id=1AbC-x_9",
+    "https://drive.google.com/uc?id=1\r\nAbC",
+    "https://drive.google.com/uc?ex\tport=download&id=1AbC-x_9",
+    " https://drive.google.com/open?id=1AbC-x_9",
+    "\x00https://drive.google.com/open?id=1AbC-x_9",
+    "https://drive.google.com/open;x?id=1AbC-x_9",
+    "https://drive.google.com/uc;?id=1AbC-x_9",
+])
+def test_drive_query_forms_need_a_clean_http_url(link):
+    # urlparse drops tab/CR/LF and leading controls, cuts ";params" and never checks the scheme.
+    assert resolve_stream_url(link) is None
+
+
+def test_whole_string_validators_reject_a_trailing_newline():
+    # `$` also matches before a final "\n"; each of these checks a whole string.
+    from src import api, streaming
+
+    assert streaming._GDRIVE_ID_RE.fullmatch("1AbC-x_9")
+    assert not streaming._GDRIVE_ID_RE.fullmatch("1AbC-x_9\n")
+    assert streaming._GDRIVE_USERCONTENT_RE.match("doc-0k.googleusercontent.com")
+    assert not streaming._GDRIVE_USERCONTENT_RE.match("doc-0k.googleusercontent.com\n")
+    assert api._GOOGLE_RESIZABLE_HOST_RE.match("lh3.googleusercontent.com")
+    assert not api._GOOGLE_RESIZABLE_HOST_RE.match("lh3.googleusercontent.com\n")
+
+
 def test_metadata_matches_in_any_case_too():
     assert resolve_metadata_url("HTTPS://PILLOWS.SU/F/AbC123") == {
         "url": "https://api.pillows.su/api/metadata/AbC123.txt",

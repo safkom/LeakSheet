@@ -53,6 +53,90 @@
       "provider": "pillows"
     },
     {
+      "link": "https://pillows.su/f/abc123&keep=me",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc.mp3",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123)",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123;x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123 ",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abcé",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123\nhttps://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123 https://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc123https://pillows.su/f/def456",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/ab\tc",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%zz",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc%C3%A9",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc[x]",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc{x}",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc\"x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc<x>",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc|x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc^x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc`x",
+      "provider": "pillows"
+    },
+    {
+      "link": "https://pillows.su/f/abc\\x",
+      "provider": "pillows"
+    },
+    {
       "link": "https://imgur.gg/f/AbC12",
       "provider": "imgur"
     },
@@ -69,6 +153,10 @@
       "provider": "imgur"
     },
     {
+      "link": "https://imgur.gg/f/abc.png",
+      "provider": "imgur"
+    },
+    {
       "link": "https://music.froste.lol/song/0123abcd",
       "provider": "froste"
     },
@@ -78,6 +166,14 @@
     },
     {
       "link": "https://music.froste.lol/song/0123abcd&sa=D&ust=1",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd.mp3",
+      "provider": "froste"
+    },
+    {
+      "link": "https://music.froste.lol/song/0123abcd_x",
       "provider": "froste"
     },
     {
@@ -93,11 +189,27 @@
       "provider": "kraken"
     },
     {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file.htmlx",
+      "provider": "kraken"
+    },
+    {
       "link": "https://pixeldrain.com/u/aBc123",
       "provider": "pixeldrain"
     },
     {
       "link": "https://www.pixeldrain.com/u/aBc123",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/a-b",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/a_b",
+      "provider": "pixeldrain"
+    },
+    {
+      "link": "https://pixeldrain.com/u/abc.flac",
       "provider": "pixeldrain"
     },
     {
@@ -134,6 +246,18 @@
     },
     {
       "link": "https://www.drive.google.com/uc?id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/file/d/abc.def",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=&id=1AbC-x_9",
+      "provider": "gdrive"
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC%2Dx",
       "provider": "gdrive"
     },
     {
@@ -297,6 +421,70 @@
       "provider": null
     },
     {
+      "link": "https://drive.google.com/open?id=1AbC.mp3",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC+x",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=%0A&id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "ftp://drive.google.com/open?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "ftp://drive.google.com/uc?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC%0A",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/open?id=1AbC-x_9\n",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/op\ten?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/%6Fpen?id=1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://drive.google.com/file/%64/1AbC-x_9",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f/%61bc",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/f%2Fabc123",
+      "provider": null
+    },
+    {
+      "link": "https://pillows.su/%66/abc123",
+      "provider": null
+    },
+    {
+      "link": "https://music.froste.lol/song/%30123abcd",
+      "provider": null
+    },
+    {
+      "link": "https://krakenfiles.com/view/AbC123xyz/file%2Ehtml",
+      "provider": null
+    },
+    {
+      "link": "https://pixeldrain.com/u/%61bc",
+      "provider": null
+    },
+    {
       "link": "https://pillows.su:443/f/abc123",
       "provider": null
     },
@@ -423,6 +611,42 @@
       "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
     },
     {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml?gid=0&single=true",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml#gid=5",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml/sheet?headers=true&gid=1",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pub?output=html",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/u/0/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/2PACX-1vAbC_d-9/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e/AAA/pubhtml",
+      "normalized": "https://docs.google.com/spreadsheets/d/e/AAA/pubhtml"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/e1AbC/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/e1AbC/htmlview"
+    },
+    {
       "raw": "https://user:pw@docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
       "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
     },
@@ -463,6 +687,22 @@
       "normalized": "https://docs.google.com/document/d/1AbC_d-42xYz/edit"
     },
     {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/ed\nit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.go\togle.com/spreadsheets/d/1AbC_d-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://docs.google.com/spreadsheets/d/1AbC_\r\nd-42xYz/edit",
+      "normalized": "https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/htmlview"
+    },
+    {
+      "raw": "https://yetra\tcker.net/a\nb?c=\r1",
+      "normalized": "https://yetracker.net/ab?c=1"
+    },
+    {
       "raw": "yetracker.net",
       "normalized": "https://yetracker.net/"
     },
@@ -499,6 +739,18 @@
       "normalized": "https://example.com/a"
     },
     {
+      "raw": "https://example.com/a?",
+      "normalized": "https://example.com/a"
+    },
+    {
+      "raw": "https://example.com/?",
+      "normalized": "https://example.com/"
+    },
+    {
+      "raw": "https://example.com?",
+      "normalized": "https://example.com/"
+    },
+    {
       "raw": "https://u:p@YeTracker.NET:443/#top",
       "normalized": "https://yetracker.net/"
     },
@@ -525,115 +777,13 @@
   ],
   "known_differences": [
     {
-      "link": "https://pillows.su/f/abc.mp3",
-      "python": "pillows",
-      "swift": null,
-      "reason": "id ends at the dot in Python"
-    },
-    {
-      "link": "https://pillows.su/f/abc123)",
-      "python": "pillows",
-      "swift": null,
-      "reason": "id ends at the paren in Python"
-    },
-    {
-      "link": "https://pillows.su/f/abc123;x",
-      "python": "pillows",
-      "swift": null,
-      "reason": "id ends at the semicolon in Python"
-    },
-    {
-      "link": "https://pillows.su/f/abc123&keep=me",
-      "python": "pillows",
-      "swift": null,
-      "reason": "Swift strips only an all-Google-tracking tail"
-    },
-    {
-      "link": "https://pillows.su/f/abc123 ",
-      "python": "pillows",
-      "swift": null,
-      "reason": "trailing space is not part of the id in Python"
-    },
-    {
-      "link": "https://pillows.su/f/abcé",
-      "python": "pillows",
-      "swift": null,
-      "reason": "id ends at the first non-ASCII letter in Python"
-    },
-    {
-      "link": "https://imgur.gg/f/abc.png",
-      "python": "imgur",
-      "swift": null,
-      "reason": "id ends at the dot in Python"
-    },
-    {
-      "link": "https://pixeldrain.com/u/a-b",
-      "python": "pixeldrain",
-      "swift": null,
-      "reason": "pixeldrain ids stop at the hyphen in Python"
-    },
-    {
-      "link": "https://pixeldrain.com/u/abc.flac",
-      "python": "pixeldrain",
-      "swift": null,
-      "reason": "id ends at the dot in Python"
-    },
-    {
-      "link": "https://drive.google.com/file/d/abc.def",
+      "link": "https://drive.google.com/uc?id=%611AbC-x_9&x{=1",
       "python": "gdrive",
       "swift": null,
-      "reason": "id ends at the dot in Python"
-    },
-    {
-      "link": "https://krakenfiles.com/view/AbC123xyz/file.htmlx",
-      "python": "kraken",
-      "swift": null,
-      "reason": "Python matches file.html as a prefix"
-    },
-    {
-      "link": "https://music.froste.lol/song/0123abcd.mp3",
-      "python": "froste",
-      "swift": null,
-      "reason": "Python's lookahead rejects only letters and digits"
-    },
-    {
-      "link": "https://music.froste.lol/song/0123abcd_x",
-      "python": "froste",
-      "swift": null,
-      "reason": "Python's lookahead rejects only letters and digits"
-    },
-    {
-      "link": "https://drive.google.com/open?id=&id=1AbC-x_9",
-      "python": "gdrive",
-      "swift": null,
-      "reason": "Python's parse_qs drops the blank id"
-    },
-    {
-      "link": "https://drive.google.com/open?id=1AbC%0A",
-      "python": "gdrive",
-      "swift": null,
-      "reason": "Python's $ matches before a trailing newline"
-    },
-    {
-      "link": "ftp://drive.google.com/open?id=1AbC-x_9",
-      "python": "gdrive",
-      "swift": null,
-      "reason": "Python's query forms never check the scheme"
+      "reason": "Foundation re-escapes the % of a query that also holds an invalid character"
     }
   ],
   "known_url_differences": [
-    {
-      "raw": "https://example.com/a?",
-      "python": "https://example.com/a",
-      "swift": "https://example.com/a?",
-      "reason": "Python drops an empty query's ?"
-    },
-    {
-      "raw": "https://example.com/?",
-      "python": "https://example.com/",
-      "swift": "https://example.com/?",
-      "reason": "Python drops an empty query's ?"
-    },
     {
       "raw": "https://example.com/a b",
       "python": "https://example.com/a b",

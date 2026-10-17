@@ -16,10 +16,22 @@ enum StreamResolver {
     }
 
     /// Characters a provider id may contain; pixeldrain ids are alphanumeric only.
+    private nonisolated static func isIDChar(_ ch: Character, allowsSeparators: Bool) -> Bool {
+        ch.isASCII && (ch.isLetter || ch.isNumber || (allowsSeparators && (ch == "_" || ch == "-")))
+    }
+
     private nonisolated static func isID(_ s: String, allowsSeparators: Bool = true) -> Bool {
-        !s.isEmpty && s.allSatisfy { ch in
-            ch.isASCII && (ch.isLetter || ch.isNumber || (allowsSeparators && (ch == "_" || ch == "-")))
-        }
+        !s.isEmpty && s.allSatisfy { isIDChar($0, allowsSeparators: allowsSeparators) }
+    }
+
+    /// The id a path segment starts with, as the backend's patterns take it: what follows
+    /// (`.mp3`, `)`, a second link) never changes the file. Empty when the segment doesn't start with one.
+    private nonisolated static func idPrefix(_ s: String, allowsSeparators: Bool = true) -> Substring {
+        s.prefix { isIDChar($0, allowsSeparators: allowsSeparators) }
+    }
+
+    private nonisolated static func hasLineBreakOrTab(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0 == "\t" || $0 == "\r" || $0 == "\n" }
     }
 
     private nonisolated static func isHex(_ s: String) -> Bool {
@@ -40,11 +52,10 @@ enum StreamResolver {
         "sa", "source", "ust", "usg", "ved",
     ]
 
-    /// A link with Google's redirect tracking removed.
+    /// A link with Google's redirect tracking removed, so it isn't nested into `/stream?url=`.
     ///
-    /// On pillows links the params are glued onto the path with no `?`
-    /// (`/f/{id}&sa=D&…`), which fails `isID`. Only strips when EVERY trailing
-    /// `&key=value` pair is a known wrapper key.
+    /// The params can be glued onto the path with no `?` (`/f/{id}&sa=D&…`). Only strips when
+    /// EVERY trailing `&key=value` pair is a known wrapper key.
     nonisolated static func canonical(_ link: String) -> String {
         guard let marker = link.range(of: "&sa=") else { return link }
         let tail = link[marker.lowerBound...].dropFirst()
@@ -56,9 +67,10 @@ enum StreamResolver {
     }
 
     /// Classify a link. Trailing path segments are ignored, so
-    /// `/file/d/{id}/view?usp=sharing` still resolves.
-    nonisolated static func target(for link: String) -> Target? {
-        let link = canonical(link)
+    /// `/file/d/{id}/view?usp=sharing` still resolves. Segments are read percent-encoded: the
+    /// backend's patterns are literal, so `/f/%61bc` is not `/f/abc`.
+    nonisolated static func target(for rawLink: String) -> Target? {
+        let link = canonical(rawLink)
         guard hasPlainAuthority(link), let comps = URLComponents(string: link),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
               var host = comps.host?.lowercased()
@@ -67,43 +79,50 @@ enum StreamResolver {
         if hasWWW { host = String(host.dropFirst(4)) }
 
         // Empty segments stay: the backend's patterns need the literal /f/{id} shape.
-        let path = comps.path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+        let path = comps.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
 
         switch host {
         case "pillows.su", "pillowcase.su", "plwcse.top":
-            guard path.count >= 2, path[0].lowercased() == "f", isID(path[1]) else { return nil }
-            return .pillows(id: path[1])
+            let id = path.count >= 2 && path[0].lowercased() == "f" ? idPrefix(path[1]) : ""
+            guard !id.isEmpty else { return nil }
+            return .pillows(id: String(id))
 
         case "imgur.gg", "temp.imgur.gg":
-            guard path.count >= 2, path[0].lowercased() == "f", isID(path[1]) else { return nil }
-            return .imgur(id: path[1])
+            let id = path.count >= 2 && path[0].lowercased() == "f" ? idPrefix(path[1]) : ""
+            guard !id.isEmpty else { return nil }
+            return .imgur(id: String(id))
 
         case "music.froste.lol":
             // The backend's froste pattern has no www. form, unlike every other host.
-            guard !hasWWW, path.count >= 2, path[0].lowercased() == "song", isHex(path[1]) else { return nil }
-            return .froste(hash: path[1])
+            // Like the backend, the hash is a whole alphanumeric run: `0123abcdzz` is no hex prefix.
+            guard !hasWWW, path.count >= 2, path[0].lowercased() == "song" else { return nil }
+            let hash = idPrefix(path[1], allowsSeparators: false)
+            guard isHex(String(hash)) else { return nil }
+            return .froste(hash: String(hash))
 
         case "krakenfiles.com":
             // The view page itself is the target; the backend scrapes its CDN URL.
             guard path.count >= 3, path[0].lowercased() == "view",
-                  isID(path[1]), path[2].lowercased() == "file.html" else { return nil }
+                  isID(path[1]), path[2].lowercased().hasPrefix("file.html") else { return nil }
             return .kraken
 
         case "pixeldrain.com":
             // /u/ is a single file; /l/ is a list and stays unresolved.
-            guard path.count >= 2, path[0].lowercased() == "u",
-                  isID(path[1], allowsSeparators: false) else { return nil }
-            return .pixeldrain(id: path[1])
+            let id = path.count >= 2 && path[0].lowercased() == "u" ? idPrefix(path[1], allowsSeparators: false) : ""
+            guard !id.isEmpty else { return nil }
+            return .pixeldrain(id: String(id))
 
         case "drive.google.com":
             // The three forms the backend resolves (streaming._extract_gdrive_id):
             // /file/d/{id}, /open?id=, /uc?id=. Folders carry no file id.
             if path.count >= 3, path[0].lowercased() == "file", path[1].lowercased() == "d",
-               isID(path[2]) {
+               !idPrefix(path[2]).isEmpty {
                 return .gdrive
             }
-            if ["/open", "/uc"].contains(comps.path.lowercased()),
-               let id = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+            // Python refuses a link with a tab/CR/LF in it (urlsplit would drop it), and its
+            // parse_qs drops blank values, so the first NON-empty id is the one.
+            if !hasLineBreakOrTab(rawLink), ["/open", "/uc"].contains(comps.percentEncodedPath.lowercased()),
+               let id = comps.queryItems?.first(where: { $0.name == "id" && $0.value?.isEmpty == false })?.value,
                isID(id) {
                 return .gdrive
             }

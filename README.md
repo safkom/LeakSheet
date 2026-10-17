@@ -82,6 +82,7 @@ Apple targets on every push (`.github/workflows/tests.yml`), and the live tracke
 | Source | Example |
 |---|---|
 | Google Sheets htmlview | `docs.google.com/spreadsheets/d/{id}/htmlview` (any `/edit`/`/view` form is normalized) |
+| Google Sheets published | `docs.google.com/spreadsheets/d/e/2PACX-…/pubhtml` (a "publish to web" link; its id works only on `pubhtml`) |
 | Custom tracker domain | sites with embedded sheets, e.g. `yetracker.net` |
 | ArtistGrid registry | `GET /trackers` — live list of community trackers with up-to-date flags |
 | Local HTML export | `Trackers/.../sheet.html` (dev only, gitignored) |
