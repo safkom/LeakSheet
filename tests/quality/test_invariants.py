@@ -52,7 +52,7 @@ def _corpus_paths() -> list[str]:
     out = []
     for path in sorted(glob.glob(os.path.join(CORPUS_DIR, "*.html"))):
         try:
-            if 20_000 < os.path.getsize(path) < 4_000_000:
+            if 20_000 < os.path.getsize(path) < 16_000_000:
                 out.append(path)
         except OSError:
             continue
