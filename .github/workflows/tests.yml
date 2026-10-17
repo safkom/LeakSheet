@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t leaksheet-api .
       - run: docker build -t leaksheet-web web
       # nginx resolves proxy_pass hosts at load time, hence the stand-in for `api`.
@@ -59,7 +59,7 @@ jobs:
     # Don't let a hung simulator hold the runner for the 6 h default.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Device names shift between image releases — take an iPhone on the
       # newest iOS runtime the image ships rather than hardcoding one.
       - name: Pick a simulator
