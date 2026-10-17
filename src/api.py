@@ -7,6 +7,8 @@ Endpoints:
   GET  /stream      — proxy audio/video from supported file hosts (Range support)
   GET  /image-proxy — proxy images through backend (width buckets, disk cache)
   GET  /metadata    — file metadata from provider APIs (incl. media_kind)
+  GET  /hosts       — which stream providers are down right now
+  GET  /health      — liveness, no I/O
   POST /cache/clear — clear the URL fetch cache (admin: X-Admin-Token)
 
 In production nginx serves these under /api/* and strips the prefix.
