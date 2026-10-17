@@ -44,7 +44,7 @@ jobs:
           BASE_URL: ${{ inputs.base_url }}
         run: k6 run -e PROFILE="$PROFILE" -e BASE_URL="$BASE_URL" tests/load/journey.js
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: k6-${{ inputs.profile }}-${{ matrix.runner }}
           path: k6-${{ inputs.profile }}-*
