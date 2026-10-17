@@ -994,6 +994,11 @@ proxy's JSON `detail` never reached a client: `/stream` for a pillows outage arr
 as Cloudflare's page. `/sheet` already answered 503 for this reason; `/stream`,
 `/image-proxy` and `/metadata` now do too. The relayed 404, 409 and 429 stay.
 
+An upstream 4xx is the host answering about one file (451 takedown, 401, 403), not a
+proxy failure: `/stream` relays it as the same code, and only 5xx and transport errors
+are 503. A 503 says "try again later" about a file the host refused for good, and hides
+the code from the client.
+
 ## api.py::non-media-415 — /stream refuses a body that is plainly not media
 
 Tracker links sometimes point at a PDF, an archive or an image. Drive labels them
@@ -1016,3 +1021,15 @@ with the recent failing links (`bytes=0-0`); any answer, a 404 included, means u
 Only /stream feeds it: on that day pillows' metadata API was healthy while its stream
 endpoint returned 500, so metadata outcomes would mislabel the stream path. Links are
 never crawled: tens of thousands of probes would invite rate limits and bans.
+
+Probe links can be permanently broken files, so the down state also expires: 300 s
+after it was set (`HALF_OPEN_AFTER_S`, `retry_at` in the shared file, so all workers
+agree), `/stream` lets requests through. A success marks the provider up; a failure that
+`record_failure` records restarts the 300 s. `/hosts` says "down" until a success.
+A body that is not media (`NonMediaError`, the 415 sniff) is the host answering with a
+bad file: it counts as a success, never toward down, in `/stream` and in the probe.
+That includes the resolver steps: a kraken page with no audio URL and an imgur API
+answer without `cdnUrl`. A 4xx from the kraken page or from every imgur host is an
+`UpstreamStatusError` like one from the file itself. A bare ValueError from a resolver
+still counts as a soft failure: those wrap transport errors, upstream 5xx and the SSRF
+pre-flight.

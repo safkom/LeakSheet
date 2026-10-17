@@ -529,7 +529,7 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
                     "Referer": "https://krakenfiles.com/",
                 },
             )
-            if status in _RELAYED_STATUSES:
+            if 400 <= status < 500:
                 raise UpstreamStatusError(status)
             if status != 200:
                 raise ValueError(
@@ -540,7 +540,7 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
 
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
         if not m:
-            raise ValueError(f"No audio URL found in krakenfiles.com page: {view_url}")
+            raise NonMediaError(f"No audio URL found in krakenfiles.com page: {view_url}")
         return m.group(0)
 
     return await _cached_resolve(view_url, _do)
@@ -604,7 +604,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     continue
                 cdn_url = data.get("cdnUrl")
                 if not cdn_url:
-                    last_err = ValueError(
+                    last_err = NonMediaError(
                         f"imgur.gg API response missing cdnUrl: {url}"
                     )
                     continue
@@ -622,10 +622,10 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                 )
                 continue
 
-        # Gone (or throttled) on every host is that answer, not an outage; max() prefers
-        # 429 ("try later") over 410 over 404 when the hosts disagree.
-        if len(statuses) == len(urls_to_try) and set(statuses) <= _RELAYED_STATUSES:
-            raise UpstreamStatusError(max(statuses))
+        # A 4xx on every host is that answer, not an outage; max() prefers 429 ("try
+        # later") over 410 over 404, and a relayed status over any other 4xx.
+        if len(statuses) == len(urls_to_try) and all(400 <= s < 500 for s in statuses):
+            raise UpstreamStatusError(max(statuses, key=lambda s: (s in _RELAYED_STATUSES, s)))
         raise last_err  # type: ignore[misc]
 
     return await _cached_resolve(api_url, _do)
@@ -638,6 +638,10 @@ _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.c
 
 # Upstream answers the API relays (as 404 or 429) instead of a generic 502.
 _RELAYED_STATUSES = frozenset({404, 410, 429})
+
+
+class NonMediaError(ValueError):
+    """Upstream served a body that is not audio: a fault of that file, not of the host."""
 
 
 class UpstreamStatusError(ValueError):
@@ -796,7 +800,7 @@ async def stream_audio(
     Returns the streaming response. Caller is responsible for closing it
     with ``await resp.aclose()``.
 
-    Raises ValueError if upstream returns non-audio content.
+    Raises NonMediaError (a ValueError) if upstream returns non-audio content.
     """
     # imgur.gg: resolve metadata API → CDN URL first
     if is_imgur_api_url(stream_url):
@@ -822,7 +826,7 @@ async def stream_audio(
                 raise UpstreamStatusError(resp.status_code)
             ct = resp.headers.get("content-type", "")
             if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-                raise ValueError(f"Upstream returned non-audio content: {ct}")
+                raise NonMediaError(f"Upstream returned non-audio content: {ct}")
         except Exception:
             await resp.aclose()
             raise
@@ -853,7 +857,7 @@ async def stream_audio(
             raise UpstreamStatusError(resp.status_code)
 
         if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-            raise ValueError(f"Upstream returned non-audio content: {ct}")
+            raise NonMediaError(f"Upstream returned non-audio content: {ct}")
     except Exception:
         await resp.aclose()
         raise

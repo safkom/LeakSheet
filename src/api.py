@@ -83,6 +83,7 @@ from src.fetcher import (
 from src.streaming import (
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
+    NonMediaError,
     PublicOnlyAsyncTransport,
     TTLCache,
     UpstreamStatusError,
@@ -1983,7 +1984,9 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     """Feed one /stream upstream outcome into the shared provider health."""
     if provider is None:
         return
-    if exc is None or (isinstance(exc, UpstreamStatusError) and exc.status_code < 500):
+    if exc is None or isinstance(exc, NonMediaError) or (
+        isinstance(exc, UpstreamStatusError) and exc.status_code < 500
+    ):
         await asyncio.to_thread(host_health.record_success, provider)  # the host answered
         return
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
@@ -2027,9 +2030,10 @@ async def proxy_stream(
     if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
         raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
 
-    # A provider known to be down is refused at once: see docs/decisions.md::host_health.py.
+    # A provider known to be down is refused at once, until a retry is due: see
+    # docs/decisions.md::host_health.py.
     provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.down, provider)):
+    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
         raise HTTPException(
             status_code=503,
             detail=f"{outage['host']} is temporarily unavailable",
@@ -2059,8 +2063,8 @@ async def proxy_stream(
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
-        # Relay upstream's status so a client can tell "gone" from "throttled"; only the
-        # code crosses over (see UpstreamStatusError). Everything else is 503.
+        # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
+        # crosses over (see UpstreamStatusError). Everything else is 503.
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
         await _record_stream_outcome(provider, url, e)
         if e.status_code in (404, 410):
@@ -2071,6 +2075,8 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
+        if 400 <= e.status_code < 500:
+            raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
         raise HTTPException(status_code=503, detail="Upstream error")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
