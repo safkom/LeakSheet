@@ -18,6 +18,7 @@ from src.api import (
     _media_kind_from_mime,
     _parse_pixeldrain_metadata,
 )
+from src.host_health import provider_for
 from src.streaming import (
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
@@ -42,10 +43,21 @@ class TestPillowsStreamResolution:
         "https://pillows.su/f/abc123",
         "https://www.pillows.su/f/abc123",
         "https://pillowcase.su/f/abc123",
+        "https://plwcse.top/f/abc123",
+        "https://www.plwcse.top/f/abc123",
         "http://pillows.su/f/abc123",
     ])
-    def test_both_domains_resolve_to_the_api_host(self, link):
+    def test_every_alias_resolves_to_the_api_host(self, link):
         assert resolve_stream_url(link) == "https://api.pillows.su/api/get/abc123"
+
+    @pytest.mark.parametrize("alias", ["pillows.su", "pillowcase.su", "plwcse.top"])
+    def test_every_alias_shares_metadata_and_provider(self, alias):
+        link = f"https://{alias}/f/abc123"
+        assert resolve_metadata_url(link) == {
+            "url": "https://api.pillows.su/api/metadata/abc123.txt",
+            "provider": "pillows",
+        }
+        assert provider_for(link) == "pillows"
 
     def test_id_keeps_dashes_and_underscores(self):
         assert resolve_stream_url("https://pillows.su/f/a-b_C9") == (
@@ -62,6 +74,9 @@ class TestPillowsStreamResolution:
         "https://pillows.su/f/",
         "https://pillows.su.evil.com/f/abc123",
         "https://evil.com/pillows.su/f/abc123",
+        "https://plwcse.top/",
+        "https://plwcse.top.evil.com/f/abc123",
+        "https://notplwcse.top/f/abc123",
     ])
     def test_non_file_and_lookalike_links_are_not_resolved(self, link):
         assert resolve_stream_url(link) is None

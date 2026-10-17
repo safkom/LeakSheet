@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import LeakSheet
@@ -15,5 +16,26 @@ struct PlayerViewModelTests {
         #expect(Format.time(-5) == "0:00")
         #expect(Format.time(.infinity) == "0:00")
         #expect(Format.time(.nan) == "0:00")
+    }
+}
+
+struct PlaybackQualityDefaultTests {
+    private func freshDefaults() -> UserDefaults {
+        let name = "OriginalQualityDefaultTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @Test func `an unset preference plays the original file`() {
+        #expect(AudioEngine.prefersOriginalQuality(in: freshDefaults()))
+    }
+
+    @Test func `an explicit choice is kept in both directions`() {
+        let defaults = freshDefaults()
+        defaults.set(false, forKey: AudioEngine.originalQualityKey)
+        #expect(!AudioEngine.prefersOriginalQuality(in: defaults))
+        defaults.set(true, forKey: AudioEngine.originalQualityKey)
+        #expect(AudioEngine.prefersOriginalQuality(in: defaults))
     }
 }

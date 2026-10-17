@@ -3,7 +3,7 @@
 Transforms file-sharing links from tracker spreadsheets into
 direct audio stream URLs.  Supported hosts:
 
-  pillows.su / pillowcase.su
+  pillows.su / pillowcase.su / plwcse.top
     https://pillows.su/f/{id}  →  https://api.pillows.su/api/get/{id}
 
   imgur.gg / temp.imgur.gg
@@ -196,9 +196,9 @@ async def _get_text_capped(
 # URL patterns — order matters (most specific first)
 # ---------------------------------------------------------------------------
 
-# pillows.su / pillowcase.su
+# pillows.su / pillowcase.su / plwcse.top: one id space, all served by api.pillows.su
 _PILLOWS_PATTERN = re.compile(
-    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su)/f/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([A-Za-z0-9_-]+)",
 )
 
 # imgur.gg / temp.imgur.gg
@@ -238,7 +238,7 @@ _GDRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # Every host `resolve_stream_url` can emit. The API's stream-proxy allowlist
 # is this set, so resolver and allowlist can't drift.
 ALLOWED_STREAM_HOSTS = frozenset({
-    "api.pillows.su",     # pillows.su / pillowcase.su both resolve here
+    "api.pillows.su",     # pillows.su / pillowcase.su / plwcse.top all resolve here
     "imgur.gg",           # primary API host
     "temp.imgur.gg",      # kept as the resolver's fallback host
     "music.froste.lol",
@@ -448,7 +448,7 @@ def resolve_stream_url(link: str) -> str | None:
     m = _PILLOWS_PATTERN.match(link)
     if m:
         file_id = m.group(2)
-        # Both pillows.su and pillowcase.su use api.pillows.su
+        # Every alias domain shares api.pillows.su
         resolved = f"https://api.pillows.su/api/get/{file_id}"
         logger.debug("Resolved pillows.su link %s → %s", link, resolved)
         return resolved
