@@ -14,7 +14,7 @@ direct audio stream URLs.  Supported hosts:
     https://music.froste.lol/song/{hash}  →  https://music.froste.lol/song/{hash}/file
 
   krakenfiles.com
-    https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  krakencloud.net CDN URL
+    https://krakenfiles.com/view/{id}/file.html  →  fetch page HTML  →  {shard}.krakenfiles.com CDN URL
     Requires Referer: https://krakenfiles.com/ when streaming from CDN.
 
   pixeldrain.com
@@ -224,9 +224,10 @@ _KRAKEN_PATTERN = re.compile(
     re.IGNORECASE | re.ASCII,
 )
 
-# krakencloud.net CDN audio URLs (used internally for validation only)
+# Shard hosts (hs3.krakenfiles.com) serving the page's audio; also the SSRF gate on the
+# scraped URL.
 _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
-    r"https://[a-z0-9]+\.krakencloud\.net/uploads/[^\s\"'<>]+"
+    r"https://[a-z0-9]+\.krakenfiles\.com/uploads/[^\s\"'<>]+"
     r"/music\.(?:m4a|mp3|ogg|flac|wav|aac)",
     re.IGNORECASE,
 )
@@ -517,35 +518,31 @@ async def resolve_kraken_cdn_url(view_url: str) -> str:
     """Fetch krakenfiles.com view page and return the CDN audio stream URL.
 
     The audio URL is embedded directly in the page HTML and always follows
-    the pattern: https://{cdn}.krakencloud.net/uploads/{date}/{id}/music.{ext}
+    the pattern: https://{shard}.krakenfiles.com/uploads/{date}/{id}/music.{ext}
 
     Args:
         view_url: e.g. ``https://krakenfiles.com/view/WS7wzkrklJ/file.html``
 
     Returns:
-        Direct CDN audio URL (krakencloud.net).
+        Direct CDN audio URL (a krakenfiles.com shard).
 
-    Raises ValueError if the page cannot be fetched or no audio URL is found.
+    Raises ValueError if the page answers badly or carries no audio URL; a connection
+    failure propagates as httpx.HTTPError so host health sees it as hard.
     """
     async def _do() -> str:
         client = _get_shared_client()
-        try:
-            status, html = await _get_text_capped(
-                client,
-                view_url,
-                {
-                    "User-Agent": _STREAM_USER_AGENT,
-                    "Referer": "https://krakenfiles.com/",
-                },
-            )
-            if 400 <= status < 500:
-                raise UpstreamStatusError(status)
-            if status != 200:
-                raise ValueError(
-                    f"krakenfiles.com returned {status} for {view_url}"
-                )
-        except httpx.HTTPError as exc:
-            raise ValueError(f"krakenfiles.com fetch failed: {exc}") from exc
+        status, html = await _get_text_capped(
+            client,
+            view_url,
+            {
+                "User-Agent": _STREAM_USER_AGENT,
+                "Referer": "https://krakenfiles.com/",
+            },
+        )
+        if 400 <= status < 500:
+            raise UpstreamStatusError(status)
+        if status != 200:
+            raise ValueError(f"krakenfiles.com returned {status} for {view_url}")
 
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(html)
         if not m:
@@ -845,8 +842,8 @@ async def stream_audio(
     if "music.froste.lol/song/" in stream_url:
         req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
 
-    # krakencloud.net requires Referer: https://krakenfiles.com/
-    if "krakencloud.net" in stream_url:
+    # The kraken CDN requires Referer: https://krakenfiles.com/
+    if _KRAKEN_CDN_AUDIO_PATTERN.match(stream_url):
         req_headers["Referer"] = "https://krakenfiles.com/"
 
     client = _get_shared_client()

@@ -202,19 +202,17 @@ class TestSliceByteStream:
 
 
 # ---------------------------------------------------------------------------
-# krakenfiles.com CDN extraction (regression for the page layout as of
-# July 2026 — the audio URL sits in an <a>/<source>-adjacent attribute as
-# https://{cdn}.krakencloud.net/uploads/{date}/{id}/music.{ext})
+# krakenfiles.com CDN extraction: the view page carries the audio URL in its jPlayer
+# setup, as https://{shard}.krakenfiles.com/uploads/{date}/{id}/music.{ext}
 # ---------------------------------------------------------------------------
 
 _KRAKEN_PAGE_SNIPPET = """
-<div class="lightgallery-wrapper">
-  <img src="https://pchs4.krakencloud.net/uploads/01-08-2023/FJmpAhYHMp/waveform.png"/>
-</div>
+<meta property="og:image" content="https://hs0.krakenfiles.com/uploads/01-01-2030/AbCdEf0123/">
+<img src="https://hs0.krakenfiles.com/uploads/01-01-2030/AbCdEf0123/waveform.png" >
 <script>
-  new jPlayerPlaylist({jPlayer: "#jquery_jplayer_N"}, [
-    {title: "file", m4a: "https://pchs4.krakencloud.net/uploads/01-08-2023/FJmpAhYHMp/music.m4a"}
-  ]);
+  $("#sfPlayer").jPlayer("setMedia", {
+      m4a: 'https://hs0.krakenfiles.com/uploads/01-01-2030/AbCdEf0123/music.m4a'
+  });
 </script>
 """
 
@@ -226,8 +224,21 @@ class TestKrakenResolution:
         m = _KRAKEN_CDN_AUDIO_PATTERN.search(_KRAKEN_PAGE_SNIPPET)
         assert m is not None
         assert m.group(0) == (
-            "https://pchs4.krakencloud.net/uploads/01-08-2023/FJmpAhYHMp/music.m4a"
+            "https://hs0.krakenfiles.com/uploads/01-01-2030/AbCdEf0123/music.m4a"
         )
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://hs0.krakencloud.net/uploads/01-01-2030/AbCdEf0123/music.m4a",
+            "https://krakenfiles.com.evil.example/uploads/01-01-2030/AbCdEf0123/music.m4a",
+            "http://hs0.krakenfiles.com/uploads/01-01-2030/AbCdEf0123/music.m4a",
+        ],
+    )
+    def test_cdn_pattern_rejects_foreign_hosts(self, url):
+        from src.streaming import _KRAKEN_CDN_AUDIO_PATTERN
+
+        assert _KRAKEN_CDN_AUDIO_PATTERN.search(url) is None
 
     def test_view_url_detected(self):
         from src.streaming import is_kraken_view_url
