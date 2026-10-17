@@ -94,7 +94,7 @@ The backend proxies audio so clients can play it without CORS pain.
 
 | Host | Link Format |
 |---|---|
-| pillows.su / pillowcase.su | `pillows.su/f/{id}` |
+| pillows.su / pillowcase.su / plwcse.top | `pillows.su/f/{id}` |
 | imgur.gg / temp.imgur.gg | `temp.imgur.gg/f/{id}` |
 | music.froste.lol | `music.froste.lol/song/{hash}` |
 | krakenfiles.com | `krakenfiles.com/view/{id}/file.html` (CDN URL scraped) |

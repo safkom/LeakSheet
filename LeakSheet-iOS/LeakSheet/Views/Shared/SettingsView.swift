@@ -2,7 +2,7 @@ import SwiftUI
 
 /// App settings — streaming quality mode and other preferences.
 struct SettingsView: View {
-    @AppStorage(AudioEngine.originalQualityKey) private var useOriginalQuality: Bool = false
+    @AppStorage(AudioEngine.originalQualityKey) private var useOriginalQuality: Bool = true
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault

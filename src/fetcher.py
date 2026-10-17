@@ -69,7 +69,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0  # Large trackers (Ye: 10MB) need time
 DEFAULT_CACHE_TTL = 3600  # 1 hour default cache
-STALE_CACHE_TTL = 86400  # 24h max age for stale-while-revalidate
+# Collapse-guard window (24h); the serve window is SERVE_STALE_TTL.
+# See docs/decisions.md::api.py::serve-stale-window
+STALE_CACHE_TTL = 86400
+SERVE_STALE_TTL = 7 * 86400  # max age served stale (and 304'd) while a revalidation runs
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
 
 # Sheet HTML + parsed-JSON cache cap: see docs/decisions.md::fetcher.py — sheet cache size cap
@@ -221,7 +224,8 @@ async def _get_capped(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Re
     # Already decoded, so the encoding headers no longer describe the body.
     headers = [(k, v) for k, v in resp.headers.multi_items()
                if k.lower() not in ("content-encoding", "content-length")]
-    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=request)
+    # The final request, so .url says where a redirect chain ended.
+    return httpx.Response(resp.status_code, headers=headers, content=bytes(body), request=resp.request)
 
 
 async def fetch_artistgrid_entries() -> list[TrackerEntry]:
@@ -1138,7 +1142,7 @@ def get_cached_age(url: str) -> float | None:
 
 
 def get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Return (raw parsed-cache JSON bytes, stored content hash, age seconds)
     for a cache entry within ``max_age``, or None.
@@ -1167,8 +1171,20 @@ def get_cached_parsed_bytes(
         return None
 
 
+def drop_cached_entry(url: str) -> None:
+    """Delete a tracker's cached HTML, parse and metadata.
+
+    For a source that is gone or private: see docs/decisions.md::api.py::serve-stale-window.
+    """
+    key = _cache_key(_normalize_url(url))
+    # The meta goes first: every reader needs it, so none sees a half-deleted entry.
+    with _entry_lock(key):
+        for suffix in (".meta.json", ".parsed.json", ".html"):
+            (CACHE_DIR / f"{key}{suffix}").unlink(missing_ok=True)
+
+
 async def async_get_cached_parsed_bytes(
-    url: str, max_age: float = STALE_CACHE_TTL
+    url: str, max_age: float = SERVE_STALE_TTL
 ) -> tuple[bytes, str, float] | None:
     """Async variant of get_cached_parsed_bytes."""
     return await asyncio.to_thread(get_cached_parsed_bytes, url, max_age)
@@ -1295,6 +1311,11 @@ class InvalidURLError(FetchError):
     pass
 
 
+class SourceGoneError(InvalidURLError):
+    """The source answered 404 or 410: the tracker no longer exists there."""
+    pass
+
+
 class AccessDeniedError(FetchError):
     """Sheet is private, banned, or access-restricted (HTTP 403)."""
     pass
@@ -1310,8 +1331,8 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
         code = exc.response.status_code
         if code == 403:
             raise AccessDeniedError(f"Access denied (403): {url}") from exc
-        if code == 404:
-            raise InvalidURLError(f"URL not found (404): {url}") from exc
+        if code in (404, 410):
+            raise SourceGoneError(f"URL not found ({code}): {url}") from exc
         raise NetworkError(f"HTTP {code}: {exc}") from exc
     # ReadError, RemoteProtocolError, TooManyRedirects, DecodingError: all the
     # upstream failing, none of them a server bug worth a 500.
@@ -1322,6 +1343,12 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 # Async variants
 # ---------------------------------------------------------------------------
 
+def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
+    """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
+    if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
+        raise AccessDeniedError(f"Sign-in required: {url}")
+
+
 async def _fetch_base_html(
     client: httpx.AsyncClient, url_norm: str, *, timeout: float
 ) -> tuple[str, str]:
@@ -1331,6 +1358,7 @@ async def _fetch_base_html(
     TAB's page, which has no tab switcher.
     """
     r = await _get_capped(client, url_norm, timeout=timeout)
+    _raise_if_signed_out(r, url_norm)
     r.raise_for_status()
     html = r.text
     title_match = TITLE_PATTERN.search(html)
@@ -1381,6 +1409,7 @@ async def async_fetch_sheet_html(
             if cached is not None:
                 return cached
         r = await _get_capped(client, url, timeout=timeout)
+        _raise_if_signed_out(r, url)
         r.raise_for_status()
         base_html = r.text
         title_match = TITLE_PATTERN.search(base_html)

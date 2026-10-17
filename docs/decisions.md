@@ -324,6 +324,38 @@ The fast path returns the cached JSON bytes as-is: no pydantic validation, no
 re-serialization, no content re-hash. Those steps cost ~400ms on a 6.5MB artist
 payload and were the bulk of warm-request latency.
 
+## api.py::serve-stale-window — a cached tracker is served for 7 days
+
+`/sheet` answers a 304 or serves the stored bytes while the entry is younger than
+`SERVE_STALE_TTL` (7 days); a background revalidation starts once it is over an hour
+old. Past 24 h the server used to do neither, so a client holding its own copy waited
+for a full cold parse anyway: production cold opens took 7.8-20.5 s. The app keeps its
+copy for days, so a week of stale-but-instant matches how it is used, and each served
+request refreshes the entry for the next one.
+
+`STALE_CACHE_TTL` (24 h) stays as the window of `fetcher.py::cache-collapse-guard`. It
+is a different question: how long a *larger* old parse outranks a smaller new one. A
+week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
+while a day still covers a partial fetch landing on a recently refreshed copy. The two
+constants are not meant to be equal. Known gap: a partial revalidation of a 1-7 day old
+entry is written, because the 24 h guard does not cover it; the next stale hit's
+revalidation repairs it.
+
+The window must not prolong content its source has revoked (DMCA). A failed revalidation
+only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
+for the whole week. `_background_revalidate` therefore calls `drop_cached_entry` (HTML,
+parse and metadata, under the entry lock) when the fetch fails with `SourceGoneError`
+(base page 404 or 410) or `AccessDeniedError`. That is a 403, or, for a docs.google.com
+sheet, a base page whose redirect chain ended on `accounts.google.com`: Google answers
+a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
+table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
+where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
+any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
+for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+serving the stale copy. The next request after a drop is a cold parse that returns the
+real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
+unchanged.
+
 ## api.py::google-size-suffix-regex — Google image URL suffix grammar
 
 Google's sizing suffix (`=s0-c-rw...`) is a `"="`-prefixed, `"-"`-joined list of
@@ -359,8 +391,8 @@ fails, a stored copy of the same picture is kept rather than downgraded.
 Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token
 is minted on every page fetch, and it stops working: one fetched directly from Google
 still loaded after 28 minutes, and every page served 42 or more minutes after Google
-rendered it had dead tokens. A parse, though, is served for 1–24 hours and clients keep
-it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
+rendered it had dead tokens. A parse, though, is served for up to 7 days and clients
+keep it for days. Covers therefore loaded only while the parse was young. On 2026-09-13
 production showed no covers for Ye and Travis, while recently parsed Kendrick and Baby
 Keem were fine.
 
@@ -438,8 +470,22 @@ Some file hosts (e.g. pillows.su) always report `Content-Type: audio/mp4` regard
 of the actual container. Chrome lenient-decodes the bytes; Safari strictly validates
 Content-Type against the data and shows "source not supported" when an Ogg file is
 served as `audio/mp4`. Because the range starts at byte 0 on a fresh request, the
-first chunk is read, the real format is sniffed from magic bytes, `Content-Type` is
-corrected, and the chunk is prepended back into the stream so no bytes are lost.
+first 16 bytes are read, the real format is sniffed from magic bytes, `Content-Type`
+is corrected, and those bytes are prepended back into the stream so none are lost.
+
+The upstream is read with `aiter_bytes()` and no chunk size: httpx buffers a fixed
+chunk size in full before its first yield, which delayed the response headers (the
+sniff gates them) by a 64 KiB download. A read may return fewer than 16 bytes, so the
+sniff accumulates reads until it has 16 or the body ends; every later chunk is relayed
+as it arrives.
+
+## api.py::metadata-deadline — /metadata gives up after 10 s
+
+The shared httpx client is tuned for audio (120 s read timeout), so a provider that
+accepts the connection and never answers held a worker for two minutes per call.
+`/metadata` bounds all its upstream calls (the metadata fetch and the pillows HEAD
+fallback) with one `asyncio.timeout` of 10 s, plus a per-call 5 s connect timeout. A
+timeout answers 503 like any other provider failure and logs at WARNING.
 
 ## api.py::range-fallback — HTTP 200, not a synthesized 206, when length is unknown
 
@@ -852,10 +898,11 @@ plausible, no error was raised, and only a forced refresh cleared it.
 
 The guard is deliberately one-sided. Growth always writes, a modest shrink
 always writes (trackers do lose tracks — DMCA, restructures), and the old copy
-wins only while it is still inside `STALE_CACHE_TTL`; past that it would not be
-served anyway, so a genuinely shrunken tracker recovers on its own instead of
-being frozen forever. The refusal is logged at WARNING so a systematically
-broken tab is visible rather than silent — which was the real defect here.
+wins only while it is still inside `STALE_CACHE_TTL` (24 h, deliberately shorter
+than the 7-day serve window, see `api.py::serve-stale-window`); past that a
+genuinely shrunken tracker recovers on its own instead of being frozen for days.
+The refusal is logged at WARNING so a systematically broken tab is visible rather
+than silent — which was the real defect here.
 
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an
@@ -932,12 +979,59 @@ byte-identical output, and serializing once per miss removed two of the three
 serializations. The remaining wait is now shown rather than hidden: `/sheet` streams
 NDJSON progress lines to clients that ask for `application/x-ndjson`.
 
+**Re-assessed 2026-10-16 (ADR, accepted): stay on Python 3 + FastAPI + gunicorn/uvicorn-worker
++ lxml.** Measured on ten trackers loaded cold one at a time: wall time 1.6-11.8 s, of which
+parsing (`parse` + `misc_parse` + `art_parse` + `hub_parse`) was 0.05-1.5 s. Production app cold
+opens took 7.8-20.5 s with parse at 59-403 ms. On the 20 largest corpus tabs, `extract_table`
+is 55 % of parse time, mostly building one `_Cell` per `<td>` (~1.1 M per pass). Python 3.14
+parsed them 5 % faster than 3.11, which is inside run-to-run noise.
+
+| Option | Cold-load gain | Cost |
+|---|---|---|
+| Keep Python/FastAPI | none | none |
+| Litestar, plain Starlette, Granian | none measurable at ~50 loads/day | migration churn |
+| Go, ASP.NET Core, TypeScript, Rust | at most the parse share (≤1.5 s of 12 s) | port ~3,000 lines of heuristics and ~1,200 tests; per-worker state redesign |
+| selectolax instead of lxml | only part of the 55 % in `extract_table` | 1.0 API break (2026-10); parity risk |
+
+Cold loads wait on Google, so the levers are the request plan and the data source (see
+fetcher.py::data-source), not the runtime. Move off 3.11 before its security support ends in
+2027-10 for the support window, not for speed. Revisit a port when `sheet_timing` shows parse
+above half of cold time, or the Python runtime itself becomes the operational problem.
+Research: `docs/reviews/2026-10-16/` (local, untracked).
+
+## fetcher.py::data-source — htmlview stays; Sheets API v4 is the candidate (ADR, proposed)
+
+Measured 2026-10-16 on three public workbooks, per path, against the htmlview HTML:
+
+| | htmlview (today) | XLSX export | Sheets API v4 `spreadsheets.get` |
+|---|---|---|---|
+| Requests, time | 12-22, 12-24 s sequential | 2, 10-14 s | 1, 1.3-4.2 s |
+| Bytes on the wire | 0.75-1.3 MB | 83-108 MB (embeds media) | 0.7-1.2 MB gzip (13-34 MB JSON) |
+| Hyperlinks | baseline | loses secondary links in multi-link cells | all on 2 of 3; 5 URLs missing on the third |
+| Era covers (in-cell images) | 47 / 262 / 382 | 0 / 262 / 381 | none: v4 has no image field |
+| Notes, conditional colours | no | notes yes, conditional colours no | both |
+| Refusals | none | 401 when the owner disabled downloads | none |
+
+XLSX is rejected: too large, refused by download-disabled sheets, and it drops links. The API
+is the fastest and richest path for cell data, but it cannot see covers. It needs an API key
+(anonymous calls get 403) with quotas of 300 reads/min per project and 60 per user, no daily
+cap. Mirror domains (yetracker.net, `*tracker.net`) are not Google URLs, so the API cannot read
+them. The decision is to keep htmlview, and prototype a hybrid behind the existing cell
+model: the API for every tab's cells and links, htmlview only for tabs that carry covers. That
+cuts a cold load from 8-16 Google page fetches to one API call plus one or two pages. Adopt it
+only if the hybrid's output matches htmlview on the accuracy labels and the yetracker diff.
+
 ## api.py::upstream-503 — proxy failures answer 503, not 502
 
 Cloudflare replaces an origin's 502 (and 504) with its own HTML error page, so a
 proxy's JSON `detail` never reached a client: `/stream` for a pillows outage arrived
 as Cloudflare's page. `/sheet` already answered 503 for this reason; `/stream`,
 `/image-proxy` and `/metadata` now do too. The relayed 404, 409 and 429 stay.
+
+An upstream 4xx is the host answering about one file (451 takedown, 401, 403), not a
+proxy failure: `/stream` relays it as the same code, and only 5xx and transport errors
+are 503. A 503 says "try again later" about a file the host refused for good, and hides
+the code from the client.
 
 ## api.py::non-media-415 — /stream refuses a body that is plainly not media
 
@@ -961,3 +1055,15 @@ with the recent failing links (`bytes=0-0`); any answer, a 404 included, means u
 Only /stream feeds it: on that day pillows' metadata API was healthy while its stream
 endpoint returned 500, so metadata outcomes would mislabel the stream path. Links are
 never crawled: tens of thousands of probes would invite rate limits and bans.
+
+Probe links can be permanently broken files, so the down state also expires: 300 s
+after it was set (`HALF_OPEN_AFTER_S`, `retry_at` in the shared file, so all workers
+agree), `/stream` lets requests through. A success marks the provider up; a failure that
+`record_failure` records restarts the 300 s. `/hosts` says "down" until a success.
+A body that is not media (`NonMediaError`, the 415 sniff) is the host answering with a
+bad file: it counts as a success, never toward down, in `/stream` and in the probe.
+That includes the resolver steps: a kraken page with no audio URL and an imgur API
+answer without `cdnUrl`. A 4xx from the kraken page or from every imgur host is an
+`UpstreamStatusError` like one from the file itself. A bare ValueError from a resolver
+still counts as a soft failure: those wrap transport errors, upstream 5xx and the SSRF
+pre-flight.

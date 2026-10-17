@@ -15,6 +15,11 @@ final class AudioEngine {
     static let autoplayNextKey = "leaksheet_autoplay_next"
     static let originalQualityKey = "leaksheet_streaming_mode"
 
+    /// Unset reads as on: see DECISIONS.md::AudioEngine.swift::original-quality-default.
+    static func prefersOriginalQuality(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: originalQualityKey) == nil || defaults.bool(forKey: originalQualityKey)
+    }
+
     private nonisolated static let log = Logger(subsystem: "si.safko.LeakSheet", category: "Audio")
 
     // MARK: - State
@@ -147,7 +152,7 @@ final class AudioEngine {
 
         // Start directly on original quality when preferred, avoiding a second
         // replaceCurrentItem (extra KVO setup and network teardown).
-        let prefersOriginal = UserDefaults.standard.bool(forKey: Self.originalQualityKey)
+        let prefersOriginal = Self.prefersOriginalQuality()
         let originalURL = prefersOriginal ? StreamResolver.originalQualityURL(for: link) : nil
         let initialURL = originalURL ?? url
 
