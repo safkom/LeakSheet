@@ -1111,6 +1111,11 @@ def clear_cache() -> tuple[int, int]:
 # Public cache info helpers (used by API layer for ETag / stale-while-revalidate)
 # ---------------------------------------------------------------------------
 
+def _servable(meta: dict) -> bool:
+    """False for an empty parse on disk: see docs/decisions.md::fetcher.py::cache-collapse-guard."""
+    return meta.get("total_versions") != 0
+
+
 def get_cached_etag(url: str) -> str | None:
     """Return the content hash (ETag) for a cached parsed result, or None."""
     url_norm = _normalize_url(url)
@@ -1119,7 +1124,7 @@ def get_cached_etag(url: str) -> str | None:
     if meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            return meta.get("content_hash")
+            return meta.get("content_hash") if _servable(meta) else None
         except (json.JSONDecodeError, OSError):
             pass
     return None
@@ -1161,7 +1166,7 @@ def get_cached_parsed_bytes(
     try:
         meta = json.loads(meta_file.read_text())
         ts = _parsed_timestamp(meta)
-        if ts <= 0 or not meta.get("content_hash"):
+        if ts <= 0 or not meta.get("content_hash") or not _servable(meta):
             return None
         age = time.time() - ts
         if age > max_age:
@@ -1968,7 +1973,8 @@ async def async_fetch_and_parse(
             t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
             with t.phase("parse"):
                 artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
-            if artist.eras:
+            # As in the gid path: eras without songs are a hub, and discovery may find more.
+            if artist.total_versions:
                 await asyncio.to_thread(_finalize, artist, url_norm)
                 if write_cache:
                     await _async_set_cache(url_norm, base_html, title)

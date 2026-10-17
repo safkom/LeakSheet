@@ -653,6 +653,24 @@ class TestFallbackParse:
         assert not (fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json").exists()
 
 
+class TestSonglessBasePage:
+    """A base page that carries a table is parsed directly. Eras without songs (a hub or
+    index) are no tracker: the parse must go on to discovery, as the gid path does."""
+
+    async def test_a_hub_table_on_the_base_page_falls_through_to_discovery(
+        self, workbook_client, patch_sheets_client
+    ):
+        from tests.conftest import build_htmlview_base
+
+        names = {"100": "Unreleased"}
+        base = build_htmlview_base(names).replace("</body>", read_synthetic("hub_tab") + "</body>")
+        patch_sheets_client(
+            workbook_client({"100": WORKBOOK["100"]}, base_html=base, tab_names=names)
+        )
+        artist = await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+        assert artist.total_songs == 4
+
+
 class TestRevalidationRefetchesHubSiblings:
     """With the cache bypassed (a background revalidation, force refresh) a hub sibling
     is fetched by the discovery probe and again by the merge. The merge's page is the one

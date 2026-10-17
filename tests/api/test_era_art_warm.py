@@ -24,7 +24,7 @@ from PIL import Image
 import src.api as api
 import src.fetcher as fetcher
 from src.api import app
-from src.models import Artist, Era
+from src.models import Artist, Era, Section, Song, SongVersion
 
 TRACKER = "https://yetracker.net/"
 
@@ -80,7 +80,12 @@ def google(monkeypatch, tmp_path):
 
 
 def _artist(*covers: tuple[str, str]) -> Artist:
-    return Artist(name="Ye", slug="ye", eras=[Era(name=n, art_url=u) for n, u in covers])
+    # One song per era: a songless artist is a 404, not a tracker.
+    songs = [Song(base_name="Intro", versions=[SongVersion(name="Intro")])]
+    return Artist(
+        name="Ye", slug="ye",
+        eras=[Era(name=n, art_url=u, sections=[Section(songs=songs)]) for n, u in covers],
+    )
 
 
 class TestWarmEraArt:

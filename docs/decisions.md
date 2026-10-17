@@ -921,6 +921,14 @@ discovery fallback and the base-page branch are covered with the rest: cached, a
 empty result was served as a hit for an hour and then cached again by the app. It is
 refused even over an entry past `COLLAPSE_GUARD_TTL`.
 
+`/sheet` answers an empty parse with 404 "No songs found in this tracker.", like
+`NoTablesError`, on the JSON and the NDJSON response alike: a 200 put an empty tracker in
+the app's cache and Recents, while the app caches no error. A parse that also recorded
+failed tab loads is a 503 instead: it is likely transient, and on a 5xx the app falls back
+to its own copy, which a 4xx forbids. An empty entry already on disk (`total_versions` 0 in its meta) is neither served
+nor 304'd. The base-page branch, like the gid path, returns only a parse with songs; a
+hub table on the base page falls through to discovery.
+
 A partial load alone is never refused: a tab that is permanently missing would
 otherwise keep its tracker out of the cache for good, and a large drop is the ratio's
 job. It does widen the ratio's window: a parse that recorded failed tab loads and shrank
