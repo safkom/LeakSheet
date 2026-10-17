@@ -244,6 +244,29 @@ class TestFailedTabs:
         await _parse(rec, patch_sheets_client, timer=timer)
         assert timer.tab_counts() == (1, 4)
 
+    @pytest.mark.parametrize(("fail_gids", "kept"), [({"500"}, 100), (set(), 5)])
+    async def test_the_collapse_guard_sees_the_api_route(
+        self, with_key, patch_sheets_client, fail_gids, kept
+    ):
+        """A tab lost on the API route holds a served entry just as an htmlview one does."""
+        import time
+
+        import src.fetcher as fetcher
+        from tests.unit.test_cache_meta import TestCollapseGuard
+
+        fetcher._set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
+        meta_file = fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - 3 * 86400
+        meta_file.write_text(json.dumps(meta))
+
+        api = (lambda r: httpx.Response(200, json={"sheets": [_api_sheet("200")]})) if fail_gids else None
+        patch_sheets_client(Recorder(api=api, fail_gids=fail_gids).client())
+        await async_fetch_and_parse(URL, use_cache=False, write_cache=True)
+
+        path = fetcher.CACHE_DIR / f"{fetcher._cache_key(URL)}.parsed.json"
+        assert json.loads(path.read_text())["total_versions"] == kept
+
 
 class TestBoundsAndPauses:
     async def test_one_oversized_tab_falls_back_alone(self, with_key, htmlview_only, patch_sheets_client):
