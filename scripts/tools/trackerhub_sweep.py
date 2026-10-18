@@ -22,7 +22,7 @@ _aggregate.json (cross-tracker gap lists). tests/results/ is gitignored.
 
 Usage:
     uv run python scripts/tools/trackerhub_sweep.py [--limit N] [--only substr]
-            [--concurrency 5] [--include-stale] [--art] [--parity]
+            [--concurrency 5] [--include-stale] [--best] [--art] [--parity]
 """
 
 from __future__ import annotations
@@ -168,6 +168,9 @@ async def sweep_one(
             result["error"] = f"{type(e).__name__}: {str(e)[:300]}"
             return result
         result["fetch_s"] = round(time.monotonic() - t0, 1)
+        if parity:
+            # Inside the semaphore: the htmlview parse unsets the key process-wide.
+            result["parity"] = await harvest_parity(entry, artist)
 
     violations = live_violations(artist)
     result["status"] = "violations" if violations else "ok"
@@ -175,8 +178,6 @@ async def sweep_one(
     result["census"] = census_artist(artist, source=entry.url, origin="sweep")
     result["dates"] = harvest_dates(artist)
     result["links"] = harvest_links(artist)
-    if parity:
-        result["parity"] = await harvest_parity(entry, artist)
     if art:
         result["art"] = await harvest_art(artist, entry.url)
     result["api_tabs"] = [
@@ -341,6 +342,8 @@ async def main_async(args) -> int:
         targets = entries if args.include_stale else [e for e in entries if e.up_to_date]
         if args.only:
             targets = [e for e in targets if args.only.lower() in e.name.lower()]
+        if args.best:
+            targets = [e for e in targets if e.best]
         if args.limit:
             targets = targets[: args.limit]
         print(f"ArtistGrid: {len(entries)} entries, sweeping {len(targets)} "
@@ -379,6 +382,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--only", type=str, default=None)
     ap.add_argument("--concurrency", type=int, default=5)
+    ap.add_argument("--best", action="store_true", help="only trackers ArtistGrid stars")
     ap.add_argument("--parity", action="store_true",
                     help="diff content tabs via the Sheets API (needs LEAKSHEET_GOOGLE_API_KEY) vs htmlview")
     ap.add_argument("--art", action="store_true",
