@@ -67,3 +67,10 @@ def test_russian_headers_map_to_their_fields():
                           "Snippet", "High Quality", _a(PILLOWS)])
     assert (v.links, v.track_length, v.leak_date, v.type, v.available_length, v.quality) == (
         [PILLOWS], "2:00", "Jan 1, 2024", "Leak", "Snippet", "High Quality")
+
+
+def test_spanish_headers_map_to_their_fields():
+    header = ["Era", "Nombre", "Notas", "Tipo", "Disponible?", "Calidad", "Enlace"]
+    v = _version(header, ["Era One", "Song One", "n", "Leak", "Snippet", "High Quality", _a(PILLOWS)])
+    assert (v.name, v.type, v.available_length, v.quality, v.links) == (
+        "Song One", "Leak", "Snippet", "High Quality", [PILLOWS])

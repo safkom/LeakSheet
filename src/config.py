@@ -201,6 +201,25 @@ COLUMN_ALIASES: dict[str, str] = {
     "ссылка": "links",
     "ссылки": "links",
 
+    # Spanish-language trackers (Anuel AA)
+    "nombre": "name",
+    "notas": "notes",
+    "tipo": "type",
+    "disponible": "available_length",
+    "disponible?": "available_length",
+    "calidad": "quality",
+    "duración": "track_length",
+    "enlace": "links",
+    "enlaces": "links",
+
+    # Header variants seen in the ArtistGrid sweep
+    "category": "type",
+    "availablity": "available_length",  # sic
+    "track notes": "notes",
+    "notes and information": "notes",
+    "description / notes": "notes",
+    "original youtube/soundcloud link": "links",
+
     # Core columns (present in nearly all trackers)
     "era": "era",
     "project": "era",             # Overlord's Lil Uzi Vert discography tracker
