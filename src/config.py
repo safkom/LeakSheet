@@ -80,6 +80,10 @@ _IMAGE_ALLOWED_DOMAINS = {
     # routes every thumbnail through this proxy.
     "img.youtube.com",
     "i.ytimg.com",
+    # Evidence screenshots shown inline (MiscLinkClassifier image hosts that serve files)
+    "i.imgur.com",
+    "i.ibb.co",
+    "i.postimg.cc",
     # Exact hostnames allowed for image proxy
     "lh3.googleusercontent.com",
     "lh4.googleusercontent.com",

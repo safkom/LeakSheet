@@ -20,6 +20,7 @@ from urllib.parse import quote, unquote_plus, urljoin, urlparse
 
 
 from src.config import COLUMN_ALIASES
+from src.streaming import resolve_stream_url
 from src.models import (
     Artist,
     Badge,
@@ -2596,6 +2597,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     # Sources column (Travis Scott): labeled evidence links, kept apart from listen
     # links; each URL pairs with its text line (link_lines, as for notices).
     sources: list[SourceRef] = []
+    source_listen: list[str] = []
     sources_idx = col_map.get("sources")
     if sources_idx is not None:
         src_cell = _get_cell(row, sources_idx)
@@ -2610,10 +2612,14 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
                 else -1
             )
             label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
-            sources.append(SourceRef(label=label, url=cleaned))
+            # With no link column, "Source" is the link column (docs/decisions.md::parser.py::sources-as-links).
+            if links_idx is None and resolve_stream_url(cleaned):
+                source_listen.append(cleaned)
+            else:
+                sources.append(SourceRef(label=label, url=cleaned))
     # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
     # merging them while preserving order and removing duplicates.
-    all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell)
+    all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell) + source_listen
     note_links = _extract_links_from_cell(notes_cell)
     seen: set[str] = set()
     merged_links: list[str] = []
@@ -2632,6 +2638,12 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
         avail_text, split_quality, rating = _split_compound_availability(avail_text)
         quality_text = split_quality or ""
+
+    if _has_no_audio(avail_text, quality_text):
+        # Nothing to play: the row's URLs are screenshots and articles (sources-as-links).
+        known = {s.url for s in sources}
+        sources += [SourceRef(url=u) for u in merged_links if u not in known]
+        merged_links = []
 
     version = SongVersion(
         name=title,
@@ -2663,6 +2675,17 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     )
 
     return version
+
+
+_NO_AUDIO_AVAILABILITY = frozenset({"rumored", "rumoured", "confirmed"})
+
+
+def _has_no_audio(avail_text: str, quality_text: str) -> bool:
+    """True for a row whose audio never leaked: rumoured, confirmed, not available."""
+    return (
+        avail_text.strip().lower() in _NO_AUDIO_AVAILABILITY
+        or quality_text.strip().lower() == "not available"
+    )
 
 
 # Base names that mark an UNKNOWN song: distinct mystery tracks, never grouped

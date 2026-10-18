@@ -429,3 +429,13 @@ class TestCoverAlreadySmallEnough:
         r = TestClient(app).get("/image-proxy", params={"url": NON_GOOGLE_URL, "w": 320})
         assert r.headers["X-Cache-Status"] == "origin"
         assert "ETag" not in r.headers
+
+
+@pytest.mark.parametrize("url", [
+    "https://i.ibb.co/AbC123/image.png",
+    "https://i.imgur.com/AbC123.jpg",
+    "https://i.postimg.cc/AbC123/shot.png",
+])
+def test_evidence_screenshot_hosts_are_allowed(url):
+    from src.config import _image_host_allowed
+    assert _image_host_allowed(url)

@@ -40,3 +40,25 @@ class TestPlaceholderEraLeniency:
         artist = _artist_with_starved_era("TBA")
         violations = health_violations(artist)
         assert any("stats claim songs" in v for v in violations)
+
+
+class TestPlayableLinks:
+    """A tracker whose listen links all landed in evidence parses cleanly but plays nothing."""
+
+    @staticmethod
+    def _artist(links: list[str], n: int = 30):
+        from src.models import Artist, Era, Section, Song, SongVersion
+        songs = [Song(base_name=f"S{i}", versions=[SongVersion(name=f"S{i}", links=links)]) for i in range(n)]
+        return Artist(name="T", slug="t", eras=[Era(name="E", sections=[Section(songs=songs)])])
+
+    def test_a_tracker_with_no_playable_links_is_flagged(self):
+        from tests._health import _playable_link_violations
+        assert _playable_link_violations(self._artist(["https://news.example.test/a"]))
+
+    def test_a_tracker_with_playable_links_passes(self):
+        from tests._health import _playable_link_violations
+        assert _playable_link_violations(self._artist(["https://pillows.su/f/0123456789abcdef"])) == []
+
+    def test_a_small_tracker_is_not_judged(self):
+        from tests._health import _playable_link_violations
+        assert _playable_link_violations(self._artist([], n=5)) == []

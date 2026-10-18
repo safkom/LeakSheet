@@ -89,6 +89,21 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
+## parser.py::sources-as-links — listen links versus evidence
+
+A column's header does not settle what its URLs are, so two rules route them:
+
+- With no Link(s) column, a "Source(s)" column is the link column (Young Thug):
+  URLs the `/stream` resolver accepts become `links`, the rest stay `sources`.
+  With a Link(s) column (Travis), Sources stays evidence.
+- A row whose audio never leaked (availability Rumored/Confirmed, or quality
+  "Not Available") moves every URL to `sources`. Those are screenshots and
+  articles, often on file hosts (imgur.gg on Ye and Kendrick), and as `links`
+  the app offered Play for an image.
+
+`tests/_health.py` flags a tracker where under 5% of versions have a playable
+link, which is how a misread link column shows up.
+
 ## models.py::parse_song_credits — credit delimiters
 
 Trackers write credits in either style — `(prod. X)` (Ye, Kendrick) or `[prod. X]`
