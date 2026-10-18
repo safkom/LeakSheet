@@ -421,6 +421,20 @@ Google it added 15-20 s to every cold load. Since the payload carries the slot k
 an upgrade changes the slot's bytes, never the payload. If a later Art-tab download
 fails, a stored copy of the same picture is kept rather than downgraded.
 
+## api.py::full-size-covers — a sheet image is fetched at full size
+
+A `sheets-images-rt/<token>=wN-hN` URL asks for the image at its cell's rendered
+size: 100-130 px on most trackers, 20 px in a short row (Carti). The same token
+with `=w1600` redirects to the original (Carti MUSIC [V2] 130 to 1179 px, Ye 102
+to 800, Young Thug 109 to 500). The warm tries that first and falls back to the
+URL as emitted.
+
+Two rules keep a good copy: a smaller copy of the same picture never replaces a
+stored one (a failed full-size download), and a sharper copy bumps the slot
+version, or clients keep the thumbnail they cached. The Art-tab identity gate
+(`fetcher.py::art-tab-identity`) stays: by name alone it picked the wrong cover
+for 42 of Ye's 43 eras. Of two copies of the same picture the larger one wins.
+
 ## api.py::_warm_era_art — covers are downloaded at parse time
 
 Google's `docs.google.com/sheets-images-rt/<token>` cover URLs are signed. A new token

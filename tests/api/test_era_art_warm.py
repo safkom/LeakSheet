@@ -153,15 +153,16 @@ class TestWarmEraArt:
         copy or a thumbnail resized from it."""
         first, second = _cover("old-art"), _cover("new-art")
         google.alive.add(first)
+        google.content[first] = _drawn(1, 400)
         asyncio.run(api._warm_era_art(_artist(("Yandhi", first)), TRACKER))
         base = api._era_art_base(TRACKER, "Yandhi")
         api._write_image_cache(api._image_cache_key(base, 320), _png(320, 320), "image/png")
 
         google.alive = {second}
-        google.content[second] = _png(300, 300)
+        google.content[second] = _drawn(2, 300)
         asyncio.run(api._warm_era_art(_artist(("Yandhi", second)), TRACKER))
 
-        assert api._read_image_cache(api._image_cache_key(base, None))[0] == _png(300, 300)
+        assert api._read_image_cache(api._image_cache_key(base, None))[0] == _drawn(2, 300)
         assert api._read_image_cache(api._image_cache_key(base, 320)) is None
 
     def test_overlapping_warms_both_store_their_covers(self, google):
@@ -445,3 +446,55 @@ class TestArtTabUpgrade:
         asyncio.run(api._warm_era_art(second, TRACKER))
         key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
         assert api._read_image_cache(key)[0] == _drawn(1, 340)
+
+
+class TestFullSizeCovers:
+    """A sheet emits each image at its cell's size (often ~100 px); the warm stores the
+    same image at up to 1600 px (docs/decisions.md::api.py::full-size-covers)."""
+
+    def test_the_url_asks_for_1600_px_and_keeps_host_and_path(self):
+        url = "https://docs.google.com/sheets-images-rt/AbC-d_9=w130-h136"
+        assert api._full_size_cover_url(url) == "https://docs.google.com/sheets-images-rt/AbC-d_9=w1600"
+
+    @pytest.mark.parametrize("url", [
+        "https://lh7-rt.googleusercontent.com/sheetsz/AbC=w130-h136",
+        "https://tracker.example.test/art.png",
+        "https://docs.google.com/spreadsheets/d/x/htmlview=w130",
+    ])
+    def test_other_urls_are_left_alone(self, url):
+        assert api._full_size_cover_url(url) == url
+
+    def test_the_full_size_copy_is_stored(self, google):
+        thumb = _cover("tok")
+        full = api._full_size_cover_url(thumb)
+        google.alive = {thumb, full}
+        google.content.update({thumb: _drawn(1, 102, "JPEG"), full: _drawn(1, 800)})
+        asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        assert api._read_image_cache(key)[0] == _drawn(1, 800)
+
+    def test_a_failed_full_size_download_never_downgrades_the_stored_copy(self, google):
+        thumb = _cover("tok")
+        full = api._full_size_cover_url(thumb)
+        google.alive = {thumb, full}
+        google.content.update({thumb: _drawn(1, 102, "JPEG"), full: _drawn(1, 800)})
+        asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
+
+        google.alive = {thumb}
+        asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        assert api._read_image_cache(key)[0] == _drawn(1, 800)
+
+    def test_a_sharper_copy_bumps_the_slot_version(self, google):
+        from src.fetcher import read_art_pointer
+        thumb = _cover("tok")
+        full = api._full_size_cover_url(thumb)
+        google.alive = {thumb}
+        google.content.update({thumb: _drawn(1, 102, "JPEG"), full: _drawn(1, 800)})
+        asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
+        base = api._era_art_base(TRACKER, "Donda")
+        before = read_art_pointer(base)
+
+        google.alive = {thumb, full}
+        asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
+        assert read_art_pointer(base) != before
