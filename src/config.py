@@ -188,6 +188,19 @@ def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]
 
 # Maps normalized header text to canonical field names.
 COLUMN_ALIASES: dict[str, str] = {
+    # Russian-language trackers (9mice); "дата cлива" with a Latin C is the sheet's spelling
+    "эра": "era",
+    "название": "name",
+    "примечания": "notes",
+    "длина": "track_length",
+    "дата слива": "leak_date",
+    "дата cлива": "leak_date",
+    "категория": "type",
+    "доступная длина": "available_length",
+    "качество": "quality",
+    "ссылка": "links",
+    "ссылки": "links",
+
     # Core columns (present in nearly all trackers)
     "era": "era",
     "project": "era",             # Overlord's Lil Uzi Vert discography tracker

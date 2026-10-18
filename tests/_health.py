@@ -75,20 +75,21 @@ def is_streamable(url: str) -> bool:
     return resolve_stream_url(url) is not None
 
 
-# Below this share of playable versions a tracker's link column was most likely
-# misread (a "Source" column holding the listen links went to evidence).
-MIN_PLAYABLE_RATIO = 0.05
-_MIN_VERSIONS_FOR_PLAYABLE_CHECK = 20
+# Below this share of versions with a listen link, the link column was most likely
+# misread (a "Source" column went to evidence, a foreign header was dropped). Links on
+# hosts /stream cannot play are a host gap, not a parse break: the sweep reports those.
+MIN_LINKED_RATIO = 0.05
+_MIN_VERSIONS_FOR_LINK_CHECK = 20
 
 
-def _playable_link_violations(artist: Artist) -> list[str]:
+def _link_column_violations(artist: Artist) -> list[str]:
     versions = [ver for _, song in iter_songs(artist) for ver in song.versions]
-    if len(versions) < _MIN_VERSIONS_FOR_PLAYABLE_CHECK:
+    if len(versions) < _MIN_VERSIONS_FOR_LINK_CHECK:
         return []
-    playable = sum(1 for ver in versions if any(is_streamable(u) for u in ver.links))
-    if playable / len(versions) >= MIN_PLAYABLE_RATIO:
+    linked = sum(1 for ver in versions if ver.links)
+    if linked / len(versions) >= MIN_LINKED_RATIO:
         return []
-    return [f"no playable links: {playable}/{len(versions)} versions"]
+    return [f"no listen links: {linked}/{len(versions)} versions"]
 
 
 def health_violations(
@@ -119,7 +120,7 @@ def health_violations(
         v.append("no eras parsed")
     if artist.total_songs == 0:
         v.append("no songs parsed")
-    v.extend(_playable_link_violations(artist))
+    v.extend(_link_column_violations(artist))
     if md is None:
         v.append("no parse_metadata present")
         return v

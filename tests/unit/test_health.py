@@ -42,7 +42,7 @@ class TestPlaceholderEraLeniency:
         assert any("stats claim songs" in v for v in violations)
 
 
-class TestPlayableLinks:
+class TestListenLinks:
     """A tracker whose listen links all landed in evidence parses cleanly but plays nothing."""
 
     @staticmethod
@@ -51,14 +51,14 @@ class TestPlayableLinks:
         songs = [Song(base_name=f"S{i}", versions=[SongVersion(name=f"S{i}", links=links)]) for i in range(n)]
         return Artist(name="T", slug="t", eras=[Era(name="E", sections=[Section(songs=songs)])])
 
-    def test_a_tracker_with_no_playable_links_is_flagged(self):
-        from tests._health import _playable_link_violations
-        assert _playable_link_violations(self._artist(["https://news.example.test/a"]))
+    def test_a_tracker_with_no_listen_links_is_flagged(self):
+        from tests._health import _link_column_violations
+        assert _link_column_violations(self._artist([]))
 
-    def test_a_tracker_with_playable_links_passes(self):
-        from tests._health import _playable_link_violations
-        assert _playable_link_violations(self._artist(["https://pillows.su/f/0123456789abcdef"])) == []
+    def test_links_on_an_unsupported_host_are_not_a_parse_break(self):
+        from tests._health import _link_column_violations
+        assert _link_column_violations(self._artist(["https://vault.example.test/a.mp3"])) == []
 
     def test_a_small_tracker_is_not_judged(self):
-        from tests._health import _playable_link_violations
-        assert _playable_link_violations(self._artist([], n=5)) == []
+        from tests._health import _link_column_violations
+        assert _link_column_violations(self._artist([], n=5)) == []

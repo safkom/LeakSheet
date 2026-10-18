@@ -101,8 +101,9 @@ A column's header does not settle what its URLs are, so two rules route them:
   articles, often on file hosts (imgur.gg on Ye and Kendrick), and as `links`
   the app offered Play for an image.
 
-`tests/_health.py` flags a tracker where under 5% of versions have a playable
-link, which is how a misread link column shows up.
+`tests/_health.py` flags a tracker where under 5% of versions have any listen
+link, which is how a misread link column shows up. Links on hosts `/stream`
+cannot play are a host gap, which the ArtistGrid sweep reports instead.
 
 ## models.py::parse_song_credits — credit delimiters
 

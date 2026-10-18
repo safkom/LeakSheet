@@ -58,3 +58,12 @@ class TestRowsWithoutAudioLinkOnlyEvidence:
         v = _version(self.HEADER, ["Era One", "Song One", "n", "Snippet", "Low Quality", _a(PILLOWS)])
         assert v.links == [PILLOWS]
         assert v.sources == []
+
+
+def test_russian_headers_map_to_their_fields():
+    header = ["Эра", "Название", "Примечания", "Длина", "Дата Cлива", "Категория",
+              "Доступная длина", "Качество", "Ссылка"]
+    v = _version(header, ["Era One", "Song One", "n", "2:00", "Jan 1, 2024", "Leak",
+                          "Snippet", "High Quality", _a(PILLOWS)])
+    assert (v.links, v.track_length, v.leak_date, v.type, v.available_length, v.quality) == (
+        [PILLOWS], "2:00", "Jan 1, 2024", "Leak", "Snippet", "High Quality")

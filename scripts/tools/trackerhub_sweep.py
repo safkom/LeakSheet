@@ -22,7 +22,7 @@ _aggregate.json (cross-tracker gap lists). tests/results/ is gitignored.
 
 Usage:
     uv run python scripts/tools/trackerhub_sweep.py [--limit N] [--only substr]
-            [--concurrency 5] [--include-stale]
+            [--concurrency 5] [--include-stale] [--art] [--parity]
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ import httpx
 
 from src.config import ARTISTGRID_URL
 from src.parser import parse_artistgrid_csv
+from src.streaming import resolve_stream_url
 from src.fetcher import (
     FetchError,
     USER_AGENT,
@@ -135,7 +136,10 @@ def classify_tabs(named_tabs: dict[str, str]) -> dict:
     return {"recognized": recognized, "unrecognized": unrecognized}
 
 
-async def sweep_one(entry, client: httpx.AsyncClient, sem: asyncio.Semaphore) -> dict:
+async def sweep_one(
+    entry, client: httpx.AsyncClient, sem: asyncio.Semaphore,
+    art: bool = False, parity: bool = False,
+) -> dict:
     slug = _slugify(entry.name)
     result: dict = {"name": entry.name, "url": entry.url, "slug": slug, "best": entry.best}
     async with sem:
@@ -153,7 +157,7 @@ async def sweep_one(entry, client: httpx.AsyncClient, sem: asyncio.Semaphore) ->
         # 2. Full pipeline parse.
         try:
             artist = await async_fetch_and_parse(
-                entry.url, artist_name=entry.name, use_cache=True, cache_ttl=6 * 3600
+                entry.url, artist_name=entry.name, use_cache=not parity, cache_ttl=6 * 3600
             )
         except FetchError as e:
             result["status"] = "fetch_error"
@@ -170,11 +174,97 @@ async def sweep_one(entry, client: httpx.AsyncClient, sem: asyncio.Semaphore) ->
     result["violations"] = violations
     result["census"] = census_artist(artist, source=entry.url, origin="sweep")
     result["dates"] = harvest_dates(artist)
+    result["links"] = harvest_links(artist)
+    if parity:
+        result["parity"] = await harvest_parity(entry, artist)
+    if art:
+        result["art"] = await harvest_art(artist, entry.url)
     result["api_tabs"] = [
         {"kind": t.kind, "name": t.name, "entries": len(t.entries)}
         for t in (artist.tabs or [])
     ]
     return result
+
+
+def harvest_links(artist) -> dict:
+    """Listen links versus evidence: a misread link column shows as playable ~0."""
+    from src.parser import _has_no_audio
+
+    versions = [v for era in artist.eras for song in era.songs for v in song.versions]
+    playable = sum(1 for v in versions if any(resolve_stream_url(u) for u in v.links))
+    sources_only = sum(1 for v in versions if v.sources and not v.links)
+    no_audio_stream = sum(
+        1 for v in versions
+        if _has_no_audio(v.available_length or "", v.quality or "")
+        and any(resolve_stream_url(s.url) for s in v.sources)
+    )
+    return {
+        "versions": len(versions),
+        "playable": playable,
+        "sources_only": sources_only,
+        "no_audio_rows_with_stream_host_evidence": no_audio_stream,
+    }
+
+
+async def harvest_parity(entry, api_artist) -> dict:
+    """Content tabs via the Sheets API (this parse) versus htmlview: differing tabs."""
+    import os
+
+    key = os.environ.pop("LEAKSHEET_GOOGLE_API_KEY", "")
+    try:
+        html_artist = await async_fetch_and_parse(
+            entry.url, artist_name=entry.name, use_cache=False, write_cache=False
+        )
+    finally:
+        if key:
+            os.environ["LEAKSHEET_GOOGLE_API_KEY"] = key
+
+    def tabs(artist) -> dict[str, list]:
+        return {t.name: [e.dict() for e in t.entries] for t in (artist.tabs or [])}
+
+    a, h = tabs(api_artist), tabs(html_artist)
+    diffs = {}
+    for name in sorted(set(a) | set(h)):
+        ea, eh = a.get(name, []), h.get(name, [])
+        if ea != eh:
+            first = next((i for i, (x, y) in enumerate(zip(ea, eh)) if x != y), min(len(ea), len(eh)))
+            fields = sorted(k for k in (ea[first] if first < len(ea) else {}) if first < len(eh)
+                            and ea[first].get(k) != eh[first].get(k))
+            diffs[name] = {"api": len(ea), "htmlview": len(eh), "first_diff_row": first, "fields": fields}
+    return {"key_set": bool(key), "tabs": len(set(a) | set(h)), "differing": diffs}
+
+
+async def harvest_art(artist, tracker_url: str) -> dict:
+    """Warm every cover into a scratch cache and measure what a client would get."""
+    import io
+    import statistics
+    import tempfile
+
+    from PIL import Image
+
+    import src.api as api
+
+    saved = api.CACHE_DIR
+    api.CACHE_DIR = Path(tempfile.mkdtemp(prefix="sweep-art-"))
+    try:
+        await api._warm_era_art(artist, tracker_url)
+        sizes: dict[str, tuple[int, int]] = {}
+        for era in artist.eras:
+            got = api._read_image_cache(api._image_cache_key(api._era_art_base(tracker_url, era.name), None))
+            if got:
+                with Image.open(io.BytesIO(got[0])) as img:
+                    sizes[era.name] = img.size
+    finally:
+        api.CACHE_DIR = saved
+    widths = [w for w, _ in sizes.values()]
+    return {
+        "eras": len(artist.eras),
+        "with_cover": len(sizes),
+        "min_width": min(widths, default=0),
+        "median_width": int(statistics.median(widths)) if widths else 0,
+        "under_300": sorted(n for n, (w, _) in sizes.items() if w < 300),
+        "banners": sorted(n for n, (w, h) in sizes.items() if h and w / h > 2.5),
+    }
 
 
 def aggregate(results: list[dict]) -> dict:
@@ -257,13 +347,14 @@ async def main_async(args) -> int:
               f"({'all' if args.include_stale else 'up-to-date only'})")
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
-        sem = asyncio.Semaphore(args.concurrency)
+        # Parity toggles the API key in os.environ, so its parses must not overlap.
+        sem = asyncio.Semaphore(1 if args.parity else args.concurrency)
         results: list[dict] = []
         done = 0
 
         async def run(entry):
             nonlocal done
-            r = await sweep_one(entry, client, sem)
+            r = await sweep_one(entry, client, sem, art=args.art, parity=args.parity)
             results.append(r)
             done += 1
             (OUT_DIR / f"{r['slug']}.json").write_text(
@@ -288,6 +379,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--only", type=str, default=None)
     ap.add_argument("--concurrency", type=int, default=5)
+    ap.add_argument("--parity", action="store_true",
+                    help="diff content tabs via the Sheets API (needs LEAKSHEET_GOOGLE_API_KEY) vs htmlview")
+    ap.add_argument("--art", action="store_true",
+                    help="warm every cover into a scratch cache and record its size")
     ap.add_argument("--include-stale", action="store_true",
                     help="also sweep trackers TrackerHub marks as not up-to-date")
     return asyncio.run(main_async(ap.parse_args()))

@@ -36,6 +36,7 @@ def _load_urls() -> list[str]:
 
 
 LIVE_URLS = _load_urls()
+_SKIPPED: list[str] = []
 
 
 @pytest.mark.skipif(not LIVE_URLS, reason="no URLs in tests/live_trackers.txt")
@@ -44,6 +45,7 @@ async def test_live_tracker_parses_healthy(url):
     try:
         artist = await async_fetch_and_parse(url, use_cache=False, write_cache=False)
     except FetchError as e:
+        _SKIPPED.append(url)
         pytest.skip(f"fetch failed (tracker availability / network): {e}")
 
     violations = live_violations(artist)
@@ -51,3 +53,10 @@ async def test_live_tracker_parses_healthy(url):
         f"{url} → {artist.name!r} parsed with invariant violations:\n  - "
         + "\n  - ".join(violations)
     )
+
+
+@pytest.mark.skipif(not LIVE_URLS, reason="no URLs in tests/live_trackers.txt")
+def test_most_trackers_were_reachable():
+    """Runs after the parametrized fetches (module order). One tracker down is not our
+    bug; most of them down is a blocked runner, which must not pass as green."""
+    assert len(_SKIPPED) * 2 <= len(LIVE_URLS), f"{len(_SKIPPED)}/{len(LIVE_URLS)} fetches skipped: {_SKIPPED}"
