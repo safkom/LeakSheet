@@ -89,6 +89,22 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
+## parser.py::sources-as-links — listen links versus evidence
+
+A column's header does not settle what its URLs are, so two rules route them:
+
+- With no Link(s) column, a "Source(s)" column is the link column (Young Thug):
+  URLs the `/stream` resolver accepts become `links`, the rest stay `sources`.
+  With a Link(s) column (Travis), Sources stays evidence.
+- A row whose audio never leaked (availability Rumored/Confirmed, or quality
+  "Not Available") moves every URL to `sources`. Those are screenshots and
+  articles, often on file hosts (imgur.gg on Ye and Kendrick), and as `links`
+  the app offered Play for an image.
+
+`tests/_health.py` flags a tracker where under 5% of versions have any listen
+link, which is how a misread link column shows up. Links on hosts `/stream`
+cannot play are a host gap, which the ArtistGrid sweep reports instead.
+
 ## models.py::parse_song_credits — credit delimiters
 
 Trackers write credits in either style — `(prod. X)` (Ye, Kendrick) or `[prod. X]`
@@ -405,6 +421,20 @@ The comparison runs after the response, not during the parse: on a slow link to
 Google it added 15-20 s to every cold load. Since the payload carries the slot key,
 an upgrade changes the slot's bytes, never the payload. If a later Art-tab download
 fails, a stored copy of the same picture is kept rather than downgraded.
+
+## api.py::full-size-covers — a sheet image is fetched at full size
+
+A `sheets-images-rt/<token>=wN-hN` URL asks for the image at its cell's rendered
+size: 100-130 px on most trackers, 20 px in a short row (Carti). The same token
+with `=w1600` redirects to the original (Carti MUSIC [V2] 130 to 1179 px, Ye 102
+to 800, Young Thug 109 to 500). The warm tries that first and falls back to the
+URL as emitted.
+
+Two rules keep a good copy: a smaller copy of the same picture never replaces a
+stored one (a failed full-size download), and a sharper copy bumps the slot
+version, or clients keep the thumbnail they cached. The Art-tab identity gate
+(`fetcher.py::art-tab-identity`) stays: by name alone it picked the wrong cover
+for 42 of Ye's 43 eras. Of two copies of the same picture the larger one wins.
 
 ## api.py::_warm_era_art — covers are downloaded at parse time
 

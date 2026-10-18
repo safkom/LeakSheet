@@ -1022,8 +1022,8 @@ _IMAGE_DOWNLOAD_CAP = 25 * 1024 * 1024
 # checked from the header before the full-frame load() below.
 _IMAGE_MAX_DECODE_PIXELS = MAX_DECODE_PIXELS  # ~80MB peak as RGBA
 
-# Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s and docs.google.com/
-# sheets-images 302s to login for N>0, so those take the Pillow path.
+# Only lh3-lh6 accept arbitrary =sNNN sizing; lh7-rt 403s it, so the rest take the
+# Pillow path. Era covers are fetched full size at warm time (_full_size_cover_url).
 _GOOGLE_RESIZABLE_HOST_RE = re.compile(r"^lh[3-6]\.googleusercontent\.com\Z", re.IGNORECASE)
 # Suffix grammar — see docs/decisions.md::api.py::google-size-suffix-regex
 _GOOGLE_SIZE_SUFFIX_RE = re.compile(r"=[a-zA-Z]+\d*(-[a-zA-Z]+\d*)*$")
@@ -1266,6 +1266,35 @@ def _log_upstream_failure(what: str, url: str, exc: Exception) -> None:
         logger.error("%s for %s: %s", what, url[:80], exc, exc_info=exc)
 
 
+def _full_size_cover_url(url: str) -> str:
+    """A sheet image at up to 1600 px: the URL a sheet emits asks for its cell's size.
+
+    Keeps host and path, so the allowlist verdict holds.
+    See docs/decisions.md::api.py::full-size-covers.
+    """
+    parsed = urlparse(url)
+    if parsed.hostname == "docs.google.com" and parsed.path.startswith("/sheets-images-rt/"):
+        return _GOOGLE_SIZE_SUFFIX_RE.sub("", url) + "=w1600"
+    return url
+
+
+def _pixel_count(data: bytes) -> int:
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return img.width * img.height
+    except Exception:
+        return 0
+
+
+def _upgrades(current: bytes, other: bytes) -> bool:
+    """True when *other* is the same picture as *current* with more pixels."""
+    return _pixel_count(other) > _pixel_count(current) and same_artwork(current, other)
+
+
 _ERA_ART_WARM_CONCURRENCY = 3
 _background_tasks: set[asyncio.Task] = set()
 def _spawn_detached(coro) -> asyncio.Task:
@@ -1306,22 +1335,28 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 logger.debug("era art warm: %s failed: %s", url[:80], exc)
                 return b"", ""
 
+    async def download_full(url: str) -> tuple[bytes, str]:
+        full = _full_size_cover_url(url)
+        got = await download(full)
+        return got if got[0] or full == url else await download(url)
+
     async def warm(era_name: str, url: str) -> None:
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
         # /image-proxy find it under whatever token URL a client's payload holds.
         base = _era_art_base(tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        data, content_type = await download(url)
+        data, content_type = await download_full(url)
         stored = await asyncio.to_thread(_read_image_cache, key)
         candidate = candidates.get(era_name)
         if data and candidate:
-            better, better_type = await download(candidate)
-            if better and await asyncio.to_thread(same_artwork, data, better):
+            better, better_type = await download_full(candidate)
+            if better and await asyncio.to_thread(_upgrades, data, better):
                 data, content_type = better, better_type
-            elif not better and stored and await asyncio.to_thread(same_artwork, stored[0], data):
-                # The Art-tab image did not load this time: keep the upgrade already stored.
-                data, content_type = stored[0], stored[1]
+        if data and stored and await asyncio.to_thread(_upgrades, data, stored[0]):
+            # A larger copy of the same picture is already stored (an Art-tab image, or
+            # a full-size download that failed this time): never downgrade it.
+            data, content_type = stored[0], stored[1]
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
@@ -1332,7 +1367,10 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
             # The sheet changed this era's cover: its thumbnails show the old one, and a
             # new picture gets a new version so clients holding the old one refetch.
             await asyncio.to_thread(_drop_image_thumbnails, base)
-            if not await asyncio.to_thread(same_artwork, stored[0], data):
+            # A sharper copy is a new version too, or clients keep the thumbnail they hold.
+            if not await asyncio.to_thread(same_artwork, stored[0], data) or await asyncio.to_thread(
+                _upgrades, stored[0], data
+            ):
                 await asyncio.to_thread(update_art_pointer, base, bump=True)
         await asyncio.to_thread(_write_image_cache, key, data, content_type)
 

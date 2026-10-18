@@ -329,9 +329,31 @@ struct EvidenceSection: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                    if MiscLinkClassifier.classify(source.url) == .image {
+                        evidenceImage(url: url)
+                    }
                 }
             }
         }
+    }
+
+    /// Screenshots are the evidence on rumoured rows: shown inline, tap opens the source.
+    private func evidenceImage(url: URL) -> some View {
+        Button {
+            onOpenLink(url)
+        } label: {
+            CachedImage(
+                url: APIClient.shared.imageProxyURL(for: url.absoluteString, width: 640) ?? url,
+                maxPixelSize: 640
+            ) {
+                ArtworkPlaceholder(cornerRadius: 8)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Evidence image")
     }
 
 }

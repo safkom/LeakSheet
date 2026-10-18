@@ -80,6 +80,10 @@ _IMAGE_ALLOWED_DOMAINS = {
     # routes every thumbnail through this proxy.
     "img.youtube.com",
     "i.ytimg.com",
+    # Evidence screenshots shown inline (MiscLinkClassifier image hosts that serve files)
+    "i.imgur.com",
+    "i.ibb.co",
+    "i.postimg.cc",
     # Exact hostnames allowed for image proxy
     "lh3.googleusercontent.com",
     "lh4.googleusercontent.com",
@@ -184,6 +188,38 @@ def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]
 
 # Maps normalized header text to canonical field names.
 COLUMN_ALIASES: dict[str, str] = {
+    # Russian-language trackers (9mice); "дата cлива" with a Latin C is the sheet's spelling
+    "эра": "era",
+    "название": "name",
+    "примечания": "notes",
+    "длина": "track_length",
+    "дата слива": "leak_date",
+    "дата cлива": "leak_date",
+    "категория": "type",
+    "доступная длина": "available_length",
+    "качество": "quality",
+    "ссылка": "links",
+    "ссылки": "links",
+
+    # Spanish-language trackers (Anuel AA)
+    "nombre": "name",
+    "notas": "notes",
+    "tipo": "type",
+    "disponible": "available_length",
+    "disponible?": "available_length",
+    "calidad": "quality",
+    "duración": "track_length",
+    "enlace": "links",
+    "enlaces": "links",
+
+    # Header variants seen in the ArtistGrid sweep
+    "category": "type",
+    "availablity": "available_length",  # sic
+    "track notes": "notes",
+    "notes and information": "notes",
+    "description / notes": "notes",
+    "original youtube/soundcloud link": "links",
+
     # Core columns (present in nearly all trackers)
     "era": "era",
     "project": "era",             # Overlord's Lil Uzi Vert discography tracker
