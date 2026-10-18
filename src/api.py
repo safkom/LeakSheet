@@ -778,6 +778,13 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         write_cache=req.use_cache,
         timer=timer,
     )
+    if not artist.total_versions:
+        # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
+        failed, total = timer.tab_counts()
+        logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
+        if failed:
+            raise HTTPException(status_code=503, detail="This tracker's tabs did not load. Please try again.")
+        raise HTTPException(status_code=404, detail="No songs found in this tracker.")
 
     # Serve the bytes the cache write already serialized; serialize (off the event
     # loop) only when there are none: use_cache false, or the collapse guard refused.

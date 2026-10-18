@@ -176,17 +176,42 @@ class TestCollapseGuard:
         assert self._cached_versions(tmp_path) == kept
 
     def test_a_genuinely_shrunken_tracker_recovers_once_the_entry_is_stale(self, tmp_path):
-        """The guard prefers the old copy only inside STALE_CACHE_TTL (24 h).
+        """The guard prefers the old copy only inside COLLAPSE_GUARD_TTL (24 h).
         Past it a smaller parse must win, or a tracker that really shrank is
         frozen for as long as the old entry is served."""
         _set_cached_parsed(URL, self._artist_with(100))
         key = _cache_key(URL)
         meta_file = tmp_path / f"{key}.meta.json"
         meta = json.loads(meta_file.read_text())
-        meta["parsed_timestamp"] = time.time() - (fetcher.STALE_CACHE_TTL + 60)
+        meta["parsed_timestamp"] = time.time() - (fetcher.COLLAPSE_GUARD_TTL + 60)
         meta_file.write_text(json.dumps(meta))
 
         _set_cached_parsed(URL, self._artist_with(40))
+        assert self._cached_versions(tmp_path) == 40
+
+    def _age_entry(self, tmp_path, seconds: float) -> None:
+        meta_file = tmp_path / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_file.read_text())
+        meta["parsed_timestamp"] = time.time() - seconds
+        meta_file.write_text(json.dumps(meta))
+
+    @pytest.mark.parametrize(("failed_tabs", "kept"), [(1, 100), (0, 40)])
+    def test_failed_tabs_extend_the_guard_to_the_serve_window(self, tmp_path, failed_tabs, kept):
+        """Entries up to SERVE_STALE_TTL are served, so a partial parse of a 3-day-old
+        entry must not replace it; a parse with every tab loaded is a real shrink."""
+        _set_cached_parsed(URL, self._artist_with(100))
+        self._age_entry(tmp_path, 3 * 86400)
+
+        _set_cached_parsed(URL, self._artist_with(40), failed_tabs=failed_tabs)
+        assert self._cached_versions(tmp_path) == kept
+
+    def test_a_permanently_failing_tab_cannot_freeze_an_entry_past_the_serve_window(
+        self, tmp_path
+    ):
+        _set_cached_parsed(URL, self._artist_with(100))
+        self._age_entry(tmp_path, fetcher.SERVE_STALE_TTL + 60)
+
+        _set_cached_parsed(URL, self._artist_with(40), failed_tabs=1)
         assert self._cached_versions(tmp_path) == 40
 
 
@@ -221,7 +246,7 @@ class TestEmptyParseIsNeverCached:
         _set_cached_parsed(URL, TestCollapseGuard._artist_with(100))
         meta_file = tmp_path / f"{_cache_key(URL)}.meta.json"
         meta = json.loads(meta_file.read_text())
-        meta["parsed_timestamp"] = time.time() - (fetcher.STALE_CACHE_TTL + 60)
+        meta["parsed_timestamp"] = time.time() - (fetcher.COLLAPSE_GUARD_TTL + 60)
         meta_file.write_text(json.dumps(meta))
 
         _set_cached_parsed(URL, self._empty())

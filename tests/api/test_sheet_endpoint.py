@@ -190,7 +190,7 @@ class TestServeStaleWindow:
         from src import fetcher
 
         assert fetcher.SERVE_STALE_TTL == 7 * self.DAY
-        assert fetcher.STALE_CACHE_TTL == self.DAY
+        assert fetcher.COLLAPSE_GUARD_TTL == self.DAY
 
 
 class TestRevalidationDropsGoneSources:
@@ -289,6 +289,68 @@ class TestRevalidationDropsGoneSources:
         assert second.status_code == 200
         assert second.headers["X-Cache-Status"] == "stale"
         assert second.json()["total_songs"] == 4
+
+
+class TestEmptyTracker:
+    """A parse with no tracks is never cached, so a 200 would hand the app an empty tracker
+    to cache and list in Recents. It is a 404, like a sheet with no table data."""
+
+    NDJSON = {"Accept": "application/x-ndjson, application/json"}
+
+    @staticmethod
+    def _empty():
+        from src.models import Artist, Era
+        return Artist(name="SynthWave", slug="synthwave", eras=[Era(name="Index", sections=[])])
+
+    def test_an_empty_parse_is_a_404_on_both_responses(self, api_client, monkeypatch):
+        async def fake_fetch(url, **kwargs):
+            return self._empty()
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+        plain = api_client.post("/sheet", json={"url": URL})
+        streamed = api_client.post("/sheet", json={"url": URL}, headers=self.NDJSON)
+        assert plain.status_code == 404
+        assert plain.json()["detail"] == "No songs found in this tracker."
+        last = json.loads([line for line in streamed.content.split(b"\n") if line][-1])
+        assert last == {"type": "error", "status": 404, "detail": "No songs found in this tracker."}
+
+    def test_an_empty_parse_with_failed_tabs_is_a_retryable_503(self, api_client, monkeypatch):
+        """Failed tabs make it likely transient: a 5xx lets the app retry and fall back
+        to its own copy, which a 4xx forbids."""
+        async def fake_fetch(url, *, timer, **kwargs):
+            timer.tab_loaded("100", False)
+            return self._empty()
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 503
+        assert r.json()["detail"] == "This tracker's tabs did not load. Please try again."
+
+    @pytest.mark.parametrize("with_etag", [False, True])
+    @pytest.mark.parametrize("age_seconds", [0, 2 * 86400])
+    def test_an_empty_entry_on_disk_is_never_served(
+        self, api_client, artist, monkeypatch, with_etag, age_seconds
+    ):
+        """An entry written before empty parses were refused must not be served or 304'd."""
+        from src.fetcher import get_cached_etag, serialize_artist
+
+        _populate_cache(URL, artist, age_seconds=age_seconds)
+        key = _cache_key(_normalize_url(URL))
+        body, etag = serialize_artist(self._empty())
+        (api.CACHE_DIR / f"{key}.parsed.json").write_bytes(body)
+        meta_path = api.CACHE_DIR / f"{key}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta.update(content_hash=etag, total_versions=0, era_count=1)
+        meta_path.write_text(json.dumps(meta))
+
+        async def fake_fetch(url, **kwargs):
+            return self._empty()
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+
+        headers = {"If-None-Match": f'"{etag}"'} if with_etag else {}
+        r = api_client.post("/sheet", json={"url": URL}, headers=headers)
+        assert r.status_code == 404
+        assert get_cached_etag(URL) is None
 
 
 class TestForceRefresh:

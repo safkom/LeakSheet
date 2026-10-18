@@ -354,13 +354,12 @@ for a full cold parse anyway: production cold opens took 7.8-20.5 s. The app kee
 copy for days, so a week of stale-but-instant matches how it is used, and each served
 request refreshes the entry for the next one.
 
-`STALE_CACHE_TTL` (24 h) stays as the window of `fetcher.py::cache-collapse-guard`. It
+`COLLAPSE_GUARD_TTL` (24 h) is the window of `fetcher.py::cache-collapse-guard`. It
 is a different question: how long a *larger* old parse outranks a smaller new one. A
 week there would freeze a tracker that really shrank (DMCA, restructure) for a week,
 while a day still covers a partial fetch landing on a recently refreshed copy. The two
-constants are not meant to be equal. Known gap: a partial revalidation of a 1-7 day old
-entry is written, because the 24 h guard does not cover it; the next stale hit's
-revalidation repairs it.
+constants are not meant to be equal. A parse that recorded failed tab loads is the
+exception: the guard then covers the whole serve window (see `fetcher.py::cache-collapse-guard`).
 
 The window must not prolong content its source has revoked (DMCA). A failed revalidation
 only sets the 15-minute backoff, so a deleted or private sheet would otherwise be served
@@ -978,7 +977,7 @@ plausible, no error was raised, and only a forced refresh cleared it.
 
 The guard is deliberately one-sided. Growth always writes, a modest shrink
 always writes (trackers do lose tracks — DMCA, restructures), and the old copy
-wins only while it is still inside `STALE_CACHE_TTL` (24 h, deliberately shorter
+wins only while it is still inside `COLLAPSE_GUARD_TTL` (24 h, deliberately shorter
 than the 7-day serve window, see `api.py::serve-stale-window`); past that a
 genuinely shrunken tracker recovers on its own instead of being frozen for days.
 The refusal is logged at WARNING so a systematically broken tab is visible rather
@@ -987,11 +986,23 @@ than silent — which was the real defect here.
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an
 empty result was served as a hit for an hour and then cached again by the app. It is
-refused even over an entry past `STALE_CACHE_TTL`.
+refused even over an entry past `COLLAPSE_GUARD_TTL`.
 
-A partial load is only logged, never refused: a tab that is permanently missing would
+`/sheet` answers an empty parse with 404 "No songs found in this tracker.", like
+`NoTablesError`, on the JSON and the NDJSON response alike: a 200 put an empty tracker in
+the app's cache and Recents, while the app caches no error. A parse that also recorded
+failed tab loads is a 503 instead: it is likely transient, and on a 5xx the app falls back
+to its own copy, which a 4xx forbids. An empty entry already on disk (`total_versions` 0 in its meta) is neither served
+nor 304'd. The base-page branch, like the gid path, returns only a parse with songs; a
+hub table on the base page falls through to discovery.
+
+A partial load alone is never refused: a tab that is permanently missing would
 otherwise keep its tracker out of the cache for good, and a large drop is the ratio's
-job. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches) and
+job. It does widen the ratio's window: a parse that recorded failed tab loads and shrank
+past the ratio is refused over any entry younger than `SERVE_STALE_TTL`, because those
+entries are served and a partial revalidation of a 1-7 day old copy would replace a good
+one. Past the serve window the entry is no longer served, so the partial parse is written
+and a tab that fails for good cannot freeze its tracker. `PhaseTimer.tabs` records each tab page by gid (gid, secondary and hub fetches) and
 the last fetch of a gid wins: a hub sibling is fetched by the discovery probe and again by
 the merge, and the merge's page is the one whose songs are kept. `_parse_once` copies the
 shared parse timer's `tabs` into each caller's timer, as it does the phases. One WARNING
