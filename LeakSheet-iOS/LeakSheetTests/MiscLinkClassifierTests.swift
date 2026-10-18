@@ -28,6 +28,11 @@ struct MiscLinkClassifierTests {
         #expect(MiscLinkClassifier.classify(url) == .image)
     }
 
+    @Test(arguments: ["https://ibb.co/AbC123", "https://postimg.cc/AbC123"])
+    func `image viewer pages stay links`(url: String) {
+        #expect(MiscLinkClassifier.classify(url) == .link)
+    }
+
     // 2026-07-17: YouTube/Vimeo moved from .video to .embed (official
     // in-app embed players); .video now means a direct video file.
     @Test(arguments: [

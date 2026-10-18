@@ -50,8 +50,9 @@ nonisolated enum MiscLinkClassifier {
     private static let archiveHosts: Set<String> = [
         "mega.nz", "mediafire.com", "drive.google.com",
     ]
+    /// File hosts only: ibb.co and postimg.cc pages are HTML, so they stay links.
     private static let imageHosts: Set<String> = [
-        "i.imgur.com", "ibb.co", "i.ibb.co", "postimg.cc", "i.postimg.cc",
+        "i.imgur.com", "i.ibb.co", "i.postimg.cc",
     ]
 
     /// Classifies a raw link URL. A video file extension wins over the streamable-host
