@@ -1268,3 +1268,19 @@ Each rule was found by diffing API cells against `extract_table` on real workboo
 cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
 enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
 one private workbook.
+
+## api.py::_evict_image_cache — era originals have their own budget
+
+Era originals (`img_*.bin` with `"original": true` in the meta, written by `_warm_era_art` and the
+slot fill in `/image-proxy`) are the only copy of a cover once its Google token dies, about 30-40
+minutes after a parse. Evicting one for a tracker nobody re-parses loses the cover for good. They
+were evicted oldest-first with every resized variant under 200 MB, and since full-size storage 354 of
+them took 142 MB of that. Variants stay under `_IMAGE_CACHE_MAX_BYTES`; originals are only evicted,
+oldest first, past `_IMAGE_ORIGINALS_MAX_BYTES` (600 MB, so the cache directory is bounded at 800 MB).
+Originals are capped to 1600 px and 3 MB (`_IMAGE_ORIGINAL_MAX_BYTES`); larger images are not stored and the
+cover already cached stays. 1600 px is the widest bucket the app requests (Now Playing), before they are
+stored, so a sheet of huge images cannot fill the budget; the cap is applied before the re-warm
+comparison so an unchanged picture stays byte-equal. An original expires like any entry: after
+`_IMAGE_CACHE_TTL` (7 days) `_read_image_cache` misses it, and the eviction scan deletes it. One written
+before the flag existed counts as a variant until its tracker is re-warmed, and that exposure lasts a
+week at most. Eviction skips a victim whose mtime changed since the scan.
