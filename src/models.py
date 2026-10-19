@@ -816,26 +816,28 @@ def _split_alt_aliases(text: str) -> list[str]:
 # "(X) prod. Y": a closed group followed by an unbracketed credit keyword.
 _GROUP_THEN_CREDIT_RE = re.compile(r"^\(([^()]*)\)\s*(?=\S)")
 
-# "(???. Name)": the unknown title is a reference to Name, not an alias.
-_UNKNOWN_REF_RE = re.compile(r"^\?{2,}\s*[.:,\-–]?\s*(?=\S)")
-
 
 def _route_alt_line(line: str, collected: dict[str, list[str]]) -> str:
-    """Move credit tails and unknown-title refs off an alt line; return what remains.
+    """Move an unbracketed credit tail off an alt line; return what remains.
 
     See docs/decisions.md::models.py::_route_alt_line.
     """
     group = _GROUP_THEN_CREDIT_RE.match(line)
-    if group and _CREDIT_PART_RE.match(line, group.end()):
-        if _harvest_bare_credit(line[group.end():], collected):
-            line = f"({group.group(1)})"
-    if line.startswith("(") and line.endswith(")"):
-        ref = _UNKNOWN_REF_RE.match(line[1:-1].strip())
-        if ref:
-            name = line[1:-1].strip()[ref.end():].strip()
-            collected.setdefault("refs", []).append(name)
-            return ""
-    return line
+    if not group:
+        return line
+    tail = line[group.end():]
+    opener = _CREDIT_PART_RE.match(tail)
+    if opener is None or opener.lastgroup not in _BARE_CREDIT_FIELDS:
+        return line
+    # The tail's own opener was lost, leaving one closer without a partner.
+    if tail.count(")") > tail.count("("):
+        tail = tail[: tail.rindex(")")]
+    for part in _split_credit_parts(tail):
+        keyword = _CREDIT_PART_RE.match(part)
+        value = _WHITESPACE_RUN_RE.sub(" ", part[keyword.end():]).strip(" ,&") if keyword else ""
+        if value and keyword and keyword.lastgroup:
+            collected.setdefault(keyword.lastgroup, []).append(value)
+    return f"({group.group(1)})"
 
 
 class SongCredits(NamedTuple):
