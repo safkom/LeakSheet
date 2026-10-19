@@ -131,3 +131,42 @@ class TestAbandonedFileSweep:
 
         assert not stale.exists()
         assert live.exists()
+
+
+class TestEraOriginalBudget:
+    """Era originals cannot be refetched once their token dies; variants can."""
+
+    @staticmethod
+    def _put(api, name, size, age_s, original):
+        key = f"{name:0<8}"
+        api._write_image_cache(key, b"x" * size, "image/png", original=original)
+        bin_path, meta = api._image_cache_paths(key)
+        t = time.time() - age_s
+        os.utime(bin_path, (t, t))
+        return bin_path, meta
+
+    def test_pressure_drops_variants_and_keeps_older_originals(self, _isolate_cache, monkeypatch):
+        import src.api as api
+
+        monkeypatch.setattr(api, "_IMAGE_CACHE_MAX_BYTES", 250)
+        monkeypatch.setattr(api, "_IMAGE_ORIGINALS_MAX_BYTES", 10_000)
+        orig, _ = self._put(api, "a", 200, 1000, True)  # oldest
+        var1, _ = self._put(api, "b", 200, 500, False)
+        var2, _ = self._put(api, "c", 200, 100, False)
+
+        api._evict_image_cache()
+
+        assert orig.exists() and var2.exists() and not var1.exists()
+
+    def test_originals_only_overflow_is_bounded_oldest_first(self, _isolate_cache, monkeypatch):
+        import src.api as api
+
+        monkeypatch.setattr(api, "_IMAGE_ORIGINALS_MAX_BYTES", 450)
+        old, old_meta = self._put(api, "a", 200, 1000, True)
+        mid, _ = self._put(api, "b", 200, 500, True)
+        new, _ = self._put(api, "c", 200, 100, True)
+
+        api._evict_image_cache()
+
+        assert not old.exists() and not old_meta.exists()
+        assert mid.exists() and new.exists()

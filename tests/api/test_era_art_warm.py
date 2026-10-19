@@ -165,6 +165,16 @@ class TestWarmEraArt:
         assert api._read_image_cache(api._image_cache_key(base, None))[0] == _drawn(2, 300)
         assert api._read_image_cache(api._image_cache_key(base, 320)) is None
 
+    def test_a_warmed_original_is_flagged_for_the_originals_budget(self, google):
+        import json
+
+        url = _cover("flagged")
+        google.alive.add(url)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        _bin, meta = api._image_cache_paths(key)
+        assert json.loads(meta.read_text())["original"] is True
+
     def test_overlapping_warms_both_store_their_covers(self, google):
         donda, yandhi = _cover("donda"), _cover("yandhi")
         google.alive.update({donda, yandhi})
