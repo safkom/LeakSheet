@@ -1173,35 +1173,49 @@ def _evict_image_cache() -> None:
     alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
     for alias in [*CACHE_DIR.glob("imgalias_*.txt"), *CACHE_DIR.glob("imgsrc_*.json")]:
         unlink_if_older(alias, alias_cutoff)
-    # Pre-flag originals carry nothing in their meta; the alias that warmed one names its base.
-    aliased = set()
-    for alias in CACHE_DIR.glob("imgalias_*.txt"):
-        try:
-            aliased.add(_image_cache_key(alias.read_text().strip(), None))
-        except OSError:
-            continue
     variants: list = []
     originals: list = []
+    expired_before = time.time() - _IMAGE_CACHE_TTL
     for bin_path in CACHE_DIR.glob("img_*.bin"):
         try:
             stat = bin_path.stat()
         except OSError:
             continue
+        meta_path = bin_path.with_name(bin_path.name[:-4] + ".meta.json")
         try:
-            meta = json.loads(bin_path.with_name(bin_path.name[:-4] + ".meta.json").read_text())
+            meta = json.loads(meta_path.read_text())
             is_original = meta.get("original") is True
-        except (OSError, ValueError, AttributeError):
-            is_original = False
-        is_original = is_original or bin_path.name[4:-4] in aliased
+            expired = is_original and meta["timestamp"] < expired_before
+        except (OSError, ValueError, AttributeError, KeyError, TypeError):
+            is_original = expired = False
+        if expired:  # _read_image_cache would miss it; it only holds budget
+            bin_path.unlink(missing_ok=True)
+            meta_path.unlink(missing_ok=True)
+            continue
         (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
     for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
         entries.sort()
         total = sum(size for _, size, _ in entries)
         while entries and total > cap:
-            _, size, victim = entries.pop(0)
+            mtime, size, victim = entries.pop(0)
             total -= size
+            try:
+                if victim.stat().st_mtime != mtime:  # a worker just rewrote it
+                    continue
+            except OSError:
+                continue
             for p in (victim, victim.with_name(victim.name[:-4] + ".meta.json")):
                 p.unlink(missing_ok=True)
+
+
+async def _cap_original(data: bytes, content_type: str) -> tuple[bytes, str]:
+    """Downscale an era original to the widest bucket the app requests."""
+    if not data:
+        return data, content_type
+    async with _resize_slot():
+        return await asyncio.to_thread(
+            _resize_image_bytes, data, _IMAGE_SIZE_BUCKETS[-1], content_type
+        )
 
 
 def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, str]:
@@ -1353,7 +1367,9 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     async def download_full(url: str) -> tuple[bytes, str]:
         full = _full_size_cover_url(url)
         got = await download(full)
-        return got if got[0] or full == url else await download(url)
+        got = got if got[0] or full == url else await download(url)
+        # Capped before any comparison, so a re-warm of an unchanged picture is byte-equal.
+        return await _cap_original(*got)
 
     async def warm(era_name: str, url: str) -> None:
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
@@ -1499,7 +1515,10 @@ async def proxy_image(
             upstream_status = resp.status_code
             if slot is not None and upstream_status == 200 and _is_raster_image(ct):
                 # A cold slot keeps its original, so other widths need no upstream.
-                await asyncio.to_thread(_write_image_cache, _image_cache_key(slot, None), data, ct, original=True)
+                orig, orig_ct = await _cap_original(data, ct)
+                await asyncio.to_thread(
+                    _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
+                )
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)

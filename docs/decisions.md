@@ -1267,8 +1267,9 @@ minutes after a parse. Evicting one for a tracker nobody re-parses loses the cov
 were evicted oldest-first with every resized variant under 200 MB, and since full-size storage 354 of
 them took 142 MB of that. Variants stay under `_IMAGE_CACHE_MAX_BYTES`; originals are only evicted,
 oldest first, past `_IMAGE_ORIGINALS_MAX_BYTES` (600 MB, so the cache directory is bounded at 800 MB).
-Originals are not downscaled: the app requests era art at `w=1600` (Now Playing), so a smaller cap would
-upscale it. An original written before the flag existed counts as a variant until its tracker is
-re-warmed.
-An original from before the flag is recognised by the cover alias that warmed it: the alias
-names the base, and the original's key is `_image_cache_key(base, None)`.
+Originals are capped to 1600 px, the widest bucket the app requests (Now Playing), before they are
+stored, so a sheet of huge images cannot fill the budget; the cap is applied before the re-warm
+comparison so an unchanged picture stays byte-equal. An original expires like any entry: after
+`_IMAGE_CACHE_TTL` (7 days) `_read_image_cache` misses it, and the eviction scan deletes it. One written
+before the flag existed counts as a variant until its tracker is re-warmed, and that exposure lasts a
+week at most. Eviction skips a victim whose mtime changed since the scan.

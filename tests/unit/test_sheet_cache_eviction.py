@@ -171,18 +171,38 @@ class TestEraOriginalBudget:
         assert not old.exists() and not old_meta.exists()
         assert mid.exists() and new.exists()
 
-    def test_legacy_original_without_flag_survives_via_its_alias(self, _isolate_cache, monkeypatch):
+    def test_expired_originals_are_dropped(self, _isolate_cache, monkeypatch):
+        import json
+
         import src.api as api
 
-        monkeypatch.setattr(api, "_IMAGE_CACHE_MAX_BYTES", 250)
-        base = "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32
-        api._write_image_alias("https://docs.google.com/sheets-images-rt/tok", base)
-        legacy = api._image_cache_key(base, None)
-        api._write_image_cache(legacy, b"x" * 200, "image/png")  # written the old way
-        bin_path, _ = api._image_cache_paths(legacy)
-        os.utime(bin_path, (1, 1))  # oldest
-        var, _ = self._put(api, "v", 200, 100, False)
+        old, meta = self._put(api, "a", 10, 0, True)
+        fresh, _ = self._put(api, "b", 10, 0, True)
+        data = json.loads(meta.read_text())
+        data["timestamp"] = time.time() - api._IMAGE_CACHE_TTL - 60
+        meta.write_text(json.dumps(data))
 
         api._evict_image_cache()
 
-        assert bin_path.exists() and var.exists()
+        assert not old.exists() and not meta.exists() and fresh.exists()
+
+    def test_victim_rewritten_during_scan_is_kept(self, _isolate_cache, monkeypatch):
+        import src.api as api
+
+        monkeypatch.setattr(api, "_IMAGE_CACHE_MAX_BYTES", 100)
+        victim, _ = self._put(api, "a", 200, 1000, False)
+        real_stat = type(victim).stat
+        calls = {"n": 0}
+
+        def stat(self, *a, **k):
+            result = real_stat(self, *a, **k)
+            if self == victim:
+                calls["n"] += 1
+                if calls["n"] == 2:  # the re-check: a worker touched it after the scan
+                    os.utime(victim, (time.time(), time.time()))
+                    return real_stat(self, *a, **k)
+            return result
+
+        monkeypatch.setattr(type(victim), "stat", stat)
+        api._evict_image_cache()
+        assert victim.exists()

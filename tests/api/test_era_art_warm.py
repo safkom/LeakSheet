@@ -175,6 +175,17 @@ class TestWarmEraArt:
         _bin, meta = api._image_cache_paths(key)
         assert json.loads(meta.read_text())["original"] is True
 
+    def test_an_oversized_original_is_stored_at_the_widest_bucket(self, google):
+        import io
+
+        url = _cover("huge")
+        google.alive.add(url)
+        google.content[url] = _drawn(3, 4000)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        stored = api._read_image_cache(key)[0]
+        assert Image.open(io.BytesIO(stored)).width <= 1600
+
     def test_overlapping_warms_both_store_their_covers(self, google):
         donda, yandhi = _cover("donda"), _cover("yandhi")
         google.alive.update({donda, yandhi})
