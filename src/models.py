@@ -817,6 +817,9 @@ def _split_alt_aliases(text: str) -> list[str]:
 _GROUP_THEN_CREDIT_RE = re.compile(r"^\(([^()]*)\)\s*(?=\S)")
 
 
+_BARE_PROD_WORD_RE = re.compile(r"prod(?:uced|uction)\s+$", re.IGNORECASE)
+
+
 def _route_alt_line(line: str, collected: dict[str, list[str]]) -> str:
     """Move an unbracketed credit tail off an alt line; return what remains.
 
@@ -828,6 +831,9 @@ def _route_alt_line(line: str, collected: dict[str, list[str]]) -> str:
     tail = line[group.end():]
     opener = _CREDIT_PART_RE.match(tail)
     if opener is None or opener.lastgroup not in _BARE_CREDIT_FIELDS:
+        return line
+    # "Production Of Love" is a title; the keyword needs its dot or "by".
+    if _BARE_PROD_WORD_RE.match(opener.group(0)):
         return line
     # The tail's own opener was lost, leaving one closer without a partner.
     if tail.count(")") > tail.count("("):
