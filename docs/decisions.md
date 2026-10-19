@@ -1270,3 +1270,5 @@ oldest first, past `_IMAGE_ORIGINALS_MAX_BYTES` (600 MB, so the cache directory 
 Originals are not downscaled: the app requests era art at `w=1600` (Now Playing), so a smaller cap would
 upscale it. An original written before the flag existed counts as a variant until its tracker is
 re-warmed.
+An original from before the flag is recognised by the cover alias that warmed it: the alias
+names the base, and the original's key is `_image_cache_key(base, None)`.

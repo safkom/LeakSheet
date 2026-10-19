@@ -1173,6 +1173,13 @@ def _evict_image_cache() -> None:
     alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
     for alias in [*CACHE_DIR.glob("imgalias_*.txt"), *CACHE_DIR.glob("imgsrc_*.json")]:
         unlink_if_older(alias, alias_cutoff)
+    # Pre-flag originals carry nothing in their meta; the alias that warmed one names its base.
+    aliased = set()
+    for alias in CACHE_DIR.glob("imgalias_*.txt"):
+        try:
+            aliased.add(_image_cache_key(alias.read_text().strip(), None))
+        except OSError:
+            continue
     variants: list = []
     originals: list = []
     for bin_path in CACHE_DIR.glob("img_*.bin"):
@@ -1185,6 +1192,7 @@ def _evict_image_cache() -> None:
             is_original = meta.get("original") is True
         except (OSError, ValueError, AttributeError):
             is_original = False
+        is_original = is_original or bin_path.name[4:-4] in aliased
         (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
     for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
         entries.sort()
