@@ -1437,7 +1437,7 @@ def _acronym(era_key: str) -> str:
 # ---------------------------------------------------------------------------
 
 _REDIRECT_Q_RE = re.compile(r"(?:^|&)q=([^&]+)")
-_HTTP_RE = re.compile(r"https?://", re.I)
+_HTTP_RE = re.compile(r"https?://[^\s/]", re.I | re.A)
 
 
 def _clean_link(url: str) -> str:
@@ -1457,7 +1457,7 @@ def _clean_link(url: str) -> str:
 
 
 # docs/decisions.md::parser.py::_split_links
-_URL_START_RE = re.compile(r"https?://", re.I)
+_URL_START_RE = re.compile(r"https?://", re.I | re.A)
 _ENCODED_WS = frozenset({"%20", "%09", "%0a", "%0d"})
 # A scheme right after one of these is a wrapper's payload (web.archive.org/web/<ts>/https://…,
 # href.li/?http://…), not a second link.

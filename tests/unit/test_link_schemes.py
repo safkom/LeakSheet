@@ -70,3 +70,13 @@ def test_notice_links(bad):
         + _table(["Era", "Name", "Notes", "Link(s)"], ["E", "S", "n", GOOD])
     )
     assert all(n.link is None or n.link.startswith("http") for n in parse_sheet(html, "Test").notices)
+
+
+def test_unicode_case_folding_does_not_pass_as_http():
+    assert _clean_link("httpſ://evil.test/x") == ""  # U+017F folds to "s" under re.I alone
+    assert _split_links("httpſ://evil.test/x") == []
+
+
+@pytest.mark.parametrize("url", ["http://", "https://", "https:///path", "https:// x"])
+def test_hostless_links_are_dropped(url):
+    assert _clean_link(url) == ""
