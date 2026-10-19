@@ -813,6 +813,31 @@ def _split_alt_aliases(text: str) -> list[str]:
     return parts
 
 
+# "(X) prod. Y": a closed group followed by an unbracketed credit keyword.
+_GROUP_THEN_CREDIT_RE = re.compile(r"^\(([^()]*)\)\s*(?=\S)")
+
+# "(???. Name)": the unknown title is a reference to Name, not an alias.
+_UNKNOWN_REF_RE = re.compile(r"^\?{2,}\s*[.:,\-–]?\s*(?=\S)")
+
+
+def _route_alt_line(line: str, collected: dict[str, list[str]]) -> str:
+    """Move credit tails and unknown-title refs off an alt line; return what remains.
+
+    See docs/decisions.md::models.py::_route_alt_line.
+    """
+    group = _GROUP_THEN_CREDIT_RE.match(line)
+    if group and _CREDIT_PART_RE.match(line, group.end()):
+        if _harvest_bare_credit(line[group.end():], collected):
+            line = f"({group.group(1)})"
+    if line.startswith("(") and line.endswith(")"):
+        ref = _UNKNOWN_REF_RE.match(line[1:-1].strip())
+        if ref:
+            name = line[1:-1].strip()[ref.end():].strip()
+            collected.setdefault("refs", []).append(name)
+            return ""
+    return line
+
+
 class SongCredits(NamedTuple):
     """Structured result of :func:`parse_song_credits`."""
 
@@ -927,7 +952,7 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 
     alt_titles: list[str] = []
     for line in lines[1:]:
-        line = line.strip()
+        line = _route_alt_line(line.strip(), collected)
         # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
         if not line.strip("()[] "):
             continue

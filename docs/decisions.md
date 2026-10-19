@@ -137,6 +137,17 @@ both sides of the newline inside the repeat and backtracked exponentially on an
 unclosed `(` followed by many `, <newline>` lines (2,000 characters did not finish in
 15 s, S5852).
 
+## models.py::_route_alt_line — credit tails and unknown-title refs on alt lines
+
+A line like `(???. Name) prod. A, B & C)` has a closed group followed by an unbracketed
+credit whose own opener was lost. The line starts with `(` and ends with `)`, so the
+alias-list rule split it at the commas into `???. Name) prod. A` and friends. The tail
+now goes through the bare-credit path (only after a closed group, so `with` stays safe),
+and a `(???. Name)` group is a reference to Name, recorded as `refs`: `???` is a
+placeholder for a title nobody knows, never an alias. The same shape in the 2478-tab
+local corpus fell from 108 `???.` alt titles to 0. Ye's `???` placeholder track that
+the junk alt `???. Bon Iver` had glued onto five `Time2Time` versions now stands alone.
+
 ## parser.py::_reconcile_title_misreads — song identity from titles and alt titles
 
 Decided with the user, 2026-09-13, after the iOS version picker showed split songs.

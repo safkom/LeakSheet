@@ -294,6 +294,29 @@ class TestSongCreditParsing:
         title, feat, prod, *_ = parse_song_credits("Living Reckless [V1]")
         assert title == "Living Reckless [V1]" and prod is None and feat is None
 
+    @pytest.mark.parametrize("tail", [
+        "prod. Ann Producer, Bob Beat & Cy",
+        "prod. Ann Producer, Bob Beat & Cy)",
+        "feat. Dee Singer",
+    ])
+    def test_credit_tail_after_closed_group_is_not_an_alt_title(self, tail):
+        from src.models import parse_song_credits
+        c = parse_song_credits(f"Sample Song [V9]\n(???. Eli Example) {tail}")
+        assert c.alt_titles == []
+        assert c.refs == "Eli Example"
+        assert (c.producers or c.featuring) and ")" not in (c.producers or c.featuring)
+
+    def test_unknown_ref_group_on_its_own_or_with_bracketed_credit(self):
+        from src.models import parse_song_credits
+        for raw in ("Sample Song\n(????. Eli Example)", "Sample Song\n(???. Eli Example) (prod. Ann Producer)"):
+            c = parse_song_credits(raw)
+            assert c.alt_titles == [] and c.refs == "Eli Example"
+
+    def test_real_alias_with_comma_before_credit_tail_is_kept(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Sample Song\n(Alias One, Alias Two) prod. Ann Producer")
+        assert c.alt_titles == ["Alias One", "Alias Two"] and c.producers == "Ann Producer"
+
 
 class TestSongBadgePrecedence:
     """A song with several differently-badged versions must report the most
