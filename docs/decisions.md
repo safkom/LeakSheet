@@ -1267,7 +1267,8 @@ minutes after a parse. Evicting one for a tracker nobody re-parses loses the cov
 were evicted oldest-first with every resized variant under 200 MB, and since full-size storage 354 of
 them took 142 MB of that. Variants stay under `_IMAGE_CACHE_MAX_BYTES`; originals are only evicted,
 oldest first, past `_IMAGE_ORIGINALS_MAX_BYTES` (600 MB, so the cache directory is bounded at 800 MB).
-Originals are capped to 1600 px, the widest bucket the app requests (Now Playing), before they are
+Originals are capped to 1600 px and 3 MB (`_IMAGE_ORIGINAL_MAX_BYTES`); larger images are not stored and the
+cover already cached stays. 1600 px is the widest bucket the app requests (Now Playing), before they are
 stored, so a sheet of huge images cannot fill the budget; the cap is applied before the re-warm
 comparison so an unchanged picture stays byte-equal. An original expires like any entry: after
 `_IMAGE_CACHE_TTL` (7 days) `_read_image_cache` misses it, and the eviction scan deletes it. One written

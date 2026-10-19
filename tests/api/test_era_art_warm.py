@@ -186,6 +186,41 @@ class TestWarmEraArt:
         stored = api._read_image_cache(key)[0]
         assert Image.open(io.BytesIO(stored)).width <= 1600
 
+    def test_an_unresizable_oversize_original_is_not_stored_and_keeps_the_old_copy(self, google):
+        first, huge = _cover("good"), _cover("giant")
+        google.alive.add(first)
+        google.content[first] = _drawn(1, 400)
+        asyncio.run(api._warm_era_art(_artist(("Donda", first)), TRACKER))
+        google.alive = {huge}
+        google.content[huge] = _drawn(1, 400) + b"0" * (16 * 1024 * 1024)  # over the 15 MB resize cap
+        asyncio.run(api._warm_era_art(_artist(("Donda", huge)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        assert api._read_image_cache(key)[0] == _drawn(1, 400)
+
+    def test_an_unchanged_small_cover_is_byte_equal_across_warms(self, google):
+        url = _cover("steady")
+        google.alive.add(url)
+        google.content[url] = _drawn(2, 900)
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        before = api._read_image_cache(key)
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        assert api._read_image_cache(key)[:2] == before[:2] == (_drawn(2, 900), "image/png")
+
+    def test_an_alpha_png_stays_png_when_capped(self, google):
+        import io
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (2400, 2400), (10, 20, 30, 128)).save(buf, format="PNG")
+        url = _cover("alpha")
+        google.alive.add(url)
+        google.content[url] = buf.getvalue()
+        asyncio.run(api._warm_era_art(_artist(("Donda", url)), TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Donda"), None)
+        data, ct, _ = api._read_image_cache(key)
+        img = Image.open(io.BytesIO(data))
+        assert (ct, img.format, img.width) == ("image/png", "PNG", 1600)
+
     def test_overlapping_warms_both_store_their_covers(self, google):
         donda, yandhi = _cover("donda"), _cover("yandhi")
         google.alive.update({donda, yandhi})

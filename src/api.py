@@ -1004,6 +1004,7 @@ _IMAGE_ALIAS_TTL = 30 * 86400
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
 # Era originals have their own budget: the token URL that made one is dead within the hour.
 _IMAGE_ORIGINALS_MAX_BYTES = 600 * 1024 * 1024
+_IMAGE_ORIGINAL_MAX_BYTES = 3 * 1024 * 1024  # per original, after the 1600 px cap
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
 # Concurrent Pillow decodes: each can hold a 15MB input plus a 20MP decode (~80MB
 # RGBA). At least 1: a Semaphore(0) would hang every resize forever.
@@ -1189,8 +1190,12 @@ def _evict_image_cache() -> None:
         except (OSError, ValueError, AttributeError, KeyError, TypeError):
             is_original = expired = False
         if expired:  # _read_image_cache would miss it; it only holds budget
-            bin_path.unlink(missing_ok=True)
-            meta_path.unlink(missing_ok=True)
+            try:
+                if bin_path.stat().st_mtime == stat.st_mtime:  # else a worker just rewrote it
+                    bin_path.unlink(missing_ok=True)
+                    meta_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             continue
         (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
     for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
@@ -1209,13 +1214,21 @@ def _evict_image_cache() -> None:
 
 
 async def _cap_original(data: bytes, content_type: str) -> tuple[bytes, str]:
-    """Downscale an era original to the widest bucket the app requests."""
+    """Downscale an era original to the widest bucket the app requests.
+
+    Returns empty bytes when it is still over _IMAGE_ORIGINAL_MAX_BYTES (undecodable or
+    too large to resize): callers then keep the cover already stored.
+    """
     if not data:
         return data, content_type
     async with _resize_slot():
-        return await asyncio.to_thread(
+        data, content_type = await asyncio.to_thread(
             _resize_image_bytes, data, _IMAGE_SIZE_BUCKETS[-1], content_type
         )
+    if len(data) > _IMAGE_ORIGINAL_MAX_BYTES:
+        logger.info("era original not stored: %d bytes after the cap", len(data))
+        return b"", ""
+    return data, content_type
 
 
 def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, str]:
@@ -1516,9 +1529,10 @@ async def proxy_image(
             if slot is not None and upstream_status == 200 and _is_raster_image(ct):
                 # A cold slot keeps its original, so other widths need no upstream.
                 orig, orig_ct = await _cap_original(data, ct)
-                await asyncio.to_thread(
-                    _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
-                )
+                if orig:
+                    await asyncio.to_thread(
+                        _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
+                    )
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
