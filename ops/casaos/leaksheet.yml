@@ -21,6 +21,13 @@ services:
         target: /app/.cache
         bind:
           create_host_path: true
+    # The API fetches attacker-chosen URLs; only the cache, /tmp and gunicorn's socket are writable.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/app/.gunicorn:uid=1000,gid=1000,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     # ~2x headroom for three workers, without letting a runaway parse take the host.
     deploy:
       resources:
