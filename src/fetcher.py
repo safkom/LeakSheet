@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
+from html import unescape as _html_unescape
 import io
 import json
 import logging
@@ -406,11 +407,21 @@ _EMOJI_RE = re.compile(
 _MIN_ERAS_FOR_VALID_GID = 5
 
 # Prefixes to strip from inferred artist names (e.g. "Updated Lil Uzi Vert")
+# A bare "New " is not stripped: it is the first word of "New Order".
 TITLE_PREFIXES = [
     "Updated ",
-    "New ",
     "Official ",
 ]
+
+# Longest first, so " Leak Tracker" wins over its own tail " Tracker".
+_SUFFIXES_LONGEST_FIRST = sorted(TITLE_SUFFIXES, key=len, reverse=True)
+
+
+def _strip_title_suffixes(name: str) -> str:
+    for suffix in _SUFFIXES_LONGEST_FIRST:
+        if name.lower().endswith(suffix.lower()):
+            name = name[: -len(suffix)].strip()
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -553,37 +564,26 @@ def _infer_artist_name(title: str) -> str:
          "Updated Lil Uzi Vert Tracker - Google Drive" → "Lil Uzi Vert"
          "The Guy From Degrassi Tracker (reup 12.29.25) - Google Drive" → "Drake"
     """
-    name = title.strip()
+    name = _html_unescape(title).strip()
 
-    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.),
-    # case-insensitively.
-    for suffix in TITLE_SUFFIXES:
-        if name.lower().endswith(suffix.lower()):
-            name = name[: -len(suffix)].strip()
+    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.).
+    name = _strip_title_suffixes(name)
 
     # Step 1b: strip qualifiers after the word Tracker ("Tracker 2.0", "Tracker v3",
-    # "Tracker PUBLIC", "Tracker [Official]").
-    name = _TRACKER_QUALIFIER_RE.sub("", name).strip()
-    # Re-apply suffix stripping after version removal
-    for suffix in TITLE_SUFFIXES:
-        if name.endswith(suffix):
-            name = name[: -len(suffix)].strip()
+    # "Tracker PUBLIC", "Tracker [Official]"), then re-apply suffix stripping.
+    name = _strip_title_suffixes(_TRACKER_QUALIFIER_RE.sub("", name).strip())
 
     # Step 2: Strip trailing parenthetical/bracketed metadata like
     # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
     paren_match = _TRAILING_BRACKET_RE.search(name)
     if paren_match:
-        stripped = name[: paren_match.start()].strip()
-        # Re-apply suffix stripping on the cleaned name
-        for suffix in TITLE_SUFFIXES:
-            if stripped.endswith(suffix):
-                stripped = stripped[: -len(suffix)].strip()
+        stripped = _strip_title_suffixes(name[: paren_match.start()].strip())
         if stripped:
             name = stripped
 
     # Step 3: Strip known prefixes ("Updated ", etc.)
     for prefix in TITLE_PREFIXES:
-        if name.startswith(prefix):
+        if name.lower().startswith(prefix.lower()):
             name = name[len(prefix):].strip()
 
     # Step 4: Strip leading emoji
