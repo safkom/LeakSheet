@@ -134,6 +134,13 @@ actor CacheService {
         try? data.write(to: metaFile(for: url), options: .atomic)
     }
 
+    /// Refresh both files' mtime so the age sweep keeps an entry in daily use.
+    func touch(url: String) {
+        let now = [FileAttributeKey.modificationDate: Date.now]
+        try? FileManager.default.setAttributes(now, ofItemAtPath: cacheFile(for: url).path)
+        try? FileManager.default.setAttributes(now, ofItemAtPath: metaFile(for: url).path)
+    }
+
     func removeTracker(for url: String) {
         try? FileManager.default.removeItem(at: cacheFile(for: url))
         try? FileManager.default.removeItem(at: metaFile(for: url))

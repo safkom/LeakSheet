@@ -80,6 +80,21 @@ struct CacheServiceTests {
         #expect(!FileManager.default.fileExists(atPath: orphan.path))
     }
 
+    @Test func `touch keeps an old entry through the age sweep`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = "https://example.com/daily"
+        await service.cacheTracker(url: url, data: artistJSON, etag: "e")
+        let file = await service.cacheFileForTesting(url: url)
+        let meta = await service.metaFileForTesting(url: url)
+        let old = [FileAttributeKey.modificationDate: Date.now.addingTimeInterval(-40 * 24 * 3600)]
+        for f in [file, meta] { try FileManager.default.setAttributes(old, ofItemAtPath: f.path) }
+
+        await service.touch(url: url)
+        await service.sweepLegacyEntries()
+        #expect(await service.getCachedEtag(for: url) == "e")
+    }
+
     @Test func `cache size reflects stored entries and clears`() async throws {
         let (service, dir) = makeService()
         defer { try? FileManager.default.removeItem(at: dir) }
