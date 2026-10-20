@@ -1437,24 +1437,27 @@ def _acronym(era_key: str) -> str:
 # ---------------------------------------------------------------------------
 
 _REDIRECT_Q_RE = re.compile(r"(?:^|&)q=([^&]+)")
+_HTTP_RE = re.compile(r"https?://[^\s/]", re.I | re.A)
 
 
 def _clean_link(url: str) -> str:
-    """Strip Google redirect wrapper from URLs.
+    """Strip Google redirect wrapper from URLs; "" for anything but http(s).
 
     Google Sheets wraps links as: https://www.google.com/url?q=REAL_URL&...
     """
+    url = url.strip()
     if "google.com/url" in url:
         # Same result as parse_qs(urlparse(url).query)["q"][0], at a fraction of the cost.
         query = url.partition("#")[0].partition("?")[2]
         m = _REDIRECT_Q_RE.search(query)
         if m:
-            return unquote_plus(m.group(1))
-    return url
+            url = unquote_plus(m.group(1)).strip()
+    # docs/decisions.md::parser.py::_clean_link
+    return url if _HTTP_RE.match(url) else ""
 
 
 # docs/decisions.md::parser.py::_split_links
-_URL_START_RE = re.compile(r"https?://", re.I)
+_URL_START_RE = re.compile(r"https?://", re.I | re.A)
 _ENCODED_WS = frozenset({"%20", "%09", "%0a", "%0d"})
 # A scheme right after one of these is a wrapper's payload (web.archive.org/web/<ts>/https://…,
 # href.li/?http://…), not a second link.
@@ -2603,20 +2606,18 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         src_cell = _get_cell(row, sources_idx)
         src_lines = src_cell.text.split("\n")
         for link_idx, link in enumerate(src_cell.links):
-            cleaned = _clean_link(link)
-            if not cleaned:
-                continue
             line_num = (
                 src_cell.link_lines[link_idx]
                 if link_idx < len(src_cell.link_lines)
                 else -1
             )
             label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
-            # With no link column, "Source" is the link column (docs/decisions.md::parser.py::sources-as-links).
-            if links_idx is None and resolve_stream_url(cleaned):
-                source_listen.append(cleaned)
-            else:
-                sources.append(SourceRef(label=label, url=cleaned))
+            for cleaned in _split_links(link):
+                # With no link column, "Source" is the link column (docs/decisions.md::parser.py::sources-as-links).
+                if links_idx is None and resolve_stream_url(cleaned):
+                    source_listen.append(cleaned)
+                else:
+                    sources.append(SourceRef(label=label, url=cleaned))
     # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
     # merging them while preserving order and removing duplicates.
     all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell) + source_listen
@@ -2640,10 +2641,10 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         quality_text = split_quality or ""
 
     if _has_no_audio(avail_text, quality_text):
-        # Nothing to play: the row's URLs are screenshots and articles (sources-as-links).
+        # Only what /stream cannot play is evidence (docs/decisions.md::parser.py::sources-as-links).
         known = {s.url for s in sources}
-        sources += [SourceRef(url=u) for u in merged_links if u not in known]
-        merged_links = []
+        sources += [SourceRef(url=u) for u in merged_links if u not in known and not _playable_no_audio(u)]
+        merged_links = [u for u in merged_links if _playable_no_audio(u)]
 
     version = SongVersion(
         name=title,
@@ -2686,6 +2687,16 @@ def _has_no_audio(avail_text: str, quality_text: str) -> bool:
         avail_text.strip().lower() in _NO_AUDIO_AVAILABILITY
         or quality_text.strip().lower() == "not available"
     )
+
+
+_IMAGE_EXT_RE = re.compile(r"\.(?:png|jpe?g|gif|webp|heic|bmp)(?:$|[?#])", re.I)
+
+
+def _playable_no_audio(url: str) -> bool:
+    """True for a link on a no-audio row that is still worth Play: streamable, not an image."""
+    stream = resolve_stream_url(url)
+    # imgur.gg is the image host there; its ids carry no extension.
+    return bool(stream) and not stream.startswith("https://imgur.gg/") and not _IMAGE_EXT_RE.search(url)
 
 
 # Base names that mark an UNKNOWN song: distinct mystery tracks, never grouped

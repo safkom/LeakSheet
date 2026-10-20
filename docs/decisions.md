@@ -89,6 +89,14 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
+## parser.py::_clean_link — http(s) only
+
+Tracker cells are untrusted and the apps open every link they get: `javascript:`, `file:`, `smb:`
+and `x-apple.systempreferences:` URLs crash `SFSafariViewController` on iOS and run URL handlers
+through `NSWorkspace` on macOS. `_clean_link` returns "" for anything that is not http(s), after
+unwrapping a Google `url?q=`, so every producer (rows, Source column, notes, notices, misc tabs)
+drops them in one place. The apps check again (`SafariItem.isWebURL`) for cached or older payloads.
+
 ## parser.py::sources-as-links — listen links versus evidence
 
 A column's header does not settle what its URLs are, so two rules route them:
@@ -97,9 +105,11 @@ A column's header does not settle what its URLs are, so two rules route them:
   URLs the `/stream` resolver accepts become `links`, the rest stay `sources`.
   With a Link(s) column (Travis), Sources stays evidence.
 - A row whose audio never leaked (availability Rumored/Confirmed, or quality
-  "Not Available") moves every URL to `sources`. Those are screenshots and
-  articles, often on file hosts (imgur.gg on Ye and Kendrick), and as `links`
-  the app offered Play for an image.
+  "Not Available") demotes only the URLs `/stream` cannot play, plus images (a
+  file extension, or any imgur.gg link: that host carries the screenshots on Ye
+  and Kendrick, with extensionless ids). Streamable links stay `links`: the
+  tracker may still link the file, and the app's Play fails visibly when it is
+  not audio. Demoting every URL hid real files on rows marked Rumored.
 
 `tests/_health.py` flags a tracker where under 5% of versions have any listen
 link, which is how a misread link column shows up. Links on hosts `/stream`
@@ -1258,3 +1268,19 @@ Each rule was found by diffing API cells against `extract_table` on real workboo
 cannot delay every tab's fallback. A body naming `SERVICE_DISABLED` or `API_KEY_*` (API not
 enabled, restricted or invalid key) pauses the API for 60 s; a plain 403 does not, since it is
 one private workbook.
+
+## api.py::_evict_image_cache — era originals have their own budget
+
+Era originals (`img_*.bin` with `"original": true` in the meta, written by `_warm_era_art` and the
+slot fill in `/image-proxy`) are the only copy of a cover once its Google token dies, about 30-40
+minutes after a parse. Evicting one for a tracker nobody re-parses loses the cover for good. They
+were evicted oldest-first with every resized variant under 200 MB, and since full-size storage 354 of
+them took 142 MB of that. Variants stay under `_IMAGE_CACHE_MAX_BYTES`; originals are only evicted,
+oldest first, past `_IMAGE_ORIGINALS_MAX_BYTES` (600 MB, so the cache directory is bounded at 800 MB).
+Originals are capped to 1600 px and 3 MB (`_IMAGE_ORIGINAL_MAX_BYTES`); larger images are not stored and the
+cover already cached stays. 1600 px is the widest bucket the app requests (Now Playing), before they are
+stored, so a sheet of huge images cannot fill the budget; the cap is applied before the re-warm
+comparison so an unchanged picture stays byte-equal. An original expires like any entry: after
+`_IMAGE_CACHE_TTL` (7 days) `_read_image_cache` misses it, and the eviction scan deletes it. One written
+before the flag existed counts as a variant until its tracker is re-warmed, and that exposure lasts a
+week at most. Eviction skips a victim whose mtime changed since the scan.
