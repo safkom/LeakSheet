@@ -783,3 +783,34 @@ class TestPartialLoadReachesTheTimingLine:
                  if m.startswith("sheet_timing") and marker in m]
         assert len(lines) == 1, caplog.text
         assert "failed_tabs=1/3" in lines[0]
+
+
+class TestSheetsApiCountReachesTheTimingLine:
+    """The shared parse timer's Sheets API counters reach the caller's timer, like the tab counts."""
+
+    def test_parse_once_carries_the_api_tab_counters(self, monkeypatch):
+        import asyncio
+
+        from src import api
+        from src.fetcher import PhaseTimer
+
+        async def fake_fetch(url, *, timer, **_kw):
+            timer.api_tabs_asked, timer.api_tabs_served = 3, 2
+            return object()
+
+        async def no_warm(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        monkeypatch.setattr(api, "_warm_era_art", no_warm)
+
+        async def run() -> PhaseTimer:
+            timer = PhaseTimer()
+            _artist, warm = await api._parse_once(
+                URL, cache_ttl=0, use_cache=False, write_cache=False, timer=timer
+            )
+            await warm
+            return timer
+
+        timer = asyncio.run(run())
+        assert "api_tabs=2/3" in timer.log_line()
