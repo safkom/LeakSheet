@@ -781,13 +781,15 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         write_cache=req.use_cache,
         timer=timer,
     )
-    if not artist.total_versions and not any(t.entries for t in artist.tabs):
-        # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
+    if not artist.total_versions:
         failed, total = timer.tab_counts()
-        logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
-        if failed:
-            raise HTTPException(status_code=503, detail="This tracker's tabs did not load. Please try again.")
-        raise HTTPException(status_code=404, detail="No songs found in this tracker.")
+        # A loaded content tab cannot vouch for song tabs that did not load.
+        if failed or not any(t.entries for t in artist.tabs):
+            # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
+            logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
+            if failed:
+                raise HTTPException(status_code=503, detail="This tracker's tabs did not load. Please try again.")
+            raise HTTPException(status_code=404, detail="No songs found in this tracker.")
 
     # Serve the bytes the cache write already serialized; serialize (off the event
     # loop) only when there are none: use_cache false, or the collapse guard refused.
@@ -2217,6 +2219,7 @@ async def proxy_stream(
     except GdriveInterstitialError as e:
         # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
         # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code

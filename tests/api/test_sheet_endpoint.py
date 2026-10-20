@@ -338,6 +338,18 @@ class TestEmptyTracker:
         assert r.status_code == 200
         assert r.json()["tabs"][0]["entries"]
 
+    def test_a_loaded_misc_tab_does_not_hide_failed_song_tabs(self, api_client, monkeypatch):
+        from src.models import MiscEntry, TabSection
+
+        async def fake_fetch(url, *, timer, **kwargs):
+            timer.tab_loaded("100", False)
+            artist = self._empty()
+            artist.tabs = [TabSection(kind="misc", name="Misc", entries=[MiscEntry(name="Demo", source_tab="misc")])]
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        assert api_client.post("/sheet", json={"url": URL}).status_code == 503
+
     def test_an_empty_parse_with_failed_tabs_is_a_retryable_503(self, api_client, monkeypatch):
         """Failed tabs make it likely transient: a 5xx lets the app retry and fall back
         to its own copy, which a 4xx forbids."""

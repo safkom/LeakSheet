@@ -194,6 +194,20 @@ class TestStreamEndpointGdriveMapping:
         assert r.status_code == 409
         assert r.json()["detail"] == "gdrive_interstitial"
 
+    def test_an_interstitial_counts_as_the_host_answering(self, api_client, monkeypatch):
+        from src import host_health
+        from src.streaming import GdriveInterstitialError
+
+        recorded = []
+        monkeypatch.setattr(host_health, "record_success", lambda provider: recorded.append(provider))
+
+        async def fake_stream_audio(url, *, range_header=None):
+            raise GdriveInterstitialError("interstitial persisted after confirm retry")
+
+        monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
+        api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
+        assert recorded == ["gdrive"]
+
     def test_permission_denied_maps_to_424_upstream_forbidden(self, api_client, monkeypatch):
         async def fake_stream_audio(url, *, range_header=None):
             return FakeUpstreamResponse(403)

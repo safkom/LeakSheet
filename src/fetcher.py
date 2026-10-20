@@ -1015,7 +1015,7 @@ def _collapse_reason(
     Past ``COLLAPSE_GUARD_TTL`` (``SERVE_STALE_TTL`` when tab loads failed) the old entry is
     never preferred, so a tracker that genuinely shrank recovers.
     """
-    if new <= 0 and not tab_entries:  # a tabs-only tracker is a real one
+    if new <= 0 and (not tab_entries or failed_tabs):  # a tabs-only tracker is a real one
         return f"empty parse, {new_eras} eras"
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
@@ -2209,12 +2209,20 @@ async def async_fetch_and_parse(
             return best_artist
 
         # Fallback: no tab yielded songs, often because the tabs that held them failed.
-        _warn_failed_tabs(url_norm, t)
-        html, title = await async_fetch_sheet_html(
-            url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-        )
-        name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
+        try:
+            html, title = await async_fetch_sheet_html(
+                url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+            )
+            name = _resolve_artist_name(title, artist_name)
+            artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
+            # A workbook of content tabs only (Misc, Music Videos) has no song tab to win discovery.
+            await _load_secondary_tabs(
+                artist, art_gid, content_tabs, url_norm, title,
+                client=client, timeout=timeout, cache_ttl=cache_ttl,
+                use_cache=use_cache, t=t, page_paths=page_paths, api_tabs=api_tabs,
+            )
+        finally:
+            _warn_failed_tabs(url_norm, t)  # also when the fallback itself fails
         await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist, t=t)
