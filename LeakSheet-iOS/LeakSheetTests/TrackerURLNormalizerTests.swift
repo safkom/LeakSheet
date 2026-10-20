@@ -60,6 +60,16 @@ struct TrackerURLNormalizerTests {
 }
 
 struct RecentTrackerDedupTests {
+    @Test func `one undecodable entry keeps the rest`() {
+        let json = #"""
+        [{"name":"A","slug":"a","sourceUrl":"https://a.example/","totalSongs":1,"availableCount":0,"snippetCount":0,"confirmedCount":0},
+         {"name":"broken"},
+         {"name":"C","slug":"c","sourceUrl":"https://c.example/","totalSongs":2,"availableCount":0,"snippetCount":0,"confirmedCount":0}]
+        """#
+        let decoded = RecentTrackersManager.decodeEntries(Data(json.utf8))
+        #expect(decoded.map(\.slug) == ["a", "c"])
+    }
+
     private func entry(url: String, slug: String = "x", name: String = "X") -> RecentTrackersManager.RecentTracker {
         RecentTrackersManager.RecentTracker(
             name: name, slug: slug, sourceUrl: url, totalSongs: 0,

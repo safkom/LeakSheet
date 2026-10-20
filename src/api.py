@@ -55,7 +55,8 @@ from src.fetcher import (
     CACHE_DIR,
     _era_art_base,
     read_art_pointer,
-    same_artwork,
+    _SAME_ART_MAX_DISTANCE,
+    _dhash,
     update_art_pointer,
     _atomic_write_bytes,
     _normalize_url,
@@ -77,6 +78,7 @@ from src.fetcher import (
     ParseError,
     PhaseTimer,
     SERVE_STALE_TTL,
+    SignedOutError,
     SourceGoneError,
     unlink_if_older,
 )
@@ -626,8 +628,9 @@ async def _background_revalidate(url: str) -> None:
     except Exception as e:
         _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
-        # Gone or private at the source: a stale copy must not outlive it (serve-stale-window).
-        if isinstance(e, (AccessDeniedError, SourceGoneError)):
+        # Gone or signed-out at the source: a stale copy must not outlive it (serve-stale-window).
+        # A plain 403 may be a challenge page or a blip, so it keeps the copy.
+        if isinstance(e, (SignedOutError, SourceGoneError)):
             try:
                 await asyncio.to_thread(drop_cached_entry, url)
             except OSError as exc:
@@ -780,12 +783,14 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         timer=timer,
     )
     if not artist.total_versions:
-        # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
         failed, total = timer.tab_counts()
-        logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
-        if failed:
-            raise HTTPException(status_code=503, detail="This tracker's tabs did not load. Please try again.")
-        raise HTTPException(status_code=404, detail="No songs found in this tracker.")
+        # A loaded content tab cannot vouch for song tabs that did not load.
+        if failed or not any(t.entries for t in artist.tabs):
+            # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
+            logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
+            if failed:
+                raise HTTPException(status_code=503, detail="This tracker's tabs did not load. Please try again.")
+            raise HTTPException(status_code=404, detail="No songs found in this tracker.")
 
     # Serve the bytes the cache write already serialized; serialize (off the event
     # loop) only when there are none: use_cache false, or the collapse guard refused.
@@ -1338,9 +1343,13 @@ def _pixel_count(data: bytes) -> int:
         return 0
 
 
-def _upgrades(current: bytes, other: bytes) -> bool:
-    """True when *other* is the same picture as *current* with more pixels."""
-    return _pixel_count(other) > _pixel_count(current) and same_artwork(current, other)
+def _fingerprint(data: bytes) -> tuple[int, int | None]:
+    """(pixel count, dHash) of an image: decoded once, compared many times."""
+    return _pixel_count(data), _dhash(data)
+
+
+def _same_fingerprint(a: tuple[int, int | None], b: tuple[int, int | None]) -> bool:
+    return a[1] is not None and b[1] is not None and (a[1] ^ b[1]).bit_count() <= _SAME_ART_MAX_DISTANCE
 
 
 _ERA_ART_WARM_CONCURRENCY = 3
@@ -1391,6 +1400,18 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         return await _cap_original(*got)
 
     async def warm(era_name: str, url: str) -> None:
+        fps: dict[bytes, tuple[int, int | None]] = {}
+
+        async def fp(data: bytes) -> tuple[int, int | None]:
+            if data not in fps:
+                fps[data] = await asyncio.to_thread(_fingerprint, data)
+            return fps[data]
+
+        async def upgrades(current: bytes, other: bytes) -> bool:
+            """True when *other* is the same picture as *current* with more pixels."""
+            cur, oth = await fp(current), await fp(other)
+            return oth[0] > cur[0] and _same_fingerprint(cur, oth)
+
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
         # /image-proxy find it under whatever token URL a client's payload holds.
         base = _era_art_base(tracker_url, era_name)
@@ -1401,9 +1422,9 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         candidate = candidates.get(era_name)
         if data and candidate:
             better, better_type = await download_full(candidate)
-            if better and await asyncio.to_thread(_upgrades, data, better):
+            if better and await upgrades(data, better):
                 data, content_type = better, better_type
-        if data and stored and await asyncio.to_thread(_upgrades, data, stored[0]):
+        if data and stored and await upgrades(data, stored[0]):
             # A larger copy of the same picture is already stored (an Art-tab image, or
             # a full-size download that failed this time): never downgrade it.
             data, content_type = stored[0], stored[1]
@@ -1418,13 +1439,24 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
             # new picture gets a new version so clients holding the old one refetch.
             await asyncio.to_thread(_drop_image_thumbnails, base)
             # A sharper copy is a new version too, or clients keep the thumbnail they hold.
-            if not await asyncio.to_thread(same_artwork, stored[0], data) or await asyncio.to_thread(
-                _upgrades, stored[0], data
+            if not _same_fingerprint(await fp(stored[0]), await fp(data)) or await upgrades(
+                stored[0], data
             ):
                 await asyncio.to_thread(update_art_pointer, base, bump=True)
         await asyncio.to_thread(_write_image_cache, key, data, content_type, original=True)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
+
+
+async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
+    try:
+        orig, orig_ct = await _cap_original(data, ct)
+        key = _image_cache_key(slot, None)
+        # A warm that finished meanwhile stored a sharper original: keep it.
+        if orig and not await asyncio.to_thread(_read_image_cache, key):
+            await asyncio.to_thread(_write_image_cache, key, orig, orig_ct, original=True)
+    except Exception as exc:  # a failed fill only costs the next width an upstream fetch
+        logger.warning("slot original not stored: %s", exc)
 
 
 @app.get("/image-proxy")
@@ -1533,12 +1565,9 @@ async def proxy_image(
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
             if slot is not None and upstream_status == 200 and _is_raster_image(ct):
-                # A cold slot keeps its original, so other widths need no upstream.
-                orig, orig_ct = await _cap_original(data, ct)
-                if orig:
-                    await asyncio.to_thread(
-                        _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
-                    )
+                # A cold slot keeps its original, so other widths need no upstream; the
+                # capping decode runs after the response, not before it.
+                _spawn_detached(_store_slot_original(slot, data, ct))
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
@@ -2225,6 +2254,7 @@ async def proxy_stream(
     except GdriveInterstitialError as e:
         # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
         raise HTTPException(status_code=409, detail="gdrive_interstitial")
     except UpstreamStatusError as e:
         # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
@@ -2239,9 +2269,16 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
+        if e.status_code in (401, 403):
+            # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
+            raise HTTPException(status_code=424, detail="upstream_forbidden")
         if 400 <= e.status_code < 500:
             raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
         raise HTTPException(status_code=503, detail="Upstream error")
+    except NonMediaError as e:
+        logger.warning("Stream non-media for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=415, detail="not_media")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.
@@ -2255,10 +2292,10 @@ async def proxy_stream(
     await _record_stream_outcome(provider, url, None)
 
     # Permission-required/private gdrive files come back from stream_audio
-    # as a real 403 response object (not raised) — relay it as-is.
+    # as a real 403 response object (not raised); see the 424 mapping above.
     if resp.status_code == 403:
         await resp.aclose()
-        raise HTTPException(status_code=403, detail="Provider denied access")
+        raise HTTPException(status_code=424, detail="upstream_forbidden")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
     # instead of collapsing it into a generic 503.

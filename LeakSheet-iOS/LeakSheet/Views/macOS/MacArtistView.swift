@@ -159,9 +159,11 @@ struct MacArtistView: View {
                 .font(.caption2)
                 .foregroundStyle(Color.lsError)
         } else if let lastUpdated {
-            Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            TimelineView(.periodic(from: .now, by: 15)) { _ in
+                Text("Updated \(lastUpdated.formatted(.relative(presentation: .named)))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

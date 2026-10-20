@@ -142,6 +142,8 @@ private struct ArtistContentView: View {
 
                 // Data-age chip (pull to refresh). Always occupies its line, so a late timestamp
                 // can't shunt the list down under the user's finger.
+                // The timeline re-evaluates the label so "N seconds ago" keeps ticking.
+                TimelineView(.periodic(from: .now, by: 15)) { _ in
                 Text(vm.loadNotice ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
                     .font(.caption2)
                     .foregroundStyle(vm.loadNotice == nil ? Color.secondary : Color.lsError)
@@ -150,6 +152,7 @@ private struct ArtistContentView: View {
                     .padding(.top, 1)
                     .opacity(vm.loadNotice == nil && lastUpdated == nil ? 0 : 1)
                     .accessibilityHidden(vm.loadNotice == nil && lastUpdated == nil)
+                }
 
                 // Sections first, then the filters for the section showing; filters act only on
                 // the song tree, so they disappear on a content tab.
@@ -205,6 +208,8 @@ private struct ArtistContentView: View {
             }
         }
         .refreshable { await onRefresh() }
+        // The mini player floats over the list: a soft edge keeps row text from bleeding through.
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
         .background(
             ZStack {
                 Color.lsBackground

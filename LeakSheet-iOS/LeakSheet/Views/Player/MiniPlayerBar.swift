@@ -23,7 +23,7 @@ struct MiniPlayerBar: View {
             VStack(spacing: 0) {
                 // Progress slider
                 if player.duration > 0 {
-                    ScrubberSlider()
+                    ScrubberSlider(compact: true)
                         .frame(height: 16)
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
@@ -57,6 +57,13 @@ struct MiniPlayerBar: View {
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
+                                if !player.error.isEmpty {
+                                    // A failed play must say so here, not only in Now Playing.
+                                    Text(player.error)
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.lsError)
+                                        .lineLimit(1)
+                                } else {
                                 HStack(spacing: 4) {
                                     Text(player.eraName.isEmpty ? player.artistName : "\(player.artistName) · \(player.eraName)")
                                         .font(.caption2)
@@ -65,6 +72,7 @@ struct MiniPlayerBar: View {
                                     if player.duration > 0 {
                                         PlaybackElapsedText()
                                     }
+                                }
                                 }
                             }
 
@@ -112,7 +120,7 @@ struct MiniPlayerBar: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                        .accessibilityLabel(player.isPlaying || player.loading ? "Pause" : "Play")
 
                         Button {
                             player.playNext()

@@ -325,8 +325,10 @@ class TestResolverUpstreamStatus:
         with pytest.raises(streaming.NonMediaError):
             await streaming.resolve_kraken_cdn_url(self.KRAKEN_VIEW)
         self._serve(monkeypatch, lambda request: httpx.Response(200, json={"name": "x"}))
-        with pytest.raises(streaming.NonMediaError):
+        with pytest.raises(ValueError) as exc:
             await streaming.resolve_imgur_cdn_url(API)
+        # An API answer without a cdnUrl is a resolver failure, not a media verdict.
+        assert not isinstance(exc.value, streaming.NonMediaError)
 
 
 @pytest.mark.asyncio

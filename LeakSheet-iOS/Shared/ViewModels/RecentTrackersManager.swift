@@ -158,13 +158,22 @@ final class RecentTrackersManager {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey) else { return }
-        let decoded = (try? JSONDecoder().decode([RecentTracker].self, from: data)) ?? []
+        let decoded = Self.decodeEntries(data)
         // Collapse duplicates persisted under an older identity scheme, before first
         // render, so ForEach ids stay unique.
         trackers = Self.deduplicated(decoded)
         if trackers.count != decoded.count {
             save()
         }
+    }
+
+    /// Element-wise, so one undecodable entry costs only itself, not the whole list.
+    nonisolated static func decodeEntries(_ data: Data) -> [RecentTracker] {
+        nonisolated struct Lossy: Decodable {
+            let value: RecentTracker?
+            init(from decoder: Decoder) throws { value = try? RecentTracker(from: decoder) }
+        }
+        return ((try? JSONDecoder().decode([Lossy].self, from: data)) ?? []).compactMap(\.value)
     }
 
     private func save() {

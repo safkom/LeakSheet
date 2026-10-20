@@ -102,6 +102,30 @@ class TestProber:
         await host_health.probe_once()
         assert host_health.down("pillows") is None
 
+    async def test_a_gdrive_interstitial_means_the_host_answers(self, clock, monkeypatch):
+        gd = "https://drive.google.com/file/d/abc123XYZ/view"
+        host_health.record_failure("gdrive", gd, hard=True, error="ConnectError")
+
+        async def interstitial(url, *, range_header=None):
+            raise streaming.GdriveInterstitialError("html")
+
+        monkeypatch.setattr(host_health, "stream_audio", interstitial)
+        await host_health.probe_once()
+        assert host_health.down("gdrive") is None
+
+    async def test_one_crashing_probe_does_not_abort_the_round(self, clock, monkeypatch):
+        host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+        host_health.record_failure("imgur", "https://imgur.gg/f/abc", hard=True, error="ConnectError")
+
+        async def answer(url, *, range_header=None):
+            if "pillows" in url:
+                raise RuntimeError("bug")
+            return httpx.Response(206)
+
+        monkeypatch.setattr(host_health, "stream_audio", answer)
+        await host_health.probe_once()
+        assert host_health.down("imgur") is None
+
     async def test_still_unreachable_stays_down(self, clock, monkeypatch):
         host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
 
@@ -176,3 +200,38 @@ async def test_the_prober_uses_its_own_connection_pool(clock, monkeypatch):
     shared = streaming._get_shared_client()
     await host_health.probe_once()
     assert seen and seen[0] is not shared
+
+
+async def test_a_resolver_failure_is_a_soft_host_failure_not_a_success(clock):
+    from src import api
+
+    host_health.record_success("imgur")
+    for link in ("https://imgur.gg/f/a", "https://imgur.gg/f/b", "https://imgur.gg/f/c"):
+        await api._record_stream_outcome("imgur", link, ValueError("imgur.gg API response missing cdnUrl"))
+    assert host_health.down("imgur")
+
+
+def test_half_open_admits_one_request_then_refuses_until_it_reports(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    assert host_health.refusing("pillows")  # inside the window
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None  # the probe request
+    assert host_health.refusing("pillows")  # the herd behind it
+    assert host_health.refusing("pillows")
+
+
+def test_a_failed_half_open_probe_waits_a_full_window(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S - 1
+    assert host_health.refusing("pillows")
+
+
+def test_a_lost_probe_is_replaced_after_its_lease(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None
+    clock[0] += host_health._PROBE_LEASE_S + 1
+    assert host_health.refusing("pillows") is None

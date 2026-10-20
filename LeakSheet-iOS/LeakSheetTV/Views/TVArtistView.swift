@@ -183,9 +183,10 @@ struct TVArtistView: View {
             if isExpanded {
                 // `offset` in the id, not baseName: several distinct "???" songs per era would
                 // collide in ForEach (the same reason EraRow.id carries an ordinal).
-                let eraVersions = songs.flatMap { $0.versions.filter(\.isStreamable) }
-                ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
-                    TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraVersions: eraVersions)
+                LazyVStack(spacing: 10) {
+                    ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
+                        TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraSongs: songs)
+                    }
                 }
             }
         }
