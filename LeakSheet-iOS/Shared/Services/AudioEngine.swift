@@ -182,27 +182,26 @@ final class AudioEngine {
     }
 
     func togglePlay() {
-        guard let player else {
-            if let track = currentTrack, let link = track.streamableLink,
-               let url = StreamResolver.streamURL(for: link) {
-                activateAudioSession()
-                let asset = AVURLAsset(url: url)
-                let item = AVPlayerItem(asset: asset)
-                item.preferredForwardBufferDuration = 10
-                setupPlayer(with: item)
-                player?.play()
-                startLoadingTimeout()
-            }
+        // A failed or missing item cannot resume: rebuild it, keeping the queue contexts.
+        guard let player, let item = player.currentItem, item.status != .failed else {
+            retryCurrent()
             return
         }
 
-        if isPlaying {
+        if isPlaying || loading {
             player.pause()
             isPlaying = false
         } else {
             player.play()
             // isPlaying set by timeControlStatus observer
         }
+    }
+
+    /// Reload the current track from scratch without clearing the era/list/queue contexts.
+    func retryCurrent() {
+        guard let track = currentTrack else { return }
+        playTrack(track, artistName: artistName, eraName: eraName, artUrl: artUrl,
+                  artistSlug: artistSlug, preservingQueueContext: true)
     }
 
     /// Start playback, never stop it.
@@ -543,6 +542,7 @@ final class AudioEngine {
                     case .playing:
                         self.isPlaying = true
                         self.loading = false
+                        self.error = ""
                     case .paused:
                         self.isPlaying = false
                         // A pause during a stall is the user's choice, not a timeout.

@@ -115,13 +115,8 @@ struct NowPlayingView: View {
                             .font(.caption)
                             .foregroundStyle(Color.lsError)
                             .multilineTextAlignment(.center)
-                        if let track = player.currentTrack {
-                            Button("Try Again") {
-                                player.playTrack(
-                                    track, artistName: player.artistName, eraName: player.eraName,
-                                    artUrl: player.artUrl, artistSlug: player.artistSlug
-                                )
-                            }
+                        if player.currentTrack != nil {
+                            Button("Try Again") { player.retryCurrent() }
                             .font(.caption.weight(.semibold))
                             .buttonStyle(.glass)
                         }

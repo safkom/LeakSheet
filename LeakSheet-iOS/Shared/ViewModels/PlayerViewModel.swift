@@ -67,6 +67,10 @@ final class PlayerViewModel {
         engine.togglePlay()
     }
 
+    func retryCurrent() {
+        engine.retryCurrent()
+    }
+
     func seekTo(_ time: TimeInterval) {
         engine.seekTo(time)
     }
