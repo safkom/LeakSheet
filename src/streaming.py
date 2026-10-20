@@ -764,6 +764,9 @@ def _is_gdrive_host_allowed(url: str) -> bool:
     return host in _GDRIVE_ALLOWED_HOSTS or bool(_GDRIVE_USERCONTENT_RE.match(host))
 
 
+_GDRIVE_MAX_REDIRECTS = 5
+
+
 async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Response:
     """Fetch a Google Drive stream URL, transparently bypassing the
     virus-scan interstitial once via the confirm-form retry.
@@ -775,16 +778,17 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
     client = _get_shared_client()
 
     async def _get(url: str) -> httpx.Response:
-        if not _is_gdrive_host_allowed(url):
-            raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
-        request = client.build_request("GET", url, headers=headers)
-        resp = await client.send(request, stream=True)
-        if not _is_gdrive_host_allowed(str(resp.url)):
+        # Redirects are followed by hand so every hop is vetted before it is requested.
+        for _ in range(_GDRIVE_MAX_REDIRECTS + 1):
+            if not _is_gdrive_host_allowed(url):
+                raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
+            request = client.build_request("GET", url, headers=headers)
+            resp = await client.send(request, stream=True, follow_redirects=False)
+            if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
+                return resp
+            url = str(resp.url.join(resp.headers["location"]))
             await resp.aclose()
-            raise ValueError(
-                f"gdrive request redirected off-allowlist to {str(resp.url)[:80]}"
-            )
-        return resp
+        raise ValueError("gdrive request redirected too many times")
 
     resp = await _get(stream_url)
 
@@ -816,7 +820,7 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
         if resp.status_code == 403:
             return resp
         retry_ct = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-        if retry_ct == "text/html":
+        if retry_ct == "text/html" and resp.status_code == 200:
             await resp.aclose()
             raise GdriveInterstitialError(
                 "drive.google.com interstitial persisted after confirm retry"
