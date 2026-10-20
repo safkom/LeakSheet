@@ -134,6 +134,29 @@ class TestSynthesizedRange:
         assert r.headers["content-range"] == "bytes 2-5/10"
         assert r.headers["content-length"] == "4"
 
+    def test_an_inverted_range_is_not_forwarded_upstream(self, api_client, monkeypatch):
+        fake = _patch_stream(monkeypatch, FakeStreamResponse(
+            200, {"content-type": "audio/mpeg", "content-length": "10"}, [b"0123456789"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS}, headers={"Range": "bytes=5-3"})
+        assert fake.last_range is None
+        assert r.status_code == 200
+
+    def test_a_206_with_an_inverted_content_range_gets_no_derived_length(self, api_client, monkeypatch):
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            206, {"content-type": "audio/mpeg", "content-range": "bytes 9-2/10", "content-length": "4"},
+            [b"0123"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS}, headers={"Range": "bytes=0-3"})
+        assert "-" not in r.headers.get("content-length", "")
+
+    def test_a_206_with_a_junk_content_length_forwards_none(self, api_client, monkeypatch):
+        _patch_stream(monkeypatch, FakeStreamResponse(
+            206, {"content-type": "audio/mpeg", "content-length": "4, 7"}, [b"0123"],
+        ))
+        r = api_client.get("/stream", params={"url": PILLOWS}, headers={"Range": "bytes=0-3"})
+        assert r.headers.get("content-length") != "4, 7"
+
     def test_upstream_416_is_relayed(self, api_client, monkeypatch):
         _patch_stream(monkeypatch, FakeStreamResponse(
             416, {"content-range": "bytes */10"}, [],

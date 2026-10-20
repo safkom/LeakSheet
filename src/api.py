@@ -2050,8 +2050,8 @@ def _plan_synthesized_range(range_header: str | None, total_size: int | None) ->
     first, last, suffix = m.groups()
     if suffix is not None:
         n = int(suffix)
-        if n == 0:
-            return _RangePlan("unsatisfiable")  # 'bytes=-0' names no bytes
+        if n == 0 or total_size == 0:
+            return _RangePlan("unsatisfiable")  # names no bytes, or the file has none
         if total_size is None:
             # Suffix against an unknown total → can't synthesise a valid
             # Content-Range; fall back to the full body.
@@ -2175,8 +2175,9 @@ async def proxy_stream(
     # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
     # not forwarded: upstreams turn garbage Range values into hard errors.
     range_header = request.headers.get("range")
-    if range_header and not _RANGE_SPEC.match(range_header.strip()):
-        range_header = None
+    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
+    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
+        range_header = None  # malformed or inverted: ignored, never forwarded
 
     # Parse range shape early — needed for the MIME sniffing decision below.
     _range_start = 0
@@ -2306,14 +2307,14 @@ async def proxy_stream(
             # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
             # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
             cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
-            if cr_match:
+            if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
                 headers["Content-Length"] = str(
                     int(cr_match.group(2)) - int(cr_match.group(1)) + 1
                 )
         if "Content-Length" not in headers:
-            cl = resp.headers.get("content-length")
-            if cl:
-                headers["Content-Length"] = cl
+            cl = _parse_content_length(resp.headers.get("content-length"))
+            if cl is not None:
+                headers["Content-Length"] = str(cl)
 
         return StreamingResponse(
             _closing(_iter_upstream()),
