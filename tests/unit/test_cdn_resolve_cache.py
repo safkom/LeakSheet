@@ -38,7 +38,10 @@ class _FakeClient:
         self.responses = responses
         self.calls: list[str] = []
 
-    async def get(self, url, headers=None):
+    def build_request(self, method, url, headers=None, timeout=None):
+        return url
+
+    async def send(self, url, stream=False):
         self.calls.append(url)
         result = self.responses.get(url)
         if result is None:
@@ -144,7 +147,10 @@ class TestSingleFlight:
             def __init__(self):
                 self.calls: list[str] = []
 
-            async def get(self, url, headers=None):
+            def build_request(self, method, url, headers=None, timeout=None):
+                return url
+
+            async def send(self, url, stream=False):
                 self.calls.append(url)
                 started.set()
                 await release.wait()
@@ -175,7 +181,10 @@ class TestSingleFlight:
             def __init__(self):
                 self.calls: list[str] = []
 
-            async def get(self, url, headers=None):
+            def build_request(self, method, url, headers=None, timeout=None):
+                return url
+
+            async def send(self, url, stream=False):
                 self.calls.append(url)
                 started.set()
                 await release.wait()
@@ -286,6 +295,21 @@ class TestResolverUpstreamStatus:
         with pytest.raises(streaming.UpstreamStatusError) as exc:
             await streaming.resolve_imgur_cdn_url(API)
         assert exc.value.status_code == expected
+
+    @pytest.mark.asyncio
+    async def test_the_imgur_api_body_is_read_only_up_to_the_cap(self, monkeypatch):
+        read = []
+
+        async def body():
+            for _ in range(200):
+                read.append(1)
+                yield b"x" * 65536
+
+        self._serve(monkeypatch, lambda request: httpx.Response(200, content=body()))
+        with pytest.raises(ValueError):
+            await streaming.resolve_imgur_cdn_url(API)
+        # imgur.gg and its temp fallback are each read once, up to the cap.
+        assert len(read) * 65536 <= 2 * (streaming._SCRAPER_READ_CAP + 65536)
 
     @pytest.mark.asyncio
     async def test_imgur_4xx_beside_a_5xx_is_not_a_status_answer(self, monkeypatch):

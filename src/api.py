@@ -81,6 +81,7 @@ from src.fetcher import (
     unlink_if_older,
 )
 from src.streaming import (
+    get_capped,
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
     NonMediaError,
@@ -1846,7 +1847,7 @@ async def proxy_metadata(
     try:
         async with asyncio.timeout(_METADATA_DEADLINE_S):
             client = _get_shared_client()
-            resp = await client.get(meta_url, headers=headers, timeout=_METADATA_TIMEOUT)
+            resp = await get_capped(client, meta_url, headers, timeout=_METADATA_TIMEOUT)
             if resp.status_code != 200:
                 # pillows' metadata .txt endpoint 404s for some files — notably
                 # videos. The CDN's Content-Type on the stream URL is accurate,

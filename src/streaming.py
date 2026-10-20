@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -176,10 +177,12 @@ async def _get_text_capped(
     headers: dict[str, str],
     *,
     cap: int = _SCRAPER_READ_CAP,
+    timeout: httpx.Timeout | float | None = None,
 ) -> tuple[int, str]:
     """GET *url*, decoding at most *cap* decompressed bytes. Returns
     (status_code, text). Stops consuming the body once the cap is reached."""
-    request = client.build_request("GET", url, headers=headers)
+    extra = {} if timeout is None else {"timeout": timeout}
+    request = client.build_request("GET", url, headers=headers, **extra)
     resp = await client.send(request, stream=True)
     try:
         buf = bytearray()
@@ -190,6 +193,28 @@ async def _get_text_capped(
         return resp.status_code, bytes(buf[:cap]).decode("utf-8", errors="ignore")
     finally:
         await resp.aclose()
+
+
+class CappedResponse:
+    """A provider answer read through _get_text_capped: status and capped text."""
+
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+    def json(self):
+        return json.loads(self.text)
+
+
+async def get_capped(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    *,
+    timeout: httpx.Timeout | float | None = None,
+) -> CappedResponse:
+    """A small provider API answer, read with the scraper byte cap."""
+    return CappedResponse(*await _get_text_capped(client, url, headers, timeout=timeout))
 
 
 # ---------------------------------------------------------------------------
@@ -593,9 +618,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
         for url in urls_to_try:
             try:
                 client = _get_shared_client()
-                resp = await client.get(
-                    url, headers={"User-Agent": _STREAM_USER_AGENT}
-                )
+                resp = await get_capped(client, url, {"User-Agent": _STREAM_USER_AGENT})
                 if resp.status_code != 200:
                     statuses.append(resp.status_code)
                     last_err = ValueError(

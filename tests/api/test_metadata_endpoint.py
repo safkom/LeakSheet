@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import asyncio
+import json
 import logging
 
 import httpx
@@ -28,6 +29,15 @@ class FakeResp:
             raise ValueError("not json")
         return self._json
 
+    async def aiter_bytes(self):
+        body = self.text or json.dumps(self._json or "")
+        for i in range(0, len(body), 1024):
+            self.bytes_read = i + 1024
+            yield body[i : i + 1024].encode()
+
+    async def aclose(self):
+        pass
+
 
 class FakeClient:
     def __init__(self, resp):
@@ -35,9 +45,12 @@ class FakeClient:
         self.calls = 0
         self.timeout = None
 
-    async def get(self, url, headers=None, timeout=None):
+    def build_request(self, method, url, headers=None, timeout=None):
         self.calls += 1
         self.timeout = timeout
+        return url
+
+    async def send(self, request, stream=False):
         return self.resp
 
 
@@ -91,7 +104,10 @@ class _HangingClient:
     def __init__(self, get_resp=None):
         self.get_resp = get_resp
 
-    async def get(self, url, headers=None, timeout=None):
+    def build_request(self, method, url, headers=None, timeout=None):
+        return url
+
+    async def send(self, request, stream=False):
         if self.get_resp is not None:
             return self.get_resp
         await asyncio.Event().wait()
@@ -101,6 +117,13 @@ class _HangingClient:
 
 
 class TestMetadataIsBounded:
+    def test_a_huge_body_is_read_only_up_to_the_cap(self, api_client, monkeypatch):
+        resp = FakeResp(text="x" * (5 * 1024 * 1024))
+        _install(monkeypatch, resp)
+        r = api_client.get("/metadata", params={"url": "https://pillows.su/f/abc"})
+        assert r.status_code == 200
+        assert resp.bytes_read <= 512 * 1024 + 1024
+
     def test_calls_carry_a_short_connect_timeout(self, api_client, monkeypatch):
         fake = _install(monkeypatch, FakeResp(text=PILLOWS_BLOB))
         api_client.get("/metadata", params={"url": "https://pillows.su/f/abc"})
