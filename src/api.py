@@ -607,6 +607,8 @@ async def _parse_once(
             for name, seconds in shared.phases.items():
                 timer.phases[name] = timer.phases.get(name, 0.0) + seconds
             timer.tabs.update(shared.tabs)
+            timer.api_tabs_asked += shared.api_tabs_asked
+            timer.api_tabs_served += shared.api_tabs_served
 
 
 async def _background_revalidate(url: str) -> None:
