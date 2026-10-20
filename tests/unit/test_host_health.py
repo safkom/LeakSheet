@@ -102,6 +102,30 @@ class TestProber:
         await host_health.probe_once()
         assert host_health.down("pillows") is None
 
+    async def test_a_gdrive_interstitial_means_the_host_answers(self, clock, monkeypatch):
+        gd = "https://drive.google.com/file/d/abc123XYZ/view"
+        host_health.record_failure("gdrive", gd, hard=True, error="ConnectError")
+
+        async def interstitial(url, *, range_header=None):
+            raise streaming.GdriveInterstitialError("html")
+
+        monkeypatch.setattr(host_health, "stream_audio", interstitial)
+        await host_health.probe_once()
+        assert host_health.down("gdrive") is None
+
+    async def test_one_crashing_probe_does_not_abort_the_round(self, clock, monkeypatch):
+        host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+        host_health.record_failure("imgur", "https://imgur.gg/f/abc", hard=True, error="ConnectError")
+
+        async def answer(url, *, range_header=None):
+            if "pillows" in url:
+                raise RuntimeError("bug")
+            return httpx.Response(206)
+
+        monkeypatch.setattr(host_health, "stream_audio", answer)
+        await host_health.probe_once()
+        assert host_health.down("imgur") is None
+
     async def test_still_unreachable_stays_down(self, clock, monkeypatch):
         host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
 

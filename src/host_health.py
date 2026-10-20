@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from src import fetcher
-from src.streaming import NonMediaError, UpstreamStatusError, resolve_stream_url, stream_audio
+from src.streaming import GdriveInterstitialError, NonMediaError, UpstreamStatusError, resolve_stream_url, stream_audio
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ async def _answers(link: str) -> bool:
         return True
     except UpstreamStatusError as e:
         return e.status_code < 500  # a missing or forbidden file is not an outage
-    except NonMediaError:
+    except (NonMediaError, GdriveInterstitialError):
         return True  # the host served a file, just not media
     except (httpx.HTTPError, ValueError, TimeoutError, OSError) as e:
         logger.debug("stream host probe of %s failed: %r", link[:80], e)
@@ -226,7 +226,7 @@ async def probe_once() -> None:
         except BlockingIOError:
             return  # another worker probes this round
         targets = [(p, e.get("probe") or []) for p, e in _read().items() if e.get("status") == "down"]
-        await asyncio.gather(*(_probe(p, links) for p, links in targets if links))
+        await asyncio.gather(*(_probe(p, links) for p, links in targets if links), return_exceptions=True)
 
 
 async def probe_forever() -> None:
