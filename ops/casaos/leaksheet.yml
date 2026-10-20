@@ -58,9 +58,12 @@ services:
         condition: service_healthy
         restart: true
     ports:
+      # IPv4 only: on [::] an IPv6 client reaches nginx from the bridge gateway, inside the
+      # tunnel trust range, and could spoof X-Forwarded-For.
       - target: 80
         published: "8081"
         protocol: tcp
+        host_ip: "0.0.0.0"
     deploy:
       resources:
         limits:

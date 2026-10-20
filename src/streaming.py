@@ -203,7 +203,12 @@ async def _get_text_capped(
             buf.extend(chunk)
             if len(buf) >= cap:
                 break
-        return resp.status_code, bytes(buf[:cap]).decode("utf-8", errors="ignore")
+        raw = bytes(buf[:cap])
+        try:
+            text = raw.decode(getattr(resp, "encoding", None) or "utf-8", errors="ignore")
+        except LookupError:  # a charset name Python does not know
+            text = raw.decode("utf-8", errors="ignore")
+        return resp.status_code, text
     finally:
         await resp.aclose()
 

@@ -64,3 +64,10 @@ def test_deploy_refuses_a_rate_limit_without_trusted_hops(rate, hops, ok):
     assert (done.returncode == 0) is ok
     if not ok:
         assert "LEAKSHEET_TRUSTED_PROXY_HOPS" in done.stderr
+
+
+def test_web_is_published_on_ipv4_only():
+    """Published on [::] too, an IPv6 client reaches nginx as the bridge gateway, which the
+    tunnel trust range covers, and can spoof X-Forwarded-For."""
+    web = COMPOSE.split("  web:", 1)[1]
+    assert 'host_ip: "0.0.0.0"' in web.split("networks:", 1)[0]

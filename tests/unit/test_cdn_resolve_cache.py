@@ -345,3 +345,24 @@ async def test_a_shared_resolve_never_runs_on_a_private_override_client(monkeypa
     finally:
         streaming._client_override.reset(token)
     assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_text_body_is_decoded_with_its_declared_charset():
+    body = "Título".encode("iso-8859-1")
+    transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, content=body, headers={"content-type": "text/plain; charset=iso-8859-1"},
+    ))
+    async with httpx.AsyncClient(transport=transport) as client:
+        resp = await streaming.get_capped(client, "https://imgur.gg/api/file/x", {})
+    assert resp.text == "Título"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_charset_falls_back_to_utf8():
+    transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, content="ok".encode(), headers={"content-type": "text/plain; charset=x-nonsense"},
+    ))
+    async with httpx.AsyncClient(transport=transport) as client:
+        resp = await streaming.get_capped(client, "https://imgur.gg/api/file/x", {})
+    assert resp.text == "ok"
