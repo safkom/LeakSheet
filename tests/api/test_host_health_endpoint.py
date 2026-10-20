@@ -138,7 +138,7 @@ def test_non_media_bodies_never_mark_the_provider_down(api_client, monkeypatch, 
     ))
     monkeypatch.setattr(streaming, "_get_shared_client", lambda: client)
     for link in (links[0], links[0], links[1]):
-        assert api_client.get("/stream", params={"url": link}).status_code == 503
+        assert api_client.get("/stream", params={"url": link}).status_code == 415
     assert host_health.down(provider) is None
 
 
@@ -170,17 +170,20 @@ def test_a_4xx_at_any_step_reaches_the_client_and_never_marks_the_provider_down(
     assert host_health.down(provider) is None
 
 
-@pytest.mark.parametrize(("provider", "links", "answer"), [
-    ("kraken", RESOLVER_LINKS[1][1], lambda request: httpx.Response(200, content=b"<html>no player</html>")),
-    ("imgur", RESOLVER_LINKS[2][1], lambda request: httpx.Response(200, json={"name": "x"})),
-])
-def test_a_resolver_page_without_media_never_marks_the_provider_down(
-    api_client, monkeypatch, provider, links, answer
-):
-    _serve(monkeypatch, answer)
+def test_a_resolver_page_without_media_never_marks_the_provider_down(api_client, monkeypatch):
+    links = RESOLVER_LINKS[1][1]
+    _serve(monkeypatch, lambda request: httpx.Response(200, content=b"<html>no player</html>"))
+    for link in (links[0], links[0], links[1]):
+        assert api_client.get("/stream", params={"url": link}).status_code == 415
+    assert host_health.down("kraken") is None
+
+
+def test_an_imgur_answer_without_cdn_url_counts_as_a_soft_failure(api_client, monkeypatch):
+    links = RESOLVER_LINKS[2][1]
+    _serve(monkeypatch, lambda request: httpx.Response(200, json={"name": "x"}))
     for link in (links[0], links[0], links[1]):
         assert api_client.get("/stream", params={"url": link}).status_code == 503
-    assert host_health.down(provider) is None
+    assert host_health.down("imgur") is not None
 
 
 def test_a_sniffed_non_media_body_never_marks_the_provider_down(api_client, monkeypatch):
