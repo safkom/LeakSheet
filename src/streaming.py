@@ -34,6 +34,7 @@ direct audio stream URLs.  Supported hosts:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import ipaddress
 import json
 import logging
@@ -375,22 +376,33 @@ _AUDIO_MIMES = {
 # ---------------------------------------------------------------------------
 
 _shared_client: httpx.AsyncClient | None = None
+# Set by the recovery prober: it gets its own small pool, so a saturated shared pool
+# cannot make a healthy host look down and keep it down.
+_client_override: contextvars.ContextVar[httpx.AsyncClient | None] = contextvars.ContextVar(
+    "stream_client_override", default=None
+)
+
+
+def new_stream_client(max_connections: int = 50, max_keepalive: int = 10) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        # Connect stays short: a dead host fails in seconds, not half a minute.
+        timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
+        # limits live on the transport because a custom transport bypasses
+        # the client-level `limits` argument.
+        transport=PublicOnlyAsyncTransport(
+            limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_keepalive),
+        ),
+    )
 
 
 def _get_shared_client() -> httpx.AsyncClient:
     """Return (and lazily create) a shared async HTTP client for streaming."""
     global _shared_client
+    if (override := _client_override.get()) is not None:
+        return override
     if _shared_client is None or _shared_client.is_closed:
-        _shared_client = httpx.AsyncClient(
-            follow_redirects=True,
-            # Connect stays short: a dead host fails in seconds, not half a minute.
-            timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
-            # limits live on the transport because a custom transport bypasses
-            # the client-level `limits` argument.
-            transport=PublicOnlyAsyncTransport(
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
-            ),
-        )
+        _shared_client = new_stream_client()
     return _shared_client
 
 

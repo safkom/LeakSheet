@@ -2119,6 +2119,8 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     ):
         await asyncio.to_thread(host_health.record_success, provider)  # the host answered
         return
+    if isinstance(exc, httpx.PoolTimeout):
+        return  # our own pool is saturated: the host was never asked
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         hard = True  # no connection at all: the host itself is unreachable
     elif isinstance(exc, (httpx.TransportError, ValueError)):
