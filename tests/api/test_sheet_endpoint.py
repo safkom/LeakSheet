@@ -20,6 +20,7 @@ from src.fetcher import (
     NetworkError,
     NoTablesError,
     ParseError,
+    SignedOutError,
     SourceGoneError,
     _cache_key,
     _normalize_url,
@@ -209,7 +210,7 @@ class TestRevalidationDropsGoneSources:
 
     @pytest.mark.parametrize(
         ("exc", "status"),
-        [(SourceGoneError("404"), 400), (AccessDeniedError("403"), 403)],
+        [(SourceGoneError("404"), 400), (SignedOutError("sign-in"), 403)],
     )
     @pytest.mark.parametrize("with_etag", [False, True])
     def test_a_gone_source_stops_being_served(
@@ -251,6 +252,15 @@ class TestRevalidationDropsGoneSources:
         assert first.headers["X-Cache-Status"] == "stale"
         assert get_cached_etag(URL) is None
         assert api_client.post("/sheet", json={"url": URL}).status_code == 403
+
+    def test_a_plain_403_keeps_the_stale_copy(self, api_client, artist, monkeypatch):
+        """A Cloudflare challenge or a brief Google 403 is not a takedown."""
+        from src.fetcher import get_cached_etag
+
+        self._failing_fetch(monkeypatch, AccessDeniedError("Access denied (403)"))
+        _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        assert api_client.post("/sheet", json={"url": URL}).headers["X-Cache-Status"] == "stale"
+        assert get_cached_etag(URL) is not None
 
     def test_a_failed_drop_does_not_escape_the_background_task(self, artist, monkeypatch):
         import asyncio
@@ -313,6 +323,32 @@ class TestEmptyTracker:
         assert plain.json()["detail"] == "No songs found in this tracker."
         last = json.loads([line for line in streamed.content.split(b"\n") if line][-1])
         assert last == {"type": "error", "status": 404, "detail": "No songs found in this tracker."}
+
+    def test_a_tracker_with_only_tab_entries_is_served(self, api_client, monkeypatch):
+        """Misc/video-only trackers have no songs but a real content tab."""
+        from src.models import MiscEntry, TabSection
+
+        async def fake_fetch(url, **kwargs):
+            artist = self._empty()
+            artist.tabs = [TabSection(kind="misc", name="Misc", entries=[MiscEntry(name="Demo", source_tab="misc")])]
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 200
+        assert r.json()["tabs"][0]["entries"]
+
+    def test_a_loaded_misc_tab_does_not_hide_failed_song_tabs(self, api_client, monkeypatch):
+        from src.models import MiscEntry, TabSection
+
+        async def fake_fetch(url, *, timer, **kwargs):
+            timer.tab_loaded("100", False)
+            artist = self._empty()
+            artist.tabs = [TabSection(kind="misc", name="Misc", entries=[MiscEntry(name="Demo", source_tab="misc")])]
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        assert api_client.post("/sheet", json={"url": URL}).status_code == 503
 
     def test_an_empty_parse_with_failed_tabs_is_a_retryable_503(self, api_client, monkeypatch):
         """Failed tabs make it likely transient: a 5xx lets the app retry and fall back

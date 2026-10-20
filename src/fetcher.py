@@ -125,6 +125,10 @@ class PhaseTimer:
         # gid → whether its latest fetch loaded. A hub sibling is fetched twice (probe,
         # then merge); the merge's page is the one kept, so the last result counts.
         self.tabs: dict[str, bool] = {}
+        # Content tabs asked of the Sheets API / answered by it: a key that silently stops
+        # working shows as 0/N in the timing log.
+        self.api_tabs_asked = 0
+        self.api_tabs_served = 0
         # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
         # the timer because the timer already reaches every stage of the pipeline.
         self.on_progress = on_progress
@@ -166,7 +170,10 @@ class PhaseTimer:
     def log_line(self) -> str:
         total = sum(self.phases.values())
         parts = " ".join(f"{n}={d * 1000:.0f}ms" for n, d in self.phases.items())
-        return f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
+        line = f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
+        if self.api_tabs_asked:
+            line += f" api_tabs={self.api_tabs_served}/{self.api_tabs_asked}"
+        return line
 
 # ---------------------------------------------------------------------------
 # Shared async HTTP client (connection-pooled, reused across requests)
@@ -998,7 +1005,9 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 CACHE_COLLAPSE_RATIO = 0.8
 
 
-def _collapse_reason(key: str, new: int, new_eras: int, failed_tabs: int) -> str | None:
+def _collapse_reason(
+    key: str, new: int, new_eras: int, failed_tabs: int, tab_entries: int = 0
+) -> str | None:
     """Why a parse of *new* versions must not be cached, or None if it may.
 
     An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
@@ -1006,7 +1015,7 @@ def _collapse_reason(key: str, new: int, new_eras: int, failed_tabs: int) -> str
     Past ``COLLAPSE_GUARD_TTL`` (``SERVE_STALE_TTL`` when tab loads failed) the old entry is
     never preferred, so a tracker that genuinely shrank recovers.
     """
-    if new <= 0:
+    if new <= 0 and (not tab_entries or failed_tabs):  # a tabs-only tracker is a real one
         return f"empty parse, {new_eras} eras"
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
@@ -1048,7 +1057,10 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
     try:
         # The collapse check needs two counts, not the whole dump — so it runs
         # before any serialization, and a refused parse costs none.
-        reason = _collapse_reason(key, artist.total_versions, len(artist.eras), failed_tabs)
+        tab_entries = sum(len(t.entries) for t in artist.tabs)
+        reason = _collapse_reason(
+            key, artist.total_versions, len(artist.eras), failed_tabs, tab_entries
+        )
         if reason is not None:
             # Served to this caller, but not persisted: the good copy stays,
             # and the next request is not poisoned by a transient failure.
@@ -1068,6 +1080,7 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
                 # small sidecar read instead of re-parsing the whole entry.
                 "total_versions": artist.total_versions,
                 "era_count": len(artist.eras),
+                "tab_entries": tab_entries,
             })
         artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
@@ -1121,7 +1134,7 @@ def clear_cache() -> tuple[int, int]:
 
 def _servable(meta: dict) -> bool:
     """False for an empty parse on disk: see docs/decisions.md::fetcher.py::cache-collapse-guard."""
-    return meta.get("total_versions") != 0
+    return meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0
 
 
 def get_cached_etag(url: str) -> str | None:
@@ -1334,6 +1347,11 @@ class AccessDeniedError(FetchError):
     pass
 
 
+class SignedOutError(AccessDeniedError):
+    """Google redirected to its sign-in page: the sheet is private, not a transient 403."""
+    pass
+
+
 def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
     """Map an httpx exception onto the typed FetchError hierarchy."""
     if isinstance(exc, httpx.TimeoutException):
@@ -1359,7 +1377,7 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
     """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
     if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
-        raise AccessDeniedError(f"Sign-in required: {url}")
+        raise SignedOutError(f"Sign-in required: {url}")
 
 
 async def _fetch_base_html(
@@ -1591,12 +1609,14 @@ async def _load_secondary_tabs(
     async def _api_rows(gid_val: str) -> list | None:
         if api_tabs is None:
             return None
+        t.api_tabs_asked += 1
         try:
             rows = ((await api_tabs) or {}).get(gid_val)
         except Exception as e:  # the API never costs a tab: htmlview can still read it
             logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
             return None
         if rows is not None:
+            t.api_tabs_served += 1
             t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
         return rows
 
@@ -2189,12 +2209,20 @@ async def async_fetch_and_parse(
             return best_artist
 
         # Fallback: no tab yielded songs, often because the tabs that held them failed.
-        _warn_failed_tabs(url_norm, t)
-        html, title = await async_fetch_sheet_html(
-            url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-        )
-        name = _resolve_artist_name(title, artist_name)
-        artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
+        try:
+            html, title = await async_fetch_sheet_html(
+                url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
+            )
+            name = _resolve_artist_name(title, artist_name)
+            artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
+            # A workbook of content tabs only (Misc, Music Videos) has no song tab to win discovery.
+            await _load_secondary_tabs(
+                artist, art_gid, content_tabs, url_norm, title,
+                client=client, timeout=timeout, cache_ttl=cache_ttl,
+                use_cache=use_cache, t=t, page_paths=page_paths, api_tabs=api_tabs,
+            )
+        finally:
+            _warn_failed_tabs(url_norm, t)  # also when the fallback itself fails
         await asyncio.to_thread(_finalize, artist, url_norm)
         if write_cache:
             await _async_set_cached_parsed(url_norm, artist, t=t)

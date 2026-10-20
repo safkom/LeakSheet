@@ -428,6 +428,28 @@ class TestSlotKeysInThePayload:
         assert client.get("/image-proxy", params={"url": key, "w": 640}).status_code == 200
         assert google.requested == []
 
+    def test_a_cold_slot_stores_its_original_off_the_request_path(self, google, monkeypatch):
+        url = _cover("source")
+        google.alive.add(url)
+        artist = _artist(("Donda", url))
+        fetcher._finalize(artist, TRACKER)
+        spawned = []
+        real = api._spawn_detached
+        monkeypatch.setattr(api, "_spawn_detached", lambda coro: spawned.append(coro.cr_code.co_name) or real(coro))
+
+        r = TestClient(app).get("/image-proxy", params={"url": artist.eras[0].art_url, "w": 320})
+        assert r.status_code == 200
+        assert spawned == ["_store_slot_original"]
+
+    def test_a_late_slot_fill_never_overwrites_a_warmed_original(self, google):
+        key = api._image_cache_key("leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32, None)
+        warmed = _png(800, 800)
+        api._write_image_cache(key, warmed, "image/png", original=True)
+        asyncio.run(api._store_slot_original(
+            "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32, _png(100, 100), "image/png"
+        ))
+        assert api._read_image_cache(key)[0] == warmed
+
     def test_an_unknown_slot_is_404(self, google):
         key = "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32
         assert TestClient(app).get("/image-proxy", params={"url": key}).status_code == 404
@@ -487,6 +509,22 @@ class TestArtTabUpgrade:
             for era in "ABC"
         }
         assert stored == {"A": _drawn(1, 340), "B": _drawn(2, 102, "JPEG"), "C": _drawn(4, 102, "JPEG")}
+
+    def test_a_rewarm_decodes_each_image_once_for_its_fingerprint(self, google, monkeypatch):
+        main, tab = _cover("main"), _cover("tab")
+        google.content.update({main: _drawn(1, 102, "JPEG"), tab: _drawn(1, 340)})
+        google.alive = {main}
+        asyncio.run(api._warm_era_art(_artist(("Donda", main)), TRACKER))
+
+        google.content[main] = _drawn(1, 200, "JPEG")  # a new copy, so old and new are compared
+        google.alive = {main, tab}
+        calls = []
+        real = api._dhash
+        monkeypatch.setattr(api, "_dhash", lambda data, *a: calls.append(1) or real(data, *a))
+        artist = _artist(("Donda", main))
+        artist._art_candidates = {"Donda": tab}
+        asyncio.run(api._warm_era_art(artist, TRACKER))
+        assert len(calls) == 3  # new copy, Art-tab copy, stored copy
 
     def test_a_failed_art_tab_download_keeps_the_upgraded_cover(self, google):
         main, tab = _cover("main"), _cover("tab")

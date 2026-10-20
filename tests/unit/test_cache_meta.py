@@ -287,3 +287,23 @@ class TestDropCachedEntry:
         fetcher.drop_cached_entry(URL)
         _set_cached_parsed(URL, TestCollapseGuard._artist_with(40))
         assert fetcher.get_cached_parsed_bytes(URL) is not None
+
+
+class TestTabOnlyTrackerIsServable:
+    """A tracker with content tabs but no songs is a real tracker; an empty one is not."""
+
+    def test_tab_entries_make_a_songless_entry_servable(self):
+        from src.models import MiscEntry, TabSection
+
+        artist = _artist()
+        artist.eras = []
+        artist.tabs = [TabSection(kind="misc", name="Misc", entries=[MiscEntry(name="x", source_tab="misc")])]
+        _set_cached_parsed(URL, artist)
+        assert fetcher.get_cached_etag(URL) is not None
+        assert fetcher.get_cached_parsed_bytes(URL) is not None
+
+    def test_a_truly_empty_entry_stays_unservable(self):
+        artist = _artist()
+        artist.eras = []
+        _set_cached_parsed(URL, artist)
+        assert fetcher.get_cached_etag(URL) is None
