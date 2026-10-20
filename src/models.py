@@ -543,13 +543,14 @@ def extract_badge(name: str) -> tuple[Badge | None, str]:
 
     Returns (badge, cleaned_name) where cleaned_name has the emoji stripped.
     """
-    match = BADGE_EMOJI_PATTERN.match(name)
-    if match:
-        emoji = match.group(1)
-        badge = EMOJI_TO_BADGE.get(emoji)
-        cleaned = name[match.end():].strip()
-        return badge, cleaned
-    return None, name.strip()
+    best: Badge | None = None
+    # Stacked emojis ("🏆🥇 Song") all go; the highest-priority badge wins.
+    while match := BADGE_EMOJI_PATTERN.match(name):
+        badge = EMOJI_TO_BADGE.get(match.group(1))
+        if badge is not None and (best is None or _BADGE_PRIORITY[badge] < _BADGE_PRIORITY[best]):
+            best = badge
+        name = name[match.end():]
+    return best, name.strip()
 
 
 def extract_version_tag(name: str) -> tuple[str | None, str]:
@@ -725,7 +726,9 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 # Must stay linear: line-break spaces are stripped first (parse_song_credits)
 # so each char matches one way, and the possessive scan never retries inner openers.
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
+# One nested "(...)" level is allowed: "(feat. A (prod. B))".
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|\([^()\n]*+\)|[^)\]\n])*+)([\)\]])?")
+_NESTED_GROUP_RE = re.compile(r"\(([^()]*)\)")
 
 # field name → the keyword that introduces it. Order is the match order, so no
 # entry may be a prefix of a later one.
@@ -916,13 +919,21 @@ def parse_song_credits(raw_name: str) -> SongCredits:
         """Harvest one bracketed group's credits; return "" if it was one."""
         if match.group(2) is None:
             return match.group(0)
-        parts = _split_credit_parts(match.group(1))
+        nested: list[str] = []
+
+        def pull_nested(inner: "re.Match[str]") -> str:
+            if _CREDIT_PART_RE.match(inner.group(1).strip()):
+                nested.append(inner.group(1))
+                return ""
+            return inner.group(0)
+
+        parts = _split_credit_parts(_NESTED_GROUP_RE.sub(pull_nested, match.group(1)))
         opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
         # The keyword must open the group, or "(Some Title, prod. X)" would lose its
         # title half.
         if opener is None:
             return match.group(0)
-        for part in parts:
+        for part in parts + [p for n in nested for p in _split_credit_parts(n)]:
             keyword = _CREDIT_PART_RE.match(part)
             # Guaranteed non-None: _split_credit_parts only breaks where a
             # keyword follows, and parts[0] was just checked.
