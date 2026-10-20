@@ -60,7 +60,6 @@ from src.parser import (
     _MAX_UNMATCHED_ROWS,
     _disambiguate_era_names,
     _era_match_key,
-    _song_match_key,
 )
 
 logger = logging.getLogger(__name__)
