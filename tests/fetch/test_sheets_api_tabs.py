@@ -281,7 +281,7 @@ class TestBoundsAndPauses:
 
         assert "dataValidation" in sheets_api._FIELDS
 
-    async def test_a_hanging_api_gives_up_after_its_own_deadline(self, with_key):
+    async def test_a_hanging_api_gives_up_after_its_own_deadline(self, with_key, monkeypatch):
         import asyncio
         import time
 
@@ -290,13 +290,10 @@ class TestBoundsAndPauses:
         async def hang(request):
             await asyncio.sleep(10)
 
-        sheets_api.TIMEOUT_S, saved = 0.2, sheets_api.TIMEOUT_S
-        try:
-            client = httpx.AsyncClient(transport=httpx.MockTransport(hang))
-            t0 = time.monotonic()
-            out = await sheets_api.fetch_tabs(client, "S", {"200": "Misc"}, timeout=60, max_bytes=1 << 20)
-        finally:
-            sheets_api.TIMEOUT_S = saved
+        monkeypatch.setattr(sheets_api, "TIMEOUT_S", 0.2)
+        client = httpx.AsyncClient(transport=httpx.MockTransport(hang))
+        t0 = time.monotonic()
+        out = await sheets_api.fetch_tabs(client, "S", {"200": "Misc"}, timeout=60, max_bytes=1 << 20)
         assert out is None
         assert time.monotonic() - t0 < 3
 

@@ -49,7 +49,7 @@ def _hold(key, cache_dir, started, release):
 
 
 def test_entry_lock_excludes_across_processes():
-    ctx = multiprocessing.get_context("fork")
+    ctx = multiprocessing.get_context("spawn")
     started, release = ctx.Event(), ctx.Event()
     key = _cache_key(URL)
     proc = ctx.Process(target=_hold, args=(key, fetcher.CACHE_DIR, started, release))
