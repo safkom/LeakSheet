@@ -342,11 +342,15 @@ struct EvidenceSection: View {
         Button {
             onOpenLink(url)
         } label: {
-            CachedImage(
-                url: APIClient.shared.imageProxyURL(for: url.absoluteString, width: 640) ?? url,
-                maxPixelSize: 640
-            ) {
-                ArtworkPlaceholder(cornerRadius: 8)
+            // No proxy URL means no safe way to load it: a direct fetch would reach a third party.
+            Group {
+                if let proxied = APIClient.shared.imageProxyURL(for: url.absoluteString, width: 640) {
+                    CachedImage(url: proxied, maxPixelSize: 640) {
+                        ArtworkPlaceholder(cornerRadius: 8)
+                    }
+                } else {
+                    ArtworkPlaceholder(cornerRadius: 8)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: 200)

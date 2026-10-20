@@ -9,8 +9,9 @@ struct TVSongRowView: View {
     let eraName: String
     let eraArt: String?
     let artist: Artist
-    /// Every streamable version in the era, so playback continues into the next song.
-    let eraVersions: [SongVersion]
+    /// The era's songs: their streamable versions are gathered on select, not per render,
+    /// so playback continues into the next song.
+    let eraSongs: [Song]
 
     @Environment(PlayerViewModel.self) private var player
 
@@ -94,7 +95,7 @@ struct TVSongRowView: View {
             eraName: eraName,
             artistName: artist.name,
             artUrl: eraArt ?? "",
-            versions: eraVersions,
+            versions: eraSongs.flatMap { $0.versions.filter(\.isStreamable) },
             artistSlug: artist.slug
         )
     }

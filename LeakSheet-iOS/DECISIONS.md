@@ -28,6 +28,14 @@ collapses to `.../d/e/{id}/pubhtml`, because htmlview 404s for it. Scheme and ho
 userinfo and the scheme's default port go, the fragment goes, and a bare host gets a trailing
 slash. The cache key and the recents dedup compare these strings, so a rule the backend reads
 differently splits one tracker in two.
+
+`sheetPagePath` mirrors the backend's `SHEET_ID_PATTERN` and `_sheet_page_path`, searched in
+`"docs.google.com" + path`: `docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+)`.
+
+Changing a rule re-keys `CacheService` entries (a SHA-256 of the normalized URL). Old entries
+are unreachable and age out through the 30-day sweep: the hash is one-way and the old rules
+are gone, so there is nothing to migrate. Recents store the raw `sourceUrl` and derive their
+identity on read, so they re-key by themselves.
 `Fixtures/stream_links.json` replays the backend's answers; the few differences that remain
 (Foundation encoding and parsing a URL where Python passes it raw; a Drive id escaped with
 `%` in a query that also holds an invalid character) are pinned there as known differences.
