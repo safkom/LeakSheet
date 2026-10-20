@@ -24,13 +24,22 @@ struct AudioEngineRetryTests {
         engine.stopTrack()
     }
 
-    @Test func `togglePlay on a track without a live item rebuilds it`() {
+    @Test func `retryCurrent replaces the player item`() throws {
         let engine = AudioEngine.shared
-        let a = song("A", id: "aaa")
-        engine.playTrack(a, artistName: "X")
+        engine.playTrack(song("A", id: "aaa"), artistName: "X")
+        let first = try #require(engine.currentPlayer?.currentItem)
+
+        engine.retryCurrent()
+        let second = try #require(engine.currentPlayer?.currentItem)
+        #expect(first !== second)
         engine.stopTrack()
-        // stopTrack clears the track; a toggle with nothing loaded must not crash or invent one.
-        engine.togglePlay()
+    }
+
+    @Test func `retryCurrent without a track does nothing`() {
+        let engine = AudioEngine.shared
+        engine.stopTrack()
+        engine.retryCurrent()
+        engine.resumePlayback()
         #expect(engine.currentTrack == nil)
     }
 }

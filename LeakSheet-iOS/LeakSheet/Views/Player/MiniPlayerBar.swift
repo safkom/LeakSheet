@@ -120,7 +120,7 @@ struct MiniPlayerBar: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                        .accessibilityLabel(player.isPlaying || player.loading ? "Pause" : "Play")
 
                         Button {
                             player.playNext()

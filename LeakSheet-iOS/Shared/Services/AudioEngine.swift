@@ -188,7 +188,9 @@ final class AudioEngine {
             return
         }
 
-        if isPlaying || loading {
+        // timeControlStatus, not isPlaying/loading: a stall reads isPlaying=false, loading=true
+        // yet must pause, while a paused player with a stale loading flag must play.
+        if player.timeControlStatus != .paused {
             player.pause()
             isPlaying = false
         } else {
@@ -209,8 +211,12 @@ final class AudioEngine {
     /// `playCommand` is a discrete intent, not a toggle: CarPlay, Siri and a desynced
     /// lock screen send it unconditionally, so it must never pause.
     func resumePlayback() {
-        guard isPlaying == false else { return }
-        togglePlay()
+        guard !isPlaying else { return }
+        guard let player, let item = player.currentItem, item.status != .failed else {
+            retryCurrent()
+            return
+        }
+        player.play()
     }
 
     func seekTo(_ time: TimeInterval) {

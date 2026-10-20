@@ -169,7 +169,7 @@ final class RecentTrackersManager {
 
     /// Element-wise, so one undecodable entry costs only itself, not the whole list.
     nonisolated static func decodeEntries(_ data: Data) -> [RecentTracker] {
-        struct Lossy: Decodable {
+        nonisolated struct Lossy: Decodable {
             let value: RecentTracker?
             init(from decoder: Decoder) throws { value = try? RecentTracker(from: decoder) }
         }
