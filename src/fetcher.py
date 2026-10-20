@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
+from html import unescape as _html_unescape
 import io
 import json
 import logging
@@ -29,6 +30,7 @@ import os
 import re
 import tempfile
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, NoReturn
@@ -58,7 +60,6 @@ from src.parser import (
     _MAX_UNMATCHED_ROWS,
     _disambiguate_era_names,
     _era_match_key,
-    _song_match_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,9 @@ _ORPHAN_TMP_AGE_S = 3600.0
 _GID_FETCH_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
 )
-_gid_fetch_sem: asyncio.Semaphore | None = None
+_gid_fetch_sems: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
 # Hub-workbook tabs are fetched AND parsed, so they need a tighter bound.
 _HUB_LOAD_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_HUB_LOAD_CONCURRENCY", "3") or 3
@@ -100,11 +103,12 @@ _HUB_LOAD_CONCURRENCY = int(
 
 
 def _gid_fetch_slot() -> asyncio.Semaphore:
-    """Lazily created so the semaphore binds to the running loop."""
-    global _gid_fetch_sem
-    if _gid_fetch_sem is None:
-        _gid_fetch_sem = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
-    return _gid_fetch_sem
+    """One semaphore per running loop: a second asyncio.run must not reuse the first's."""
+    loop = asyncio.get_running_loop()
+    sem = _gid_fetch_sems.get(loop)
+    if sem is None:
+        sem = _gid_fetch_sems[loop] = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
+    return sem
 
 
 def _megabytes(text: str) -> str:
@@ -310,13 +314,13 @@ GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 # Google Sheets embeds tab metadata as:
 #   items.push({name: "Tab Name", pageUrl: "...", gid: "12345", ...});
 _TAB_ITEMS_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^{}]*?gid:\s*"(\d+)"',
+    r'\{name:\s*"((?:[^"\\]|\\.)+)"[^{}]*?gid:\s*"(\d+)"',
 )
 
 # The same items.push() switcher, keyed on pageUrl ("\/htmlview\/sheet\/1.html"):
 # see docs/decisions.md::fetcher.py::_build_sheet_html_url — advertised tab paths
 _TAB_PAGEURL_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^{}]*?pageUrl:\s*"([^"]+)"',
+    r'\{name:\s*"((?:[^"\\]|\\.)+)"[^{}]*?pageUrl:\s*"((?:[^"\\]|\\.)+)"',
 )
 
 # Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
@@ -347,7 +351,7 @@ _FAKES_TAB_NAMES = frozenset({"fakes"})
 # exposed with kind="other" plus the tab's display name.
 _OTHER_CONTENT_TAB_NAMES = frozenset({
     "live performances", "performances",
-    "ai tracks", "remixes", "edits (wip)", "edits/remasters", "edits / remasters",
+    "ai tracks", "remixes", "edits", "edits/remasters", "edits / remasters",
 })
 
 # Badge tab kinds — see docs/decisions.md::fetcher.py::badge-tab-kinds
@@ -413,11 +417,21 @@ _EMOJI_RE = re.compile(
 _MIN_ERAS_FOR_VALID_GID = 5
 
 # Prefixes to strip from inferred artist names (e.g. "Updated Lil Uzi Vert")
+# A bare "New " is not stripped: it is the first word of "New Order".
 TITLE_PREFIXES = [
     "Updated ",
-    "New ",
     "Official ",
 ]
+
+# Longest first, so " Leak Tracker" wins over its own tail " Tracker".
+_SUFFIXES_LONGEST_FIRST = sorted(TITLE_SUFFIXES, key=len, reverse=True)
+
+
+def _strip_title_suffixes(name: str) -> str:
+    for suffix in _SUFFIXES_LONGEST_FIRST:
+        if name.lower().endswith(suffix.lower()):
+            name = name[: -len(suffix)].strip()
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -560,37 +574,26 @@ def _infer_artist_name(title: str) -> str:
          "Updated Lil Uzi Vert Tracker - Google Drive" → "Lil Uzi Vert"
          "The Guy From Degrassi Tracker (reup 12.29.25) - Google Drive" → "Drake"
     """
-    name = title.strip()
+    name = _html_unescape(title).strip()
 
-    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.),
-    # case-insensitively.
-    for suffix in TITLE_SUFFIXES:
-        if name.lower().endswith(suffix.lower()):
-            name = name[: -len(suffix)].strip()
+    # Step 1: Strip known suffixes (" - Google Drive", " Tracker", etc.).
+    name = _strip_title_suffixes(name)
 
     # Step 1b: strip qualifiers after the word Tracker ("Tracker 2.0", "Tracker v3",
-    # "Tracker PUBLIC", "Tracker [Official]").
-    name = _TRACKER_QUALIFIER_RE.sub("", name).strip()
-    # Re-apply suffix stripping after version removal
-    for suffix in TITLE_SUFFIXES:
-        if name.endswith(suffix):
-            name = name[: -len(suffix)].strip()
+    # "Tracker PUBLIC", "Tracker [Official]"), then re-apply suffix stripping.
+    name = _strip_title_suffixes(_TRACKER_QUALIFIER_RE.sub("", name).strip())
 
     # Step 2: Strip trailing parenthetical/bracketed metadata like
     # "(reup 12.29.25)" or "[Official]" that prevents suffix stripping
     paren_match = _TRAILING_BRACKET_RE.search(name)
     if paren_match:
-        stripped = name[: paren_match.start()].strip()
-        # Re-apply suffix stripping on the cleaned name
-        for suffix in TITLE_SUFFIXES:
-            if stripped.endswith(suffix):
-                stripped = stripped[: -len(suffix)].strip()
+        stripped = _strip_title_suffixes(name[: paren_match.start()].strip())
         if stripped:
             name = stripped
 
     # Step 3: Strip known prefixes ("Updated ", etc.)
     for prefix in TITLE_PREFIXES:
-        if name.startswith(prefix):
+        if name.lower().startswith(prefix.lower()):
             name = name[len(prefix):].strip()
 
     # Step 4: Strip leading emoji
@@ -728,16 +731,29 @@ def _display_tab_name(name: str) -> str:
     return re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip()
 
 
+def _first_tab_gid(named_tabs: dict[str, str], names: frozenset) -> str | None:
+    """GID of the tab named in *names*, an exact unqualified name before a qualified one.
+
+    "Unreleased (Old)" cleans to "unreleased" too, and must not win by dict order.
+    """
+    qualified = None
+    for gid, name in named_tabs.items():
+        clean = _clean_tab_name(name)
+        if clean not in names:
+            continue
+        if re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip().lower() == clean:
+            return gid
+        qualified = qualified or gid
+    return qualified
+
+
 def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
     """Return the GID of the main unreleased/leaks tab if one exists.
 
     Used to prefer the primary tracker sheet over landing/recent tabs like
     Travis Scott's "Recent" sheet. Normalises through _clean_tab_name.
     """
-    for gid, name in named_tabs.items():
-        if _clean_tab_name(name) in _UNRELEASED_TAB_NAMES:
-            return gid
-    return None
+    return _first_tab_gid(named_tabs, _UNRELEASED_TAB_NAMES)
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
@@ -746,10 +762,7 @@ def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
     Strips emoji and normalises whitespace before comparing against the
     known art-tab keyword set ({"art", "album art", "cover art", ...}).
     """
-    for gid, name in named_tabs.items():
-        if _clean_tab_name(name) in _ART_TAB_NAMES:
-            return gid
-    return None
+    return _first_tab_gid(named_tabs, _ART_TAB_NAMES)
 
 
 # Kind resolution order for content tabs; earlier entries sort first in the
@@ -846,6 +859,7 @@ def _evict_sheet_cache() -> None:
     if not CACHE_DIR.exists():
         return
     groups: dict[str, list[tuple[float, int, Path]]] = {}
+    locks: list[Path] = []
     total = 0
     orphan_cutoff = time.time() - _ORPHAN_TMP_AGE_S
     for path in CACHE_DIR.iterdir():
@@ -856,7 +870,16 @@ def _evict_sheet_cache() -> None:
             continue
         # img_* is the image cache (own cap); imgalias_*/imgsrc_* are the pointers covers
         # resolve through, and evicting them brings back expired-token failures.
-        if not path.is_file() or path.name.startswith(("img_", "imgalias_", "imgsrc_")) or path.name.endswith(".lock"):
+        if path.name.endswith(".meta.lock"):
+            locks.append(path)
+            continue
+        # host_health.json is shared state, not a cache entry.
+        if (
+            not path.is_file()
+            or path.name.startswith(("img_", "imgalias_", "imgsrc_"))
+            or path.name.endswith(".lock")
+            or path.name == "host_health.json"
+        ):
             continue
         try:
             stat = path.stat()
@@ -865,6 +888,9 @@ def _evict_sheet_cache() -> None:
         stem = path.name.split(".", 1)[0]
         groups.setdefault(stem, []).append((stat.st_mtime, stat.st_size, path))
         total += stat.st_size
+    for lock in locks:
+        if lock.name.split(".", 1)[0] not in groups:
+            _remove_idle_lock(lock, orphan_cutoff)
     if total <= _SHEET_CACHE_MAX_BYTES:
         return
     ranked = sorted(
@@ -879,6 +905,18 @@ def _evict_sheet_cache() -> None:
                 victim.unlink()
             except OSError:
                 pass
+
+
+def _remove_idle_lock(path: Path, cutoff: float) -> None:
+    """Unlink an entry-less, old lock file nobody holds; _entry_lock re-checks the inode."""
+    try:
+        if path.stat().st_mtime >= cutoff:
+            return
+        with open(path, "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path.unlink()
+    except OSError:
+        pass
 
 
 def unlink_if_older(path: Path, cutoff: float) -> None:
@@ -955,9 +993,18 @@ def _entry_lock(key: str):
     the same file blocks even within one process.
     """
     CACHE_DIR.mkdir(exist_ok=True)
-    with open(CACHE_DIR / f"{key}.meta.lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    path = CACHE_DIR / f"{key}.meta.lock"
+    while True:
+        with open(path, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # Eviction may have unlinked this file while we waited: lock the live one.
+            try:
+                if os.stat(path).st_ino != os.fstat(lock.fileno()).st_ino:
+                    continue
+            except FileNotFoundError:
+                continue
+            yield
+            return
 
 
 def _merge_meta(key: str, updates: dict) -> None:
@@ -1424,7 +1471,10 @@ async def async_fetch_sheet_html(
                 if cached is not None:
                     return cached
             r = await _get_capped(client, sheet_url, timeout=timeout)
+            _raise_if_signed_out(r, sheet_url)
             r.raise_for_status()
+            if "<table" not in r.text.lower():
+                raise NoTablesError(f"No table in tab gid={gid} of {url}")
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
             if use_cache:
@@ -1559,6 +1609,38 @@ async def _load_secondary_tabs(
     page_paths: dict[str, str] | None = None,
     api_tabs: asyncio.Task | None = None,
 ) -> None:
+    """Fetch + parse the Art tab and all content tabs into *artist* (see _load_secondary_tabs_with)."""
+    if not art_gid and not content_tabs:
+        return
+    created = api_tabs is None
+    if created:
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
+    try:
+        await _load_secondary_tabs_with(
+            artist, art_gid, content_tabs, url_norm, title, client=client, timeout=timeout,
+            cache_ttl=cache_ttl, use_cache=use_cache, t=t, page_paths=page_paths, api_tabs=api_tabs,
+        )
+    finally:
+        # A task this call started must not outlive an error or a cancel.
+        if created and api_tabs is not None and not api_tabs.done():
+            api_tabs.cancel()
+
+
+async def _load_secondary_tabs_with(
+    artist: Artist,
+    art_gid: str | None,
+    content_tabs: list[tuple[str, str, str]],
+    url_norm: str,
+    title: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+    t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
+    api_tabs: asyncio.Task | None = None,
+) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
     Everything here is optional — a failure never fails the request. Misc/MV
@@ -1566,11 +1648,6 @@ async def _load_secondary_tabs(
     compatibility; every non-empty tab lands in ``Artist.tabs``. Content tabs
     come from ``api_tabs`` when it has them, else from htmlview.
     """
-    if not art_gid and not content_tabs:
-        return
-    if api_tabs is None:
-        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
-
     total = len(content_tabs) + (1 if art_gid else 0)
     done = 0
     t.report("tabs", f"Reading {total} extra tabs", done=0, total=total)
@@ -1830,13 +1907,14 @@ async def _aggregate_hub_workbook(
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 
     # Duplicate-tab filtering — see docs/decisions.md::fetcher.py::duplicate-tab-keys
-    def _keys(a: Artist) -> set[str]:
+    # Keyed per era on song_key: placeholder tracks have an empty key and never match.
+    def _keys(a: Artist) -> set[tuple[str, str]]:
         return {
-            k
+            (_era_match_key(era.name), song.song_key)
             for era in a.eras
             for section in era.sections
             for song in section.songs
-            if (k := _song_match_key(song.base_name))
+            if song.song_key
         }
 
     main_keys = _keys(artist)
@@ -1849,6 +1927,15 @@ async def _aggregate_hub_workbook(
         if keys and keys <= main_keys:
             logger.debug("Hub tab %r adds nothing new — skipped", display)
             continue
+        # A superset tab after a subset merges only what main lacks, whatever the tab order.
+        for era in extra.eras:
+            for section in era.sections:
+                section.songs = [
+                    song for song in section.songs
+                    if not song.song_key or (_era_match_key(era.name), song.song_key) not in main_keys
+                ]
+            era.sections = [sec for sec in era.sections if sec.songs]
+        extra.eras = [era for era in extra.eras if era.sections]
         merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
         main_keys |= keys
         total += merged

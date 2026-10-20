@@ -7,13 +7,14 @@ structured Artist/Era/Song/SongVersion objects.
 from __future__ import annotations
 
 import csv
+import io
 import logging
 import re
 from bisect import bisect_left
 from collections import Counter
 import unicodedata
 from functools import lru_cache
-from typing import Iterable
+from typing import Callable, Iterable
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote, unquote_plus, urljoin, urlparse
@@ -675,6 +676,7 @@ ERA_STATS_PATTERN = re.compile(
     r"|Streaming|Off-Streaming|Off Streaming|On Streaming|On-Streaming"
     r"|tracks?|songs?"
     r"|Released|Deleted|Losts?|Privated"
+    r"|Confirmed|Rumou?red"
     r")\b",
     re.IGNORECASE,
 )
@@ -854,6 +856,11 @@ _COVER_RE = re.compile(r"\bcover\b", re.IGNORECASE)
 # Punctuation and whitespace normalization for era matching keys
 _PUNCT_STRIP_RE = re.compile(r"[,.:;!?'\"]+")
 _WHITESPACE_COLLAPSE_RE = re.compile(r"\s+")
+# Typographic quotes and dashes fold to ASCII so "Don’t" and "Don't" share a key.
+_TYPOGRAPHIC_FOLD = str.maketrans(
+    {"’": "'", "‘": "'", "‚": "'", "‛": "'", "“": '"', "”": '"',
+     "–": "-", "—": "-", "‐": "-", "‑": "-", "−": "-"}
+)
 
 # Junk era name filtering patterns
 _HANDLE_RE = re.compile(r"@\w+")
@@ -1298,7 +1305,17 @@ def _normalize_unicode(text: str) -> str:
     # NFKD decomposition splits characters like ë into e + combining diaeresis
     decomposed = unicodedata.normalize("NFKD", text)
     # Remove combining characters (diacritics)
-    return "".join(c for c in decomposed if not unicodedata.combining(c))
+    # Marks carry meaning outside Latin (か/が, и/й), so only Latin bases lose them.
+    out: list[str] = []
+    latin = False
+    for c in decomposed:
+        if unicodedata.combining(c):
+            if not latin:
+                out.append(c)
+            continue
+        latin = unicodedata.name(c, "").startswith("LATIN")
+        out.append(c)
+    return "".join(out)
 
 
 def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> str:
@@ -1340,7 +1357,7 @@ def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> 
     # features sub-section, so "Rodeo*" resolves to "Rodeo".
     key = key.rstrip("*").strip()
     # Normalize Unicode diacritics (ë→e, á→a, etc.)
-    key = _normalize_unicode(key)
+    key = _normalize_unicode(key).translate(_TYPOGRAPHIC_FOLD)
     key = key.lower()
     # Strip punctuation so "Meet The Woo, Vol. 2" matches "Meet The Woo Vol 2" and
     # "AT.LONG.LAST.A$AP" matches "AT LONG LAST A$AP".
@@ -1366,7 +1383,7 @@ def _song_match_key(name: str) -> str:
     in WAR and "This One Here" in DONDA 2 share one key. Exposed to clients
     as ``Song.song_key``.
     """
-    key = _normalize_unicode(name)
+    key = _normalize_unicode(name).translate(_TYPOGRAPHIC_FOLD)
     key = VERSION_TAG_PATTERN.sub("", key)
     key = key.lower()
     key = _PUNCT_STRIP_RE.sub(" ", key)
@@ -1821,6 +1838,27 @@ def _absolutize_era_art(eras: list[Era], source_url: str) -> None:
             era.art_url = urljoin(source_url, era.art_url)
 
 
+class _TagIndex:
+    """Newest era per own tag key, so a tagged row finds its sibling without scanning eras."""
+
+    def __init__(self) -> None:
+        self.latest: dict[str, Era] = {}
+        self.upto = 0
+        self.unnamed: list[Era] = []  # indexed once a backfilled name gives it keys
+
+    def find(self, tag_key: str, eras: list[Era], own_keys: Callable[[Era], set[str]]) -> Era | None:
+        pending, self.unnamed = self.unnamed + eras[self.upto:], []
+        self.upto = len(eras)
+        # Pending is in era order, so a newer era overwrites an older one.
+        for era in pending:
+            keys = own_keys(era)
+            if not keys:
+                self.unnamed.append(era)
+            for key in keys:
+                self.latest[key] = era
+        return self.latest.get(tag_key)
+
+
 def _resolve_row_era(
     row_era: str,
     current_era: Era | None,
@@ -1828,6 +1866,7 @@ def _resolve_row_era(
     era_by_key: dict[str, Era],
     era_by_key_fallback: dict[str, Era],
     own_keys_cache: dict[int, set[str]],
+    tag_index: _TagIndex,
 ) -> tuple[Era | None, bool, bool]:
     """The era a row's era-column value names, whether only a fuzzy match found it, and
     whether it is a tagged sibling of the current era (which then stays current).
@@ -1850,7 +1889,7 @@ def _resolve_row_era(
     if norm in own or tag_key in own:
         return current_era, False, False
     # Own names only: a section-label alias never makes an era a tagged sibling.
-    tagged = next((e for e in reversed(eras) if tag_key in own_keys(e)), None) if tag_key else None
+    tagged = tag_index.find(tag_key, eras, own_keys) if tag_key else None
     if tagged is not None:
         return tagged, False, stripped in own
     if stripped in own:
@@ -1994,6 +2033,7 @@ def parse_sheet(
     _needs_name_backfill: set[int] = set()  # id(era) values
     # id(era) → its own key forms, for the positional-exact prior.
     _era_own_keys_cache: dict[int, set[str]] = {}
+    _tag_index = _TagIndex()
     # Own keys of eras[:declared_upto], so a repeated tagged heading is found in O(1).
     declared_keys: set[str] = set()
     declared_upto = 0
@@ -2097,7 +2137,7 @@ def parse_sheet(
         if row_era:
             # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
             matched_era, fuzzy, sibling = _resolve_row_era(
-                row_era, current_era, eras, era_by_key, era_by_key_fallback, _era_own_keys_cache
+                row_era, current_era, eras, era_by_key, era_by_key_fallback, _era_own_keys_cache, _tag_index
             )
             fuzzy_matched_rows += fuzzy
 
@@ -2449,9 +2489,8 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     colspan differences, so we extract by content matching.
     """
     for row in reversed(rows):
-        # Look for the signature "Total Links" or "Total Full"
         cell_texts = [c.text for c in row]
-        has_links = any("Total Links" in t or "Total Link" in t for t in cell_texts)
+        has_links = any("Total Link" in t for t in cell_texts)
         has_avail = any("Total Full" in t for t in cell_texts)
 
         if has_links or has_avail:
@@ -2460,18 +2499,25 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
             availability_text = ""
             highlights_text = ""
 
+            # Independent checks: one cell may hold several stat lines.
             for cell in row:
                 t = cell.text
-                if "Total Links" in t or "Total Link" in t or "Missing Links" in t:
+                if "Total Link" in t or "Missing Links" in t:
                     links_text = t
-                elif "Lossless" in t or "CD Quality" in t:
+                if "Lossless" in t or "CD Quality" in t:
                     quality_text = t
-                elif "Total Full" in t or "OG Files" in t or "OG File" in t:
+                if "Total Full" in t or "OG Files" in t or "OG File" in t:
                     availability_text = t
-                elif "Best Of" in t or "Special" in t or "Grails" in t:
+                if "Best Of" in t or "Special" in t or "Grails" in t:
                     highlights_text = t
 
-            return parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
+            # A footer may hold all its stats in one cell, so count parsed fields. An
+            # era header or a note that mentions a total yields at most one field.
+            stats = parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
+            parsed = sum(1 for v in stats.model_dump().values() if v)
+            if parsed < 2 or (parsed < 4 and _is_era_header(row)):
+                continue
+            return stats
 
     return None
 
@@ -2562,6 +2608,12 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     version_tag, _base = extract_version_tag(title)
     # Use base name (tag stripped) to avoid duplication in the UI
     title = _base
+    # A credit-only name cell leaves no title: borrow an alt title or the raw line.
+    if not title:
+        raw_line = next((ln.strip() for ln in after_badge.split("\n") if ln.strip()), "")
+        title = alt_titles.pop(0) if alt_titles else raw_line
+        if not title:
+            return None
 
     # If found unfinished tag but no explicit version tag, set one
     if _found_unfinished and not version_tag:
@@ -2643,8 +2695,9 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if _has_no_audio(avail_text, quality_text):
         # Only what /stream cannot play is evidence (docs/decisions.md::parser.py::sources-as-links).
         known = {s.url for s in sources}
-        sources += [SourceRef(url=u) for u in merged_links if u not in known and not _playable_no_audio(u)]
-        merged_links = [u for u in merged_links if _playable_no_audio(u)]
+        playable = {u: _playable_no_audio(u) for u in merged_links}
+        sources += [SourceRef(url=u) for u in merged_links if u not in known and not playable[u]]
+        merged_links = [u for u in merged_links if playable[u]]
 
     version = SongVersion(
         name=title,
@@ -3359,13 +3412,14 @@ def parse_artistgrid_csv(csv_text: str) -> list[TrackerEntry]:
     never contain a dot, which is what tells the two apart.
     """
     entries: list[TrackerEntry] = []
-    for row in csv.DictReader(csv_text.splitlines()):
+    for row in csv.DictReader(io.StringIO(csv_text, newline="")):
         name = (row.get("name") or "").strip()
         raw_url = (row.get("url") or "").strip()
         if not name or not raw_url:
             continue
         url = (
-            f"https://{raw_url}/" if "." in raw_url
+            raw_url if re.match(r"https?://", raw_url, re.IGNORECASE)
+            else f"https://{raw_url}/" if "." in raw_url
             else f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
         )
         entries.append(TrackerEntry(

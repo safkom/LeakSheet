@@ -543,13 +543,17 @@ def extract_badge(name: str) -> tuple[Badge | None, str]:
 
     Returns (badge, cleaned_name) where cleaned_name has the emoji stripped.
     """
-    match = BADGE_EMOJI_PATTERN.match(name)
-    if match:
-        emoji = match.group(1)
-        badge = EMOJI_TO_BADGE.get(emoji)
-        cleaned = name[match.end():].strip()
-        return badge, cleaned
-    return None, name.strip()
+    best: Badge | None = None
+    # Stacked emojis ("🏆🥇 Song") all go; the highest-priority badge wins, except that
+    # an AI marker is never lost behind another badge: an AI version must not look genuine.
+    ai = False
+    while match := BADGE_EMOJI_PATTERN.match(name):
+        badge = EMOJI_TO_BADGE.get(match.group(1))
+        ai = ai or badge is Badge.AI
+        if badge is not None and (best is None or _BADGE_PRIORITY[badge] < _BADGE_PRIORITY[best]):
+            best = badge
+        name = name[match.end():]
+    return (Badge.AI if ai else best), name.strip()
 
 
 def extract_version_tag(name: str) -> tuple[str | None, str]:
@@ -726,6 +730,9 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 # Must stay linear: line-break spaces are stripped first (parse_song_credits)
 # so each char matches one way, and the possessive scan never retries inner openers.
 _CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
+# A closed "(X (kw. Y))" becomes "(X; kw. Y)" first. An unclosed outer group never
+# matches, so a typo'd closer keeps its old reading.
+_NESTED_CREDIT_RE = re.compile(r"\(([^()\n]*)\(([^()\n]*)\)\)")
 
 # field name → the keyword that introduces it. Order is the match order, so no
 # entry may be a prefix of a later one.
@@ -937,6 +944,14 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     # Linear, and equivalent for everything below: every line is stripped
     # again before it is used, and group values collapse their whitespace.
     raw_name = "\n".join(line.strip() for line in raw_name.split("\n"))
+
+    def flatten_nested(m: "re.Match[str]") -> str:
+        outer, inner = m.group(1), m.group(2)
+        if _CREDIT_PART_RE.match(outer.strip()) and _CREDIT_PART_RE.match(inner.strip()):
+            return f"({outer.rstrip()}; {inner})"
+        return m.group(0)
+
+    raw_name = _NESTED_CREDIT_RE.sub(flatten_nested, raw_name)
     cleaned = _CREDIT_GROUP_RE.sub(take_group, raw_name)
     # A removed group leaves a double space behind ("Title (feat. A) Remix").
     cleaned = _INNER_SPACE_RE.sub(" ", cleaned)

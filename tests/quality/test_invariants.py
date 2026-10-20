@@ -164,3 +164,24 @@ class TestCorpusInvariants:
             except Exception as exc:  # noqa: BLE001 - the point of the test
                 bad.append(f"{title}: {type(exc).__name__}: {exc}")
         assert bad == [], f"{len(bad)} trackers raised, e.g. {bad[:3]}"
+
+
+class TestNameHygieneInvariant:
+    def test_flags_each_defect(self):
+        from src.models import Artist, Era, Section, Song, SongVersion
+        from tests.quality.invariants import check_name_hygiene, ios_contract_violations
+
+        songs = [
+            Song(base_name="", versions=[SongVersion(name="")]),
+            Song(base_name="🏆 Left (open", versions=[SongVersion(name="x", featuring="A (B")]),
+            Song(base_name="Dup", song_key="dup", versions=[SongVersion(name="Dup")]),
+            Song(base_name="Dup", song_key="dup", versions=[SongVersion(name="Dup")]),
+        ]
+        artist = Artist(name="X", slug="x", eras=[Era(name="E", sections=[Section(songs=songs)])])
+        found = " | ".join(check_name_hygiene(artist))
+        for needle in ("empty name", "badge emoji", "unbalanced brackets in name",
+                       "unbalanced brackets in featuring", "duplicate song_key"):
+            assert needle in found
+        payload = {"name": "X", "slug": "x", "eras": [{"name": "E", "sections": [
+            {"name": "", "songs": [{"base_name": "", "song_key": "k", "versions": [{"name": ""}]}]}]}]}
+        assert len(ios_contract_violations(payload)) == 2

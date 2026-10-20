@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from src.models import Artist
+from src.models import BADGE_EMOJI_PATTERN, Artist
 
 # M:SS or H:MM:SS. Trackers also write "?:??" and "N/A" for unknown, which are
 # legitimate content rather than parse failures, so they are allowed through.
@@ -159,8 +159,12 @@ def check_ios_contract(artist: Artist) -> list[str]:
 def ios_contract_violations(payload: dict) -> list[str]:
     out: list[str] = []
 
-    def need(d: dict, keys: list[str], ctx: str) -> None:
-        out.extend(f"{ctx}: {k!r} is null/missing" for k in keys if d.get(k) is None)
+    def need(d: dict, keys: list[str], ctx: str, blank_is_null: tuple[str, ...] = ()) -> None:
+        out.extend(
+            f"{ctx}: {k!r} is null/missing"
+            for k in keys
+            if d.get(k) is None or (k in blank_is_null and not str(d.get(k)).strip())
+        )
 
     need(payload, ["name", "slug", "eras"], "Artist")
     for era in payload.get("eras") or []:
@@ -168,11 +172,12 @@ def ios_contract_violations(payload: dict) -> list[str]:
         for sec in era.get("sections") or []:
             need(sec, ["name", "songs"], f"Section in {era.get('name')!r}")
             for song in sec.get("songs") or []:
-                need(song, ["base_name", "versions", "song_key"], f"Song in {era.get('name')!r}")
+                need(song, ["base_name", "versions", "song_key"], f"Song in {era.get('name')!r}",
+                         blank_is_null=("base_name",))
                 if not song.get("versions"):
                     out.append(f"Song {song.get('base_name')!r} has no versions")
                 for v in song.get("versions") or []:
-                    need(v, ["name"], f"Version of {song.get('base_name')!r}")
+                    need(v, ["name"], f"Version of {song.get('base_name')!r}", blank_is_null=("name",))
                     for ref in v.get("sources") or []:
                         need(ref, ["label", "url"], f"SourceRef on {v.get('name')!r}")
     entries = list(payload.get("misc_entries") or [])
@@ -183,6 +188,40 @@ def ios_contract_violations(payload: dict) -> list[str]:
         entries += t.get("entries") or []
     for m in entries:
         need(m, ["era_name", "name", "links", "source_tab"], f"Entry {m.get('name')!r}")
+    return out
+
+
+_CREDIT_FIELDS = ("featuring", "producers", "collaboration", "refs", "director")
+
+
+def _unbalanced(text: str) -> bool:
+    return text.count("(") != text.count(")") or text.count("[") != text.count("]")
+
+
+def check_name_hygiene(artist: Artist) -> list[str]:
+    """Names and credits must be non-empty, balanced, badge-free, and unique per section."""
+    out = []
+    for era in artist.eras:
+        for section in era.sections:
+            keys: set[str] = set()
+            for song in section.songs:
+                if not song.base_name.strip():
+                    out.append(f"{era.name!r}: song with an empty name")
+                if BADGE_EMOJI_PATTERN.match(song.base_name):
+                    out.append(f"{song.base_name!r}: leading badge emoji left in name")
+                if song.song_key:
+                    if song.song_key in keys:
+                        out.append(f"{era.name!r}: duplicate song_key {song.song_key!r} in a section")
+                    keys.add(song.song_key)
+                if _unbalanced(song.base_name):
+                    out.append(f"{song.base_name!r}: unbalanced brackets in name")
+                for v in song.versions:
+                    if not v.name.strip():
+                        out.append(f"{song.base_name!r}: version with an empty name")
+                    for field in _CREDIT_FIELDS:
+                        value = getattr(v, field, None)
+                        if value and _unbalanced(value):
+                            out.append(f"{song.base_name!r}: unbalanced brackets in {field} {value!r}")
     return out
 
 
@@ -212,6 +251,7 @@ ALL_CHECKS = (
     check_art_urls,
     check_field_sanity,
     check_ios_contract,
+    check_name_hygiene,
     check_tab_entry_identity,
 )
 

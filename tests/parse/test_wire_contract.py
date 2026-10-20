@@ -11,11 +11,12 @@ import json
 
 from src.config import ROOT_DIR
 from src.fetcher import serialize_artist
-from src.models import TabSection
+from src.models import Artist, Era, MiscEntry, Section, Song, TabSection
 from src.parser import parse_misc_tab, parse_sheet
 from tests.quality.invariants import ios_contract_violations
 
 FIXTURE = ROOT_DIR / "LeakSheet-iOS" / "LeakSheetTests" / "Fixtures" / "contract.json"
+EDGE_FIXTURE = FIXTURE.with_name("contract_edge.json")
 
 
 def _table(rows: list[list[str]]) -> str:
@@ -49,6 +50,19 @@ def contract_payload() -> dict:
     return json.loads(body)
 
 
+def edge_payload() -> dict:
+    """Optional blocks absent, a song with no versions, and MiscEntry at its sparsest."""
+    bare = MiscEntry(name="Bare", source_tab="other")
+    artist = Artist(
+        name="Edge Artist", slug="edge-artist",
+        eras=[Era(name="Edge Era", sections=[Section(songs=[Song(base_name="Hollow", versions=[])])])],
+        misc_entries=[bare],
+        tabs=[TabSection(kind="other", name="Sparse", entries=[bare])],
+    )
+    body, _etag = serialize_artist(artist)
+    return json.loads(body)
+
+
 def test_section_notes_and_groups_reach_the_wire():
     sections = contract_payload()["eras"][0]["sections"]
     assert [(s["name"], s["group"], s.get("notes")) for s in sections] == [
@@ -68,7 +82,24 @@ def test_the_shared_fixture_matches_the_serializer():
     )
 
 
+def test_edge_payload_is_what_swift_can_decode():
+    payload = edge_payload()
+    assert payload.get("tracker_stats") is None and payload.get("parse_metadata") is None
+    entry = payload["misc_entries"][0]
+    assert entry["links"] == [] and entry["era_name"] == "" and entry["source_tab"] == "other"
+    assert payload["eras"][0]["sections"][0]["songs"][0]["versions"] == []
+    # An empty versions list decodes; the invariant flags it as a content defect.
+    assert ios_contract_violations(payload) == ["Song 'Hollow' has no versions"]
+
+
+def test_the_edge_fixture_matches_the_serializer():
+    assert EDGE_FIXTURE.exists() and json.loads(EDGE_FIXTURE.read_text()) == edge_payload(), (
+        "Regenerate the Swift fixtures: uv run python -m tests.parse.test_wire_contract"
+    )
+
+
 if __name__ == "__main__":
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_text(json.dumps(contract_payload(), ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-    print(f"wrote {FIXTURE}")
+    EDGE_FIXTURE.write_text(json.dumps(edge_payload(), ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    print(f"wrote {FIXTURE} and {EDGE_FIXTURE}")

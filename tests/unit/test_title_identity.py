@@ -105,3 +105,19 @@ class TestCreditGroupRegexIsLinear:
         assert parse_song_credits("Song\n(prod. \nLondon On Da Track)").producers == "London On Da Track"
         wrapped = parse_song_credits("Song\n(prod. BoogzDaBeast,\nNascent)")
         assert wrapped.producers == "BoogzDaBeast, Nascent"
+
+
+def test_match_keys_fold_typographic_quotes_and_dashes():
+    from src.parser import _era_match_key, _song_match_key
+
+    assert _song_match_key("Don’t Stop") == _song_match_key("Don't Stop")
+    assert _song_match_key("A – B") == _song_match_key("A - B") == _song_match_key("A — B")
+    assert _era_match_key("Don‘t Look") == _era_match_key("Don't Look")
+
+
+def test_normalize_unicode_strips_latin_marks_only():
+    from src.parser import _normalize_unicode
+
+    assert _normalize_unicode("geëky ROSALÍA") == "geeky ROSALIA"
+    assert _normalize_unicode("が") != _normalize_unicode("か")
+    assert _normalize_unicode("й") != _normalize_unicode("и")

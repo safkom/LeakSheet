@@ -1,0 +1,79 @@
+{
+  "eras": [
+    {
+      "alt_names": [],
+      "art_url": null,
+      "description": null,
+      "highlighted_producers": [],
+      "name": "Edge Era",
+      "sections": [
+        {
+          "group": null,
+          "name": "",
+          "notes": null,
+          "songs": [
+            {
+              "badge": null,
+              "base_name": "Hollow",
+              "song_key": "",
+              "versions": []
+            }
+          ]
+        }
+      ],
+      "song_count": 1,
+      "stats": null,
+      "stats_raw": null,
+      "timeline": [],
+      "version_count": 0
+    }
+  ],
+  "misc_entries": [
+    {
+      "available": null,
+      "date": null,
+      "entry_type": null,
+      "era_name": "",
+      "length": null,
+      "links": [],
+      "name": "Bare",
+      "notes": null,
+      "quality": null,
+      "row_index": 0,
+      "section": "",
+      "source_tab": "other",
+      "streaming": null
+    }
+  ],
+  "name": "Edge Artist",
+  "notices": [],
+  "parse_metadata": null,
+  "slug": "edge-artist",
+  "source_url": null,
+  "tabs": [
+    {
+      "entries": [
+        {
+          "available": null,
+          "date": null,
+          "entry_type": null,
+          "era_name": "",
+          "length": null,
+          "links": [],
+          "name": "Bare",
+          "notes": null,
+          "quality": null,
+          "row_index": 0,
+          "section": "",
+          "source_tab": "other",
+          "streaming": null
+        }
+      ],
+      "kind": "other",
+      "name": "Sparse"
+    }
+  ],
+  "total_songs": 1,
+  "total_versions": 0,
+  "tracker_stats": null
+}
