@@ -25,3 +25,11 @@ def test_gid_fetch_slot_survives_a_second_event_loop():
             return True
 
     assert asyncio.run(use()) and asyncio.run(use())
+
+
+def test_tab_discovery_handles_escaped_quote_in_name():
+    from src.fetcher import _discover_page_urls, _discover_named_tabs
+
+    html = r'items.push({name: "Say \"Hi\"", pageUrl: "\/htmlview\/sheet\/55.html", gid: "55"});'
+    assert _discover_named_tabs(html) == {"55": 'Say "Hi"'}
+    assert _discover_page_urls(html)["55"][0] == 'Say "Hi"'

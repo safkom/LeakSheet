@@ -308,13 +308,13 @@ GID_PATTERN = re.compile(r"gid[=:]\s*[\"']?(\d+)")
 # Google Sheets embeds tab metadata as:
 #   items.push({name: "Tab Name", pageUrl: "...", gid: "12345", ...});
 _TAB_ITEMS_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^{}]*?gid:\s*"(\d+)"',
+    r'\{name:\s*"((?:[^"\\]|\\.)+)"[^{}]*?gid:\s*"(\d+)"',
 )
 
 # The same items.push() switcher, keyed on pageUrl ("\/htmlview\/sheet\/1.html"):
 # see docs/decisions.md::fetcher.py::_build_sheet_html_url — advertised tab paths
 _TAB_PAGEURL_PATTERN = re.compile(
-    r'\{name:\s*"([^"]+)"[^{}]*?pageUrl:\s*"([^"]+)"',
+    r'\{name:\s*"((?:[^"\\]|\\.)+)"[^{}]*?pageUrl:\s*"((?:[^"\\]|\\.)+)"',
 )
 
 # Trailing gid in a page-switcher path: "/htmlview/sheet/554276433.html".
@@ -1843,6 +1843,13 @@ async def _aggregate_hub_workbook(
         if keys and keys <= main_keys:
             logger.debug("Hub tab %r adds nothing new — skipped", display)
             continue
+        # A superset tab after a subset merges only what main lacks, whatever the tab order.
+        for era in extra.eras:
+            for section in era.sections:
+                section.songs = [
+                    song for song in section.songs
+                    if not (k := _song_match_key(song.base_name)) or k not in main_keys
+                ]
         merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
         main_keys |= keys
         total += merged
