@@ -441,6 +441,15 @@ class TestSlotKeysInThePayload:
         assert r.status_code == 200
         assert spawned == ["_store_slot_original"]
 
+    def test_a_late_slot_fill_never_overwrites_a_warmed_original(self, google):
+        key = api._image_cache_key("leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32, None)
+        warmed = _png(800, 800)
+        api._write_image_cache(key, warmed, "image/png", original=True)
+        asyncio.run(api._store_slot_original(
+            "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32, _png(100, 100), "image/png"
+        ))
+        assert api._read_image_cache(key)[0] == warmed
+
     def test_an_unknown_slot_is_404(self, google):
         key = "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32
         assert TestClient(app).get("/image-proxy", params={"url": key}).status_code == 404

@@ -1443,10 +1443,10 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
 async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
     try:
         orig, orig_ct = await _cap_original(data, ct)
-        if orig:
-            await asyncio.to_thread(
-                _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
-            )
+        key = _image_cache_key(slot, None)
+        # A warm that finished meanwhile stored a sharper original: keep it.
+        if orig and not await asyncio.to_thread(_read_image_cache, key):
+            await asyncio.to_thread(_write_image_cache, key, orig, orig_ct, original=True)
     except Exception as exc:  # a failed fill only costs the next width an upstream fetch
         logger.warning("slot original not stored: %s", exc)
 
