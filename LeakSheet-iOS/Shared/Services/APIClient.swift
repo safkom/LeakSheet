@@ -16,9 +16,17 @@ actor APIClient {
         resolveBaseURL(UserDefaults.standard.string(forKey: baseURLDefaultsKey))
     }
 
-    private static func resolveBaseURL(_ raw: String?) -> String {
+    /// An explicit http(s) scheme and a non-empty host: "httpfoo" or "http://" are not servers.
+    static func isValidServerURL(_ raw: String) -> Bool {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
+        else { return false }
+        return !(url.host() ?? "").isEmpty
+    }
+
+    static func resolveBaseURL(_ raw: String?) -> String {
         let custom = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !custom.isEmpty, custom.lowercased().hasPrefix("http"), URL(string: custom) != nil else {
+        guard isValidServerURL(custom) else {
             return defaultBaseURL
         }
         return custom.hasSuffix("/") ? String(custom.dropLast()) : custom

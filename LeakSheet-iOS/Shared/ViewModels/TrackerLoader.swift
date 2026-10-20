@@ -23,6 +23,7 @@ final class TrackerLoader {
         _ urlString: String,
         artistName: String? = nil,
         forceRefresh: Bool = false,
+        waitForInFlight: Bool = false,
         recents: RecentTrackersManager
     ) async -> Artist? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,6 +35,9 @@ final class TrackerLoader {
         let resolvedName = artistName ?? recents.savedName(forSourceUrl: trimmed)
         // One load at a time, across every call site: concurrent loads raced into
         // multiple navigation pushes.
+        // `waitForInFlight` (Mac sidebar, where a dropped selection leaves the pane spinning)
+        // queues behind the running load; the default drops, so a double tap can't push twice.
+        while waitForInFlight && loading { try? await Task.sleep(for: .milliseconds(50)) }
         guard !loading else { return nil }
         withAnimation { error = nil }
         staleNotice = nil
@@ -73,6 +77,8 @@ final class TrackerLoader {
         } catch let apiError as APIError {
             switch apiError {
             case .notModified:
+                // The sweep ages by mtime; a 304 proves the copy is current, so it counts as use.
+                await CacheService.shared.touch(url: trimmed)
                 return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
             case .httpError(let status, let msg):
                 // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403

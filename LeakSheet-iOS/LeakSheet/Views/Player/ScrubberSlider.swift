@@ -6,6 +6,8 @@ import SwiftUI
 struct ScrubberSlider: View {
     @Environment(PlayerViewModel.self) private var player
     var tint: Color = .lsAccent
+    /// The mini player's 16 pt strip: the Liquid Glass thumb is taller than the frame, so hide it.
+    var compact = false
 
     /// How far one VoiceOver swipe moves the playhead.
     private static let accessibilityStep: TimeInterval = 15
@@ -23,6 +25,7 @@ struct ScrubberSlider: View {
             }
         )
         .tint(tint)
+        .sliderThumbVisibility(compact ? .hidden : .automatic)
         // Without a label VoiceOver reads the raw TimeInterval ("142.0").
         .accessibilityLabel("Playback position")
         .accessibilityValue("\(Self.spoken(player.displayTime)) of \(Self.spoken(player.duration))")

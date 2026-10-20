@@ -23,7 +23,7 @@ struct MiniPlayerBar: View {
             VStack(spacing: 0) {
                 // Progress slider
                 if player.duration > 0 {
-                    ScrubberSlider()
+                    ScrubberSlider(compact: true)
                         .frame(height: 16)
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
@@ -120,7 +120,7 @@ struct MiniPlayerBar: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+                        .accessibilityLabel(player.isPlaying || player.loading ? "Pause" : "Play")
 
                         Button {
                             player.playNext()

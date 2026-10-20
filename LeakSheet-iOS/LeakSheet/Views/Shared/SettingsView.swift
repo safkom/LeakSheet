@@ -29,8 +29,7 @@ struct SettingsView: View {
 
     private var customURLInvalid: Bool {
         let trimmed = customServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty
-            && (!trimmed.lowercased().hasPrefix("http") || URL(string: trimmed) == nil)
+        return !trimmed.isEmpty && !APIClient.isValidServerURL(trimmed)
     }
 
     var body: some View {
