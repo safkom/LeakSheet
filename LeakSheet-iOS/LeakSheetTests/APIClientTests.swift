@@ -11,6 +11,14 @@ import Testing
 /// parallel execution would race on it.
 @Suite(.serialized)
 struct APIClientTests {
+    @Test func `custom server url needs http scheme and host`() {
+        #expect(APIClient.resolveBaseURL("https://my.host/api/") == "https://my.host/api")
+        #expect(APIClient.resolveBaseURL("HTTP://10.0.0.5:8000") == "HTTP://10.0.0.5:8000")
+        for bad in ["httpfoo", "http", "http://", "https:///api", "ftp://x.y", "my.host", ""] {
+            #expect(APIClient.resolveBaseURL(bad) == APIClient.defaultBaseURL, "\(bad)")
+        }
+    }
+
     /// URLProtocol stub: each test registers a handler keyed by request.
     nonisolated final class StubProtocol: URLProtocol {
         nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
