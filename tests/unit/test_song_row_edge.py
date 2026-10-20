@@ -1,3 +1,4 @@
+from src.models import Badge
 from src.parser import _Cell, _parse_song_row
 
 
@@ -40,3 +41,22 @@ def test_artistgrid_csv_quoted_newline_and_u2028_and_full_url():
     entries = {e.name: e.url for e in parse_artistgrid_csv(text)}
     assert entries["A\nB"] == "https://docs.google.com/spreadsheets/d/abc123/edit"
     assert entries["C D"] == "https://tracker.example.com/"
+
+
+def test_ai_flagged_version_groups_with_its_song_and_keeps_its_badge():
+    import tests.parse.test_wire_contract as wire
+    from src.parser import parse_sheet
+
+    def row(name):
+        # Song row shape the wire fixture uses: era, name, notes, length, date, availability.
+        return ["Synth Era", name, "", "3:00", "Jan 1, 2020", "Full (HQ)", "", "", ""]
+
+    era = ["2 OG File(s)\n2 Full", "Synth Era", "(01/01/2001) (Start)", "", "", "", "", "", ""]
+    table = wire._table([wire._HEADER, era, row("⭐🤖 Song [V2]"), row("Song [V1]")])
+    artist = parse_sheet(table, "Synth")
+    songs = [s for e in artist.eras for sec in e.sections for s in sec.songs]
+    assert len(songs) == 1
+    by_tag = {v.version_tag: v for v in songs[0].versions}
+    assert by_tag["V2"].badge == Badge.AI
+    assert by_tag["V1"].badge is None
+    assert songs[0].badge == Badge.AI

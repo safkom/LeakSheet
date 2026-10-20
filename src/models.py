@@ -544,13 +544,16 @@ def extract_badge(name: str) -> tuple[Badge | None, str]:
     Returns (badge, cleaned_name) where cleaned_name has the emoji stripped.
     """
     best: Badge | None = None
-    # Stacked emojis ("🏆🥇 Song") all go; the highest-priority badge wins.
+    # Stacked emojis ("🏆🥇 Song") all go; the highest-priority badge wins, except that
+    # an AI marker is never lost behind another badge: an AI version must not look genuine.
+    ai = False
     while match := BADGE_EMOJI_PATTERN.match(name):
         badge = EMOJI_TO_BADGE.get(match.group(1))
+        ai = ai or badge is Badge.AI
         if badge is not None and (best is None or _BADGE_PRIORITY[badge] < _BADGE_PRIORITY[best]):
             best = badge
         name = name[match.end():]
-    return best, name.strip()
+    return (Badge.AI if ai else best), name.strip()
 
 
 def extract_version_tag(name: str) -> tuple[str | None, str]:
