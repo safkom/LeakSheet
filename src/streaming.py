@@ -35,12 +35,14 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import functools
 import ipaddress
 import json
 import logging
 import re
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
 
@@ -121,17 +123,27 @@ async def assert_public_redirect_target(resp: httpx.Response, *, source: str) ->
 _DNS_RETRY_DELAY_S = 0.3
 
 
+# Name lookups get their own threads: sharing the default executor with every
+# to_thread call lets a resolver stall starve cache reads and health I/O.
+_DNS_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dns")
+
+
+async def _run_dns(func, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(
+        _DNS_EXECUTOR, functools.partial(func, *args, **kwargs)
+    )
+
+
 async def _getaddrinfo(host: str, port: int | None) -> list:
     """Resolve *host*, retrying once on EAI_AGAIN: a resolver hiccup (they cluster
     after a host reboot), unlike a name that does not exist."""
-    loop = asyncio.get_running_loop()
     try:
-        return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        return await _run_dns(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         if exc.errno != socket.EAI_AGAIN:
             raise
     await asyncio.sleep(_DNS_RETRY_DELAY_S)
-    return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return await _run_dns(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
 
 
 class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
@@ -651,9 +663,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     continue
                 # The cdnUrl is attacker-influenceable — validate the destination
                 # is a public https host before the caller streams from it (SSRF).
-                await asyncio.to_thread(
-                    _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
-                )
+                await _run_dns(_assert_public_https_url, cdn_url, source="imgur.gg cdnUrl")
                 return cdn_url
             # ValueError too: the SSRF pre-flight raises it (even for a transient DNS
             # failure), and that must still reach the temp.imgur.gg fallback.

@@ -6,7 +6,6 @@ server-side; a compromised/poisoned API could point it at an internal host
 requires https and rejects any host that resolves to a non-public address.
 """
 
-import asyncio
 import socket
 
 import httpx
@@ -135,11 +134,11 @@ async def test_transport_blocks_literal_private_ip():
 async def test_transport_wraps_dns_failure_as_connect_error(monkeypatch):
     # A DNS blip (socket.gaierror) must surface as an httpx error: raw, it slipped past
     # /sheet's `except httpx.HTTPError` and became a 500 "Internal error".
-    async def dns_down(*_args, **_kwargs):
+    def dns_down(*_args, **_kwargs):
         raise socket.gaierror(-3, "Temporary failure in name resolution")
 
     monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns_down)
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", dns_down)
     async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
         with pytest.raises(httpx.ConnectError, match="name resolution"):
             await client.get("https://tracker.example/x")
@@ -148,14 +147,14 @@ async def test_transport_wraps_dns_failure_as_connect_error(monkeypatch):
 async def test_transport_retries_a_transient_dns_failure_once(monkeypatch):
     calls = []
 
-    async def flaky(host, *_args, **_kwargs):
+    def flaky(host, *_args, **_kwargs):
         calls.append(host)
         if len(calls) == 1:
             raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 443))]
 
     monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", flaky)
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", flaky)
     async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
         # The retry's answer is the one vetted: a private address, refused before connecting.
         with pytest.raises(httpx.ConnectError, match="non-public"):
@@ -166,13 +165,29 @@ async def test_transport_retries_a_transient_dns_failure_once(monkeypatch):
 async def test_transport_does_not_retry_a_missing_host(monkeypatch):
     calls = []
 
-    async def missing(host, *_args, **_kwargs):
+    def missing(host, *_args, **_kwargs):
         calls.append(host)
         raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
 
     monkeypatch.setattr(streaming, "_DNS_RETRY_DELAY_S", 0)
-    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", missing)
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", missing)
     async with httpx.AsyncClient(transport=PublicOnlyAsyncTransport()) as client:
         with pytest.raises(httpx.ConnectError, match="not known"):
             await client.get("https://tracker.example/x")
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dns_lookups_do_not_use_the_default_executor(monkeypatch):
+    """A resolver stall must not starve to_thread callers (cache reads, health I/O)."""
+    import threading
+
+    names = []
+
+    def fake(host, port, *args, **kwargs):
+        names.append(threading.current_thread().name)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(streaming.socket, "getaddrinfo", fake)
+    await streaming._getaddrinfo("example.com", 443)
+    assert names[0].startswith("dns")
