@@ -25,6 +25,8 @@ import socket
 from pathlib import Path
 
 import httpx
+import weakref
+
 import pytest
 
 SYNTHETIC_DIR = Path(__file__).parent / "fixtures" / "synthetic"
@@ -65,6 +67,8 @@ def _isolate_cache(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(api, "_trackers_stale", None)
     monkeypatch.setattr(api, "_trackers_fail_until", 0.0)
     monkeypatch.setattr(fetcher, "_host_refresh", None)
+    monkeypatch.setattr(fetcher, "_last_sheet_evict", 0.0)
+    monkeypatch.setattr(fetcher, "_gid_fetch_sems", weakref.WeakKeyDictionary())
     monkeypatch.setattr(config, "_tracker_hosts", set())
     monkeypatch.setattr(config, "_tracker_hosts_at", 0.0)
     monkeypatch.setattr(streaming, "_cdn_url_cache", streaming.TTLCache(ttl=streaming._CDN_URL_TTL, max_entries=500))

@@ -30,6 +30,7 @@ import os
 import re
 import tempfile
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, NoReturn
@@ -93,7 +94,9 @@ _ORPHAN_TMP_AGE_S = 3600.0
 _GID_FETCH_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_GID_FETCH_CONCURRENCY", "6") or 6
 )
-_gid_fetch_sem: asyncio.Semaphore | None = None
+_gid_fetch_sems: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
 # Hub-workbook tabs are fetched AND parsed, so they need a tighter bound.
 _HUB_LOAD_CONCURRENCY = int(
     os.environ.get("LEAKSHEET_HUB_LOAD_CONCURRENCY", "3") or 3
@@ -101,11 +104,12 @@ _HUB_LOAD_CONCURRENCY = int(
 
 
 def _gid_fetch_slot() -> asyncio.Semaphore:
-    """Lazily created so the semaphore binds to the running loop."""
-    global _gid_fetch_sem
-    if _gid_fetch_sem is None:
-        _gid_fetch_sem = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
-    return _gid_fetch_sem
+    """One semaphore per running loop: a second asyncio.run must not reuse the first's."""
+    loop = asyncio.get_running_loop()
+    sem = _gid_fetch_sems.get(loop)
+    if sem is None:
+        sem = _gid_fetch_sems[loop] = asyncio.Semaphore(_GID_FETCH_CONCURRENCY)
+    return sem
 
 
 def _megabytes(text: str) -> str:
@@ -341,7 +345,7 @@ _FAKES_TAB_NAMES = frozenset({"fakes"})
 # exposed with kind="other" plus the tab's display name.
 _OTHER_CONTENT_TAB_NAMES = frozenset({
     "live performances", "performances",
-    "ai tracks", "remixes", "edits (wip)", "edits/remasters", "edits / remasters",
+    "ai tracks", "remixes", "edits", "edits/remasters", "edits / remasters",
 })
 
 # Badge tab kinds — see docs/decisions.md::fetcher.py::badge-tab-kinds
@@ -721,16 +725,29 @@ def _display_tab_name(name: str) -> str:
     return re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip()
 
 
+def _first_tab_gid(named_tabs: dict[str, str], names: frozenset) -> str | None:
+    """GID of the tab named in *names*, an exact unqualified name before a qualified one.
+
+    "Unreleased (Old)" cleans to "unreleased" too, and must not win by dict order.
+    """
+    qualified = None
+    for gid, name in named_tabs.items():
+        clean = _clean_tab_name(name)
+        if clean not in names:
+            continue
+        if re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip().lower() == clean:
+            return gid
+        qualified = qualified or gid
+    return qualified
+
+
 def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
     """Return the GID of the main unreleased/leaks tab if one exists.
 
     Used to prefer the primary tracker sheet over landing/recent tabs like
     Travis Scott's "Recent" sheet. Normalises through _clean_tab_name.
     """
-    for gid, name in named_tabs.items():
-        if _clean_tab_name(name) in _UNRELEASED_TAB_NAMES:
-            return gid
-    return None
+    return _first_tab_gid(named_tabs, _UNRELEASED_TAB_NAMES)
 
 
 def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
@@ -739,10 +756,7 @@ def _get_art_tab_gid(named_tabs: dict[str, str]) -> str | None:
     Strips emoji and normalises whitespace before comparing against the
     known art-tab keyword set ({"art", "album art", "cover art", ...}).
     """
-    for gid, name in named_tabs.items():
-        if _clean_tab_name(name) in _ART_TAB_NAMES:
-            return gid
-    return None
+    return _first_tab_gid(named_tabs, _ART_TAB_NAMES)
 
 
 # Kind resolution order for content tabs; earlier entries sort first in the
