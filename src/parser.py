@@ -2499,22 +2499,25 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
             availability_text = ""
             highlights_text = ""
 
+            # Independent checks: one cell may hold several stat lines.
             for cell in row:
                 t = cell.text
                 if "Total Link" in t or "Missing Links" in t:
                     links_text = t
-                elif "Lossless" in t or "CD Quality" in t:
+                if "Lossless" in t or "CD Quality" in t:
                     quality_text = t
-                elif "Total Full" in t or "OG Files" in t or "OG File" in t:
+                if "Total Full" in t or "OG Files" in t or "OG File" in t:
                     availability_text = t
-                elif "Best Of" in t or "Special" in t or "Grails" in t:
+                if "Best Of" in t or "Special" in t or "Grails" in t:
                     highlights_text = t
 
-            # An era header or a note that merely mentions a total holds one stat cell.
-            filled = sum(bool(x) for x in (links_text, quality_text, availability_text, highlights_text))
-            if filled < 2 or _is_era_header(row):
+            # A footer may hold all its stats in one cell, so count parsed fields. An
+            # era header or a note that mentions a total yields at most one field.
+            stats = parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
+            parsed = sum(1 for v in stats.model_dump().values() if v)
+            if parsed < 2 or (parsed < 4 and _is_era_header(row)):
                 continue
-            return parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
+            return stats
 
     return None
 

@@ -16,8 +16,10 @@ def test_global_stats_needs_two_stat_cells():
 
     note = [[_Cell(text="Note: Total Full count excludes snippets")]]
     assert _find_global_stats(note) is None
-    footer = [[_Cell(text="Total Links 3"), _Cell(text="Total Full 2")]]
+    footer = [[_Cell(text="10 Total Links\n2 Missing Links"), _Cell(text="5 Lossless"), _Cell(text="7 Total Full")]]
     assert _find_global_stats(footer) is not None
+    one_cell = [[_Cell(text="3 Total Links\n2 Lossless\n4 Total Full")]]
+    assert _find_global_stats(one_cell) is not None
 
 
 def test_confirmed_only_stats_cell_is_an_era_header():

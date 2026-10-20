@@ -1888,13 +1888,14 @@ async def _aggregate_hub_workbook(
     loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
 
     # Duplicate-tab filtering — see docs/decisions.md::fetcher.py::duplicate-tab-keys
-    def _keys(a: Artist) -> set[str]:
+    # Keyed per era on song_key: placeholder tracks have an empty key and never match.
+    def _keys(a: Artist) -> set[tuple[str, str]]:
         return {
-            k
+            (_era_match_key(era.name), song.song_key)
             for era in a.eras
             for section in era.sections
             for song in section.songs
-            if (k := _song_match_key(song.base_name))
+            if song.song_key
         }
 
     main_keys = _keys(artist)
@@ -1912,8 +1913,10 @@ async def _aggregate_hub_workbook(
             for section in era.sections:
                 section.songs = [
                     song for song in section.songs
-                    if not (k := _song_match_key(song.base_name)) or k not in main_keys
+                    if not song.song_key or (_era_match_key(era.name), song.song_key) not in main_keys
                 ]
+            era.sections = [sec for sec in era.sections if sec.songs]
+        extra.eras = [era for era in extra.eras if era.sections]
         merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
         main_keys |= keys
         total += merged

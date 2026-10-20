@@ -726,9 +726,10 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 # Must stay linear: line-break spaces are stripped first (parse_song_credits)
 # so each char matches one way, and the possessive scan never retries inner openers.
-# One nested "(...)" level is allowed: "(feat. A (prod. B))".
-_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|\([^()\n]*+\)|[^)\]\n])*+)([\)\]])?")
-_NESTED_GROUP_RE = re.compile(r"\(([^()]*)\)")
+_CREDIT_GROUP_RE = re.compile(r"[\(\[]((?:[,&.]\n|[^)\]\n])*+)([\)\]])?")
+# A closed "(X (kw. Y))" becomes "(X; kw. Y)" first. An unclosed outer group never
+# matches, so a typo'd closer keeps its old reading.
+_NESTED_CREDIT_RE = re.compile(r"\(([^()\n]*)\(([^()\n]*)\)\)")
 
 # field name → the keyword that introduces it. Order is the match order, so no
 # entry may be a prefix of a later one.
@@ -919,21 +920,13 @@ def parse_song_credits(raw_name: str) -> SongCredits:
         """Harvest one bracketed group's credits; return "" if it was one."""
         if match.group(2) is None:
             return match.group(0)
-        nested: list[str] = []
-
-        def pull_nested(inner: "re.Match[str]") -> str:
-            if _CREDIT_PART_RE.match(inner.group(1).strip()):
-                nested.append(inner.group(1))
-                return ""
-            return inner.group(0)
-
-        parts = _split_credit_parts(_NESTED_GROUP_RE.sub(pull_nested, match.group(1)))
+        parts = _split_credit_parts(match.group(1))
         opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
         # The keyword must open the group, or "(Some Title, prod. X)" would lose its
         # title half.
         if opener is None:
             return match.group(0)
-        for part in parts + [p for n in nested for p in _split_credit_parts(n)]:
+        for part in parts:
             keyword = _CREDIT_PART_RE.match(part)
             # Guaranteed non-None: _split_credit_parts only breaks where a
             # keyword follows, and parts[0] was just checked.
@@ -948,6 +941,14 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     # Linear, and equivalent for everything below: every line is stripped
     # again before it is used, and group values collapse their whitespace.
     raw_name = "\n".join(line.strip() for line in raw_name.split("\n"))
+
+    def flatten_nested(m: "re.Match[str]") -> str:
+        outer, inner = m.group(1), m.group(2)
+        if _CREDIT_PART_RE.match(outer.strip()) and _CREDIT_PART_RE.match(inner.strip()):
+            return f"({outer.rstrip()}; {inner})"
+        return m.group(0)
+
+    raw_name = _NESTED_CREDIT_RE.sub(flatten_nested, raw_name)
     cleaned = _CREDIT_GROUP_RE.sub(take_group, raw_name)
     # A removed group leaves a double space behind ("Title (feat. A) Remix").
     cleaned = _INNER_SPACE_RE.sub(" ", cleaned)
