@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src import fetcher
+from src import fetcher, streaming
 from src.streaming import GdriveInterstitialError, NonMediaError, UpstreamStatusError, resolve_stream_url, stream_audio
 
 logger = logging.getLogger(__name__)
@@ -226,7 +226,13 @@ async def probe_once() -> None:
         except BlockingIOError:
             return  # another worker probes this round
         targets = [(p, e.get("probe") or []) for p, e in _read().items() if e.get("status") == "down"]
-        await asyncio.gather(*(_probe(p, links) for p, links in targets if links), return_exceptions=True)
+        client = streaming.new_stream_client(max_connections=4, max_keepalive=0)
+        token = streaming._client_override.set(client)
+        try:
+            await asyncio.gather(*(_probe(p, links) for p, links in targets if links), return_exceptions=True)
+        finally:
+            streaming._client_override.reset(token)
+            await client.aclose()
 
 
 async def probe_forever() -> None:

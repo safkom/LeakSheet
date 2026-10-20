@@ -42,6 +42,7 @@ from src.api import (
         ("bytes=-2000", 1000, _RangePlan("partial", 0, 999)),  # suffix > total
         ("bytes=-500", None, _RangePlan("full")),          # unknown total → 200
         ("bytes=-0", 1000, _RangePlan("unsatisfiable")),   # names no bytes
+        ("bytes=-5", 0, _RangePlan("unsatisfiable")),      # nothing to take a suffix of
         # Unsatisfiable starts
         ("bytes=1000-", 1000, _RangePlan("unsatisfiable")),
         ("bytes=1000-2000", 1000, _RangePlan("unsatisfiable")),

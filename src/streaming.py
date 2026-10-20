@@ -34,11 +34,15 @@ direct audio stream URLs.  Supported hosts:
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
 import ipaddress
+import json
 import logging
 import re
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
 
@@ -119,17 +123,27 @@ async def assert_public_redirect_target(resp: httpx.Response, *, source: str) ->
 _DNS_RETRY_DELAY_S = 0.3
 
 
+# Name lookups get their own threads: sharing the default executor with every
+# to_thread call lets a resolver stall starve cache reads and health I/O.
+_DNS_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dns")
+
+
+async def _run_dns(func, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(
+        _DNS_EXECUTOR, functools.partial(func, *args, **kwargs)
+    )
+
+
 async def _getaddrinfo(host: str, port: int | None) -> list:
     """Resolve *host*, retrying once on EAI_AGAIN: a resolver hiccup (they cluster
     after a host reboot), unlike a name that does not exist."""
-    loop = asyncio.get_running_loop()
     try:
-        return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        return await _run_dns(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         if exc.errno != socket.EAI_AGAIN:
             raise
     await asyncio.sleep(_DNS_RETRY_DELAY_S)
-    return await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return await _run_dns(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
 
 
 class PublicOnlyAsyncTransport(httpx.AsyncHTTPTransport):
@@ -176,10 +190,12 @@ async def _get_text_capped(
     headers: dict[str, str],
     *,
     cap: int = _SCRAPER_READ_CAP,
+    timeout: httpx.Timeout | float | None = None,
 ) -> tuple[int, str]:
     """GET *url*, decoding at most *cap* decompressed bytes. Returns
     (status_code, text). Stops consuming the body once the cap is reached."""
-    request = client.build_request("GET", url, headers=headers)
+    extra = {} if timeout is None else {"timeout": timeout}
+    request = client.build_request("GET", url, headers=headers, **extra)
     resp = await client.send(request, stream=True)
     try:
         buf = bytearray()
@@ -187,9 +203,36 @@ async def _get_text_capped(
             buf.extend(chunk)
             if len(buf) >= cap:
                 break
-        return resp.status_code, bytes(buf[:cap]).decode("utf-8", errors="ignore")
+        raw = bytes(buf[:cap])
+        try:
+            text = raw.decode(getattr(resp, "encoding", None) or "utf-8", errors="ignore")
+        except LookupError:  # a charset name Python does not know
+            text = raw.decode("utf-8", errors="ignore")
+        return resp.status_code, text
     finally:
         await resp.aclose()
+
+
+class CappedResponse:
+    """A provider answer read through _get_text_capped: status and capped text."""
+
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+    def json(self):
+        return json.loads(self.text)
+
+
+async def get_capped(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    *,
+    timeout: httpx.Timeout | float | None = None,
+) -> CappedResponse:
+    """A small provider API answer, read with the scraper byte cap."""
+    return CappedResponse(*await _get_text_capped(client, url, headers, timeout=timeout))
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +361,10 @@ async def _cached_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> st
 
     task = _inflight_resolves.get(key)
     if task is None:
-        task = asyncio.ensure_future(resolve())
+        # Shared with other callers, so never bound to one caller's private client.
+        ctx = contextvars.copy_context()
+        ctx.run(_client_override.set, None)
+        task = asyncio.create_task(resolve(), context=ctx)
         _inflight_resolves[key] = task
 
         def _store(done: asyncio.Task[str]) -> None:
@@ -350,22 +396,33 @@ _AUDIO_MIMES = {
 # ---------------------------------------------------------------------------
 
 _shared_client: httpx.AsyncClient | None = None
+# Set by the recovery prober: it gets its own small pool, so a saturated shared pool
+# cannot make a healthy host look down and keep it down.
+_client_override: contextvars.ContextVar[httpx.AsyncClient | None] = contextvars.ContextVar(
+    "stream_client_override", default=None
+)
+
+
+def new_stream_client(max_connections: int = 50, max_keepalive: int = 10) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        # Connect stays short: a dead host fails in seconds, not half a minute.
+        timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
+        # limits live on the transport because a custom transport bypasses
+        # the client-level `limits` argument.
+        transport=PublicOnlyAsyncTransport(
+            limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_keepalive),
+        ),
+    )
 
 
 def _get_shared_client() -> httpx.AsyncClient:
     """Return (and lazily create) a shared async HTTP client for streaming."""
     global _shared_client
+    if (override := _client_override.get()) is not None:
+        return override
     if _shared_client is None or _shared_client.is_closed:
-        _shared_client = httpx.AsyncClient(
-            follow_redirects=True,
-            # Connect stays short: a dead host fails in seconds, not half a minute.
-            timeout=httpx.Timeout(_STREAM_TIMEOUT, connect=10.0, read=120.0),
-            # limits live on the transport because a custom transport bypasses
-            # the client-level `limits` argument.
-            transport=PublicOnlyAsyncTransport(
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=10),
-            ),
-        )
+        _shared_client = new_stream_client()
     return _shared_client
 
 
@@ -593,9 +650,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
         for url in urls_to_try:
             try:
                 client = _get_shared_client()
-                resp = await client.get(
-                    url, headers={"User-Agent": _STREAM_USER_AGENT}
-                )
+                resp = await get_capped(client, url, {"User-Agent": _STREAM_USER_AGENT})
                 if resp.status_code != 200:
                     statuses.append(resp.status_code)
                     last_err = ValueError(
@@ -616,9 +671,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     continue
                 # The cdnUrl is attacker-influenceable — validate the destination
                 # is a public https host before the caller streams from it (SSRF).
-                await asyncio.to_thread(
-                    _assert_public_https_url, cdn_url, source="imgur.gg cdnUrl"
-                )
+                await _run_dns(_assert_public_https_url, cdn_url, source="imgur.gg cdnUrl")
                 return cdn_url
             # ValueError too: the SSRF pre-flight raises it (even for a transient DNS
             # failure), and that must still reach the temp.imgur.gg fallback.
@@ -719,6 +772,9 @@ def _is_gdrive_host_allowed(url: str) -> bool:
     return host in _GDRIVE_ALLOWED_HOSTS or bool(_GDRIVE_USERCONTENT_RE.match(host))
 
 
+_GDRIVE_MAX_REDIRECTS = 5
+
+
 async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Response:
     """Fetch a Google Drive stream URL, transparently bypassing the
     virus-scan interstitial once via the confirm-form retry.
@@ -730,16 +786,21 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
     client = _get_shared_client()
 
     async def _get(url: str) -> httpx.Response:
-        if not _is_gdrive_host_allowed(url):
-            raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
-        request = client.build_request("GET", url, headers=headers)
-        resp = await client.send(request, stream=True)
-        if not _is_gdrive_host_allowed(str(resp.url)):
+        # Redirects are followed by hand so every hop is vetted before it is requested.
+        for _ in range(_GDRIVE_MAX_REDIRECTS + 1):
+            if not _is_gdrive_host_allowed(url):
+                raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
+            request = client.build_request("GET", url, headers=headers)
+            resp = await client.send(request, stream=True, follow_redirects=False)
+            if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
+                return resp
+            location = resp.headers["location"]
             await resp.aclose()
-            raise ValueError(
-                f"gdrive request redirected off-allowlist to {str(resp.url)[:80]}"
-            )
-        return resp
+            try:
+                url = str(resp.url.join(location))
+            except httpx.InvalidURL as exc:
+                raise ValueError("gdrive redirect with a malformed Location") from exc
+        raise ValueError("gdrive request redirected too many times")
 
     resp = await _get(stream_url)
 
@@ -771,7 +832,7 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
         if resp.status_code == 403:
             return resp
         retry_ct = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-        if retry_ct == "text/html":
+        if retry_ct == "text/html" and resp.status_code == 200:
             await resp.aclose()
             raise GdriveInterstitialError(
                 "drive.google.com interstitial persisted after confirm retry"

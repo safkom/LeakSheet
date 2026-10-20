@@ -83,6 +83,7 @@ from src.fetcher import (
     unlink_if_older,
 )
 from src.streaming import (
+    get_capped,
     ALLOWED_STREAM_HOSTS,
     GdriveInterstitialError,
     NonMediaError,
@@ -1313,6 +1314,11 @@ def _log_upstream_failure(what: str, url: str, exc: Exception) -> None:
         logger.error("%s for %s: %s", what, url[:80], exc, exc_info=exc)
 
 
+def _is_sheet_image_token(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.hostname == "docs.google.com" and parsed.path.startswith("/sheets-images-rt/")
+
+
 def _full_size_cover_url(url: str) -> str:
     """A sheet image at up to 1600 px: the URL a sheet emits asks for its cell's size.
 
@@ -1587,8 +1593,14 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": status},
             )
 
-        # Only "gone" and "slow down" relay. Anything else, a non-image 200 or Google's 403
-        # for an expired cover token included, is 503 (Cloudflare masks a 502).
+        # An expired Google cover token is a cover that is gone, not an outage; a 503 here
+        # would also read as one.
+        if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
+            logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
+            raise HTTPException(status_code=404, detail="Cover token expired")
+        # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
+        # is 503 (Cloudflare masks a 502).
+        logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
         raise HTTPException(
             status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
             detail="Upstream image fetch failed",
@@ -1875,7 +1887,7 @@ async def proxy_metadata(
     try:
         async with asyncio.timeout(_METADATA_DEADLINE_S):
             client = _get_shared_client()
-            resp = await client.get(meta_url, headers=headers, timeout=_METADATA_TIMEOUT)
+            resp = await get_capped(client, meta_url, headers, timeout=_METADATA_TIMEOUT)
             if resp.status_code != 200:
                 # pillows' metadata .txt endpoint 404s for some files — notably
                 # videos. The CDN's Content-Type on the stream URL is accurate,
@@ -1973,7 +1985,7 @@ async def list_trackers():
     Falls back to the last successful fetch, or if there's none yet, to the
     built-in seed list (src/tracker_seed.py) — see X-Cache-Status.
     """
-    global _trackers_stale, _trackers_fail_until
+    global _trackers_fail_until
 
     # Back off after a failure: this endpoint is outside the rate limiter, so retrying
     # per request would amplify an ArtistGrid outage against a third party.
@@ -1992,12 +2004,7 @@ async def list_trackers():
         )
 
     try:
-        # Also registers every listed tracker's host — this is the warm path
-        # for the /sheet allowlist (see config.sheet_host_allowed).
-        entries = await fetch_artistgrid_entries()
-        payload = json.dumps([e.model_dump() for e in entries])
-        _trackers_cache.set("trackers", payload)
-        _trackers_stale = payload
+        payload = await _load_trackers_once()
         return Response(
             content=payload,
             media_type="application/json",
@@ -2006,10 +2013,35 @@ async def list_trackers():
                 "X-Cache-Status": "miss",
             },
         )
-    except Exception as e:
-        _log_upstream_failure("ArtistGrid fetch failed", ARTISTGRID_URL, e)
+    except Exception:
         _trackers_fail_until = time.monotonic() + _TRACKERS_FAIL_BACKOFF_S
         return _trackers_fallback_response()
+
+
+# Coalesces simultaneous cold fetches of the registry, per worker.
+_trackers_inflight: asyncio.Task[str] | None = None
+
+
+async def _load_trackers_once() -> str:
+    global _trackers_inflight
+    if _trackers_inflight is None or _trackers_inflight.done():
+        _trackers_inflight = asyncio.create_task(_fetch_trackers_payload())
+    return await asyncio.shield(_trackers_inflight)
+
+
+async def _fetch_trackers_payload() -> str:
+    global _trackers_stale
+    try:
+        # Also registers every listed tracker's host — this is the warm path
+        # for the /sheet allowlist (see config.sheet_host_allowed).
+        entries = await fetch_artistgrid_entries()
+    except Exception as e:
+        _log_upstream_failure("ArtistGrid fetch failed", ARTISTGRID_URL, e)
+        raise
+    payload = json.dumps([e.model_dump() for e in entries])
+    _trackers_cache.set("trackers", payload)
+    _trackers_stale = payload
+    return payload
 
 
 def _trackers_fallback_response() -> Response:
@@ -2078,8 +2110,8 @@ def _plan_synthesized_range(range_header: str | None, total_size: int | None) ->
     first, last, suffix = m.groups()
     if suffix is not None:
         n = int(suffix)
-        if n == 0:
-            return _RangePlan("unsatisfiable")  # 'bytes=-0' names no bytes
+        if n == 0 or total_size == 0:
+            return _RangePlan("unsatisfiable")  # names no bytes, or the file has none
         if total_size is None:
             # Suffix against an unknown total → can't synthesise a valid
             # Content-Range; fall back to the full body.
@@ -2147,6 +2179,8 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     ):
         await asyncio.to_thread(host_health.record_success, provider)  # the host answered
         return
+    if isinstance(exc, httpx.PoolTimeout):
+        return  # our own pool is saturated: the host was never asked
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         hard = True  # no connection at all: the host itself is unreachable
     elif isinstance(exc, (httpx.TransportError, ValueError)):
@@ -2201,8 +2235,9 @@ async def proxy_stream(
     # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
     # not forwarded: upstreams turn garbage Range values into hard errors.
     range_header = request.headers.get("range")
-    if range_header and not _RANGE_SPEC.match(range_header.strip()):
-        range_header = None
+    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
+    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
+        range_header = None  # malformed or inverted: ignored, never forwarded
 
     # Parse range shape early — needed for the MIME sniffing decision below.
     _range_start = 0
@@ -2340,14 +2375,14 @@ async def proxy_stream(
             # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
             # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
             cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
-            if cr_match:
+            if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
                 headers["Content-Length"] = str(
                     int(cr_match.group(2)) - int(cr_match.group(1)) + 1
                 )
         if "Content-Length" not in headers:
-            cl = resp.headers.get("content-length")
-            if cl:
-                headers["Content-Length"] = cl
+            cl = _parse_content_length(resp.headers.get("content-length"))
+            if cl is not None:
+                headers["Content-Length"] = str(cl)
 
         return StreamingResponse(
             _closing(_iter_upstream()),

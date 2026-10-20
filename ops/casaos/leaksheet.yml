@@ -10,6 +10,8 @@ services:
     image: leaksheet-api:latest
     pull_policy: never
     restart: unless-stopped
+    # Longer than gunicorn's 30 s graceful timeout, so a deploy does not SIGKILL streams.
+    stop_grace_period: 35s
     environment:
       LEAKSHEET_TRUSTED_PROXY_HOPS: "${LEAKSHEET_TRUSTED_PROXY_HOPS}"
       LEAKSHEET_RATE_LIMIT_PER_MIN: "${LEAKSHEET_RATE_LIMIT_PER_MIN}"
@@ -54,10 +56,14 @@ services:
       # The HEALTHCHECK, not just a started container: nginx must not proxy early.
       api:
         condition: service_healthy
+        restart: true
     ports:
+      # IPv4 only: on [::] an IPv6 client reaches nginx from the bridge gateway, inside the
+      # tunnel trust range, and could spoof X-Forwarded-For.
       - target: 80
         published: "8081"
         protocol: tcp
+        host_ip: "0.0.0.0"
     deploy:
       resources:
         limits:
