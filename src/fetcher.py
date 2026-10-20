@@ -1005,7 +1005,9 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
 CACHE_COLLAPSE_RATIO = 0.8
 
 
-def _collapse_reason(key: str, new: int, new_eras: int, failed_tabs: int) -> str | None:
+def _collapse_reason(
+    key: str, new: int, new_eras: int, failed_tabs: int, tab_entries: int = 0
+) -> str | None:
     """Why a parse of *new* versions must not be cached, or None if it may.
 
     An empty parse is never cached, whatever the entry. A partial fetch parses cleanly
@@ -1013,7 +1015,7 @@ def _collapse_reason(key: str, new: int, new_eras: int, failed_tabs: int) -> str
     Past ``COLLAPSE_GUARD_TTL`` (``SERVE_STALE_TTL`` when tab loads failed) the old entry is
     never preferred, so a tracker that genuinely shrank recovers.
     """
-    if new <= 0:
+    if new <= 0 and not tab_entries:  # a tabs-only tracker is a real one
         return f"empty parse, {new_eras} eras"
     parsed_file = CACHE_DIR / f"{key}.parsed.json"
     if not parsed_file.exists():
@@ -1055,7 +1057,10 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
     try:
         # The collapse check needs two counts, not the whole dump — so it runs
         # before any serialization, and a refused parse costs none.
-        reason = _collapse_reason(key, artist.total_versions, len(artist.eras), failed_tabs)
+        tab_entries = sum(len(t.entries) for t in artist.tabs)
+        reason = _collapse_reason(
+            key, artist.total_versions, len(artist.eras), failed_tabs, tab_entries
+        )
         if reason is not None:
             # Served to this caller, but not persisted: the good copy stays,
             # and the next request is not poisoned by a transient failure.
@@ -1075,6 +1080,7 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
                 # small sidecar read instead of re-parsing the whole entry.
                 "total_versions": artist.total_versions,
                 "era_count": len(artist.eras),
+                "tab_entries": tab_entries,
             })
         artist._wire = (body, etag)
         _maybe_evict_sheet_cache()
@@ -1128,7 +1134,7 @@ def clear_cache() -> tuple[int, int]:
 
 def _servable(meta: dict) -> bool:
     """False for an empty parse on disk: see docs/decisions.md::fetcher.py::cache-collapse-guard."""
-    return meta.get("total_versions") != 0
+    return meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0
 
 
 def get_cached_etag(url: str) -> str | None:
