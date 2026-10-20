@@ -162,3 +162,29 @@ async def test_a_resolver_failure_is_a_soft_host_failure_not_a_success(clock):
     for link in ("https://imgur.gg/f/a", "https://imgur.gg/f/b", "https://imgur.gg/f/c"):
         await api._record_stream_outcome("imgur", link, ValueError("imgur.gg API response missing cdnUrl"))
     assert host_health.down("imgur")
+
+
+def test_half_open_admits_one_request_then_refuses_until_it_reports(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    assert host_health.refusing("pillows")  # inside the window
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None  # the probe request
+    assert host_health.refusing("pillows")  # the herd behind it
+    assert host_health.refusing("pillows")
+
+
+def test_a_failed_half_open_probe_waits_a_full_window(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S - 1
+    assert host_health.refusing("pillows")
+
+
+def test_a_lost_probe_is_replaced_after_its_lease(clock):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    clock[0] += host_health.HALF_OPEN_AFTER_S + 1
+    assert host_health.refusing("pillows") is None
+    clock[0] += host_health._PROBE_LEASE_S + 1
+    assert host_health.refusing("pillows") is None

@@ -50,6 +50,8 @@ _SOFT_DISTINCT_LINKS = 2
 PROBE_INTERVAL_S = 60.0
 HALF_OPEN_AFTER_S = 300
 _PROBE_TIMEOUT_S = 15.0
+# How long an admitted half-open request holds the door before another may try.
+_PROBE_LEASE_S = 30
 
 # (path, inode, mtime_ns, state): a re-read only when another worker wrote the file.
 # Every write is an os.replace, so the inode changes even within one mtime tick.
@@ -110,9 +112,25 @@ def down(provider: str) -> dict | None:
 
 
 def refusing(provider: str) -> dict | None:
-    """The entry when /stream should refuse *provider*: down and not yet due a retry."""
+    """The entry when /stream should refuse *provider*: down and not yet due a retry.
+
+    Once due, exactly one request (across workers) is admitted; the rest keep being
+    refused until it reports or its lease runs out.
+    """
     entry = down(provider)
-    return entry if entry and time.time() < entry.get("retry_at", 0) else None
+    if not entry:
+        return None
+    if time.time() < entry.get("retry_at", 0):
+        return entry
+    with _locked_state() as state:
+        current = state.get(provider)
+        if not current or current.get("status") != "down":
+            return None
+        now = time.time()
+        if now < current.get("retry_at", 0):
+            return {**current, "host": PROVIDERS[provider]}  # another worker won the probe
+        current["retry_at"] = now + _PROBE_LEASE_S
+    return None
 
 
 def record_success(provider: str) -> None:
@@ -131,8 +149,7 @@ def record_failure(provider: str, link: str, *, hard: bool, error: str) -> None:
         entry = state.setdefault(provider, {"status": "up", "since": now})
         entry["checked"] = now
         if entry["status"] == "down":
-            if now >= entry.get("retry_at", 0):
-                entry["retry_at"] = now + HALF_OPEN_AFTER_S  # a half-open request failed
+            entry["retry_at"] = now + HALF_OPEN_AFTER_S  # the half-open probe failed
             return
         failures = [f for f in entry.get("failures", []) if now - f[0] <= _SOFT_WINDOW_S]
         failures.append([now, link])
