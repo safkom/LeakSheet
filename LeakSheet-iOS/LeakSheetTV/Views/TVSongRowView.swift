@@ -60,7 +60,7 @@ struct TVSongRowView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(TVRowButtonStyle())
-            .disabled(primary == nil)
+            .disabled(!(primary?.isStreamable ?? false))
 
             if let payload = detailPayload {
                 NavigationLink(value: TVRoute.song(payload)) {
