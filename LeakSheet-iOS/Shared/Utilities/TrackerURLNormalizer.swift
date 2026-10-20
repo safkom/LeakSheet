@@ -36,9 +36,7 @@ nonisolated enum TrackerURLNormalizer {
         return components.url?.absoluteString ?? input
     }
 
-    // Mirrors backend SHEET_ID_PATTERN and _sheet_page_path, searched in "docs.google.com" + path:
-    // docs\.google\.com/spreadsheets(?:/u/\d+)?/d/(e/)?([A-Za-z0-9_-]+). A published sheet (/d/e/)
-    // is its own id space and only pubhtml serves it.
+    // Mirrors backend SHEET_ID_PATTERN: see DECISIONS.md::TrackerURLNormalizer.swift::mirrors-backend
     private static func sheetPagePath(inPath path: String) -> String? {
         let pattern = /docs\.google\.com\/spreadsheets(?:\/u\/\d+)?\/d\/(e\/)?([A-Za-z0-9_-]+)/
         guard let match = ("docs.google.com" + path).firstMatch(of: pattern) else { return nil }

@@ -26,9 +26,7 @@ struct TVMiniPlayerBar: View {
                             .lineLimit(1)
                     }
                     Spacer()
-                    Text("\(Format.time(player.currentTime)) / \(Format.time(player.duration))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    TVElapsedText()
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                 }
                 .padding(.horizontal, 40)
@@ -60,5 +58,16 @@ struct TVMiniPlayerBar: View {
         }
         .frame(width: 60, height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Own view so the ~10 Hz time updates re-render only this label, not the whole bar.
+private struct TVElapsedText: View {
+    @Environment(PlayerViewModel.self) private var player
+
+    var body: some View {
+        Text("\(Format.time(player.currentTime)) / \(Format.time(player.duration))")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
     }
 }

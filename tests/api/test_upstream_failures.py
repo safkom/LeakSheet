@@ -62,6 +62,8 @@ def test_upstream_failure_maps_to_a_client_status_and_no_error_log(
     response, expected = _UPSTREAM[answer]
     if path == "/metadata":
         expected = _METADATA_STATUS.get(expected, expected)
+    if path == "/stream" and answer == "html-200" and endpoint == "stream-kraken":
+        expected = 415  # a resolver page without media is NonMediaError
     hits = upstream(response)
 
     with caplog.at_level(logging.INFO):

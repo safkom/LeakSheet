@@ -194,13 +194,28 @@ class TestStreamEndpointGdriveMapping:
         assert r.status_code == 409
         assert r.json()["detail"] == "gdrive_interstitial"
 
-    def test_permission_denied_maps_to_403(self, api_client, monkeypatch):
+    def test_an_interstitial_counts_as_the_host_answering(self, api_client, monkeypatch):
+        from src import host_health
+        from src.streaming import GdriveInterstitialError
+
+        recorded = []
+        monkeypatch.setattr(host_health, "record_success", lambda provider: recorded.append(provider))
+
+        async def fake_stream_audio(url, *, range_header=None):
+            raise GdriveInterstitialError("interstitial persisted after confirm retry")
+
+        monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
+        api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
+        assert recorded == ["gdrive"]
+
+    def test_permission_denied_maps_to_424_upstream_forbidden(self, api_client, monkeypatch):
         async def fake_stream_audio(url, *, range_header=None):
             return FakeUpstreamResponse(403)
 
         monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
         r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
-        assert r.status_code == 403
+        assert r.status_code == 424
+        assert r.json()["detail"] == "upstream_forbidden"
 
     def test_generic_upstream_error_still_maps_to_503(self, api_client, monkeypatch):
         # Non-gdrive failures keep their 503 mapping — the 409/403 branches
@@ -282,6 +297,17 @@ class TestUpstreamStatusIsRelayed:
     def test_anything_else_stays_503(self, api_client, monkeypatch):
         self._raise(monkeypatch, 500)
         assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 503
+
+    def test_non_media_upstream_is_415_not_media(self, api_client, monkeypatch):
+        from src.streaming import NonMediaError
+
+        async def raiser(stream_url, *, range_header=None):
+            raise NonMediaError("Upstream returned non-audio content: application/zip")
+
+        monkeypatch.setattr(api, "stream_audio", raiser)
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 415
+        assert r.json()["detail"] == "not_media"
 
     def test_no_upstream_detail_leaks_to_the_client(self, api_client, monkeypatch):
         self._raise(monkeypatch, 404)

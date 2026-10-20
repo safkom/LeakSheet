@@ -9,6 +9,8 @@ struct MacRootView: View {
 
     @State private var ui = MacUIState.shared
     @State private var loader = TrackerLoader()
+    /// Latest selecting open wins: a queued earlier open finishing late must not steal the selection.
+    @State private var selectToken = 0
 
     /// The view model for whatever is playing — lets the mini player resolve the
     /// full song behind the bare version the player holds.
@@ -109,7 +111,6 @@ struct MacRootView: View {
 
     private var loadingPane: some View {
         VStack(spacing: 10) {
-            ProgressView()
             if let error = loader.error {
                 Text(error)
                     .font(.callout)
@@ -117,6 +118,7 @@ struct MacRootView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
+                ProgressView()
                 Text("Loading tracker…")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -171,11 +173,13 @@ struct MacRootView: View {
         select: Bool = true
     ) async {
         let shown = ui.selectedSlug.flatMap { ui.tracker($0) }
+        if select { selectToken += 1 }
+        let token = selectToken
         guard let artist = await loader.load(
-            url, artistName: artistName, forceRefresh: forceRefresh, recents: recents
+            url, artistName: artistName, forceRefresh: forceRefresh, waitForInFlight: true, recents: recents
         ) else {
             // A failed ⌘R keeps the loaded copy: say why there, not only on the other panes.
-            // No error means the load never ran (another was in flight), which says nothing.
+            // No error means the load was cancelled, which says nothing.
             if let shown, shown.artist.sourceUrl == url, let error = loader.error {
                 shown.vm.loadNotice = error
             }
@@ -185,7 +189,7 @@ struct MacRootView: View {
         let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
         vm.loadNotice = notice
         ui.store(LoadedTracker(artist: artist, vm: vm))
-        if select || ui.selectedSlug != artist.slug {
+        if select && token == selectToken {
             ui.selection = .tracker(slug: artist.slug)
         }
     }

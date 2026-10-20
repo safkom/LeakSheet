@@ -228,6 +228,17 @@ class TestFailedTabs:
         # Main and Art over htmlview, Misc and Grails / Wanted over the API.
         assert timer.tab_counts() == (0, 4)
 
+    async def test_the_timing_line_says_how_many_tabs_the_api_served(self, with_key, patch_sheets_client):
+        from src.fetcher import PhaseTimer
+
+        timer = PhaseTimer()
+        await _parse(Recorder(), patch_sheets_client, timer=timer)
+        assert "api_tabs=2/2" in timer.log_line()
+
+        broken = PhaseTimer()
+        await _parse(Recorder(api=lambda r: httpx.Response(403)), patch_sheets_client, timer=broken)
+        assert "api_tabs=0/2" in broken.log_line()
+
     async def test_a_tab_the_api_lacks_and_htmlview_fails_is_a_failed_tab(self, with_key, patch_sheets_client):
         from src.fetcher import PhaseTimer
 

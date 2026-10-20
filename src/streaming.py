@@ -610,7 +610,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
                     continue
                 cdn_url = data.get("cdnUrl")
                 if not cdn_url:
-                    last_err = NonMediaError(
+                    last_err = ValueError(
                         f"imgur.gg API response missing cdnUrl: {url}"
                     )
                     continue
