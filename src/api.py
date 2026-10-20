@@ -2206,6 +2206,9 @@ async def proxy_stream(
                 detail="Upstream rate limited",
                 headers={"Retry-After": "30"},
             )
+        if e.status_code in (401, 403):
+            # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
+            raise HTTPException(status_code=424, detail="upstream_forbidden")
         if 400 <= e.status_code < 500:
             raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
         raise HTTPException(status_code=503, detail="Upstream error")
@@ -2226,10 +2229,10 @@ async def proxy_stream(
     await _record_stream_outcome(provider, url, None)
 
     # Permission-required/private gdrive files come back from stream_audio
-    # as a real 403 response object (not raised) — relay it as-is.
+    # as a real 403 response object (not raised); see the 424 mapping above.
     if resp.status_code == 403:
         await resp.aclose()
-        raise HTTPException(status_code=403, detail="Provider denied access")
+        raise HTTPException(status_code=424, detail="upstream_forbidden")
 
     # Upstream judged the (valid) range unsatisfiable — relay it faithfully
     # instead of collapsing it into a generic 503.

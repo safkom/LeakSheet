@@ -194,13 +194,14 @@ class TestStreamEndpointGdriveMapping:
         assert r.status_code == 409
         assert r.json()["detail"] == "gdrive_interstitial"
 
-    def test_permission_denied_maps_to_403(self, api_client, monkeypatch):
+    def test_permission_denied_maps_to_424_upstream_forbidden(self, api_client, monkeypatch):
         async def fake_stream_audio(url, *, range_header=None):
             return FakeUpstreamResponse(403)
 
         monkeypatch.setattr(api, "stream_audio", fake_stream_audio)
         r = api_client.get("/stream", params={"url": GDRIVE_SHARE_URL})
-        assert r.status_code == 403
+        assert r.status_code == 424
+        assert r.json()["detail"] == "upstream_forbidden"
 
     def test_generic_upstream_error_still_maps_to_503(self, api_client, monkeypatch):
         # Non-gdrive failures keep their 503 mapping — the 409/403 branches

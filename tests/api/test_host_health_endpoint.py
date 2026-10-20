@@ -120,7 +120,7 @@ def test_other_upstream_4xx_is_relayed_and_never_marks_the_provider_down(api_cli
     monkeypatch.setattr(api, "stream_audio", refuses)
     for link in (PILLOWS, PILLOWS, "https://pillows.su/f/def456"):
         r = api_client.get("/stream", params={"url": link})
-        assert r.status_code == code
+        assert r.status_code == (424 if code in (401, 403) else code)
         assert isinstance(r.json()["detail"], str)
     assert host_health.down("pillows") is None
 
@@ -165,8 +165,9 @@ def test_a_4xx_at_any_step_reaches_the_client_and_never_marks_the_provider_down(
     api_client, monkeypatch, provider, links, code
 ):
     _serve(monkeypatch, lambda request: httpx.Response(code))
+    expected = 424 if code == 403 else code  # our own 403 is "Domain not allowed"
     for link in (links[0], links[0], links[1]):
-        assert api_client.get("/stream", params={"url": link}).status_code == code
+        assert api_client.get("/stream", params={"url": link}).status_code == expected
     assert host_health.down(provider) is None
 
 
