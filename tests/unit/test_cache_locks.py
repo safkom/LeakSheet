@@ -68,3 +68,26 @@ def test_entry_lock_excludes_across_processes():
     finally:
         release.set()
         proc.join(5)
+
+
+@pytest.mark.asyncio
+async def test_secondary_tabs_cancels_the_api_task_it_started(monkeypatch):
+    import asyncio
+
+    from src.fetcher import PhaseTimer, _load_secondary_tabs
+    from src.models import Artist
+
+    task = asyncio.get_running_loop().create_task(asyncio.sleep(60))
+    monkeypatch.setattr(fetcher, "_start_api_tabs", lambda *a, **k: task)
+
+    async def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(fetcher, "_load_secondary_tabs_with", boom)
+    with pytest.raises(RuntimeError):
+        await _load_secondary_tabs(
+            Artist(name="X", slug="x", eras=[]), None, [("1", "misc", "Misc")], URL, "T",
+            client=None, timeout=1, cache_ttl=0, use_cache=False, t=PhaseTimer(),
+        )
+    await asyncio.sleep(0)
+    assert task.cancelled()

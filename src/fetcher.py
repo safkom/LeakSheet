@@ -1592,6 +1592,38 @@ async def _load_secondary_tabs(
     page_paths: dict[str, str] | None = None,
     api_tabs: asyncio.Task | None = None,
 ) -> None:
+    """Fetch + parse the Art tab and all content tabs into *artist* (see _load_secondary_tabs_with)."""
+    if not art_gid and not content_tabs:
+        return
+    created = api_tabs is None
+    if created:
+        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
+    try:
+        await _load_secondary_tabs_with(
+            artist, art_gid, content_tabs, url_norm, title, client=client, timeout=timeout,
+            cache_ttl=cache_ttl, use_cache=use_cache, t=t, page_paths=page_paths, api_tabs=api_tabs,
+        )
+    finally:
+        # A task this call started must not outlive an error or a cancel.
+        if created and api_tabs is not None and not api_tabs.done():
+            api_tabs.cancel()
+
+
+async def _load_secondary_tabs_with(
+    artist: Artist,
+    art_gid: str | None,
+    content_tabs: list[tuple[str, str, str]],
+    url_norm: str,
+    title: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: float,
+    cache_ttl: float,
+    use_cache: bool,
+    t: PhaseTimer,
+    page_paths: dict[str, str] | None = None,
+    api_tabs: asyncio.Task | None = None,
+) -> None:
     """Fetch + parse the Art tab and all content tabs into *artist*.
 
     Everything here is optional — a failure never fails the request. Misc/MV
@@ -1599,11 +1631,6 @@ async def _load_secondary_tabs(
     compatibility; every non-empty tab lands in ``Artist.tabs``. Content tabs
     come from ``api_tabs`` when it has them, else from htmlview.
     """
-    if not art_gid and not content_tabs:
-        return
-    if api_tabs is None:
-        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
-
     total = len(content_tabs) + (1 if art_gid else 0)
     done = 0
     t.report("tabs", f"Reading {total} extra tabs", done=0, total=total)
