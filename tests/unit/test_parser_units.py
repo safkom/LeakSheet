@@ -294,6 +294,48 @@ class TestSongCreditParsing:
         title, feat, prod, *_ = parse_song_credits("Living Reckless [V1]")
         assert title == "Living Reckless [V1]" and prod is None and feat is None
 
+    @pytest.mark.parametrize("tail", [
+        "prod. Ann Producer, Bob Beat & Cy",
+        "prod. Ann Producer, Bob Beat & Cy)",
+        "feat. Dee Singer",
+    ])
+    def test_credit_tail_after_closed_group_is_not_an_alt_title(self, tail):
+        from src.models import parse_song_credits
+        c = parse_song_credits(f"Sample Song [V9]\n(???. Eli Example) {tail}")
+        assert c.alt_titles == ["???. Eli Example"]
+        assert (c.producers or c.featuring) and ")" not in (c.producers or c.featuring)
+
+    def test_credit_tail_splits_into_fields(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Sample Song\n(Alias) ft. Dee Singer, prod. Ann Producer)")
+        assert c.alt_titles == ["Alias"]
+        assert c.featuring == "Dee Singer" and c.producers == "Ann Producer"
+        c = parse_song_credits("Sample Song\n(Alias) feat. Dee Singer (Remix)")
+        assert c.alt_titles == ["Alias"] and c.featuring == "Dee Singer (Remix)"
+
+    @pytest.mark.parametrize("line", ["(???)", "(????)", "(??? Freestyle)"])
+    def test_unknown_placeholder_groups_stay_alt_titles(self, line):
+        from src.models import parse_song_credits
+        c = parse_song_credits(f"Sample Song\n{line}")
+        assert c.alt_titles == [line[1:-1]] and c.refs is None
+
+    def test_two_unknown_ref_groups_stay_alt_titles(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Sample Song\n(???. Eli Example) (???. Fay Sample)")
+        assert c.refs is None and c.alt_titles == ["???. Eli Example) (???. Fay Sample"]
+
+    @pytest.mark.parametrize("tail", ["Production Of Love", "Produced Tonight", "Prodigy Of Love"])
+    def test_word_starting_with_a_credit_keyword_is_not_a_credit(self, tail):
+        from src.models import parse_song_credits
+        c = parse_song_credits(f"Sample Song\n(Alias) {tail}")
+        assert c.producers is None and c.featuring is None
+        assert c.alt_titles == [f"(Alias) {tail}"]
+
+    def test_real_alias_with_comma_before_credit_tail_is_kept(self):
+        from src.models import parse_song_credits
+        c = parse_song_credits("Sample Song\n(Alias One, Alias Two) prod. Ann Producer")
+        assert c.alt_titles == ["Alias One", "Alias Two"] and c.producers == "Ann Producer"
+
 
 class TestSongBadgePrecedence:
     """A song with several differently-badged versions must report the most
