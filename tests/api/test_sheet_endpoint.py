@@ -20,6 +20,7 @@ from src.fetcher import (
     NetworkError,
     NoTablesError,
     ParseError,
+    SignedOutError,
     SourceGoneError,
     _cache_key,
     _normalize_url,
@@ -209,7 +210,7 @@ class TestRevalidationDropsGoneSources:
 
     @pytest.mark.parametrize(
         ("exc", "status"),
-        [(SourceGoneError("404"), 400), (AccessDeniedError("403"), 403)],
+        [(SourceGoneError("404"), 400), (SignedOutError("sign-in"), 403)],
     )
     @pytest.mark.parametrize("with_etag", [False, True])
     def test_a_gone_source_stops_being_served(
@@ -251,6 +252,15 @@ class TestRevalidationDropsGoneSources:
         assert first.headers["X-Cache-Status"] == "stale"
         assert get_cached_etag(URL) is None
         assert api_client.post("/sheet", json={"url": URL}).status_code == 403
+
+    def test_a_plain_403_keeps_the_stale_copy(self, api_client, artist, monkeypatch):
+        """A Cloudflare challenge or a brief Google 403 is not a takedown."""
+        from src.fetcher import get_cached_etag
+
+        self._failing_fetch(monkeypatch, AccessDeniedError("Access denied (403)"))
+        _populate_cache(URL, artist, age_seconds=2 * self.DAY)
+        assert api_client.post("/sheet", json={"url": URL}).headers["X-Cache-Status"] == "stale"
+        assert get_cached_etag(URL) is not None
 
     def test_a_failed_drop_does_not_escape_the_background_task(self, artist, monkeypatch):
         import asyncio

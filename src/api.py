@@ -77,6 +77,7 @@ from src.fetcher import (
     ParseError,
     PhaseTimer,
     SERVE_STALE_TTL,
+    SignedOutError,
     SourceGoneError,
     unlink_if_older,
 )
@@ -625,8 +626,9 @@ async def _background_revalidate(url: str) -> None:
     except Exception as e:
         _revalidate_backoff[key] = time.monotonic() + _REVALIDATE_BACKOFF_S
         logger.warning("Background revalidation failed for %s: %s", url[:80], e)
-        # Gone or private at the source: a stale copy must not outlive it (serve-stale-window).
-        if isinstance(e, (AccessDeniedError, SourceGoneError)):
+        # Gone or signed-out at the source: a stale copy must not outlive it (serve-stale-window).
+        # A plain 403 may be a challenge page or a blip, so it keeps the copy.
+        if isinstance(e, (SignedOutError, SourceGoneError)):
             try:
                 await asyncio.to_thread(drop_cached_entry, url)
             except OSError as exc:
@@ -2207,6 +2209,10 @@ async def proxy_stream(
         if 400 <= e.status_code < 500:
             raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
         raise HTTPException(status_code=503, detail="Upstream error")
+    except NonMediaError as e:
+        logger.warning("Stream non-media for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=415, detail="not_media")
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.

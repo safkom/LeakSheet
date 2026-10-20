@@ -283,6 +283,17 @@ class TestUpstreamStatusIsRelayed:
         self._raise(monkeypatch, 500)
         assert api_client.get("/stream", params={"url": PILLOWS}).status_code == 503
 
+    def test_non_media_upstream_is_415_not_media(self, api_client, monkeypatch):
+        from src.streaming import NonMediaError
+
+        async def raiser(stream_url, *, range_header=None):
+            raise NonMediaError("Upstream returned non-audio content: application/zip")
+
+        monkeypatch.setattr(api, "stream_audio", raiser)
+        r = api_client.get("/stream", params={"url": PILLOWS})
+        assert r.status_code == 415
+        assert r.json()["detail"] == "not_media"
+
     def test_no_upstream_detail_leaks_to_the_client(self, api_client, monkeypatch):
         self._raise(monkeypatch, 404)
         body = api_client.get("/stream", params={"url": PILLOWS}).text.lower()

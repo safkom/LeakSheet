@@ -152,3 +152,13 @@ class TestProber:
         await host_health.probe_once()
         await client.aclose()
         assert host_health.down("pillows") is None
+
+
+@pytest.mark.asyncio
+async def test_a_resolver_failure_is_a_soft_host_failure_not_a_success(clock):
+    from src import api
+
+    host_health.record_success("imgur")
+    for link in ("https://imgur.gg/f/a", "https://imgur.gg/f/b", "https://imgur.gg/f/c"):
+        await api._record_stream_outcome("imgur", link, ValueError("imgur.gg API response missing cdnUrl"))
+    assert host_health.down("imgur")

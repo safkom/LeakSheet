@@ -1334,6 +1334,11 @@ class AccessDeniedError(FetchError):
     pass
 
 
+class SignedOutError(AccessDeniedError):
+    """Google redirected to its sign-in page: the sheet is private, not a transient 403."""
+    pass
+
+
 def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
     """Map an httpx exception onto the typed FetchError hierarchy."""
     if isinstance(exc, httpx.TimeoutException):
@@ -1359,7 +1364,7 @@ def _raise_fetch_error(exc: httpx.HTTPError, url: str) -> "NoReturn":
 def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
     """A private Google sheet redirects to the sign-in page, which answers 200 with no table."""
     if _is_google_sheets_url(url) and r.url.host == "accounts.google.com":
-        raise AccessDeniedError(f"Sign-in required: {url}")
+        raise SignedOutError(f"Sign-in required: {url}")
 
 
 async def _fetch_base_html(
