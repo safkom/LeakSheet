@@ -147,6 +147,17 @@ both sides of the newline inside the repeat and backtracked exponentially on an
 unclosed `(` followed by many `, <newline>` lines (2,000 characters did not finish in
 15 s, S5852).
 
+## models.py::_route_alt_line — credit tails on alt lines
+
+A line like `(???. Name) prod. A, B & C)` has a closed group followed by an unbracketed
+credit whose own opener was lost. It starts with `(` and ends with `)`, so the alias-list
+rule split it at the commas into `???. Name) prod. A` and friends. The tail now goes
+through `_split_credit_parts` (`ft. X, prod. Y` fills both fields), a closer with no
+partner is dropped, and the group stays an alias. Only feature, producer, ref and
+director keywords qualify: a bare `with` is ambiguous. `???. Name` alts are kept on
+purpose: they bridge placeholder rows into one song (commit 6205387, the grouping rule
+in `parser.py` song identity), so they must not become refs.
+
 ## parser.py::_reconcile_title_misreads — song identity from titles and alt titles
 
 Decided with the user, 2026-09-13, after the iOS version picker showed split songs.

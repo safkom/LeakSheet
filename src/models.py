@@ -813,6 +813,39 @@ def _split_alt_aliases(text: str) -> list[str]:
     return parts
 
 
+# "(X) prod. Y": a closed group followed by an unbracketed credit keyword.
+_GROUP_THEN_CREDIT_RE = re.compile(r"^\(([^()]*)\)\s*(?=\S)")
+
+
+_BARE_PROD_WORD_RE = re.compile(r"prod(?:uced|uction)\s+$", re.IGNORECASE)
+
+
+def _route_alt_line(line: str, collected: dict[str, list[str]]) -> str:
+    """Move an unbracketed credit tail off an alt line; return what remains.
+
+    See docs/decisions.md::models.py::_route_alt_line.
+    """
+    group = _GROUP_THEN_CREDIT_RE.match(line)
+    if not group:
+        return line
+    tail = line[group.end():]
+    opener = _CREDIT_PART_RE.match(tail)
+    if opener is None or opener.lastgroup not in _BARE_CREDIT_FIELDS:
+        return line
+    # "Production Of Love" is a title; the keyword needs its dot or "by".
+    if _BARE_PROD_WORD_RE.match(opener.group(0)):
+        return line
+    # The tail's own opener was lost, leaving one closer without a partner.
+    if tail.count(")") > tail.count("("):
+        tail = tail[: tail.rindex(")")]
+    for part in _split_credit_parts(tail):
+        keyword = _CREDIT_PART_RE.match(part)
+        value = _WHITESPACE_RUN_RE.sub(" ", part[keyword.end():]).strip(" ,&") if keyword else ""
+        if value and keyword and keyword.lastgroup:
+            collected.setdefault(keyword.lastgroup, []).append(value)
+    return f"({group.group(1)})"
+
+
 class SongCredits(NamedTuple):
     """Structured result of :func:`parse_song_credits`."""
 
@@ -927,7 +960,7 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 
     alt_titles: list[str] = []
     for line in lines[1:]:
-        line = line.strip()
+        line = _route_alt_line(line.strip(), collected)
         # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
         if not line.strip("()[] "):
             continue
