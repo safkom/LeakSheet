@@ -23,7 +23,7 @@ struct MiniPlayerBar: View {
             VStack(spacing: 0) {
                 // Progress slider
                 if player.duration > 0 {
-                    ScrubberSlider()
+                    ScrubberSlider(compact: true)
                         .frame(height: 16)
                         .padding(.horizontal, 16)
                         .padding(.top, 6)

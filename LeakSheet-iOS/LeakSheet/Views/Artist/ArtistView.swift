@@ -208,6 +208,8 @@ private struct ArtistContentView: View {
             }
         }
         .refreshable { await onRefresh() }
+        // The mini player floats over the list: a soft edge keeps row text from bleeding through.
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
         .background(
             ZStack {
                 Color.lsBackground
