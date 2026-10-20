@@ -125,6 +125,10 @@ class PhaseTimer:
         # gid → whether its latest fetch loaded. A hub sibling is fetched twice (probe,
         # then merge); the merge's page is the one kept, so the last result counts.
         self.tabs: dict[str, bool] = {}
+        # Content tabs asked of the Sheets API / answered by it: a key that silently stops
+        # working shows as 0/N in the timing log.
+        self.api_tabs_asked = 0
+        self.api_tabs_served = 0
         # Progress events for a client waiting on a cold parse (NDJSON /sheet). Rides on
         # the timer because the timer already reaches every stage of the pipeline.
         self.on_progress = on_progress
@@ -166,7 +170,10 @@ class PhaseTimer:
     def log_line(self) -> str:
         total = sum(self.phases.values())
         parts = " ".join(f"{n}={d * 1000:.0f}ms" for n, d in self.phases.items())
-        return f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
+        line = f"{parts} total={total * 1000:.0f}ms failed_tabs={'/'.join(map(str, self.tab_counts()))}"
+        if self.api_tabs_asked:
+            line += f" api_tabs={self.api_tabs_served}/{self.api_tabs_asked}"
+        return line
 
 # ---------------------------------------------------------------------------
 # Shared async HTTP client (connection-pooled, reused across requests)
@@ -1596,12 +1603,14 @@ async def _load_secondary_tabs(
     async def _api_rows(gid_val: str) -> list | None:
         if api_tabs is None:
             return None
+        t.api_tabs_asked += 1
         try:
             rows = ((await api_tabs) or {}).get(gid_val)
         except Exception as e:  # the API never costs a tab: htmlview can still read it
             logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
             return None
         if rows is not None:
+            t.api_tabs_served += 1
             t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
         return rows
 
