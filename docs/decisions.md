@@ -1295,3 +1295,25 @@ comparison so an unchanged picture stays byte-equal. An original expires like an
 `_IMAGE_CACHE_TTL` (7 days) `_read_image_cache` misses it, and the eviction scan deletes it. One written
 before the flag existed counts as a variant until its tracker is re-warmed, and that exposure lasts a
 week at most. Eviction skips a victim whose mtime changed since the scan.
+
+## streaming.py::PublicOnlyAsyncTransport — DNS rebinding is not closed
+
+The transport resolves a host, vets every address, then lets httpx resolve it again to
+connect: a name that answers with a public address first and a private one second passes.
+Connecting to the vetted address (with the original host in SNI and `Host`) would close it;
+deferred, because the allowlists bound what hostnames reach this path at all.
+Lookups run on their own thread pool (`_DNS_EXECUTOR`) so a resolver stall cannot starve
+`asyncio.to_thread` callers.
+
+## api.py::proxy_image — a dead Google cover token is 404
+
+`docs.google.com/sheets-images-rt/` URLs stop working within minutes. When no stored copy
+exists, the proxy answers 404 (and logs at INFO), not 503, which reads as an outage. An
+alias outlives its parse for `_IMAGE_ALIAS_TTL`; URLs a client stored from an older payload
+miss once their token left the sheet and the alias aged out.
+
+## host_health.py — pool saturation is not a host failure; the prober has its own pool
+
+`httpx.PoolTimeout` is our own pool running dry, not the provider failing, so it is never
+recorded. Recovery probes run on a small private client, or a saturated shared pool would
+keep failing them and the host would stay down.
