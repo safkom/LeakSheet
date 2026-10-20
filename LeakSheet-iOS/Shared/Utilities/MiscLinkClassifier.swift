@@ -127,7 +127,9 @@ nonisolated enum MiscLinkClassifier {
     }
 
     private static func normalizedHost(_ url: URL) -> String? {
-        guard var host = url.host?.lowercased() else { return nil }
+        // Non-http(s) links must fall back to .link so the web-sheet gate rejects them.
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              var host = url.host?.lowercased() else { return nil }
         if host.hasPrefix("www.") { host.removeFirst(4) }
         return host
     }

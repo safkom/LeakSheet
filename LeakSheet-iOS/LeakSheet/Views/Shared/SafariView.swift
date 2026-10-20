@@ -10,6 +10,13 @@ import AppKit
 struct SafariItem: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
+
+    /// Tracker cells are untrusted: only http(s) may reach SFSafariViewController
+    /// (it throws on anything else) or NSWorkspace (it runs any URL handler).
+    nonisolated static func isWebURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return (scheme == "http" || scheme == "https") && url.host?.isEmpty == false
+    }
 }
 
 extension View {
@@ -24,13 +31,24 @@ extension View {
 private struct WebSheet: ViewModifier {
     @Binding var item: SafariItem?
 
+    private var webItem: Binding<SafariItem?> {
+        Binding(
+            get: { item.flatMap { SafariItem.isWebURL($0.url) ? $0 : nil } },
+            set: { item = $0 }
+        )
+    }
+
     func body(content: Content) -> some View {
         #if os(iOS)
-        content.sheet(item: $item) { SafariView(url: $0.url) }
+        content
+            .sheet(item: webItem) { SafariView(url: $0.url) }
+            .onChange(of: item?.url) { _, url in
+                if let url, !SafariItem.isWebURL(url) { item = nil }
+            }
         #elseif os(macOS)
         content.onChange(of: item?.url) { _, url in
             guard let url else { return }
-            NSWorkspace.shared.open(url)
+            if SafariItem.isWebURL(url) { NSWorkspace.shared.open(url) }
             item = nil
         }
         #else

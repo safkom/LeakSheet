@@ -89,6 +89,14 @@ From the 2026-07-20 TrackerHub sweep, all user-confirmed:
 - **File Name / Instrumental Name** columns merge into `og_filenames` alongside the
   `OG Filename:` notes convention, deduped.
 
+## parser.py::_clean_link — http(s) only
+
+Tracker cells are untrusted and the apps open every link they get: `javascript:`, `file:`, `smb:`
+and `x-apple.systempreferences:` URLs crash `SFSafariViewController` on iOS and run URL handlers
+through `NSWorkspace` on macOS. `_clean_link` returns "" for anything that is not http(s), after
+unwrapping a Google `url?q=`, so every producer (rows, Source column, notes, notices, misc tabs)
+drops them in one place. The apps check again (`SafariItem.isWebURL`) for cached or older payloads.
+
 ## parser.py::sources-as-links — listen links versus evidence
 
 A column's header does not settle what its URLs are, so two rules route them:
@@ -97,9 +105,11 @@ A column's header does not settle what its URLs are, so two rules route them:
   URLs the `/stream` resolver accepts become `links`, the rest stay `sources`.
   With a Link(s) column (Travis), Sources stays evidence.
 - A row whose audio never leaked (availability Rumored/Confirmed, or quality
-  "Not Available") moves every URL to `sources`. Those are screenshots and
-  articles, often on file hosts (imgur.gg on Ye and Kendrick), and as `links`
-  the app offered Play for an image.
+  "Not Available") demotes only the URLs `/stream` cannot play, plus images (a
+  file extension, or any imgur.gg link: that host carries the screenshots on Ye
+  and Kendrick, with extensionless ids). Streamable links stay `links`: the
+  tracker may still link the file, and the app's Play fails visibly when it is
+  not audio. Demoting every URL hid real files on rows marked Rumored.
 
 `tests/_health.py` flags a tracker where under 5% of versions have any listen
 link, which is how a misread link column shows up. Links on hosts `/stream`
