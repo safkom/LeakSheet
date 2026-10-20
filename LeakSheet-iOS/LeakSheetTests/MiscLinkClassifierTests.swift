@@ -4,6 +4,15 @@ import Testing
 @testable import LeakSheet
 
 struct MiscLinkClassifierTests {
+    @Test(arguments: [
+        "someapp://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "someapp://soundcloud.com/artist/track",
+    ])
+    func `custom schemes on embed hosts stay plain links`(url: String) {
+        #expect(MiscLinkClassifier.classify(url) == .link)
+        #expect(MiscLinkClassifier.embedURL(for: url) == nil)
+    }
+
     // 2026-07-17: pixeldrain single files and Google Drive single-file links
     // now stream through the backend proxy.
     @Test(arguments: [

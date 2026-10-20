@@ -1002,6 +1002,9 @@ _IMAGE_CACHE_TTL = 7 * 86400          # resized results are valid for a week
 # An alias outlives its thumbnails: an offline client can hold a weeks-old payload.
 _IMAGE_ALIAS_TTL = 30 * 86400
 _IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024
+# Era originals have their own budget: the token URL that made one is dead within the hour.
+_IMAGE_ORIGINALS_MAX_BYTES = 600 * 1024 * 1024
+_IMAGE_ORIGINAL_MAX_BYTES = 3 * 1024 * 1024  # per original, after the 1600 px cap
 _IMAGE_RESIZE_INPUT_CAP = 15 * 1024 * 1024  # don't decode >15MB
 # Concurrent Pillow decodes: each can hold a 15MB input plus a 20MP decode (~80MB
 # RGBA). At least 1: a Semaphore(0) would hang every resize forever.
@@ -1083,7 +1086,9 @@ def _read_image_cache(key: str) -> tuple[bytes, str, str] | None:
         return None
 
 
-def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
+def _write_image_cache(
+    key: str, data: bytes, content_type: str, *, original: bool = False
+) -> str | None:
     """Blocking write + size-cap eviction — call via asyncio.to_thread.
 
     Returns the entry's ETag (key plus a digest of the bytes), so the response that
@@ -1098,6 +1103,7 @@ def _write_image_cache(key: str, data: bytes, content_type: str) -> str | None:
             "content_type": content_type,
             "timestamp": time.time(),
             "etag": etag,
+            **({"original": True} if original else {}),
         }).encode()
         _atomic_write_bytes(bin_path, data)
         _atomic_write_bytes(meta_path, meta_bytes)
@@ -1161,32 +1167,68 @@ def _maybe_evict_image_cache() -> None:
 
 
 def _evict_image_cache() -> None:
-    """Drop oldest resized images (by mtime) once the cache exceeds the cap, and
-    cover aliases no parse has re-written in _IMAGE_ALIAS_TTL."""
+    """Drop oldest resized images (by mtime) once they exceed the cap, era originals
+    only against their own larger budget, and cover aliases no parse has re-written in _IMAGE_ALIAS_TTL."""
     # Every warm re-writes the alias of each URL still in the sheet, and cover tokens
     # rotate, so without this sweep the directory gains a file per era per re-parse.
     alias_cutoff = time.time() - _IMAGE_ALIAS_TTL
     for alias in [*CACHE_DIR.glob("imgalias_*.txt"), *CACHE_DIR.glob("imgsrc_*.json")]:
         unlink_if_older(alias, alias_cutoff)
-    entries = []
-    total = 0
+    variants: list = []
+    originals: list = []
+    expired_before = time.time() - _IMAGE_CACHE_TTL
     for bin_path in CACHE_DIR.glob("img_*.bin"):
         try:
             stat = bin_path.stat()
         except OSError:
             continue
-        entries.append((stat.st_mtime, stat.st_size, bin_path))
-        total += stat.st_size
-    entries.sort()
-    while entries and total > _IMAGE_CACHE_MAX_BYTES:
-        _, size, victim = entries.pop(0)
-        total -= size
-        meta = victim.with_name(victim.name[:-4] + ".meta.json")
-        for p in (victim, meta):
+        meta_path = bin_path.with_name(bin_path.name[:-4] + ".meta.json")
+        try:
+            meta = json.loads(meta_path.read_text())
+            is_original = meta.get("original") is True
+            expired = is_original and meta["timestamp"] < expired_before
+        except (OSError, ValueError, AttributeError, KeyError, TypeError):
+            is_original = expired = False
+        if expired:  # _read_image_cache would miss it; it only holds budget
             try:
-                p.unlink()
+                if bin_path.stat().st_mtime == stat.st_mtime:  # else a worker just rewrote it
+                    bin_path.unlink(missing_ok=True)
+                    meta_path.unlink(missing_ok=True)
             except OSError:
                 pass
+            continue
+        (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
+    for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
+        entries.sort()
+        total = sum(size for _, size, _ in entries)
+        while entries and total > cap:
+            mtime, size, victim = entries.pop(0)
+            total -= size
+            try:
+                if victim.stat().st_mtime != mtime:  # a worker just rewrote it
+                    continue
+            except OSError:
+                continue
+            for p in (victim, victim.with_name(victim.name[:-4] + ".meta.json")):
+                p.unlink(missing_ok=True)
+
+
+async def _cap_original(data: bytes, content_type: str) -> tuple[bytes, str]:
+    """Downscale an era original to the widest bucket the app requests.
+
+    Returns empty bytes when it is still over _IMAGE_ORIGINAL_MAX_BYTES (undecodable or
+    too large to resize): callers then keep the cover already stored.
+    """
+    if not data:
+        return data, content_type
+    async with _resize_slot():
+        data, content_type = await asyncio.to_thread(
+            _resize_image_bytes, data, _IMAGE_SIZE_BUCKETS[-1], content_type
+        )
+    if len(data) > _IMAGE_ORIGINAL_MAX_BYTES:
+        logger.info("era original not stored: %d bytes after the cap", len(data))
+        return b"", ""
+    return data, content_type
 
 
 def _resize_image_bytes(data: bytes, w: int, content_type: str) -> tuple[bytes, str]:
@@ -1338,7 +1380,9 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     async def download_full(url: str) -> tuple[bytes, str]:
         full = _full_size_cover_url(url)
         got = await download(full)
-        return got if got[0] or full == url else await download(url)
+        got = got if got[0] or full == url else await download(url)
+        # Capped before any comparison, so a re-warm of an unchanged picture is byte-equal.
+        return await _cap_original(*got)
 
     async def warm(era_name: str, url: str) -> None:
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
@@ -1372,7 +1416,7 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 _upgrades, stored[0], data
             ):
                 await asyncio.to_thread(update_art_pointer, base, bump=True)
-        await asyncio.to_thread(_write_image_cache, key, data, content_type)
+        await asyncio.to_thread(_write_image_cache, key, data, content_type, original=True)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
 
@@ -1484,7 +1528,11 @@ async def proxy_image(
             upstream_status = resp.status_code
             if slot is not None and upstream_status == 200 and _is_raster_image(ct):
                 # A cold slot keeps its original, so other widths need no upstream.
-                await asyncio.to_thread(_write_image_cache, _image_cache_key(slot, None), data, ct)
+                orig, orig_ct = await _cap_original(data, ct)
+                if orig:
+                    await asyncio.to_thread(
+                        _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
+                    )
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)

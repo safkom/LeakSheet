@@ -933,7 +933,7 @@ class TestLinkCleaning:
 
     def test_malformed_url_does_not_raise(self):
         from src.parser import _clean_link
-        assert _clean_link("https://www.google.com/url?q=x#[invalid")
+        assert _clean_link("https://www.google.com/url?q=https://x.test#[invalid")
 
 
 class TestLinkSplitting:
@@ -2496,7 +2496,7 @@ class TestVersionSorting:
 @pytest.mark.parametrize("url", [
     "https://www.google.com/url?q=https://pillows.su/f/abc&sa=D&ust=1",
     "https://www.google.com/url?sa=D&q=https%3A%2F%2Fx.com%2Fa%3Fb%3D1&ust=2",
-    "https://www.google.com/url?q=a+b%20c",
+    "https://www.google.com/url?q=https://a+b%20c",
     "https://www.google.com/url?q=&q=https://second.com",
     "https://www.google.com/url?q=",
     "https://www.google.com/url?sa=D",

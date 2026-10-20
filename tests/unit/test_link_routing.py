@@ -36,8 +36,38 @@ class TestSourceColumnHoldingListenLinks:
         assert [s.url for s in v.sources] == [PILLOWS]
 
 
+class TestSourceColumnSplitsLikeLinkColumns:
+    HEADER = ["Era", "Name", "Notes", "Quality", "Source"]
+    P2 = "https://pillows.su/f/fedcba9876543210fedcba9876543210"
+
+    def test_one_href_holding_two_urls_yields_two_links(self):
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "CD", f"<a href='{PILLOWS} {self.P2}'>t</a>"])
+        assert v.links == [PILLOWS, self.P2]
+
+    def test_two_google_wrappers_in_one_href_both_survive(self):
+        w = lambda u: f"https://www.google.com/url?q={u}&sa=D"  # noqa: E731
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "CD", f"<a href='{w(PILLOWS)} {w(ARTICLE)}'>t</a>"])
+        assert v.links == [PILLOWS]
+        assert [s.url for s in v.sources] == [ARTICLE]
+
+    def test_a_source_url_keeps_its_text_line_as_label(self):
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "CD", f"Interview<br><a href='{ARTICLE}'>Interview</a>"])
+        assert [(s.label, s.url) for s in v.sources] == [("Interview", ARTICLE)]
+
+
 class TestRowsWithoutAudioLinkOnlyEvidence:
     HEADER = ["Era", "Name", "Notes", "Available Length", "Quality", "Link(s)"]
+
+    def test_a_streamable_link_stays_playable(self):
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "Rumored", "Not Available", _a(PILLOWS)])
+        assert v.links == [PILLOWS]
+        assert v.sources == []
+
+    def test_an_image_on_a_stream_host_moves_to_sources(self):
+        img = PILLOWS + "/shot.png"
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "Rumored", "", _a(img)])
+        assert v.links == []
+        assert [s.url for s in v.sources] == [img]
 
     def test_a_rumoured_row_moves_its_links_to_sources(self):
         v = _version(self.HEADER, ["Era One", "Song One", "n", "Rumored", "Not Available", _a(IMGUR)])
@@ -45,9 +75,9 @@ class TestRowsWithoutAudioLinkOnlyEvidence:
         assert [s.url for s in v.sources] == [IMGUR]
 
     def test_not_available_quality_alone_is_enough(self):
-        v = _version(self.HEADER, ["Era One", "Song One", "n", "", "Not Available", _a(PILLOWS)])
+        v = _version(self.HEADER, ["Era One", "Song One", "n", "", "Not Available", _a(ARTICLE)])
         assert v.links == []
-        assert [s.url for s in v.sources] == [PILLOWS]
+        assert [s.url for s in v.sources] == [ARTICLE]
 
     def test_a_confirmed_row_moves_its_links_to_sources(self):
         v = _version(self.HEADER, ["Era One", "Song One", "n", "Confirmed", "", _a(ARTICLE)])
