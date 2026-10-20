@@ -1945,7 +1945,7 @@ async def list_trackers():
     Falls back to the last successful fetch, or if there's none yet, to the
     built-in seed list (src/tracker_seed.py) — see X-Cache-Status.
     """
-    global _trackers_stale, _trackers_fail_until
+    global _trackers_fail_until
 
     # Back off after a failure: this endpoint is outside the rate limiter, so retrying
     # per request would amplify an ArtistGrid outage against a third party.
@@ -1964,12 +1964,7 @@ async def list_trackers():
         )
 
     try:
-        # Also registers every listed tracker's host — this is the warm path
-        # for the /sheet allowlist (see config.sheet_host_allowed).
-        entries = await fetch_artistgrid_entries()
-        payload = json.dumps([e.model_dump() for e in entries])
-        _trackers_cache.set("trackers", payload)
-        _trackers_stale = payload
+        payload = await _load_trackers_once()
         return Response(
             content=payload,
             media_type="application/json",
@@ -1978,10 +1973,35 @@ async def list_trackers():
                 "X-Cache-Status": "miss",
             },
         )
-    except Exception as e:
-        _log_upstream_failure("ArtistGrid fetch failed", ARTISTGRID_URL, e)
+    except Exception:
         _trackers_fail_until = time.monotonic() + _TRACKERS_FAIL_BACKOFF_S
         return _trackers_fallback_response()
+
+
+# Coalesces simultaneous cold fetches of the registry, per worker.
+_trackers_inflight: asyncio.Task[str] | None = None
+
+
+async def _load_trackers_once() -> str:
+    global _trackers_inflight
+    if _trackers_inflight is None or _trackers_inflight.done():
+        _trackers_inflight = asyncio.create_task(_fetch_trackers_payload())
+    return await asyncio.shield(_trackers_inflight)
+
+
+async def _fetch_trackers_payload() -> str:
+    global _trackers_stale
+    try:
+        # Also registers every listed tracker's host — this is the warm path
+        # for the /sheet allowlist (see config.sheet_host_allowed).
+        entries = await fetch_artistgrid_entries()
+    except Exception as e:
+        _log_upstream_failure("ArtistGrid fetch failed", ARTISTGRID_URL, e)
+        raise
+    payload = json.dumps([e.model_dump() for e in entries])
+    _trackers_cache.set("trackers", payload)
+    _trackers_stale = payload
+    return payload
 
 
 def _trackers_fallback_response() -> Response:
