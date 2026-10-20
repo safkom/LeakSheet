@@ -324,6 +324,20 @@ class TestEmptyTracker:
         last = json.loads([line for line in streamed.content.split(b"\n") if line][-1])
         assert last == {"type": "error", "status": 404, "detail": "No songs found in this tracker."}
 
+    def test_a_tracker_with_only_tab_entries_is_served(self, api_client, monkeypatch):
+        """Misc/video-only trackers have no songs but a real content tab."""
+        from src.models import MiscEntry, TabSection
+
+        async def fake_fetch(url, **kwargs):
+            artist = self._empty()
+            artist.tabs = [TabSection(kind="misc", name="Misc", entries=[MiscEntry(name="Demo", source_tab="misc")])]
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fake_fetch)
+        r = api_client.post("/sheet", json={"url": URL})
+        assert r.status_code == 200
+        assert r.json()["tabs"][0]["entries"]
+
     def test_an_empty_parse_with_failed_tabs_is_a_retryable_503(self, api_client, monkeypatch):
         """Failed tabs make it likely transient: a 5xx lets the app retry and fall back
         to its own copy, which a 4xx forbids."""

@@ -780,7 +780,7 @@ async def _parse_for_response(req: SheetRequest, timer: PhaseTimer) -> tuple[byt
         write_cache=req.use_cache,
         timer=timer,
     )
-    if not artist.total_versions:
+    if not artist.total_versions and not any(t.entries for t in artist.tabs):
         # Never cached (cache-collapse-guard): a 200 would put an empty tracker in the app.
         failed, total = timer.tab_counts()
         logger.warning("sheet parsed empty for %s: failed_tabs=%d/%d", req.url[:120], failed, total)
