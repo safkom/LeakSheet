@@ -1309,6 +1309,11 @@ def _log_upstream_failure(what: str, url: str, exc: Exception) -> None:
         logger.error("%s for %s: %s", what, url[:80], exc, exc_info=exc)
 
 
+def _is_sheet_image_token(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.hostname == "docs.google.com" and parsed.path.startswith("/sheets-images-rt/")
+
+
 def _full_size_cover_url(url: str) -> str:
     """A sheet image at up to 1600 px: the URL a sheet emits asks for its cell's size.
 
@@ -1559,8 +1564,14 @@ async def proxy_image(
                 headers={**base_headers, "X-Cache-Status": status},
             )
 
-        # Only "gone" and "slow down" relay. Anything else, a non-image 200 or Google's 403
-        # for an expired cover token included, is 503 (Cloudflare masks a 502).
+        # An expired Google cover token is a cover that is gone, not an outage; a 503 here
+        # would also read as one.
+        if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
+            logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
+            raise HTTPException(status_code=404, detail="Cover token expired")
+        # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
+        # is 503 (Cloudflare masks a 502).
+        logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
         raise HTTPException(
             status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
             detail="Upstream image fetch failed",

@@ -118,9 +118,9 @@ class TestWarmEraArt:
         stale = _cover("never-good")
         asyncio.run(api._warm_era_art(_artist(("Yandhi", stale)), TRACKER))
         r = TestClient(app).get("/image-proxy", params={"url": stale, "w": 320})
-        # 502, not the 403 Google gave us: an expired token is this server
-        # holding a stale URL, not the caller being forbidden the image.
-        assert r.status_code == 503
+        # 404, not the 403 Google gave us or a 503 that reads as an outage: an expired
+        # token is a cover that is gone.
+        assert r.status_code == 404
 
     def test_covers_from_another_tracker_are_not_borrowed(self, google):
         good = _cover("other-tracker")
@@ -130,7 +130,7 @@ class TestWarmEraArt:
         stale = _cover("ye-stale")
         asyncio.run(api._warm_era_art(_artist(("Donda", stale)), TRACKER))
         r = TestClient(app).get("/image-proxy", params={"url": stale})
-        assert r.status_code == 503
+        assert r.status_code == 404
 
     def test_a_rewarm_marks_the_current_cover_recently_used(self, google):
         """Eviction drops the oldest mtime first; a cover the live parse still
@@ -427,6 +427,13 @@ class TestSlotKeysInThePayload:
         # The original was filed under the slot: another width needs no upstream.
         assert client.get("/image-proxy", params={"url": key, "w": 640}).status_code == 200
         assert google.requested == []
+
+    def test_a_dead_token_is_logged_at_info(self, google, caplog):
+        import logging
+
+        with caplog.at_level(logging.INFO):
+            TestClient(app).get("/image-proxy", params={"url": _cover("dead"), "w": 320})
+        assert any("cover token" in r.getMessage() for r in caplog.records)
 
     def test_an_unknown_slot_is_404(self, google):
         key = "leaksheet:art/v2/" + "a" * 32 + "/" + "b" * 32
