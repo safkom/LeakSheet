@@ -55,7 +55,8 @@ from src.fetcher import (
     CACHE_DIR,
     _era_art_base,
     read_art_pointer,
-    same_artwork,
+    _SAME_ART_MAX_DISTANCE,
+    _dhash,
     update_art_pointer,
     _atomic_write_bytes,
     _normalize_url,
@@ -1334,9 +1335,13 @@ def _pixel_count(data: bytes) -> int:
         return 0
 
 
-def _upgrades(current: bytes, other: bytes) -> bool:
-    """True when *other* is the same picture as *current* with more pixels."""
-    return _pixel_count(other) > _pixel_count(current) and same_artwork(current, other)
+def _fingerprint(data: bytes) -> tuple[int, int | None]:
+    """(pixel count, dHash) of an image: decoded once, compared many times."""
+    return _pixel_count(data), _dhash(data)
+
+
+def _same_fingerprint(a: tuple[int, int | None], b: tuple[int, int | None]) -> bool:
+    return a[1] is not None and b[1] is not None and (a[1] ^ b[1]).bit_count() <= _SAME_ART_MAX_DISTANCE
 
 
 _ERA_ART_WARM_CONCURRENCY = 3
@@ -1387,6 +1392,18 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         return await _cap_original(*got)
 
     async def warm(era_name: str, url: str) -> None:
+        fps: dict[bytes, tuple[int, int | None]] = {}
+
+        async def fp(data: bytes) -> tuple[int, int | None]:
+            if data not in fps:
+                fps[data] = await asyncio.to_thread(_fingerprint, data)
+            return fps[data]
+
+        async def upgrades(current: bytes, other: bytes) -> bool:
+            """True when *other* is the same picture as *current* with more pixels."""
+            cur, oth = await fp(current), await fp(other)
+            return oth[0] > cur[0] and _same_fingerprint(cur, oth)
+
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
         # /image-proxy find it under whatever token URL a client's payload holds.
         base = _era_art_base(tracker_url, era_name)
@@ -1397,9 +1414,9 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
         candidate = candidates.get(era_name)
         if data and candidate:
             better, better_type = await download_full(candidate)
-            if better and await asyncio.to_thread(_upgrades, data, better):
+            if better and await upgrades(data, better):
                 data, content_type = better, better_type
-        if data and stored and await asyncio.to_thread(_upgrades, data, stored[0]):
+        if data and stored and await upgrades(data, stored[0]):
             # A larger copy of the same picture is already stored (an Art-tab image, or
             # a full-size download that failed this time): never downgrade it.
             data, content_type = stored[0], stored[1]
@@ -1414,13 +1431,24 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
             # new picture gets a new version so clients holding the old one refetch.
             await asyncio.to_thread(_drop_image_thumbnails, base)
             # A sharper copy is a new version too, or clients keep the thumbnail they hold.
-            if not await asyncio.to_thread(same_artwork, stored[0], data) or await asyncio.to_thread(
-                _upgrades, stored[0], data
+            if not _same_fingerprint(await fp(stored[0]), await fp(data)) or await upgrades(
+                stored[0], data
             ):
                 await asyncio.to_thread(update_art_pointer, base, bump=True)
         await asyncio.to_thread(_write_image_cache, key, data, content_type, original=True)
 
     await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
+
+
+async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
+    try:
+        orig, orig_ct = await _cap_original(data, ct)
+        if orig:
+            await asyncio.to_thread(
+                _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
+            )
+    except Exception as exc:  # a failed fill only costs the next width an upstream fetch
+        logger.warning("slot original not stored: %s", exc)
 
 
 @app.get("/image-proxy")
@@ -1529,12 +1557,9 @@ async def proxy_image(
             ct = resp.headers.get("content-type", "")
             upstream_status = resp.status_code
             if slot is not None and upstream_status == 200 and _is_raster_image(ct):
-                # A cold slot keeps its original, so other widths need no upstream.
-                orig, orig_ct = await _cap_original(data, ct)
-                if orig:
-                    await asyncio.to_thread(
-                        _write_image_cache, _image_cache_key(slot, None), orig, orig_ct, original=True
-                    )
+                # A cold slot keeps its original, so other widths need no upstream; the
+                # capping decode runs after the response, not before it.
+                _spawn_detached(_store_slot_original(slot, data, ct))
         if upstream_status == 200 and _is_raster_image(ct):
             if width is not None:
                 original_len = len(data)
