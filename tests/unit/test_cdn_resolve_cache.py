@@ -327,3 +327,21 @@ class TestResolverUpstreamStatus:
         self._serve(monkeypatch, lambda request: httpx.Response(200, json={"name": "x"}))
         with pytest.raises(streaming.NonMediaError):
             await streaming.resolve_imgur_cdn_url(API)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_resolve_never_runs_on_a_private_override_client(monkeypatch):
+    """The prober closes its client after its round; a resolve joined by user requests
+    must not be bound to it."""
+    seen = []
+
+    async def resolve() -> str:
+        seen.append(streaming._client_override.get())
+        return "https://cdn.example/x"
+
+    token = streaming._client_override.set(object())
+    try:
+        await streaming._cached_resolve("k-override", resolve)
+    finally:
+        streaming._client_override.reset(token)
+    assert seen == [None]

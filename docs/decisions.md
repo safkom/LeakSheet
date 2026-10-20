@@ -1317,3 +1317,10 @@ miss once their token left the sheet and the alias aged out.
 `httpx.PoolTimeout` is our own pool running dry, not the provider failing, so it is never
 recorded. Recovery probes run on a small private client, or a saturated shared pool would
 keep failing them and the host would stay down.
+
+## web/nginx.conf — the tunnel peer is trusted by subnet
+
+`$leak_xff` keeps the incoming X-Forwarded-For only from 172.16.0.0/12 (the docker bridge
+the tunnel arrives on). If Docker's 172 pool runs out and the network lands in 192.168.x,
+every tunnel request gets a one-entry chain and the API buckets them under the nginx peer:
+pin the network's subnet in ops/casaos/leaksheet.yml before that happens.

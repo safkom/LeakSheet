@@ -356,7 +356,10 @@ async def _cached_resolve(key: str, resolve: Callable[[], Awaitable[str]]) -> st
 
     task = _inflight_resolves.get(key)
     if task is None:
-        task = asyncio.ensure_future(resolve())
+        # Shared with other callers, so never bound to one caller's private client.
+        ctx = contextvars.copy_context()
+        ctx.run(_client_override.set, None)
+        task = asyncio.create_task(resolve(), context=ctx)
         _inflight_resolves[key] = task
 
         def _store(done: asyncio.Task[str]) -> None:
@@ -786,8 +789,12 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
             resp = await client.send(request, stream=True, follow_redirects=False)
             if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
                 return resp
-            url = str(resp.url.join(resp.headers["location"]))
+            location = resp.headers["location"]
             await resp.aclose()
+            try:
+                url = str(resp.url.join(location))
+            except httpx.InvalidURL as exc:
+                raise ValueError("gdrive redirect with a malformed Location") from exc
         raise ValueError("gdrive request redirected too many times")
 
     resp = await _get(stream_url)

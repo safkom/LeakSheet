@@ -67,3 +67,19 @@ async def test_html_after_the_retry_with_a_200_is_still_an_interstitial(monkeypa
     _serve(monkeypatch, handler)
     with pytest.raises(streaming.GdriveInterstitialError):
         await streaming._fetch_gdrive(URL, {})
+
+
+async def test_a_malformed_location_closes_the_response(monkeypatch):
+    closed = []
+
+    class Tracking(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b""
+
+        async def aclose(self):
+            closed.append(1)
+
+    _serve(monkeypatch, lambda r: httpx.Response(302, headers={"location": "http://[bad"}, stream=Tracking()))
+    with pytest.raises(ValueError):
+        await streaming._fetch_gdrive(URL, {})
+    assert closed
