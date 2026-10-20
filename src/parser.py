@@ -854,6 +854,11 @@ _COVER_RE = re.compile(r"\bcover\b", re.IGNORECASE)
 # Punctuation and whitespace normalization for era matching keys
 _PUNCT_STRIP_RE = re.compile(r"[,.:;!?'\"]+")
 _WHITESPACE_COLLAPSE_RE = re.compile(r"\s+")
+# Typographic quotes and dashes fold to ASCII so "Don’t" and "Don't" share a key.
+_TYPOGRAPHIC_FOLD = str.maketrans(
+    {"’": "'", "‘": "'", "‚": "'", "‛": "'", "“": '"', "”": '"',
+     "–": "-", "—": "-", "‐": "-", "‑": "-", "−": "-"}
+)
 
 # Junk era name filtering patterns
 _HANDLE_RE = re.compile(r"@\w+")
@@ -1298,7 +1303,17 @@ def _normalize_unicode(text: str) -> str:
     # NFKD decomposition splits characters like ë into e + combining diaeresis
     decomposed = unicodedata.normalize("NFKD", text)
     # Remove combining characters (diacritics)
-    return "".join(c for c in decomposed if not unicodedata.combining(c))
+    # Marks carry meaning outside Latin (か/が, и/й), so only Latin bases lose them.
+    out: list[str] = []
+    latin = False
+    for c in decomposed:
+        if unicodedata.combining(c):
+            if not latin:
+                out.append(c)
+            continue
+        latin = unicodedata.name(c, "").startswith("LATIN")
+        out.append(c)
+    return "".join(out)
 
 
 def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> str:
@@ -1340,7 +1355,7 @@ def _era_match_key(full_era_name: str, *, keep_discriminators: bool = False) -> 
     # features sub-section, so "Rodeo*" resolves to "Rodeo".
     key = key.rstrip("*").strip()
     # Normalize Unicode diacritics (ë→e, á→a, etc.)
-    key = _normalize_unicode(key)
+    key = _normalize_unicode(key).translate(_TYPOGRAPHIC_FOLD)
     key = key.lower()
     # Strip punctuation so "Meet The Woo, Vol. 2" matches "Meet The Woo Vol 2" and
     # "AT.LONG.LAST.A$AP" matches "AT LONG LAST A$AP".
@@ -1366,7 +1381,7 @@ def _song_match_key(name: str) -> str:
     in WAR and "This One Here" in DONDA 2 share one key. Exposed to clients
     as ``Song.song_key``.
     """
-    key = _normalize_unicode(name)
+    key = _normalize_unicode(name).translate(_TYPOGRAPHIC_FOLD)
     key = VERSION_TAG_PATTERN.sub("", key)
     key = key.lower()
     key = _PUNCT_STRIP_RE.sub(" ", key)
