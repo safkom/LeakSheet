@@ -2464,9 +2464,8 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     colspan differences, so we extract by content matching.
     """
     for row in reversed(rows):
-        # Look for the signature "Total Links" or "Total Full"
         cell_texts = [c.text for c in row]
-        has_links = any("Total Links" in t or "Total Link" in t for t in cell_texts)
+        has_links = any("Total Link" in t for t in cell_texts)
         has_avail = any("Total Full" in t for t in cell_texts)
 
         if has_links or has_avail:
@@ -2477,7 +2476,7 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
 
             for cell in row:
                 t = cell.text
-                if "Total Links" in t or "Total Link" in t or "Missing Links" in t:
+                if "Total Link" in t or "Missing Links" in t:
                     links_text = t
                 elif "Lossless" in t or "CD Quality" in t:
                     quality_text = t
@@ -2486,6 +2485,10 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
                 elif "Best Of" in t or "Special" in t or "Grails" in t:
                     highlights_text = t
 
+            # An era header or a note that merely mentions a total holds one stat cell.
+            filled = sum(bool(x) for x in (links_text, quality_text, availability_text, highlights_text))
+            if filled < 2 or _is_era_header(row):
+                continue
             return parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
 
     return None
@@ -2577,6 +2580,12 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     version_tag, _base = extract_version_tag(title)
     # Use base name (tag stripped) to avoid duplication in the UI
     title = _base
+    # A credit-only name cell leaves no title: borrow an alt title or the raw line.
+    if not title:
+        raw_line = next((ln.strip() for ln in after_badge.split("\n") if ln.strip()), "")
+        title = alt_titles.pop(0) if alt_titles else raw_line
+        if not title:
+            return None
 
     # If found unfinished tag but no explicit version tag, set one
     if _found_unfinished and not version_tag:
@@ -2658,8 +2667,9 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
     if _has_no_audio(avail_text, quality_text):
         # Only what /stream cannot play is evidence (docs/decisions.md::parser.py::sources-as-links).
         known = {s.url for s in sources}
-        sources += [SourceRef(url=u) for u in merged_links if u not in known and not _playable_no_audio(u)]
-        merged_links = [u for u in merged_links if _playable_no_audio(u)]
+        playable = {u: _playable_no_audio(u) for u in merged_links}
+        sources += [SourceRef(url=u) for u in merged_links if u not in known and not playable[u]]
+        merged_links = [u for u in merged_links if playable[u]]
 
     version = SongVersion(
         name=title,

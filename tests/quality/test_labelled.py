@@ -9,7 +9,7 @@ The labels in `labels/*.json` contain no tracker content beyond era and song
 names needed to identify a row: no links, no notes, no file names. The HTML
 itself is never committed (DMCA — see .gitignore); each label records the
 sha256 of the tab it was read from, and the test hydrates that tab out of the
-local cache. Absent cache means skip, never silent pass.
+local cache. Empty corpus fails; a label whose tab is missing from a populated corpus skips.
 
 To add a tracker: `uv run python -m tests.quality.make_label <url-substring>` writes
 a draft from current parser output, then VERIFY EVERY VALUE against the real
@@ -23,6 +23,7 @@ import glob
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,23 @@ import pytest
 from src.parser import parse_sheet
 
 LABELS_DIR = Path(__file__).parent / "labels"
-CORPUS_DIR = os.environ.get("LEAKSHEET_CORPUS", ".cache")
+
+
+def _default_corpus() -> str:
+    """The checkout's .cache; a worktree resolves to the main checkout's via the common git dir."""
+    if os.path.isdir(".cache"):
+        return ".cache"
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ".cache"
+    return os.path.join(os.path.dirname(common), ".cache")
+
+
+CORPUS_DIR = os.environ.get("LEAKSHEET_CORPUS") or _default_corpus()
 
 LABEL_FILES = sorted(LABELS_DIR.glob("*.json")) if LABELS_DIR.is_dir() else []
 
@@ -69,6 +86,9 @@ def _tab_by_sha(sha: str) -> str | None:
 
 
 def _parse(label: dict):
+    # Reaching here means -m accuracy was asked for: an empty corpus must not pass as a skip.
+    if not _candidate_paths():
+        pytest.fail(f"accuracy run found no corpus in {CORPUS_DIR!r}; set LEAKSHEET_CORPUS")
     html = _tab_by_sha(label["sha256"])
     if html is None:
         pytest.skip(
