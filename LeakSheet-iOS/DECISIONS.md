@@ -36,6 +36,7 @@ Changing a rule re-keys `CacheService` entries (a SHA-256 of the normalized URL)
 are unreachable and age out through the 30-day sweep: the hash is one-way and the old rules
 are gone, so there is nothing to migrate. Recents store the raw `sourceUrl` and derive their
 identity on read, so they re-key by themselves.
+
 `Fixtures/stream_links.json` replays the backend's answers; the few differences that remain
 (Foundation encoding and parsing a URL where Python passes it raw; a Drive id escaped with
 `%` in a query that also holds an invalid character) are pinned there as known differences.
