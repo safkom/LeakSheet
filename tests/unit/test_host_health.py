@@ -179,6 +179,29 @@ class TestProber:
 
 
 @pytest.mark.asyncio
+async def test_our_own_pool_saturation_says_nothing_about_the_host(clock):
+    from src import api
+
+    for link in ("https://pillows.su/f/a", "https://pillows.su/f/b", "https://pillows.su/f/c"):
+        await api._record_stream_outcome("pillows", link, httpx.PoolTimeout("pool"))
+    assert host_health.down("pillows") is None
+
+
+@pytest.mark.asyncio
+async def test_the_prober_uses_its_own_connection_pool(clock, monkeypatch):
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    seen = []
+
+    async def answer(url, *, range_header=None):
+        seen.append(streaming._get_shared_client())
+        return httpx.Response(206)
+
+    monkeypatch.setattr(host_health, "stream_audio", answer)
+    shared = streaming._get_shared_client()
+    await host_health.probe_once()
+    assert seen and seen[0] is not shared
+
+
 async def test_a_resolver_failure_is_a_soft_host_failure_not_a_success(clock):
     from src import api
 

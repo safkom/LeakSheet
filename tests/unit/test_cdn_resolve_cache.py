@@ -38,7 +38,10 @@ class _FakeClient:
         self.responses = responses
         self.calls: list[str] = []
 
-    async def get(self, url, headers=None):
+    def build_request(self, method, url, headers=None, timeout=None):
+        return url
+
+    async def send(self, url, stream=False):
         self.calls.append(url)
         result = self.responses.get(url)
         if result is None:
@@ -144,7 +147,10 @@ class TestSingleFlight:
             def __init__(self):
                 self.calls: list[str] = []
 
-            async def get(self, url, headers=None):
+            def build_request(self, method, url, headers=None, timeout=None):
+                return url
+
+            async def send(self, url, stream=False):
                 self.calls.append(url)
                 started.set()
                 await release.wait()
@@ -175,7 +181,10 @@ class TestSingleFlight:
             def __init__(self):
                 self.calls: list[str] = []
 
-            async def get(self, url, headers=None):
+            def build_request(self, method, url, headers=None, timeout=None):
+                return url
+
+            async def send(self, url, stream=False):
                 self.calls.append(url)
                 started.set()
                 await release.wait()
@@ -288,6 +297,21 @@ class TestResolverUpstreamStatus:
         assert exc.value.status_code == expected
 
     @pytest.mark.asyncio
+    async def test_the_imgur_api_body_is_read_only_up_to_the_cap(self, monkeypatch):
+        read = []
+
+        async def body():
+            for _ in range(200):
+                read.append(1)
+                yield b"x" * 65536
+
+        self._serve(monkeypatch, lambda request: httpx.Response(200, content=body()))
+        with pytest.raises(ValueError):
+            await streaming.resolve_imgur_cdn_url(API)
+        # imgur.gg and its temp fallback are each read once, up to the cap.
+        assert len(read) * 65536 <= 2 * (streaming._SCRAPER_READ_CAP + 65536)
+
+    @pytest.mark.asyncio
     async def test_imgur_4xx_beside_a_5xx_is_not_a_status_answer(self, monkeypatch):
         by_host = {"imgur.gg": 451, "temp.imgur.gg": 502}
         self._serve(monkeypatch, lambda request: httpx.Response(by_host[request.url.host]))
@@ -305,3 +329,42 @@ class TestResolverUpstreamStatus:
             await streaming.resolve_imgur_cdn_url(API)
         # An API answer without a cdnUrl is a resolver failure, not a media verdict.
         assert not isinstance(exc.value, streaming.NonMediaError)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_resolve_never_runs_on_a_private_override_client(monkeypatch):
+    """The prober closes its client after its round; a resolve joined by user requests
+    must not be bound to it."""
+    seen = []
+
+    async def resolve() -> str:
+        seen.append(streaming._client_override.get())
+        return "https://cdn.example/x"
+
+    token = streaming._client_override.set(object())
+    try:
+        await streaming._cached_resolve("k-override", resolve)
+    finally:
+        streaming._client_override.reset(token)
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_text_body_is_decoded_with_its_declared_charset():
+    body = "Título".encode("iso-8859-1")
+    transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, content=body, headers={"content-type": "text/plain; charset=iso-8859-1"},
+    ))
+    async with httpx.AsyncClient(transport=transport) as client:
+        resp = await streaming.get_capped(client, "https://imgur.gg/api/file/x", {})
+    assert resp.text == "Título"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_charset_falls_back_to_utf8():
+    transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, content="ok".encode(), headers={"content-type": "text/plain; charset=x-nonsense"},
+    ))
+    async with httpx.AsyncClient(transport=transport) as client:
+        resp = await streaming.get_capped(client, "https://imgur.gg/api/file/x", {})
+    assert resp.text == "ok"

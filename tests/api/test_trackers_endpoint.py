@@ -158,3 +158,21 @@ class TestTrackersEndpoint:
         r = client.get("/trackers")
         assert r.status_code == 200
         assert r.headers["X-Cache-Status"] == "seed"
+
+
+class TestColdFetchIsSingleFlight:
+    async def test_simultaneous_cold_requests_fetch_the_registry_once(self, monkeypatch):
+        import asyncio
+
+        calls = []
+
+        async def slow_fetch():
+            calls.append(1)
+            await asyncio.sleep(0.05)
+            return parse_artistgrid_csv(FIXTURE_CSV)
+
+        monkeypatch.setattr(api, "fetch_artistgrid_entries", slow_fetch)
+        monkeypatch.setattr(api, "_trackers_inflight", None, raising=False)
+        responses = await asyncio.gather(*(api.list_trackers() for _ in range(5)))
+        assert len(calls) == 1
+        assert {r.body for r in responses} == {responses[0].body}
