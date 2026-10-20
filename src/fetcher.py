@@ -853,6 +853,7 @@ def _evict_sheet_cache() -> None:
     if not CACHE_DIR.exists():
         return
     groups: dict[str, list[tuple[float, int, Path]]] = {}
+    locks: list[Path] = []
     total = 0
     orphan_cutoff = time.time() - _ORPHAN_TMP_AGE_S
     for path in CACHE_DIR.iterdir():
@@ -863,7 +864,16 @@ def _evict_sheet_cache() -> None:
             continue
         # img_* is the image cache (own cap); imgalias_*/imgsrc_* are the pointers covers
         # resolve through, and evicting them brings back expired-token failures.
-        if not path.is_file() or path.name.startswith(("img_", "imgalias_", "imgsrc_")) or path.name.endswith(".lock"):
+        if path.name.endswith(".meta.lock"):
+            locks.append(path)
+            continue
+        # host_health.json is shared state, not a cache entry.
+        if (
+            not path.is_file()
+            or path.name.startswith(("img_", "imgalias_", "imgsrc_"))
+            or path.name.endswith(".lock")
+            or path.name == "host_health.json"
+        ):
             continue
         try:
             stat = path.stat()
@@ -872,6 +882,9 @@ def _evict_sheet_cache() -> None:
         stem = path.name.split(".", 1)[0]
         groups.setdefault(stem, []).append((stat.st_mtime, stat.st_size, path))
         total += stat.st_size
+    for lock in locks:
+        if lock.name.split(".", 1)[0] not in groups:
+            _remove_idle_lock(lock, orphan_cutoff)
     if total <= _SHEET_CACHE_MAX_BYTES:
         return
     ranked = sorted(
@@ -886,6 +899,18 @@ def _evict_sheet_cache() -> None:
                 victim.unlink()
             except OSError:
                 pass
+
+
+def _remove_idle_lock(path: Path, cutoff: float) -> None:
+    """Unlink an entry-less, old lock file nobody holds; _entry_lock re-checks the inode."""
+    try:
+        if path.stat().st_mtime >= cutoff:
+            return
+        with open(path, "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path.unlink()
+    except OSError:
+        pass
 
 
 def unlink_if_older(path: Path, cutoff: float) -> None:
@@ -962,9 +987,18 @@ def _entry_lock(key: str):
     the same file blocks even within one process.
     """
     CACHE_DIR.mkdir(exist_ok=True)
-    with open(CACHE_DIR / f"{key}.meta.lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    path = CACHE_DIR / f"{key}.meta.lock"
+    while True:
+        with open(path, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # Eviction may have unlinked this file while we waited: lock the live one.
+            try:
+                if os.stat(path).st_ino != os.fstat(lock.fileno()).st_ino:
+                    continue
+            except FileNotFoundError:
+                continue
+            yield
+            return
 
 
 def _merge_meta(key: str, updates: dict) -> None:
@@ -1420,7 +1454,10 @@ async def async_fetch_sheet_html(
                 if cached is not None:
                     return cached
             r = await _get_capped(client, sheet_url, timeout=timeout)
+            _raise_if_signed_out(r, sheet_url)
             r.raise_for_status()
+            if "<table" not in r.text.lower():
+                raise NoTablesError(f"No table in tab gid={gid} of {url}")
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
             if use_cache:
