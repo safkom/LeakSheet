@@ -235,9 +235,14 @@ async def harvest_parity(entry, api_artist) -> dict:
     return {"key_set": bool(key), "tabs": len(set(a) | set(h)), "differing": diffs}
 
 
+# harvest_art swaps api.CACHE_DIR, so only one may run at a time.
+_ART_LOCK = asyncio.Lock()
+
+
 async def harvest_art(artist, tracker_url: str) -> dict:
     """Warm every cover into a scratch cache and measure what a client would get."""
     import io
+    import shutil
     import statistics
     import tempfile
 
@@ -245,18 +250,23 @@ async def harvest_art(artist, tracker_url: str) -> dict:
 
     import src.api as api
 
-    saved = api.CACHE_DIR
-    api.CACHE_DIR = Path(tempfile.mkdtemp(prefix="sweep-art-"))
-    try:
-        await api._warm_era_art(artist, tracker_url)
-        sizes: dict[str, tuple[int, int]] = {}
-        for era in artist.eras:
-            got = api._read_image_cache(api._image_cache_key(api._era_art_base(tracker_url, era.name), None))
-            if got:
-                with Image.open(io.BytesIO(got[0])) as img:
-                    sizes[era.name] = img.size
-    finally:
-        api.CACHE_DIR = saved
+    async with _ART_LOCK:
+        saved = api.CACHE_DIR
+        scratch = Path(tempfile.mkdtemp(prefix="sweep-art-"))
+        api.CACHE_DIR = scratch
+        try:
+            await api._warm_era_art(artist, tracker_url)
+            sizes: dict[str, tuple[int, int]] = {}
+            for era in artist.eras:
+                got = api._read_image_cache(
+                    api._image_cache_key(api._era_art_base(tracker_url, era.name), None)
+                )
+                if got:
+                    with Image.open(io.BytesIO(got[0])) as img:
+                        sizes[era.name] = img.size
+        finally:
+            api.CACHE_DIR = saved
+            shutil.rmtree(scratch, ignore_errors=True)
     widths = [w for w, _ in sizes.values()]
     return {
         "eras": len(artist.eras),
