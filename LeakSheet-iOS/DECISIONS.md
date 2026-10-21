@@ -14,14 +14,15 @@ underneath, and scroll content is automatically inset to clear the bar.
 
 ## ContentView.swift::mini-player-inset — the tracker list clears the bar itself
 
-The automatic inset above never reaches the tracker screen's list. The bar is
-attached outside the `NavigationStack`, and that screen runs
-`toolbarMinimizationSafeAreaAdjustment(.disabled)`. Its list therefore stopped at
-the home indicator: the last rows rested under the mini player and sprang back
-when released. Removing the modifier alone did not help (simulator, iOS 27).
-`ContentView` measures the bar and publishes its height as `miniPlayerInset`.
-`ArtistView` adds it as a bottom content margin, only while a track is loaded,
-because the bar is empty otherwise and its last measured height would go stale.
+On iOS 27 (simulator) the automatic inset above does not reach the tracker
+screen's list: its last rows rested under the mini player and sprang back when
+released. The cause is not isolated: removing that screen's
+`toolbarMinimizationSafeAreaAdjustment(.disabled)` did not help, and the landing
+list under the same bar is inset correctly. `ContentView` measures the bar and
+publishes `miniPlayerInset` (0 with no track, since the empty bar never
+re-measures). `ArtistView` applies it with `safeAreaPadding`, not `contentMargins`,
+so nested chip scroll rows don't inherit it. Re-check on each SDK bump: if the
+system inset starts arriving, this padding doubles it.
 
 ## Models.swift::kept-badge — badge follows the versions actually shown
 

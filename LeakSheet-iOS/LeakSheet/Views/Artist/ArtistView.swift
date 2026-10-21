@@ -212,7 +212,7 @@ private struct ArtistContentView: View {
         // The mini player floats over the list: a soft edge keeps row text from bleeding through.
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         // The bar's safe-area inset never reaches this list: DECISIONS.md::ContentView.swift::mini-player-inset
-        .contentMargins(.bottom, player.currentTrack == nil ? 0 : miniPlayerInset, for: .scrollContent)
+        .safeAreaPadding(.bottom, miniPlayerInset)
         .background(
             ZStack {
                 Color.lsBackground
@@ -234,7 +234,7 @@ private struct ArtistContentView: View {
                     .controlSize(.small)
                     .padding(8)
                     .background(.thinMaterial, in: Capsule())
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 12 + miniPlayerInset)
                     .transition(.opacity)
             }
         }

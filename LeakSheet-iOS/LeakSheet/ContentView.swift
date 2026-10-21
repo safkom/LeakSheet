@@ -58,7 +58,8 @@ struct ContentView: View {
                 }
             }
         }
-        .environment(\.miniPlayerInset, miniPlayerHeight)
+        // Zero without a track: the empty bar never re-measures, so its last height goes stale.
+        .environment(\.miniPlayerInset, PlayerViewModel.shared.currentTrack == nil ? 0 : miniPlayerHeight)
         .environment(PlayerViewModel.shared)
         .environment(FavouritesManager.shared)
         .environment(RecentTrackersManager.shared)
