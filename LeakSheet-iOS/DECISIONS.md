@@ -12,6 +12,17 @@ one-line pointer, the archaeology lives here. Entries are keyed `File.swift::sym
 system stacks the floating search field above it instead of laying it out
 underneath, and scroll content is automatically inset to clear the bar.
 
+## ContentView.swift::mini-player-inset — the tracker list clears the bar itself
+
+The automatic inset above never reaches the tracker screen's list. The bar is
+attached outside the `NavigationStack`, and that screen runs
+`toolbarMinimizationSafeAreaAdjustment(.disabled)`. Its list therefore stopped at
+the home indicator: the last rows rested under the mini player and sprang back
+when released. Removing the modifier alone did not help (simulator, iOS 27).
+`ContentView` measures the bar and publishes its height as `miniPlayerInset`.
+`ArtistView` adds it as a bottom content margin, only while a track is loaded,
+because the bar is empty otherwise and its last measured height would go stale.
+
 ## Models.swift::kept-badge — badge follows the versions actually shown
 
 The row must wear a badge that belongs to the versions it actually shows. Carrying
