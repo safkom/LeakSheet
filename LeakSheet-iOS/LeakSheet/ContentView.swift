@@ -11,6 +11,8 @@ struct ContentView: View {
     /// state, handed to the pushed screen so the app has ONE loading state
     /// per tracker instead of "Loading…" followed by "Preparing…".
     @State private var prepared: (slug: String, vm: ArtistViewModel)?
+    /// See DECISIONS.md::ContentView.swift::mini-player-inset.
+    @State private var miniPlayerHeight: CGFloat = 0
 
     /// The prepared view model, only when it describes the artist actually playing.
     /// Reads the singleton, not @Environment: this view installs PlayerViewModel itself.
@@ -56,6 +58,8 @@ struct ContentView: View {
                 }
             }
         }
+        // Zero without a track: the empty bar never re-measures, so its last height goes stale.
+        .environment(\.miniPlayerInset, PlayerViewModel.shared.currentTrack == nil ? 0 : miniPlayerHeight)
         .environment(PlayerViewModel.shared)
         .environment(FavouritesManager.shared)
         .environment(RecentTrackersManager.shared)
@@ -64,6 +68,7 @@ struct ContentView: View {
             MiniPlayerBar()
                 .environment(PlayerViewModel.shared)
                 .environment(vmForCurrentPlayback)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { miniPlayerHeight = $0 }
         }
         .sheet(isPresented: $showFavourites) {
             FavouritesView()
@@ -81,4 +86,9 @@ struct ContentView: View {
             }
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Height of the floating mini player, for scroll views that must clear it themselves.
+    @Entry var miniPlayerInset: CGFloat = 0
 }

@@ -95,6 +95,7 @@ private struct ArtistContentView: View {
         artist.eras.contains { !($0.timeline ?? []).isEmpty }
     }
     @Environment(PlayerViewModel.self) private var player
+    @Environment(\.miniPlayerInset) private var miniPlayerInset
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
@@ -210,6 +211,8 @@ private struct ArtistContentView: View {
         .refreshable { await onRefresh() }
         // The mini player floats over the list: a soft edge keeps row text from bleeding through.
         .scrollEdgeEffectStyle(.soft, for: .bottom)
+        // The bar's safe-area inset never reaches this list: DECISIONS.md::ContentView.swift::mini-player-inset
+        .safeAreaPadding(.bottom, miniPlayerInset)
         .background(
             ZStack {
                 Color.lsBackground
@@ -231,7 +234,7 @@ private struct ArtistContentView: View {
                     .controlSize(.small)
                     .padding(8)
                     .background(.thinMaterial, in: Capsule())
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 12 + miniPlayerInset)
                     .transition(.opacity)
             }
         }
@@ -250,36 +253,27 @@ private struct ArtistContentView: View {
         .toolbarTitleDisplayMode(.large)
         #endif
         .toolbar {
+            // Plain items: the toolbar draws the shared glass capsule itself.
             ToolbarItemGroup(placement: .primaryAction) {
-                GlassEffectContainer {
-                    HStack(spacing: 8) {
-                        Menu {
-                            if artist.trackerStats != nil {
-                                Button { showStats = true } label: { Label("Stats", systemImage: "chart.bar.xaxis") }
-                            }
-                            if hasTimeline {
-                                Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
-                            }
-                            Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
-                                .accessibilityHidden(true)
-                        }
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .accessibilityLabel("More")
-
-                        Button {
-                            showQueue = true
-                        } label: {
-                            Image(systemName: "list.bullet")
-                                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
-                                .accessibilityHidden(true)
-                        }
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .accessibilityLabel("Queue")
+                Menu {
+                    if artist.trackerStats != nil {
+                        Button { showStats = true } label: { Label("Stats", systemImage: "chart.bar.xaxis") }
                     }
+                    if hasTimeline {
+                        Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
+                    }
+                    Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
+                } label: {
+                    Image(systemName: "ellipsis")
                 }
+                .accessibilityLabel("More")
+
+                Button {
+                    showQueue = true
+                } label: {
+                    Image(systemName: "list.bullet")
+                }
+                .accessibilityLabel("Queue")
             }
         }
         // navigationBarDrawer + displayMode .always — see

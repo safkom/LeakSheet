@@ -12,6 +12,18 @@ one-line pointer, the archaeology lives here. Entries are keyed `File.swift::sym
 system stacks the floating search field above it instead of laying it out
 underneath, and scroll content is automatically inset to clear the bar.
 
+## ContentView.swift::mini-player-inset — the tracker list clears the bar itself
+
+On iOS 27 (simulator) the automatic inset above does not reach the tracker
+screen's list: its last rows rested under the mini player and sprang back when
+released. The cause is not isolated: removing that screen's
+`toolbarMinimizationSafeAreaAdjustment(.disabled)` did not help, and the landing
+list under the same bar is inset correctly. `ContentView` measures the bar and
+publishes `miniPlayerInset` (0 with no track, since the empty bar never
+re-measures). `ArtistView` applies it with `safeAreaPadding`, not `contentMargins`,
+so nested chip scroll rows don't inherit it. Re-check on each SDK bump: if the
+system inset starts arriving, this padding doubles it.
+
 ## Models.swift::kept-badge — badge follows the versions actually shown
 
 The row must wear a badge that belongs to the versions it actually shows. Carrying
