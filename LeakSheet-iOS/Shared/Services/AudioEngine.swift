@@ -366,8 +366,8 @@ final class AudioEngine {
 
     // MARK: - Queue
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
-        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
+    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "", playNext: Bool = false) {
+        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug, playNext: playNext)
         syncQueue()
     }
 

@@ -8,9 +8,8 @@ struct EraCardView: View {
     /// Precomputed display colors (derived once per era when the dominant
     /// color is extracted) — nil until the first extraction lands.
     var displayColors: EraDisplayColors?
-    /// Optional line under the title. Content-tab pages (Misc / Released /
-    /// Stems / Fakes) use it for the entry count; the main era list has no
-    /// subtitle and passes nil.
+    /// Optional line under the title: the entry count on content-tab pages, the
+    /// track and playable counts in the main era list.
     var subtitle: String?
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
