@@ -148,6 +148,7 @@ final class PlayerViewModel {
         playInList(items, startAt: 0)
     }
 
+    // shortcut: the 200-item queue cap drops the rest of a bigger era silently; report the count if users hit it.
     func queueEra(_ era: FilteredEra, artistName: String, artistSlug: String) {
         for version in era.streamableVersions {
             addToQueue(version, artistName: artistName, eraName: era.era.name,

@@ -19,27 +19,28 @@ struct EraRowView: View {
     let onSongTap: (Song, String, String?, Int) -> Void
     let onPlayVersion: (SongVersion, String) -> Void
     let onShowDescription: (DescriptionSheet.Payload) -> Void
+    @Environment(PlayerViewModel.self) private var player
 
     /// Both counts are versions, the unit the nav subtitle calls "tracks".
     static func countsLine(tracks: Int, playable: Int) -> String {
-        "\(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") · \(playable.formatted()) playable"
+        "\(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") · \(playable.formatted()) available"
     }
 
     var body: some View {
         VStack(spacing: 0) {
             switch row {
             case .card(let filtered, let expanded):
+                let actions = EraAction.all(for: filtered, artistName: artistName, artistSlug: artistSlug, player: player)
                 EraCardView(
                     era: filtered.era,
                     expanded: expanded,
                     displayColors: displayColors,
                     subtitle: Self.countsLine(tracks: filtered.stats.total, playable: filtered.stats.available),
+                    actions: actions,
                     onTap: { onCardTap(filtered.era.name) },
                     onColorExtracted: { color in onColorExtracted(filtered.era.name, color) }
                 )
-                .contextMenu {
-                    EraContextMenu(era: filtered, artistName: artistName, artistSlug: artistSlug)
-                }
+                .contextMenu { EraContextMenu(actions: actions) }
                 .padding(.horizontal, 16)
 
             case .divider:

@@ -11,6 +11,8 @@ struct EraCardView: View {
     /// Optional line under the title: the entry count on content-tab pages, the
     /// track and playable counts in the main era list.
     var subtitle: String?
+    /// The long-press menu's actions, offered to VoiceOver on the header too.
+    var actions: [EraAction] = []
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
 
@@ -47,6 +49,9 @@ struct EraCardView: View {
             // state belongs in the value: a hint can be turned off.
             .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityActions {
+                ForEach(actions) { action in Button(action.id, action: action.run) }
+            }
 
             if expanded, let desc = era.description, !desc.isEmpty {
                 descriptionBlock(desc)
