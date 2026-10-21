@@ -8,10 +8,11 @@ struct EraCardView: View {
     /// Precomputed display colors (derived once per era when the dominant
     /// color is extracted) — nil until the first extraction lands.
     var displayColors: EraDisplayColors?
-    /// Optional line under the title. Content-tab pages (Misc / Released /
-    /// Stems / Fakes) use it for the entry count; the main era list has no
-    /// subtitle and passes nil.
+    /// Optional line under the title: the entry count on content-tab pages, the
+    /// track and playable counts in the main era list.
     var subtitle: String?
+    /// The long-press menu's actions, offered to VoiceOver on the header too.
+    var actions: [EraAction] = []
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
 
@@ -48,6 +49,9 @@ struct EraCardView: View {
             // state belongs in the value: a hint can be turned off.
             .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityActions {
+                ForEach(actions) { action in Button(action.id, action: action.run) }
+            }
 
             if expanded, let desc = era.description, !desc.isEmpty {
                 descriptionBlock(desc)

@@ -101,6 +101,7 @@ struct VersionRowView: View {
         .accessibilityActions {
             if canStream {
                 Button("Play", action: play)
+                Button("Play Next", action: playNext)
                 Button("Add to Queue", action: queue)
             }
         }
@@ -120,6 +121,12 @@ struct VersionRowView: View {
                 }
                 .tint(.green)
                 .accessibilityLabel("Play \(version.name)")
+
+                Button(action: playNext) {
+                    Image(systemName: "text.insert")
+                }
+                .tint(.orange)
+                .accessibilityLabel("Play \(version.name) next")
             }
         }
         .contextMenu {
@@ -151,9 +158,13 @@ struct VersionRowView: View {
         }
     }
 
-    private func queue() {
+    private func queue() { enqueue(next: false) }
+
+    private func playNext() { enqueue(next: true) }
+
+    private func enqueue(next: Bool) {
         guard canStream else { return }
-        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug, playNext: next)
         Haptics.light()
     }
 }

@@ -75,8 +75,8 @@ final class PlayerViewModel {
         engine.seekTo(time)
     }
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
-        engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
+    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "", playNext: Bool = false) {
+        engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug, playNext: playNext)
     }
 
     func removeFromQueue(at index: Int) {
@@ -126,5 +126,33 @@ final class PlayerViewModel {
     /// results, a song's versions) — auto-advance continues down the list.
     func playInList(_ items: [PlaybackListItem], startAt index: Int) {
         engine.playInList(items, startAt: index)
+    }
+
+    // MARK: - Whole-era actions
+
+    /// Plays the era's streamable versions in order, rolling into the next era at its end.
+    func playEra(_ era: FilteredEra, artistName: String, artistSlug: String) {
+        let versions = era.streamableVersions
+        guard let first = versions.first else { return }
+        playInEra(first, eraName: era.era.name, artistName: artistName, artUrl: era.era.artUrl ?? "",
+                  versions: versions, artistSlug: artistSlug)
+    }
+
+    /// A list, not an era context: a shuffled era stops at its end instead of rolling on.
+    func shuffleEra(_ era: FilteredEra, artistName: String, artistSlug: String) {
+        let items = era.streamableVersions.shuffled().map {
+            PlaybackListItem(version: $0, artistName: artistName, eraName: era.era.name,
+                             artUrl: era.era.artUrl ?? "", artistSlug: artistSlug)
+        }
+        guard !items.isEmpty else { return }
+        playInList(items, startAt: 0)
+    }
+
+    // shortcut: the 200-item queue cap drops the rest of a bigger era silently; report the count if users hit it.
+    func queueEra(_ era: FilteredEra, artistName: String, artistSlug: String) {
+        for version in era.streamableVersions {
+            addToQueue(version, artistName: artistName, eraName: era.era.name,
+                       artUrl: era.era.artUrl ?? "", artistSlug: artistSlug)
+        }
     }
 }

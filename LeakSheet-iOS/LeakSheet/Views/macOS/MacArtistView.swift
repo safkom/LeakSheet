@@ -204,12 +204,7 @@ struct MacArtistView: View {
 
             if let filtered, !filtered.streamableVersions.isEmpty {
                 Button {
-                    guard let first = filtered.streamableVersions.first else { return }
-                    player.playInEra(
-                        first, eraName: name, artistName: artist.name,
-                        artUrl: filtered.era.artUrl ?? "",
-                        versions: filtered.streamableVersions, artistSlug: artist.slug
-                    )
+                    player.playEra(filtered, artistName: artist.name, artistSlug: artist.slug)
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }

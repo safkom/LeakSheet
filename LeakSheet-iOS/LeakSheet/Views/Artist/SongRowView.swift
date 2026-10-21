@@ -127,6 +127,7 @@ struct SongRowView: View {
         .accessibilityActions {
             if canStream {
                 Button("Play", action: play)
+                Button("Play Next", action: playNext)
                 Button("Add to Queue", action: queue)
             }
             Button(isFavourite ? "Remove from Favourites" : "Add to Favourites", action: toggleFavourite)
@@ -156,6 +157,12 @@ struct SongRowView: View {
                 }
                 .tint(.green)
                 .accessibilityLabel("Play \(song.baseName)")
+
+                Button(action: playNext) {
+                    Image(systemName: "text.insert")
+                }
+                .tint(.orange)
+                .accessibilityLabel("Play \(song.baseName) next")
             }
         }
         .contextMenu {
@@ -200,9 +207,13 @@ struct SongRowView: View {
         }
     }
 
-    private func queue() {
+    private func queue() { enqueue(next: false) }
+
+    private func playNext() { enqueue(next: true) }
+
+    private func enqueue(next: Bool) {
         guard canStream, let version else { return }
-        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug, playNext: next)
         Haptics.light()
     }
 

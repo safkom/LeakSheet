@@ -30,6 +30,26 @@ private func playedName(_ advance: PlaybackQueueLogic.Advance) -> String? {
 // MARK: - Tests
 
 struct PlaybackQueueLogicTests {
+    @Test func `play next goes ahead of queued items and dequeues first`() {
+        var logic = PlaybackQueueLogic()
+        logic.addToQueue(version("Q1"), artistName: "", eraName: "", artUrl: "")
+        logic.addToQueue(version("Q2"), artistName: "", eraName: "", artUrl: "")
+        logic.addToQueue(version("Next"), artistName: "", eraName: "", artUrl: "", playNext: true)
+        #expect(logic.queue.map(\.version.name) == ["Next", "Q1", "Q2"])
+        #expect(playedName(logic.next()) == "Next")
+        #expect(playedName(logic.next()) == "Q1")
+    }
+
+    @Test func `play next respects the queue cap`() {
+        var logic = PlaybackQueueLogic()
+        for i in 0..<200 {
+            logic.addToQueue(version("Q\(i)"), artistName: "", eraName: "", artUrl: "")
+        }
+        logic.addToQueue(version("Next"), artistName: "", eraName: "", artUrl: "", playNext: true)
+        #expect(logic.queue.count == 200)
+        #expect(logic.queue.first?.version.name == "Q0")
+    }
+
     @Test func `era advance walks versions in order and stops after last era`() {
         var logic = PlaybackQueueLogic()
         let songs = [version("A"), version("B"), version("C")]
