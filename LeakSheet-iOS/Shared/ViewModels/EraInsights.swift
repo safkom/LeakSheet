@@ -92,13 +92,7 @@ struct EraInsights {
         return names
     }
 
-    // shortcut: splits on "," and "&" only; swap in the credit-name splitter once it lands.
-    static func creditNames(_ raw: String?) -> [String] {
-        guard let raw, !raw.isEmpty else { return [] }
-        return raw.split(whereSeparator: { $0 == "," || $0 == "&" })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0 != "???" }
-    }
+    static func creditNames(_ raw: String?) -> [String] { CreditNames.split(raw) }
 
     private static func tally(_ counts: inout [String: (name: String, count: Int)], _ name: String) {
         counts[name.lowercased(), default: (name, 0)].count += 1
