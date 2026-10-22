@@ -219,6 +219,9 @@ final class TrackerLoader {
         if let cachedArtist = await cachedFallback(trimmed, artistName: artistName, recents: recents) {
             return cachedArtist
         }
+        // No usable copy is left to keep. Dropping it makes the next load unconditional
+        // instead of a 304 that replays nothing, twice per open.
+        await CacheService.shared.removeTracker(for: trimmed)
         do {
             let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
             if let etag = result.etag {
