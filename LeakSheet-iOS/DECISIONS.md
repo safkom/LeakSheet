@@ -600,3 +600,9 @@ mode because its download needs a Referer that AVPlayer does not send; pixeldrai
 pillows play direct. For froste the original and streaming URLs are therefore the same,
 so the Playback Quality toggle changes nothing there, and whether the proxied
 `/song/{hash}/file` is the original file is unverified.
+
+---
+
+## CreditNames.swift::split — separator rules
+
+Credit fields are split on `,` `&` `+` `/` `;` and on whole-word ` x ` and ` and `, case-insensitive. The word separators need the spaces, so "Maxwell", "Alexander" and "Brandon" stay whole. A leading `feat.`, `ft.`, `prod.` or `prod. by` is removed from each part, and `???` is dropped as a placeholder. The shortcut: a comma inside a name ("Tyler, The Creator") splits it. A known-names list would fix that, and is the upgrade if users report it.
