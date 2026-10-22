@@ -22,11 +22,6 @@ struct EraRowView: View {
     var onShowEraInfo: ((String) -> Void)? = nil
     @Environment(PlayerViewModel.self) private var player
 
-    /// Both counts are versions, the unit the nav subtitle calls "tracks".
-    static func countsLine(tracks: Int, playable: Int) -> String {
-        "\(tracks.formatted()) \(tracks == 1 ? "track" : "tracks") · \(playable.formatted()) available"
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             switch row {
@@ -38,7 +33,6 @@ struct EraRowView: View {
                     era: filtered.era,
                     expanded: expanded,
                     displayColors: displayColors,
-                    subtitle: Self.countsLine(tracks: filtered.stats.total, playable: filtered.stats.available),
                     actions: actions,
                     onInfo: showInfo,
                     onTap: { onCardTap(filtered.era.name) },
