@@ -603,6 +603,10 @@ so the Playback Quality toggle changes nothing there, and whether the proxied
 
 ---
 
+## CreditNames.swift::split — separator rules
+
+Credit fields are split on `,` `&` `+` `/` `;` and on whole-word ` x ` and ` and `, case-insensitive. The word separators need the spaces, so "Maxwell", "Alexander" and "Brandon" stay whole. A leading `feat.`, `ft.`, `prod.` or `prod. by` is removed from each part, and `???` is dropped as a placeholder. The shortcut: a comma inside a name ("Tyler, The Creator") splits it. A known-names list would fix that, and is the upgrade if users report it.
+
 ## ListeningHistory.swift::key-shape — why a version key carries the file link for placeholders
 
 A version is identified by era, name and tag, all lower-cased, the way favourites
