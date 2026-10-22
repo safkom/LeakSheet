@@ -76,6 +76,10 @@ final class AudioEngine {
     private var videoHintTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
     private var seekInFlight = false
+    /// Real playback time in the current load, summed from ticks; seeks don't add to it.
+    @ObservationIgnored private var listenedSeconds: TimeInterval = 0
+    @ObservationIgnored private var lastTickTime: TimeInterval?
+    @ObservationIgnored private var recordedThisLoad = false
     /// Bumped per seek so a superseded seek's completion can't clear
     /// `seekInFlight` out from under the newer one.
     private var seekGeneration = 0
@@ -122,6 +126,9 @@ final class AudioEngine {
         hasVideo = false
         videoAspectRatio = nil
         duration = Self.parseDuration(version?.trackLength)
+        listenedSeconds = 0
+        lastTickTime = nil
+        recordedThisLoad = false
 
         // Both bailouts must silence the OLD item, or it keeps playing (and driving the
         // time observer and lock screen) under the new track's metadata.
@@ -309,8 +316,27 @@ final class AudioEngine {
     func handleBackgrounding() {
         Task {
             await FavouritesManager.shared.flush()
+            await ListeningHistory.shared.flush()
             await EraColorExtractor.shared.flush()
         }
+    }
+
+    /// Adds the ticks since the last one, if they are one tick long: a seek jumps further.
+    /// See DECISIONS.md::ListeningHistory.swift::listened-not-position.
+    private func accumulateListening(to position: TimeInterval) {
+        defer { lastTickTime = position }
+        guard isPlaying, let last = lastTickTime else { return }
+        let delta = position - last
+        guard delta > 0, delta < 1 else { return }
+        listenedSeconds += delta
+        guard !recordedThisLoad, let track = currentTrack,
+              PlayThreshold.reached(listened: listenedSeconds, duration: duration)
+        else { return }
+        recordedThisLoad = true
+        ListeningHistory.shared.record(
+            track, artistSlug: artistSlug, artistName: artistName,
+            eraName: eraName, eraArt: artUrl.isEmpty ? nil : artUrl
+        )
     }
 
     // MARK: - Original Quality
@@ -471,6 +497,7 @@ final class AudioEngine {
                 if !self.seekInFlight {
                     self.currentTime = time.seconds
                 }
+                self.accumulateListening(to: time.seconds)
                 // Update lock screen every ~3 seconds
                 tickCount += 1
                 if tickCount % 30 == 0 {
