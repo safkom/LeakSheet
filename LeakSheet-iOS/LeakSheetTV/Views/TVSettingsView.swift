@@ -9,6 +9,8 @@ struct TVSettingsView: View {
 
     @State private var cacheSizeBytes: Int64 = 0
     @State private var clearingCache = false
+    /// The server this screen opened with; compared on disappear, not per keystroke.
+    @State private var openedBaseURL = ""
 
     var body: some View {
         NavigationStack {
@@ -67,6 +69,15 @@ struct TVSettingsView: View {
             .background(Color.lsBackground)
             .navigationTitle("Settings")
             .task { cacheSizeBytes = await CacheService.shared.cacheSizeBytes() }
+            .onAppear { openedBaseURL = APIClient.baseURL }
+            .onDisappear {
+                guard APIClient.baseURL != openedBaseURL else { return }
+                // Cached trackers and host health belong to the server they came from.
+                Task {
+                    await CacheService.shared.clearCache()
+                    HostHealthStore.shared.reset()
+                }
+            }
         }
     }
 

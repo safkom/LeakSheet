@@ -13,6 +13,7 @@ final class HostHealthStore {
 
     @ObservationIgnored private var lastRefresh: Date?
     @ObservationIgnored private var refreshing = false
+    @ObservationIgnored private var generation = 0
     private static let minimumInterval: TimeInterval = 60
 
     func isDown(link: String?) -> Bool {
@@ -32,9 +33,20 @@ final class HostHealthStore {
         if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < Self.minimumInterval { return }
         refreshing = true
         defer { refreshing = false }
+        let started = generation
         guard let hosts = try? await APIClient.shared.fetchHostHealth() else { return }
+        // An answer from before a reset describes the old server.
+        guard started == generation else { return }
         downHosts = Self.downHosts(from: hosts)
         lastRefresh = Date()
+    }
+
+    /// Drops the last answer, so a backend change doesn't inherit the old one's down hosts.
+    /// A refresh already in flight is discarded when it returns.
+    func reset() {
+        generation += 1
+        downHosts = [:]
+        lastRefresh = nil
     }
 
     nonisolated static func downHosts(from hosts: [HostStatus]) -> [String: String] {

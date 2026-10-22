@@ -275,8 +275,8 @@ extension ArtistViewModel {
 
     /// Misc entries after in-mode filters: No Snippets drops unavailable
     /// entries, Recent sorts by date descending, search matches name /
-    /// notes / era / type. Best Of restricts to badge-marked names when any
-    /// exist (misc entries usually carry no badges — then it's a no-op).
+    /// notes / era / type. Best Of, Worst Of and Grails keep only their badge-marked
+    /// names, so a tab with none shows empty rather than the whole tab.
     private nonisolated static func computeMiscResults(artist: Artist, tabKey: String, state: FilterState) -> [MiscEntry] {
         var entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
         if state.noSnippets {
@@ -284,21 +284,18 @@ extension ArtistViewModel {
         }
         if state.bestOf {
             // Match only best/special emojis, the same set as isBestOfVersion (not 🗑️ or 🤖).
-            let starred = entries.filter { e in
+            entries = entries.filter { e in
                 Badge.allCases.contains { $0.isBestOf && e.name.contains($0.emoji) }
             }
-            if !starred.isEmpty { entries = starred }
         }
         if state.worstOf {
-            let flagged = entries.filter { $0.name.contains(Badge.worst.emoji) }
-            if !flagged.isEmpty { entries = flagged }
+            entries = entries.filter { $0.name.contains(Badge.worst.emoji) }
         }
         if state.grails {
             // Grail + wanted, matching the eras branch's combined chip.
-            let sought = entries.filter { e in
+            entries = entries.filter { e in
                 e.name.contains(Badge.grail.emoji) || e.name.contains(Badge.wanted.emoji)
             }
-            if !sought.isEmpty { entries = sought }
         }
         if !state.query.isEmpty {
             let q = state.query

@@ -247,5 +247,21 @@ struct CacheServiceTests {
         try Data(old.utf8).write(to: meta)
         #expect(await service.getCachedArtist(for: url)?.slug == "o")
     }
+
+    /// A successful refetch replaces the entry in place: the loader relies on this
+    /// instead of removing the old entry first, so a failed reload keeps the copy.
+    @Test func `cacheTracker overwrites data and etag for the same url`() async throws {
+        let (service, dir) = makeService()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = "https://example.com/refetch"
+        let fresh = Data(#"{"name": "Fresh", "slug": "fresh", "eras": []}"#.utf8)
+
+        await service.cacheTracker(url: url, data: artistJSON, etag: "old")
+        await service.cacheTracker(url: url, data: fresh, etag: "new")
+
+        let entry = try #require(await service.getCachedTracker(for: url))
+        #expect(entry.data == fresh)
+        #expect(entry.etag == "new")
+    }
 }
 

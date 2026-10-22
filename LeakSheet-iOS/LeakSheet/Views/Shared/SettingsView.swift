@@ -21,6 +21,8 @@ struct SettingsView: View {
     @State private var imageCacheBytes: Int64 = 0
     @State private var clearingCache = false
     @State private var confirmingClearCache = false
+    /// The server this screen opened with; compared on disappear, not per keystroke.
+    @State private var openedBaseURL = ""
 
     /// Shown so a sideloaded build can be identified.
     private var appVersion: String {
@@ -175,6 +177,15 @@ struct SettingsView: View {
             .task {
                 cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
                 imageCacheBytes = await ImageCache.shared.diskUsageBytes()
+            }
+            .onAppear { openedBaseURL = APIClient.baseURL }
+            .onDisappear {
+                guard APIClient.baseURL != openedBaseURL else { return }
+                // Cached trackers and host health belong to the server they came from.
+                Task {
+                    await CacheService.shared.clearCache()
+                    HostHealthStore.shared.reset()
+                }
             }
             .toolbar {
                 if !embedded {

@@ -987,3 +987,46 @@ struct MiscEraGroupingTests {
         #expect(groups.map(\.eraName) == ["Z", "A"])
     }
 }
+
+/// Best Of, Worst Of and Grails on a tab: a filter with no matching entry shows an
+/// empty tab, never the unfiltered list.
+struct TabBadgeFilterTests {
+    private func names(_ entries: [String], _ configure: (inout FilterState) -> Void) -> [String] {
+        let tab = TabSection(
+            kind: "released", name: "📻 Released",
+            entries: entries.enumerated().map { offset, name in
+                MiscEntry(
+                    eraName: "Era 1", rowIndex: offset, name: name, notes: nil, entryType: nil, date: nil,
+                    length: nil, available: nil, quality: nil, streaming: nil,
+                    links: [], sourceTab: "released"
+                )
+            }
+        )
+        let artist = Artist(
+            name: "Test", slug: "test", sourceUrl: nil, eras: [],
+            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil,
+            miscEntries: nil, tabs: [tab]
+        )
+        var state = FilterState()
+        state.tabKey = tab.id
+        configure(&state)
+        return ArtistViewModel.computeContent(artist: artist, state: state, eraStats: [:]).miscResults.map(\.name)
+    }
+
+    @Test func `bestOf with no starred entry is empty`() {
+        #expect(names(["Hurricane", "Moon"]) { $0.bestOf = true }.isEmpty)
+    }
+
+    @Test func `bestOf keeps only starred entries`() {
+        let result = names(["Hurricane \(Badge.best.emoji)", "Moon"]) { $0.bestOf = true }
+        #expect(result == ["Hurricane \(Badge.best.emoji)"])
+    }
+
+    @Test func `worstOf with no flagged entry is empty`() {
+        #expect(names(["Hurricane", "Moon"]) { $0.worstOf = true }.isEmpty)
+    }
+
+    @Test func `grails with no sought entry is empty`() {
+        #expect(names(["Hurricane", "Moon"]) { $0.grails = true }.isEmpty)
+    }
+}

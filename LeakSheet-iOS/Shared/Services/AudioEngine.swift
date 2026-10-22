@@ -35,7 +35,12 @@ final class AudioEngine {
     var currentTime: TimeInterval = 0
     var duration: TimeInterval = 0
     var loading = false
-    var error = ""
+    var error = "" {
+        didSet {
+            guard !error.isEmpty, error != oldValue else { return }
+            AccessibilityNotification.Announcement(error).post()
+        }
+    }
     var streamUrl = ""
     var originalQuality = false
     /// Format info read from the live AVPlayerItem once playback is ready —
