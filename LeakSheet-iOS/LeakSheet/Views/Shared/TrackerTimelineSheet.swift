@@ -6,14 +6,21 @@ struct TrackerTimelineSheet: View {
     let artist: Artist
     @Environment(\.dismiss) private var dismiss
 
-    private var erasWithTimeline: [Era] {
-        artist.eras.filter { !($0.timeline ?? []).isEmpty }
+    /// Each era's events, minus ones an earlier era already listed: trackers repeat the
+    /// event that ends one era ("X releases") as the first event of the next.
+    static func sections(_ eras: [Era]) -> [(era: Era, events: [TimelineEvent])] {
+        var seen = Set<String>()
+        return eras.compactMap { era in
+            let events = (era.timeline ?? []).filter { seen.insert($0.id).inserted }
+            return events.isEmpty ? nil : (era, events)
+        }
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if erasWithTimeline.isEmpty {
+                let sections = Self.sections(artist.eras)
+                if sections.isEmpty {
                     ContentUnavailableView(
                         "No Timeline",
                         systemImage: "clock",
@@ -22,8 +29,8 @@ struct TrackerTimelineSheet: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 22) {
-                            ForEach(erasWithTimeline) { era in
-                                eraSection(era)
+                            ForEach(sections, id: \.era.id) { section in
+                                eraSection(section.era, section.events)
                             }
                         }
                         .padding(.vertical, 16)
@@ -43,12 +50,12 @@ struct TrackerTimelineSheet: View {
         }
     }
 
-    private func eraSection(_ era: Era) -> some View {
+    private func eraSection(_ era: Era, _ events: [TimelineEvent]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(era.name)
                 .font(.headline)
                 .padding(.horizontal, 16)
-            EraTimelineList(events: era.timeline ?? [])
+            EraTimelineList(events: events)
                 .padding(.horizontal, 16)
         }
     }

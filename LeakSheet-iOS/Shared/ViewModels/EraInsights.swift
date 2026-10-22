@@ -44,6 +44,7 @@ struct EraInsights {
                 for name in creditNames(raw) { tally(&features, name) }
             }
         }
+        for name in selfNames(artist) { features[name] = nil }
 
         let eraNames = artist.eras.map(\.name)
         let index = eraNames.firstIndex(of: era.name)
@@ -71,6 +72,24 @@ struct EraInsights {
         let parsed = raws.map { ($0, ArtistViewModel.parseLeakDate($0)) }.filter { $0.1 > 0 }
         guard let first = parsed.min(by: { $0.1 < $1.1 }), let last = parsed.max(by: { $0.1 < $1.1 }) else { return nil }
         return DateRange(first: first.0, last: last.0)
+    }
+
+    /// Case-folded names that are the tracker's own artist, who can't feature on their own sheet.
+    /// The sheet's name is unreliable ("Ye" credits as "Kanye West"), so the tracker-wide top
+    /// feature counts too when it clearly leads: the artist guests on other people's songs.
+    static func selfNames(_ artist: Artist) -> Set<String> {
+        var counts: [String: Int] = [:]
+        for version in artist.eras.flatMap(\.allSongs).flatMap(\.versions) {
+            for raw in [version.featuring, version.creditedArtists] {
+                for name in creditNames(raw) { counts[name.lowercased(), default: 0] += 1 }
+            }
+        }
+        let ranked = counts.sorted { $0.value > $1.value }
+        var names: Set<String> = [artist.name.lowercased()]
+        if ranked.count >= 2, ranked[0].value * 2 >= ranked[1].value * 3 {
+            names.insert(ranked[0].key)
+        }
+        return names
     }
 
     // shortcut: splits on "," and "&" only; swap in the credit-name splitter once it lands.

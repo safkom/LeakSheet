@@ -56,6 +56,19 @@ struct EraInsightsTests {
         #expect(insights.sections == [.init(label: "Main", value: 2)])
     }
 
+    @Test func `the tracker's own artist never counts as a feature`() throws {
+        let versions = ["Star", "Star", "Star", "Guest", "Star & Guest", "Sheet Name"].enumerated().map {
+            version("Song \($0.offset)", featuring: $0.element)
+        }
+        let json: [String: Any] = [
+            "name": "Sheet Name", "slug": "s",
+            "eras": [["name": "Only", "sections": [["name": "", "songs": [["base_name": "Song", "versions": versions]]]]]],
+        ]
+        let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
+        // "Star" leads "Guest" 4 to 2, so it is the sheet's artist; the sheet name is dropped too.
+        #expect(EraInsights.compute(era: a.eras[0], artist: a).topFeatures.map(\.label) == ["Guest"])
+    }
+
     @Test func `date ranges skip strings that do not parse`() throws {
         let a = try artist()
         let insights = EraInsights.compute(era: a.eras[0], artist: a)
