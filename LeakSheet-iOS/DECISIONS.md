@@ -631,3 +631,19 @@ adds to the total only when playback is running and the position moved by less t
 second since the last tick, so a seek forward or back adds nothing. A play is recorded
 once per load: `playTrack` resets `recordedThisLoad`, so a retry starts a new count. A quality
 switch goes through `setupPlayer` and keeps the current one.
+
+---
+
+## TrackerLoader.swift::keep-cache-on-failed-reload — refetch overwrites, never removes
+
+The refetch after a 304 miss used to remove the cached entry first, so a failed reload left
+nothing to fall back on. It now relies on `cacheTracker` overwriting the entry in place. A
+failed reload keeps the previous copy, which the offline path can still show. Pinned by
+`CacheServiceTests` ("cacheTracker overwrites data and etag for the same url").
+
+## SettingsView.swift::backend-change — a new server clears what the old one sent
+
+Cached trackers and `HostHealthStore` answers come from whichever backend fetched them. The
+URL is compared on disappear, not per keystroke, so typing a server address does not clear
+the cache mid-edit. A change clears `CacheService` and calls `HostHealthStore.reset()`.
+`TVSettingsView.swift` follows the same rule.

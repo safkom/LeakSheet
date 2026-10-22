@@ -37,6 +37,12 @@ final class HostHealthStore {
         lastRefresh = Date()
     }
 
+    /// Drops the last answer, so a backend change doesn't inherit the old one's down hosts.
+    func reset() {
+        downHosts = [:]
+        lastRefresh = nil
+    }
+
     nonisolated static func downHosts(from hosts: [HostStatus]) -> [String: String] {
         Dictionary(hosts.filter(\.isDown).map { ($0.provider, $0.host) }, uniquingKeysWith: { first, _ in first })
     }

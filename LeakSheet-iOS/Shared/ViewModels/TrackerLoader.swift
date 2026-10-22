@@ -9,7 +9,12 @@ final class TrackerLoader {
     var url: String = ""
     private(set) var loading = false
     private(set) var loadPhase: APIClient.LoadPhase?
-    private(set) var error: String?
+    private(set) var error: String? {
+        didSet {
+            guard let error, !error.isEmpty, error != oldValue else { return }
+            AccessibilityNotification.Announcement(error).post()
+        }
+    }
     /// Set when the returned tracker came from the local cache because the server was
     /// unreachable: the content is usable, but a failed refresh must not look successful.
     private(set) var staleNotice: String?
@@ -214,10 +219,10 @@ final class TrackerLoader {
         if let cachedArtist = await cachedFallback(trimmed, artistName: artistName, recents: recents) {
             return cachedArtist
         }
-        await CacheService.shared.removeTracker(for: trimmed)
         do {
             let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
             if let etag = result.etag {
+                // Overwrites in place; a failed reload keeps the old copy. See DECISIONS.md::TrackerLoader.swift::keep-cache-on-failed-reload.
                 await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
