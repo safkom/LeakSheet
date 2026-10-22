@@ -606,3 +606,21 @@ so the Playback Quality toggle changes nothing there, and whether the proxied
 ## CreditNames.swift::split — separator rules
 
 Credit fields are split on `,` `&` `+` `/` `;` and on whole-word ` x ` and ` and `, case-insensitive. The word separators need the spaces, so "Maxwell", "Alexander" and "Brandon" stay whole. A leading `feat.`, `ft.`, `prod.` or `prod. by` is removed from each part, and `???` is dropped as a placeholder. The shortcut: a comma inside a name ("Tyler, The Creator") splits it. A known-names list would fix that, and is the upgrade if users report it.
+
+## ListeningHistory.swift::key-shape — why a version key carries the file link for placeholders
+
+A version is identified by era, name and tag, all lower-cased, the way favourites
+identify a song. Placeholder names ("???") name nothing, so two of them in one era would
+share a row; for those alone the first link (the file) is appended, the same discriminator
+`FavouritesManager` uses. Non-placeholder names never take the link, so a song that gains
+a second mirror keeps its count.
+
+---
+
+## ListeningHistory.swift::listened-not-position — counting seconds, not seeks
+
+The threshold uses the seconds the player actually advanced, not the playhead. A tick
+adds to the total only when playback is running and the position moved by less than one
+second since the last tick, so a seek forward or back adds nothing. A play is recorded
+once per load: `playTrack` resets `recordedThisLoad`, so a retry starts a new count. A quality
+switch goes through `setupPlayer` and keeps the current one.
