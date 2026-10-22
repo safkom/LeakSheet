@@ -160,7 +160,7 @@ struct TrackerStatsSheet: View {
 }
 
 /// A single stacked bar showing the relative size of each quality tier.
-private struct QualityBar: View {
+struct QualityBar: View {
     let segments: [(value: Int, color: Color)]
 
     var body: some View {

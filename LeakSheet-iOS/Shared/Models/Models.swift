@@ -56,6 +56,8 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
     let sections: [Section]?
     let songCount: Int?
     let versionCount: Int?
+    /// The sheet's own counts from the era header (86% of eras); nil when it has none.
+    var stats: EraStats? = nil
 
     var id: String { name }
 
@@ -77,6 +79,7 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
         case artUrl = "art_url"
         case songCount = "song_count"
         case versionCount = "version_count"
+        case stats
     }
 
     func hash(into hasher: inout Hasher) {
@@ -85,6 +88,33 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
 
     static func == (lhs: Era, rhs: Era) -> Bool {
         lhs.name == rhs.name
+    }
+}
+
+/// Counts the tracker states in an era's header cell, mirroring the backend's `EraStats`.
+nonisolated struct EraStats: Codable, Hashable, Sendable {
+    let ogFiles: Int?
+    let full: Int?
+    let totalFull: Int?
+    let tagged: Int?
+    let partial: Int?
+    let snippets: Int?
+    let stemBounces: Int?
+    let unavailable: Int?
+    /// A total the sheet states outright ("18 Total"); 0 when it states none.
+    let statedTotal: Int?
+    /// The backend's derived total: the stated one, else the sum of the status counts.
+    let total: Int?
+    /// Discography-style counts in the sheet's own wording, e.g. ["singles": 4].
+    let releaseTypes: [String: Int]?
+
+    enum CodingKeys: String, CodingKey {
+        case full, tagged, partial, snippets, unavailable, total
+        case ogFiles = "og_files"
+        case totalFull = "total_full"
+        case stemBounces = "stem_bounces"
+        case statedTotal = "stated_total"
+        case releaseTypes = "release_types"
     }
 }
 

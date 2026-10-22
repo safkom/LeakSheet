@@ -13,6 +13,8 @@ struct EraCardView: View {
     var subtitle: String?
     /// The long-press menu's actions, offered to VoiceOver on the header too.
     var actions: [EraAction] = []
+    /// Shows the ⓘ button in place of the chevron; nil keeps the chevron.
+    var onInfo: (() -> Void)? = nil
     var onTap: () -> Void
     var onColorExtracted: ((Color) -> Void)?
 
@@ -31,26 +33,42 @@ struct EraCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Only the header toggles the era: a Button inside another Button's label never
             // receives taps, and the description needs its own control.
-            Button(action: onTap) {
-                HStack(alignment: .center, spacing: 14) {
-                    coverArt
-                    titleBlock
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.down")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(titleColor.opacity(0.6))
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
-                        .accessibilityHidden(true)
+            HStack(spacing: 4) {
+                Button(action: onTap) {
+                    HStack(alignment: .center, spacing: 14) {
+                        coverArt
+                        titleBlock
+                        Spacer(minLength: 8)
+                        if onInfo == nil {
+                            Image(systemName: "chevron.down")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(titleColor.opacity(0.6))
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            // The alt names and subtitle are part of what the card says, and
-            // state belongs in the value: a hint can be turned off.
-            .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-            .accessibilityActions {
-                ForEach(actions) { action in Button(action.id, action: action.run) }
+                .buttonStyle(.plain)
+                // The alt names and subtitle are part of what the card says, and
+                // state belongs in the value: a hint can be turned off.
+                .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                .accessibilityActions {
+                    ForEach(actions) { action in Button(action.id, action: action.run) }
+                }
+
+                if let onInfo {
+                    Button(action: onInfo) {
+                        Image(systemName: "info.circle")
+                            .font(.body)
+                            .foregroundStyle(titleColor.opacity(0.75))
+                            .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(era.name) info")
+                }
             }
 
             if expanded, let desc = era.description, !desc.isEmpty {

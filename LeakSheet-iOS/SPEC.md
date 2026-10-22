@@ -355,11 +355,11 @@ wanted   — 🏅 / 🥇 / 🥉
 ai       — 🤖
 ```
 
-### EraStats / ParseMetadata (server-side only)
-The tracker-declared per-era stats block and the parse diagnostics are still
-emitted by the API (its own health harness reads them), but **iOS does not
-decode either** — no screen shows them. Era counts on screen come from
-`ArtistViewModel.computeEraStats`, which counts the parsed versions.
+### EraStats / ParseMetadata
+iOS decodes the tracker-declared per-era stats block as `Era.stats` (`EraStats`,
+optional) and shows it only in the era info sheet's Tracker Counts card. Every
+other era count on screen comes from `ArtistViewModel.computeEraStats`, which
+counts the parsed versions. Parse diagnostics stay server-side only.
 
 ### TrackerStats
 ```

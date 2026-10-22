@@ -314,7 +314,7 @@ struct SongDescriptionSheet: View {
 
                         // Alt titles (remaining, after subtitle)
                         if let alts = active.version.altTitles, alts.count > 1 {
-                            cardSection(title: "Alt Titles") {
+                            CardSection(title: "Alt Titles") {
                                 ForEach(alts.dropFirst(), id: \.self) { alt in
                                     Text(alt)
                                         .font(.subheadline)
@@ -326,7 +326,7 @@ struct SongDescriptionSheet: View {
                         // OG file(s) — dedicated section, pluralized by count
                         let ogFiles = active.version.allOgFilenames
                         if !ogFiles.isEmpty {
-                            cardSection(title: ogFiles.count == 1 ? "OG File" : "OG Files") {
+                            CardSection(title: ogFiles.count == 1 ? "OG File" : "OG Files") {
                                 ForEach(ogFiles, id: \.self) { file in
                                     Text(file)
                                         .font(.subheadline.monospaced())
@@ -337,7 +337,7 @@ struct SongDescriptionSheet: View {
 
                         // Samples
                         if let samples = active.version.samples, !samples.isEmpty {
-                            cardSection(title: "Samples") {
+                            CardSection(title: "Samples") {
                                 ForEach(samples, id: \.self) { sample in
                                     Text(sample)
                                         .font(.subheadline)
@@ -648,11 +648,10 @@ struct SongDescriptionSheet: View {
 
     // MARK: - Detail grid
 
-    @ViewBuilder
     private var detailGrid: some View {
         // Date cells are shown verbatim, digits or not: trackers write "Spring" or
         // "Late 2004 sessions", and hiding them loses information.
-        let items: [(String, String)] = [
+        InfoGrid(items: [
             ("Version", active.version.versionTag),
             ("Duration", active.version.trackLength),
             ("File Date", active.version.fileDate),
@@ -660,28 +659,7 @@ struct SongDescriptionSheet: View {
             ("Preview Date", active.version.previewDate),
             ("Type", active.version.type),
             ("Recording", active.version.dateOfRecording),
-        ].compactMap { label, val in
-            guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
-            return (label, v)
-        }
-
-        if !items.isEmpty {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
-                ForEach(items, id: \.0) { label, value in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(label)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.tertiary)
-                        Text(value)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                }
-            }
-            .padding(12)
-            .background(Color.lsCard)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
+        ])
     }
 
     // MARK: - Helpers
@@ -701,16 +679,6 @@ struct SongDescriptionSheet: View {
         .clipShape(Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Fan rating \(rating) of 5 stars")
-    }
-
-    @ViewBuilder
-    private func cardSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
-        }
     }
 
     /// Favourite the whole song when one's known, else just this version —

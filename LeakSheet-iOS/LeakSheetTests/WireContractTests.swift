@@ -36,4 +36,17 @@ struct WireContractTests {
         #expect(tab.entries.map(\.section) == ["Instrumentals"])
         #expect(tab.entries.first?.links == ["https://pillows.su/f/ccc"])
     }
+
+    @Test func `era stats decode, and an era without a stats block gives nil`() throws {
+        let stats = try #require(try contractArtist().eras.first?.stats)
+        #expect(stats.ogFiles == 2)
+        #expect(stats.full == 2)
+        #expect(stats.total == 4)
+        #expect(stats.statedTotal == 0)
+        #expect(stats.releaseTypes == [:])
+
+        let url = try #require(Bundle(for: BundleToken.self).url(forResource: "contract_edge", withExtension: "json"))
+        let edge = try JSONDecoder().decode(Artist.self, from: Data(contentsOf: url))
+        #expect(edge.eras.first?.stats == nil)
+    }
 }

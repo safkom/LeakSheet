@@ -82,6 +82,7 @@ private struct ArtistContentView: View {
     let onRefresh: () async -> Void
 
     @State private var showDescription: DescriptionSheet.Payload?
+    @State private var eraInfo: EraRef?
     @State private var showQueue = false
     @State private var showStats = false
     @State private var showTimeline = false
@@ -197,6 +198,7 @@ private struct ArtistContentView: View {
                         artistSlug: artist.slug,
                         sourceUrl: artist.sourceUrl,
                         onShowDescription: { showDescription = $0 },
+                        onShowEraInfo: { eraInfo = EraRef(name: $0) },
                         onColorExtracted: { color in
                             if activeEraColor == nil {
                                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
@@ -291,6 +293,10 @@ private struct ArtistContentView: View {
         #else
         .searchable(text: $vm.searchQuery, prompt: "Search songs…")
         #endif
+        .sheet(item: $eraInfo) { ref in
+            EraInfoSheet(eraName: ref.name)
+                .environment(vm)
+        }
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
                 .environment(vm)  // enables the cross-era "Also in" section
@@ -331,4 +337,10 @@ private struct ArtistContentView: View {
             }
         }
     }
+}
+
+/// Identifies the era whose info sheet is open.
+private struct EraRef: Identifiable {
+    let name: String
+    var id: String { name }
 }

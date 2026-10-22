@@ -601,6 +601,13 @@ pillows play direct. For froste the original and streaming URLs are therefore th
 so the Playback Quality toggle changes nothing there, and whether the proxied
 `/song/{hash}/file` is the original file is unverified.
 
+## EraInfoSheet.swift::two-stat-sources — tracker counts beside parsed counts
+
+The era sheet shows two sets of numbers. The header and Quality card count the parsed
+versions (`EraInsights`). The Tracker Counts card shows the era header's own figures
+(`Era.stats`). They differ when a tracker's header is stale or counts differently, and
+neither one is the truth, so the sheet labels the tracker's figures and never mixes them.
+
 ---
 
 ## CreditNames.swift::split — separator rules
