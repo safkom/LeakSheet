@@ -214,6 +214,7 @@ struct ErasListView: View {
     let artistSlug: String
     let sourceUrl: String?
     let onShowDescription: (DescriptionSheet.Payload) -> Void
+    let onShowEraInfo: (String) -> Void
     let onColorExtracted: (Color) -> Void
 
     @Environment(PlayerViewModel.self) private var player
@@ -259,7 +260,8 @@ struct ErasListView: View {
                     },
                     onSongTap: handleSongTap,
                     onPlayVersion: playWithEraContext,
-                    onShowDescription: onShowDescription
+                    onShowDescription: onShowDescription,
+                    onShowEraInfo: onShowEraInfo
                 )
             }
         }

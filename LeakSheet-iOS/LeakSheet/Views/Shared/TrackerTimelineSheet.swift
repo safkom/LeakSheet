@@ -48,22 +48,8 @@ struct TrackerTimelineSheet: View {
             Text(era.name)
                 .font(.headline)
                 .padding(.horizontal, 16)
-            ForEach(era.timeline ?? []) { event in
-                HStack(alignment: .top, spacing: 10) {
-                    Circle()
-                        .fill(Color.lsAccent.opacity(0.7))
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 5)
-                    Text(event.date)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 92, alignment: .leading)
-                    Text(event.event)
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            EraTimelineList(events: era.timeline ?? [])
                 .padding(.horizontal, 16)
-            }
         }
     }
 }

@@ -6,10 +6,13 @@ struct EraAction: Identifiable {
     let systemImage: String
     let run: () -> Void
 
-    /// Empty when nothing in the era streams. Acts on the filtered era, like the Mac header's Play.
-    static func all(for era: FilteredEra, artistName: String, artistSlug: String, player: PlayerViewModel) -> [EraAction] {
-        guard era.allSongs.contains(where: { $0.versions.contains(where: \.isStreamable) }) else { return [] }
-        return [
+    /// "Era Info" when `onInfo` is given, then playback, which is left out when nothing in the
+    /// era streams. Playback acts on the filtered era, like the Mac header's Play.
+    static func all(for era: FilteredEra, artistName: String, artistSlug: String, player: PlayerViewModel,
+                    onInfo: (() -> Void)? = nil) -> [EraAction] {
+        let info = onInfo.map { [EraAction(id: "Era Info", systemImage: "info.circle", run: $0)] } ?? []
+        guard era.allSongs.contains(where: { $0.versions.contains(where: \.isStreamable) }) else { return info }
+        return info + [
             EraAction(id: "Play Era", systemImage: "play.fill") {
                 Haptics.light()
                 player.playEra(era, artistName: artistName, artistSlug: artistSlug)
