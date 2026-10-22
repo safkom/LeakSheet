@@ -187,6 +187,9 @@ final class ArtistViewModel {
     private let titleKeySongs: [String: [CrossEraRef]]
     private let altTitleKeySongs: [String: [CrossEraRef]]
     private let eraOrder: [String: Int]
+    /// Producer and feature credits by name key (see Precomputed.creditIndex).
+    let creditIndex: [CreditRole: [String: [CreditHit]]]
+    let creditDisplayNames: [String: String]
 
     /// Prebuilt lowercased search haystack (see Precomputed.searchIndex).
     private let searchIndex: [[SongSearchFields]]
@@ -252,6 +255,18 @@ final class ArtistViewModel {
         var id: String { "\(eraName)::\(version.id)" }
     }
 
+    /// Position of one version in `artist.eras[era].sections[section].songs[song].versions[version]`.
+    nonisolated struct CreditHit: Hashable, Sendable {
+        let era: Int
+        let section: Int
+        let song: Int
+        let version: Int
+    }
+
+    nonisolated enum CreditRole: Hashable, Sendable {
+        case producer, feature
+    }
+
     /// The heavy startup pass (era stats + the unfiltered content tree), computed
     /// off-main by `make(artist:)` so pushing a huge tracker doesn't hitch navigation.
     nonisolated struct Precomputed: Sendable {
@@ -280,15 +295,46 @@ final class ArtistViewModel {
         /// Ordered playback contexts, one per era — what drives auto-advance into the
         /// next era. Built once off-main: it parses every version's link.
         let eraPlaybackContexts: [EraSongContext]
+        /// Role → CreditNames.key → every version crediting that name.
+        let creditIndex: [CreditRole: [String: [CreditHit]]]
+        /// CreditNames.key → the most common spelling of that name.
+        let creditDisplayNames: [String: String]
+
+        /// Adds one version's producer and feature names to the credit index.
+        private static func indexCredits(
+            _ version: SongVersion, at hit: CreditHit,
+            into index: inout [CreditRole: [String: [CreditHit]]],
+            spellings: inout [String: [String: Int]]
+        ) {
+            let roles: [(CreditRole, [String?])] = [
+                (.producer, [version.producers]),
+                (.feature, [version.featuring, version.creditedArtists, version.collaboration]),
+            ]
+            for (role, fields) in roles {
+                var keys = Set<String>()
+                for field in fields {
+                    for name in CreditNames.split(field) {
+                        let key = CreditNames.key(name)
+                        keys.insert(key)
+                        spellings[key, default: [:]][name, default: 0] += 1
+                    }
+                }
+                for key in keys {
+                    index[role, default: [:]][key, default: []].append(hit)
+                }
+            }
+        }
 
         init(artist: Artist) {
+            var creditIndex: [CreditRole: [String: [CreditHit]]] = [:]
+            var spellings: [String: [String: Int]] = [:]
             var statsByName: [String: Stats] = [:]
             var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
             var keyEras: [String: [CrossEraRef]] = [:]
             var byBaseName: [String: [CrossEraRef]] = [:]
             var byTitleKey: [String: [CrossEraRef]] = [:]
             var byAltTitleKey: [String: [CrossEraRef]] = [:]
-            for era in artist.eras {
+            for (ei, era) in artist.eras.enumerated() {
                 let s = ArtistViewModel.computeEraStats(era)
                 statsByName[era.name] = s
                 total += s.total
@@ -296,26 +342,40 @@ final class ArtistViewModel {
                 snippets += s.snippets
                 confirmed += s.confirmed
                 fullHQ += s.fullHQ
-                for song in era.allSongs {
-                    // Before the placeholder guard: a "???" row's alt title is its only identity and
-                    // still links to the named song (never BY the placeholder title).
-                    let linkRef = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
-                    for key in song.titleKeys { byTitleKey[key, default: []].append(linkRef) }
-                    for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(linkRef) }
-                    // A placeholder title identifies nothing: indexing it would group every
-                    // unidentified track under one key. Mirrors the backend's empty songKey.
-                    guard !song.isPlaceholder else { continue }
-                    byBaseName[song.baseName, default: []].append(
-                        CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
-                    )
-                    guard let key = song.songKey, !key.isEmpty else { continue }
-                    // One ref per era per key (a song appears once per era)
-                    if keyEras[key]?.last?.eraName != era.name {
-                        keyEras[key, default: []].append(
+                // Same order as `era.allSongs`, which flattens the sections.
+                for (si, section) in (era.sections ?? []).enumerated() {
+                    for (sj, song) in section.songs.enumerated() {
+                        for (vi, version) in song.versions.enumerated() {
+                            Self.indexCredits(
+                                version, at: CreditHit(era: ei, section: si, song: sj, version: vi),
+                                into: &creditIndex, spellings: &spellings
+                            )
+                        }
+                        // Before the placeholder guard: a "???" row's alt title is its only identity and
+                        // still links to the named song (never BY the placeholder title).
+                        let linkRef = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
+                        for key in song.titleKeys { byTitleKey[key, default: []].append(linkRef) }
+                        for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(linkRef) }
+                        // A placeholder title identifies nothing: indexing it would group every
+                        // unidentified track under one key. Mirrors the backend's empty songKey.
+                        guard !song.isPlaceholder else { continue }
+                        byBaseName[song.baseName, default: []].append(
                             CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
                         )
+                        guard let key = song.songKey, !key.isEmpty else { continue }
+                        // One ref per era per key (a song appears once per era)
+                        if keyEras[key]?.last?.eraName != era.name {
+                            keyEras[key, default: []].append(
+                                CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
+                            )
+                        }
                     }
                 }
+            }
+            self.creditIndex = creditIndex
+            self.creditDisplayNames = spellings.mapValues { counts in
+                // Most common spelling; the alphabetically first one wins a tie.
+                counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key ?? ""
             }
             self.eraStatsByName = statsByName
             var tabStats: [String: Stats] = [:]
@@ -523,6 +583,8 @@ final class ArtistViewModel {
         self.titleKeySongs = precomputed.titleKeySongs
         self.altTitleKeySongs = precomputed.altTitleKeySongs
         self.eraOrder = precomputed.eraOrder
+        self.creditIndex = precomputed.creditIndex
+        self.creditDisplayNames = precomputed.creditDisplayNames
         self.searchIndex = precomputed.searchIndex
         self.allEraPlaybackContexts = precomputed.eraPlaybackContexts
         self.eraPlaybackContexts = precomputed.eraPlaybackContexts
