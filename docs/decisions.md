@@ -586,6 +586,15 @@ When discovered, the unreleased/leaks tab is tried before any other GID so that
 trackers with a "Recent" landing tab (e.g. Travis Scott 2.0) don't fool the fetcher
 into treating the small Recent sheet as the primary data.
 
+## fetcher.py::tab-qualifier-rank — a newer copy beats its plain namesake
+
+Trackers keep the old tab when they rebuild one: "Unreleased" next to "Unreleased [NEW]"
+(The Beatles), "Unreleased (Archive)", "Unreleased (Old)". All clean to the same name,
+so `_first_tab_gid` ranks by the trailing qualifier: a qualifier that is only a newness
+marker ("[NEW]", "(Updated)", "[2.0]") first, then the plain name, then other qualifiers
+("(WIP)"), then stale ones ("(Archive)", "(Outdated)") last. "New" must be the whole
+qualifier: "(New Leaks)" names a subset of the catalogue, not its successor.
+
 ## fetcher.py::duplicate-tab-keys — filtering "Recent"-style duplicate tabs
 
 A tab whose songs the winner already has is a filtered view of it, not extra

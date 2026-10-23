@@ -731,20 +731,48 @@ def _display_tab_name(name: str) -> str:
     return re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip()
 
 
-def _first_tab_gid(named_tabs: dict[str, str], names: frozenset) -> str | None:
-    """GID of the tab named in *names*, an exact unqualified name before a qualified one.
+# A trailing qualifier saying a tab replaced, or was replaced by, its namesake.
+# See docs/decisions.md::fetcher.py::tab-qualifier-rank
+# The whole qualifier must be the marker: "(New Leaks)" names a subset, not a successor.
+# Version marks count from 2 up: "(1.0)" or "(v1)" names the original.
+_NEW_TAB_QUALIFIER_RE = re.compile(
+    r"^[\(\[]\s*(?:new|updated|current|latest|v(?:[2-9]|\d{2,})|(?:[2-9]|\d{2,})\.0)\s*!*\s*[\)\]]$"
+)
+_STALE_TAB_QUALIFIER_RE = re.compile(
+    r"\b(?:old|archived?|outdated|deprecated|backup|legacy|unused|do ?n[o']?t use)\b"
+)
 
-    "Unreleased (Old)" cleans to "unreleased" too, and must not win by dict order.
+
+def _tab_qualifier_rank(name: str) -> int:
+    """0 a newer copy, 1 the plain name, 2 any other qualifier, 3 a stale copy."""
+    plain = re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip().lower()
+    # Plain means no trailing qualifier: slash spacing alone must not demote a name.
+    m = _TAB_QUALIFIER_RE.search(plain)
+    if not m:
+        return 1
+    qualifier = m.group(0)
+    if _STALE_TAB_QUALIFIER_RE.search(qualifier):
+        return 3
+    if _NEW_TAB_QUALIFIER_RE.search(qualifier):
+        return 0
+    return 2
+
+
+def _first_tab_gid(named_tabs: dict[str, str], names: frozenset) -> str | None:
+    """GID of the tab named in *names*, ranked by its trailing qualifier, then tab order.
+
+    "Unreleased (Old)" and "Unreleased [NEW]" both clean to "unreleased"; the new one
+    wins over the plain name and the old one loses to everything.
     """
-    qualified = None
+    best: tuple[int, str] | None = None
     for gid, name in named_tabs.items():
         clean = _clean_tab_name(name)
         if clean not in names:
             continue
-        if re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip().lower() == clean:
-            return gid
-        qualified = qualified or gid
-    return qualified
+        rank = _tab_qualifier_rank(name)
+        if best is None or rank < best[0]:
+            best = (rank, gid)
+    return best[1] if best else None
 
 
 def _get_unreleased_tab_gid(named_tabs: dict[str, str]) -> str | None:
