@@ -9,6 +9,11 @@ Checks:
 import sys
 sys.path.insert(0, ".")
 
+import tempfile
+from pathlib import Path
+from unittest import mock
+
+from src import fetcher
 from src.fetcher import fetch_and_parse
 
 
@@ -18,7 +23,9 @@ def verify_tracker(url, name):
     print(f"  {url}")
     print(f"{'='*70}")
 
-    artist = fetch_and_parse(url)
+    # .cache is the accuracy corpus; a live fetch here would overwrite its pinned tabs.
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fetcher, "CACHE_DIR", Path(tmp)):
+        artist = fetch_and_parse(url)
     print(f"Artist: {artist.name} ({artist.slug})")
     print(f"Eras: {len(artist.eras)}, Songs: {artist.total_songs}, Versions: {artist.total_versions}")
 

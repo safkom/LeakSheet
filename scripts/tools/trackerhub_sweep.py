@@ -69,16 +69,22 @@ _MONTHS_FULL = (
     "January|February|March|April|May|June|July|August|September|October|November|December"
 )
 _MONTHS_ABBR = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec"
+# What FilterPipeline.parseLeakDate's non-lenient DateFormatters accept: "Sep" not "Sept",
+# no trailing dot, the comma where the format has one.
+_ABBR_STRICT = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 _DATE_CLASSES: list[tuple[str, re.Pattern, str]] = [
     ("MM/dd/yyyy",     re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$"), "ios-full"),
     ("yyyy-MM-dd",     re.compile(r"^\d{4}-\d{2}-\d{2}$"), "ios-full"),
     ("MMMM yyyy",      re.compile(rf"^(?:{_MONTHS_FULL}) \d{{4}}$"), "ios-full"),
     ("yyyy",           re.compile(r"^\d{4}$"), "ios-full"),
-    ("MMM d, yyyy",    re.compile(rf"^(?:{_MONTHS_ABBR})\.? \d{{1,2}},? \d{{4}}$"), "ios-year-only"),
-    ("MMMM d, yyyy",   re.compile(rf"^(?:{_MONTHS_FULL}) \d{{1,2}},? \d{{4}}$"), "ios-year-only"),
-    ("MMM yyyy",       re.compile(rf"^(?:{_MONTHS_ABBR})\.? \d{{4}}$"), "ios-year-only"),
+    ("MMM d, yyyy",    re.compile(rf"^(?:{_ABBR_STRICT}) \d{{1,2}}, \d{{4}}$"), "ios-full"),
+    ("MMMM d, yyyy",   re.compile(rf"^(?:{_MONTHS_FULL}) \d{{1,2}}, \d{{4}}$"), "ios-full"),
+    ("MMM yyyy",       re.compile(rf"^(?:{_ABBR_STRICT}) \d{{4}}$"), "ios-full"),
+    ("d MMM yyyy",     re.compile(rf"^\d{{1,2}} (?:{_ABBR_STRICT}) \d{{4}}$"), "ios-full"),
+    ("month-name variant", re.compile(
+        rf"^(?:\d{{1,2}} )?(?:{_MONTHS_FULL}|{_MONTHS_ABBR})\.?(?: \d{{1,2}}(?:st|nd|rd|th)?,?)? \d{{4}}$"
+    ), "ios-year-only"),
     ("dd/MM_or_MM/dd (2-digit yr)", re.compile(r"^\d{1,2}/\d{1,2}/\d{2}$"), "ios-zero"),
-    ("d Month yyyy",   re.compile(rf"^\d{{1,2}} (?:{_MONTHS_FULL}|{_MONTHS_ABBR})\.? \d{{4}}$"), "ios-year-only"),
     ("n/a-ish",        re.compile(r"^(n/?a|none|unknown|\?+|tbd|-+)$", re.IGNORECASE), "absent"),
 ]
 
@@ -399,7 +405,15 @@ def main() -> int:
                     help="warm every cover into a scratch cache and record its size")
     ap.add_argument("--include-stale", action="store_true",
                     help="also sweep trackers TrackerHub marks as not up-to-date")
-    return asyncio.run(main_async(ap.parse_args()))
+    args = ap.parse_args()
+    import tempfile
+    from unittest import mock
+
+    from src import fetcher
+    # Live fetches overwrite cached tabs, and .cache is also the accuracy corpus whose
+    # labels pin tab hashes: sweep into a scratch cache instead (as yetracker_diff does).
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fetcher, "CACHE_DIR", Path(tmp)):
+        return asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
