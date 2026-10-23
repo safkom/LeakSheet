@@ -69,7 +69,7 @@ struct QueueSheet: View {
 
     private var content: some View {
             Group {
-                if player.queue.isEmpty {
+                if player.queue.isEmpty && player.upNext.isEmpty {
                     ContentUnavailableView(
                         "Queue Empty",
                         systemImage: "list.bullet",
@@ -82,6 +82,14 @@ struct QueueSheet: View {
                         }
                         // Drag to reorder with no edit mode (iOS 27's reorderable container).
                         .reorderable()
+                        if !player.upNext.isEmpty {
+                            // Read-only: the list plays on after the manual queue drains.
+                            SwiftUI.Section("Up Next") {
+                                ForEach(Array(player.upNext.enumerated()), id: \.offset) { _, item in
+                                    upNextRow(item)
+                                }
+                            }
+                        }
                     }
                     .reorderContainer(for: QueueItem.self) { difference in
                         applyReorder(difference)
@@ -170,6 +178,33 @@ struct QueueSheet: View {
         // Switch Control can't do.
         .accessibilityAction(named: "Move Up") { move(item, by: -1) }
         .accessibilityAction(named: "Move Down") { move(item, by: 1) }
+    }
+
+    private func upNextRow(_ item: PlaybackListItem) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                if item.isInserted {
+                    Image(systemName: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(Color.lsAccent)
+                        .accessibilityHidden(true)
+                }
+                Text(item.version.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            Text(item.eraName.isEmpty ? item.artistName : "\(item.artistName) · \(item.eraName)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if item.isInserted {
+                Text("Suggested")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     /// The item's CURRENT position, resolved at tap time: a captured row index goes

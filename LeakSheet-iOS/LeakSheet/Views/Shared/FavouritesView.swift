@@ -7,6 +7,7 @@ struct FavouritesView: View {
     /// resolves its full song (Versions picker, alt title, song-level credits)
     /// instead of showing only the one version the entry stored.
     @Environment(ArtistViewModel.self) private var artistVM: ArtistViewModel?
+    @Environment(PlayerViewModel.self) private var player
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDescription: DescriptionSheet.Payload?
@@ -135,6 +136,16 @@ struct FavouritesView: View {
                 }
             }
             .background(Color.lsBackground)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await player.playSmartShuffle(favourites.entries) }
+                    } label: {
+                        Label("Smart Shuffle", systemImage: "sparkles")
+                    }
+                    .disabled(favourites.entries.isEmpty)
+                }
+            }
             .navigationTitle("Favourites (\(favourites.entries.count))")
             #if os(iOS)
             .toolbarTitleDisplayMode(.inline)

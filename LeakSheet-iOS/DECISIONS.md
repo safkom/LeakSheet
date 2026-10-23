@@ -654,3 +654,12 @@ The tracker's own artist can feature on their own sheet, so their name would lin
 lists every song as a guest appearance. `CreditProfile.hasPage` refuses a feature page for the
 names `EraInsights.selfNames` returns, and the description and era sheets then show the name as plain
 text. A producer page for the same name still opens, since the artist can produce their own tracks.
+
+## RadioBuilder.swift::stations — each station is a playInList, built from the filtered view
+
+Era Radio, Credit Radio, Newest Leaks and Smart Shuffle are `[PlaybackListItem]` played through
+`playInList`, not an era context. An era context rolls into the next era at its end, and a radio
+must stop; a list stops at its own end. Era Radio uses the filtered era, like Play Era, and each song's
+`bestPlayableVersion` (skipped when not streamable). Smart Shuffle suggests only versions the user has
+not heard, from trackers already in the cache, so a favourite whose tracker was never loaded gets no
+suggestion.

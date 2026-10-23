@@ -399,6 +399,18 @@ struct CreditPageView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Shuffle all tracks")
+                Button {
+                    Haptics.light()
+                    player.playCreditRadio(list, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                } label: {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.headline)
+                        .frame(width: 52, height: 52)
+                        .background(Color.lsCard)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Radio")
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)

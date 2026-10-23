@@ -7,7 +7,7 @@ struct RecentPlaysShelfView: View {
     @Environment(PlayerViewModel.self) private var player
 
     var body: some View {
-        let entries = ListeningHistory.shared.recent
+        let entries = Self.oneTakePerSong(ListeningHistory.shared.recent)
         if historyEnabled, !entries.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Recently Played")
@@ -43,7 +43,7 @@ struct RecentPlaysShelfView: View {
             Text(entry.version.derivedBaseName)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-            Text(entry.artistName)
+            Text([entry.version.versionTag, entry.artistName].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -52,6 +52,14 @@ struct RecentPlaysShelfView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Plays")
+    }
+
+    /// An era plays its takes back to back, so V1 and V2 of one song would fill two cards.
+    static func oneTakePerSong(_ entries: [ListeningHistory.RecentPlay]) -> [ListeningHistory.RecentPlay] {
+        var seen = Set<String>()
+        return entries.filter {
+            seen.insert("\($0.artistSlug)::\($0.eraName)::\($0.version.derivedBaseName.lowercased())").inserted
+        }
     }
 
     private func play(_ entry: ListeningHistory.RecentPlay) {

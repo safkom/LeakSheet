@@ -36,6 +36,7 @@ final class PlayerViewModel {
     var loading: Bool { engine.loading }
     var error: String { engine.error }
     var queue: [QueueItem] { engine.queue }
+    var upNext: [PlaybackListItem] { engine.upNext }
     var originalQuality: Bool { engine.originalQuality }
     /// Live-captured stream format for the current track — File Info fallback.
     var streamFormat: StreamFormatInfo? { engine.streamFormat }
@@ -146,6 +147,47 @@ final class PlayerViewModel {
         }
         guard !items.isEmpty else { return }
         playInList(items, startAt: 0)
+    }
+
+    // MARK: - Radio
+
+    /// Each song's best playable version of the era, shuffled, as a station that stops at its end.
+    func playEraRadio(_ era: FilteredEra, artistName: String, artistSlug: String) {
+        var rng = SystemRandomNumberGenerator()
+        playInList(RadioBuilder.eraRadio(era: era, artistName: artistName, artistSlug: artistSlug, using: &rng),
+                   startAt: 0)
+    }
+
+    func playCreditRadio(_ versions: [CreditProfile.Credited], artistName: String, artistSlug: String) {
+        var rng = SystemRandomNumberGenerator()
+        playInList(RadioBuilder.creditRadio(versions: versions, artistName: artistName, artistSlug: artistSlug,
+                                            using: &rng), startAt: 0)
+    }
+
+    func playNewestLeaks(_ artist: Artist) {
+        playInList(RadioBuilder.newestLeaks(artist: artist), startAt: 0)
+    }
+
+    /// Favourites shuffled, with suggestions from trackers already in the cache: a favourite
+    /// whose tracker was never loaded gets none.
+    func playSmartShuffle(_ entries: [FavouritesManager.FavouriteEntry]) async {
+        let favourites: [PlaybackListItem] = entries.compactMap { entry in
+            guard let version = entry.toSongVersion, version.isStreamable else { return nil }
+            return PlaybackListItem(version: version, artistName: entry.artistName, eraName: entry.eraName,
+                                    artUrl: entry.eraArt ?? "", artistSlug: entry.artistSlug)
+        }
+        var artists: [Artist] = []
+        for url in Set(entries.compactMap(\.sourceUrl)) {
+            if let artist = await CacheService.shared.getCachedArtist(for: url) { artists.append(artist) }
+        }
+        var rng = SystemRandomNumberGenerator()
+        let station = RadioBuilder.smartShuffle(
+            favourites: favourites,
+            candidatesByEra: RadioBuilder.candidatesByEra(artists: artists),
+            isHeard: { ListeningHistory.shared.isHeard($0.version, artistSlug: $0.artistSlug ?? "", eraName: $0.eraName) },
+            using: &rng
+        )
+        playInList(station, startAt: 0)
     }
 
     // shortcut: the 200-item queue cap drops the rest of a bigger era silently; report the count if users hit it.

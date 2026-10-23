@@ -190,7 +190,7 @@ extension ArtistViewModel {
         var id: String { "\(era.name)::\(songOrdinal)::\(song.baseName)::\(version.id)" }
     }
 
-    private nonisolated static func computeRecentResults(artist: Artist, state: FilterState) -> [RecentResult] {
+    nonisolated static func computeRecentResults(artist: Artist, state: FilterState) -> [RecentResult] {
         var results: [RecentResult] = []
         for era in artist.eras {
             if Task.isCancelled { return [] }

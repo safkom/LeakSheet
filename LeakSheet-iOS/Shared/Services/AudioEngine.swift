@@ -56,6 +56,9 @@ final class AudioEngine {
     /// Cached from `logic.queue` after every mutation, so views reading `queue` don't
     /// depend on the whole `PlaybackQueueLogic` (era/list cursors included).
     private(set) var queue: [QueueItem] = []
+    /// The next list items after the cursor (the manual queue plays first and is not
+    /// included). Refreshed with `queue`, so the Up Next section tracks the list.
+    private(set) var upNext: [PlaybackListItem] = []
 
     // MARK: - Private
 
@@ -120,6 +123,7 @@ final class AudioEngine {
         // walks off into an unrelated song.
         if !preservingQueueContext {
             logic.clearContexts()
+            syncQueue()
         }
         currentTrack = version
         self.artistName = artistName
@@ -307,6 +311,7 @@ final class AudioEngine {
         hasVideo = false
         videoAspectRatio = nil
         logic.clearContexts()
+        syncQueue()
         clearNowPlayingInfo()
     }
 
@@ -315,7 +320,10 @@ final class AudioEngine {
     /// the invalidation when the queue didn't actually change.
     private func syncQueue() {
         queue = logic.queue
+        upNext = logic.upcoming(limit: Self.upNextLimit)
     }
+
+    private static let upNextLimit = 50
 
     /// Called when the app moves to background. Playback deliberately continues
     /// (the session is configured for it); this is where debounced writes are
@@ -455,6 +463,8 @@ final class AudioEngine {
     }
 
     private func play(_ target: PlaybackQueueLogic.Target) {
+        // Callers move the cursor before playing, so the list position is current here.
+        syncQueue()
         playTrack(
             target.version,
             artistName: target.artistName,
@@ -1075,6 +1085,8 @@ struct EraSongContext: Sendable {
     /// Canonical API slug — optional so older call sites keep compiling;
     /// playback falls back to a slugified artist name when absent.
     var artistSlug: String? = nil
+    /// Set on a smart-shuffle suggestion, so the queue can label it.
+    var isInserted: Bool = false
 }
 
 /// One entry of an ad-hoc playback list — each item carries its own era
@@ -1086,4 +1098,6 @@ nonisolated struct PlaybackListItem: Equatable, Sendable {
     let artUrl: String
     /// Canonical API slug — optional so call sites without it keep compiling.
     var artistSlug: String? = nil
+    /// Set on a smart-shuffle suggestion, so the queue can label it.
+    var isInserted: Bool = false
 }
