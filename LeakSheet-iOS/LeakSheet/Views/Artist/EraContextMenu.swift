@@ -21,6 +21,10 @@ struct EraAction: Identifiable {
                 Haptics.light()
                 player.shuffleEra(era, artistName: artistName, artistSlug: artistSlug)
             },
+            EraAction(id: "Era Radio", systemImage: "dot.radiowaves.left.and.right") {
+                Haptics.light()
+                player.playEraRadio(era, artistName: artistName, artistSlug: artistSlug)
+            },
             EraAction(id: "Add Era to Queue", systemImage: "text.append") {
                 Haptics.light()
                 player.queueEra(era, artistName: artistName, artistSlug: artistSlug)

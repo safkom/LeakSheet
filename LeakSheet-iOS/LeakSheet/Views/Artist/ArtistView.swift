@@ -265,6 +265,9 @@ private struct ArtistContentView: View {
                         Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
                     }
                     Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
+                    Button { player.playNewestLeaks(vm.artist) } label: {
+                        Label("Newest Leaks", systemImage: "clock.arrow.circlepath")
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                 }

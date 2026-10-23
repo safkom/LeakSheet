@@ -98,6 +98,15 @@ nonisolated struct PlaybackQueueLogic {
         return Self.target(for: items[index])
     }
 
+    /// The list items after the cursor, up to `limit`. The manual queue is not included:
+    /// it plays first and is shown above these.
+    func upcoming(limit: Int) -> [PlaybackListItem] {
+        guard let list = playbackList, let idx = listIndex, limit > 0 else { return [] }
+        let start = idx + 1
+        guard start < list.count else { return [] }
+        return Array(list[start..<min(list.count, start + limit)])
+    }
+
     /// Register an artist's ordered era list, filed under that artist so it never
     /// disturbs another's rollover.
     mutating func setArtistEras(_ eras: [EraSongContext]) {

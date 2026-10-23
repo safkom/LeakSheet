@@ -287,4 +287,44 @@ struct CrossArtistEraListTests {
         }
         #expect(target.eraName == "A2")
     }
+
+    // MARK: - Up next
+
+    @Test func `upcoming lists the list remainder after the cursor`() {
+        var logic = PlaybackQueueLogic()
+        let items = ["a", "b", "c", "d"].map { listItem(version($0)) }
+        _ = logic.playInList(items, startAt: 1)
+        #expect(logic.upcoming(limit: 10).map(\.version.name) == ["c", "d"])
+    }
+
+    @Test func `upcoming respects the limit`() {
+        var logic = PlaybackQueueLogic()
+        let items = ["a", "b", "c", "d", "e"].map { listItem(version($0)) }
+        _ = logic.playInList(items, startAt: 0)
+        #expect(logic.upcoming(limit: 2).map(\.version.name) == ["b", "c"])
+    }
+
+    @Test func `upcoming is empty at the end of the list`() {
+        var logic = PlaybackQueueLogic()
+        let items = ["a", "b"].map { listItem(version($0)) }
+        _ = logic.playInList(items, startAt: 1)
+        #expect(logic.upcoming(limit: 10).isEmpty)
+    }
+
+    @Test func `upcoming leaves the manual queue out and it still plays first`() {
+        var logic = PlaybackQueueLogic()
+        let items = ["a", "b", "c"].map { listItem(version($0)) }
+        _ = logic.playInList(items, startAt: 0)
+        logic.addToQueue(version("Q"), artistName: "", eraName: "", artUrl: "")
+        #expect(logic.upcoming(limit: 10).map(\.version.name) == ["b", "c"])
+        #expect(playedName(logic.next()) == "Q")
+        #expect(playedName(logic.next()) == "b")
+    }
+
+    @Test func `upcoming is empty without a list context`() {
+        var logic = PlaybackQueueLogic()
+        let ctx = EraSongContext(eraName: "Yeezus", artistName: "Ye", artUrl: "", versions: [version("A"), version("B")])
+        _ = logic.playInEra(ctx.versions[0], context: ctx)
+        #expect(logic.upcoming(limit: 10).isEmpty)
+    }
 }

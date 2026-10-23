@@ -275,6 +275,19 @@ struct EraInfoSheet: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Shuffle era")
+                Button {
+                    Haptics.light()
+                    player.playEraRadio(filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                    if !embedded { dismiss() }
+                } label: {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.headline)
+                        .frame(width: 52, height: 52)
+                        .background(Color.lsCard)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Era radio")
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
