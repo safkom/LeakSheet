@@ -24,12 +24,14 @@ actor CacheService {
     /// ETag still earns a 304 when the tracker hasn't changed.
     private static let maxAge: TimeInterval = 30 * 24 * 3600
 
-    init(directory: URL? = nil) {
+    /// `sweepOnInit` is off in tests: a detached sweep racing a test's own file setup deletes its entries.
+    init(directory: URL? = nil, sweepOnInit: Bool = true) {
         cacheDirectory = directory
             ?? URL.cachesDirectory.appending(path: "LeakSheet", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         // The `.shared` initializer runs on whichever thread first touches
         // it (usually main) — sweep legacy files off that thread.
+        guard sweepOnInit else { return }
         let directoryToSweep = cacheDirectory
         Task.detached(priority: .utility) {
             Self.sweepLegacyFiles(in: directoryToSweep)
