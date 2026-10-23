@@ -9,7 +9,7 @@ struct CacheServiceTests {
     private func makeService() -> (CacheService, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appending(path: "CacheServiceTests-\(UUID().uuidString)")
-        return (CacheService(directory: dir), dir)
+        return (CacheService(directory: dir, sweepOnInit: false), dir)
     }
 
     private let artistJSON = Data(#"{"name": "Test", "slug": "test", "eras": []}"#.utf8)
@@ -75,7 +75,7 @@ struct CacheServiceTests {
         let orphan = dir.appending(path: "tracker_aHR0cHM6Ly9leGFtcGxlLmNvbQ==.json")
         try Data("{}".utf8).write(to: orphan)
 
-        let service = CacheService(directory: dir)
+        let service = CacheService(directory: dir, sweepOnInit: false)
         await service.sweepLegacyEntries()
         #expect(!FileManager.default.fileExists(atPath: orphan.path))
     }
