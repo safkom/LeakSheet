@@ -759,6 +759,19 @@ struct LeakDateParsingTests {
         #expect(v > 0)
     }
 
+    @Test func irregularMonthDayShapesKeepDayPrecision() {
+        let ref = ArtistViewModel.parseLeakDate("Sep 13, 1996")
+        for raw in ["Sept 13, 1996", "Sept 13th, 1996", "Sep. 13, 1996", "Sep 13 1996",
+                    "September 13th, 1996", "13 September 1996", "13th Sep 1996"] {
+            #expect(ArtistViewModel.parseLeakDate(raw) == ref, "\(raw)")
+        }
+    }
+
+    @Test func twoDigitYearSlashDates() {
+        #expect(ArtistViewModel.parseLeakDate("03/20/23") == ArtistViewModel.parseLeakDate("03/20/2023"))
+        #expect(ArtistViewModel.parseLeakDate("3/5/19") == ArtistViewModel.parseLeakDate("03/05/2019"))
+    }
+
     @Test func existingFormatsStillParse() {
         #expect(ArtistViewModel.parseLeakDate("03/20/2023") > 0)
         #expect(ArtistViewModel.parseLeakDate("2023-03-20") > 0)

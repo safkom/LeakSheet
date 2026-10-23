@@ -514,8 +514,45 @@ extension ArtistViewModel {
         return f
     }()
 
+    // "3/5/19": US order like the four-digit form; yy maps into a 1950–2049 window.
+    private nonisolated static let _shortYearSlashFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "M/d/yy"
+        return f
+    }()
+
+    /// "Sept 13th, 1996", "Sep. 13 1996", "13th September 1996" → shapes the formatters accept.
+    nonisolated static func normalizedDate(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        s = s.replacing(/(\d{1,2})(?:st|nd|rd|th)\b/) { String($0.output.1) }
+        s = s.replacing(/\b(Sept)\b\.?/.ignoresCase()) { _ in "Sep" }
+        s = s.replacing(/\b([A-Za-z]{3})\.(?=\s)/) { String($0.output.1) }
+        // "Sep 13 1996" → "Sep 13, 1996"; a full month name is shortened so one formatter fits.
+        s = s.replacing(/^([A-Za-z]+) (\d{1,2}) (\d{4})$/) { "\($0.output.1) \($0.output.2), \($0.output.3)" }
+        s = s.replacing(/^(\d{1,2}) ([A-Za-z]{4,}) (\d{4})$/) { "\($0.output.1) \($0.output.2.prefix(3)) \($0.output.3)" }
+        return s
+    }
+
     // Internal (not private) so LeakSheetTests can pin the accepted formats.
     nonisolated static func parseLeakDate(_ dateStr: String) -> TimeInterval {
+        if let t = exactDate(dateStr) { return t }
+        // Irregular spellings keep day precision instead of collapsing to the year.
+        let normalized = normalizedDate(dateStr)
+        if normalized != dateStr, let t = exactDate(normalized) { return t }
+        // Extract bare year with Swift Regex (compile-time checked)
+        if let match = dateStr.firstMatch(of: /(\d{4})/),
+           let d = _yearFmt.date(from: String(match.output.1)) {
+            return d.timeIntervalSince1970
+        }
+        return 0
+    }
+
+    private nonisolated static func exactDate(_ dateStr: String) -> TimeInterval? {
+        // Before the four-digit form, which reads "03/20/23" as the year 23.
+        if dateStr.wholeMatch(of: /\d{1,2}\/\d{1,2}\/\d{2}/) != nil {
+            return _shortYearSlashFmt.date(from: dateStr)?.timeIntervalSince1970
+        }
         if let d = _slashFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _isoFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _iso8601Fmt.date(from: dateStr) { return d.timeIntervalSince1970 }
@@ -524,11 +561,6 @@ extension ArtistViewModel {
         if let d = _fullMonthDayFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _monthYearFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
         if let d = _abbrevMonthYearFmt.date(from: dateStr) { return d.timeIntervalSince1970 }
-        // Extract bare year with Swift Regex (compile-time checked)
-        if let match = dateStr.firstMatch(of: /(\d{4})/),
-           let d = _yearFmt.date(from: String(match.output.1)) {
-            return d.timeIntervalSince1970
-        }
-        return 0
+        return nil
     }
 }
