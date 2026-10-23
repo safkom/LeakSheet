@@ -23,6 +23,18 @@ struct ContentTabsView: View {
         }
     }
 
+    /// The tab name without the leading emoji the tab's icon already stands for.
+    /// Digits and letters are ASCII, so only non-ASCII scalars count as decoration.
+    static func labelText(for name: String) -> String {
+        let rest = name.unicodeScalars.drop { scalar in
+            scalar.properties.isWhitespace || (scalar.value > 0x7F && (
+                scalar.properties.isEmoji || scalar.properties.isEmojiModifier
+                    || scalar.value == 0xFE0F || scalar.value == 0x200D || scalar.value == 0x20E3))
+        }
+        let text = String(rest)
+        return text.isEmpty ? name : text
+    }
+
     var body: some View {
         HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -31,7 +43,7 @@ struct ContentTabsView: View {
                         vm.selectTab(nil)
                     }
                     ForEach(vm.availableTabs) { tab in
-                        TabButton(label: tab.name, icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
+                        TabButton(label: Self.labelText(for: tab.name), icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
                             vm.selectTab(tab.id)
                         }
                     }
@@ -60,6 +72,8 @@ private struct TabButton: View {
                     .font(.subheadline.weight(isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? .primary : .secondary)
                     .lineLimit(1)
+                    // The scroll view scrolls the tabs; a label must never truncate.
+                    .fixedSize()
                 Capsule()
                     .fill(isSelected ? Color.lsAccent : .clear)
                     .frame(height: 3)
@@ -323,6 +337,14 @@ struct MiscListView: View {
         vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
+    /// The badge filter that can empty a content tab, named as the Filters menu labels it.
+    static func emptyFilterName(_ vm: ArtistViewModel) -> String? {
+        if vm.grails { return "Grails" }
+        if vm.bestOf { return "Best Of" }
+        if vm.worstOf { return "Worst Of" }
+        return nil
+    }
+
     /// Normalised key for `vm.eraDisplay`, used for reads and writes alike (the card
     /// shows "Other" for an empty name and matches art case-insensitively).
     private func colorKey(_ eraName: String) -> String {
@@ -361,7 +383,7 @@ struct MiscListView: View {
                     description: Text(
                         vm.noSnippets ? "Hide Snippets is on. Turn it off in Filters to see snippet entries."
                         : !vm.content.state.query.isEmpty ? "Nothing on this page matches your search."
-                        : "This page has no entries."
+                        : Self.emptyFilterName(vm).map { "No \($0) on this page." } ?? "This page has no entries."
                     )
                 )
                 .padding(.top, 40)
