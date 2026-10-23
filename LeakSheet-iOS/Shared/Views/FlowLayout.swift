@@ -59,7 +59,9 @@ struct FlowLayout: Layout {
             // Clamped measurement proposal — see DECISIONS.md::FlowLayout.swift::clamped-sizing
             var size = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
             size.width = min(size.width, maxWidth)
-            if x + size.width > maxWidth && x > 0 {
+            // The reported width is the row's own width; placement can hand back a hair less
+            // after pixel rounding, which must not wrap the last item onto an unmeasured row.
+            if x + size.width > maxWidth + 1 && x > 0 {
                 x = 0
                 y += rowHeight + spacing
                 rowHeight = 0
