@@ -40,7 +40,7 @@ struct EraInsights {
         for version in versions {
             tiers[qualityVariant(version.quality), default: 0] += 1
             for name in creditNames(version.producers) { tally(&producers, name) }
-            for raw in [version.featuring, version.creditedArtists] {
+            for raw in [version.featuring, version.creditedArtists, version.collaboration] {
                 for name in creditNames(raw) { tally(&features, name) }
             }
         }
@@ -91,7 +91,7 @@ struct EraInsights {
     private static func computeSelfNames(_ artist: Artist) -> Set<String> {
         var counts: [String: Int] = [:]
         for version in artist.eras.flatMap(\.allSongs).flatMap(\.versions) {
-            for raw in [version.featuring, version.creditedArtists] {
+            for raw in [version.featuring, version.creditedArtists, version.collaboration] {
                 for name in creditNames(raw) { counts[name.lowercased(), default: 0] += 1 }
             }
         }

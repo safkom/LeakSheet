@@ -627,42 +627,48 @@ struct SongDescriptionSheet: View {
         }
 
         if !credits.isEmpty {
-            FlowLayout(spacing: 6) {
+            // One row per role, the label in a fixed column beside its names so it lines up
+            // with the first pill instead of floating among them.
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(credits, id: \.0) { label, value in
-                    if let role = Self.creditRole(label) {
+                    HStack(alignment: .top, spacing: 8) {
                         Text(label)
-                            .font(.caption2.weight(.medium))
+                            .font(.caption.weight(.medium))
                             .foregroundStyle(.tertiary)
-                        ForEach(Array(CreditNames.split(value).enumerated()), id: \.offset) { _, name in
-                            creditName(name, role: role)
+                            .frame(width: 44, alignment: .leading)
+                            .padding(.vertical, 4)
+                        FlowLayout(spacing: 6) {
+                            if let role = Self.creditRole(label) {
+                                ForEach(Array(CreditNames.split(value).enumerated()), id: \.offset) { _, name in
+                                    creditName(name, role: role)
+                                }
+                            } else {
+                                plainCredit(value)
+                            }
                         }
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(label)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.tertiary)
-                            Text(value)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                // Allow the value to wrap to multiple lines when the
-                                // pill is width-constrained (long producer lists),
-                                // instead of forcing a single line that overflows.
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.lsCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
+                    .accessibilityElement(children: .contain)
                 }
             }
         }
     }
 
+    private func plainCredit(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.lsCard)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     /// The page role a credit label names, or nil for labels that stay plain text.
     private static func creditRole(_ label: String) -> ArtistViewModel.CreditRole? {
         switch label {
-        case "feat.": return .feature
+        // "with" is a collaboration; the credit index files it with features.
+        case "feat.", "with": return .feature
         case "prod.": return .producer
         default: return nil
         }
@@ -679,13 +685,7 @@ struct SongDescriptionSheet: View {
                 onOpen: { creditSheet = $0 }
             )
         } else {
-            Text(name)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.lsCard)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            plainCredit(name)
         }
     }
 

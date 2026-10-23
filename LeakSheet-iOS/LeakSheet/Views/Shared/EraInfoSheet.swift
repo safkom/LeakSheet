@@ -65,8 +65,8 @@ struct EraInfoSheet: View {
                         }
                         creditSection("Producers", insights.topProducers, role: .producer)
                         creditSection("Featuring", insights.topFeatures, role: .feature)
-                        countList("Sections", insights.sections.map { ($0.label, "\($0.value) songs") })
-                        countList("Misc & Videos", Self.typeCounts(insights.miscEntries))
+                        sectionBars(insights.sections)
+                        miscTiles(Self.typeCounts(insights.miscEntries))
                         neighbours(insights)
                     }
                     .padding(20)
@@ -142,21 +142,19 @@ struct EraInfoSheet: View {
     /// The counts the tracker states in its era header, which can differ from what parsed.
     @ViewBuilder
     private func trackerCounts(_ stats: EraStats?) -> some View {
-        let rows: [(String, Int)] = stats.map { s in
-            [("OG Files", s.ogFiles ?? 0), ("Full", max(s.full ?? 0, s.totalFull ?? 0)), ("Tagged", s.tagged ?? 0),
-             ("Partial", s.partial ?? 0), ("Snippets", s.snippets ?? 0), ("Stem Bounces", s.stemBounces ?? 0),
-             ("Unavailable", s.unavailable ?? 0)]
-            + (s.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { ($0.key.capitalized, $0.value) }
-        }?.filter { $0.1 > 0 } ?? []
-        if !rows.isEmpty {
-            CardSection(title: "Tracker Counts") {
-                VStack(spacing: 6) {
-                    ForEach(rows, id: \.0) { countRow($0.0, "\($0.1)") }
-                }
-                .padding(12)
-                .background(Color.lsCard)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
+        let items: [StatGrid.Item] = stats.map { s in
+            // Tinted like the availability pills on the rows, so the two read as one vocabulary.
+            [StatGrid.Item(label: "OG Files", value: s.ogFiles ?? 0, tint: BadgeVariant.ogfile.color),
+             StatGrid.Item(label: "Full", value: max(s.full ?? 0, s.totalFull ?? 0), tint: BadgeVariant.full.color),
+             StatGrid.Item(label: "Tagged", value: s.tagged ?? 0, tint: BadgeVariant.tagged.color),
+             StatGrid.Item(label: "Partial", value: s.partial ?? 0, tint: BadgeVariant.partial.color),
+             StatGrid.Item(label: "Snippets", value: s.snippets ?? 0, tint: BadgeVariant.snippet.color),
+             StatGrid.Item(label: "Stem Bounces", value: s.stemBounces ?? 0, tint: BadgeVariant.stem.color),
+             StatGrid.Item(label: "Unavailable", value: s.unavailable ?? 0, tint: .secondary)]
+            + (s.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { StatGrid.Item(label: $0.key.capitalized, value: $0.value) }
+        }?.filter { $0.value > 0 } ?? []
+        if !items.isEmpty {
+            CardSection(title: "Tracker Counts") { StatGrid(items: items) }
         }
     }
 
@@ -180,15 +178,19 @@ struct EraInfoSheet: View {
     }
 
     @ViewBuilder
-    private func countList(_ title: String, _ rows: [(String, String)]) -> some View {
-        if !rows.isEmpty {
-            CardSection(title: title) {
-                VStack(spacing: 6) {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in countRow(row.0, row.1) }
-                }
-                .padding(12)
-                .background(Color.lsCard)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+    private func sectionBars(_ sections: [EraInsights.Count]) -> some View {
+        if !sections.isEmpty {
+            CardSection(title: "Sections") {
+                BarList(rows: sections.map { .init(label: $0.label, value: $0.value, unit: $0.value == 1 ? "song" : "songs") })
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func miscTiles(_ counts: [(String, Int)]) -> some View {
+        if !counts.isEmpty {
+            CardSection(title: "Misc & Videos") {
+                StatGrid(items: counts.map { StatGrid.Item(label: $0.0, value: $0.1) })
             }
         }
     }
@@ -278,14 +280,14 @@ struct EraInfoSheet: View {
     }
 
     /// Misc entries counted per type, largest first: an era can hold dozens of them.
-    static func typeCounts(_ entries: [MiscEntry]) -> [(String, String)] {
+    static func typeCounts(_ entries: [MiscEntry]) -> [(String, Int)] {
         var counts: [String: Int] = [:]
         for entry in entries {
             let type = entry.entryType ?? ""
             counts[type.isEmpty ? "Other" : type, default: 0] += 1
         }
         let sorted = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-        return sorted.map { ($0.key, String($0.value)) }
+        return sorted.map { ($0.key, $0.value) }
     }
 
     private func rangeText(_ range: EraInsights.DateRange) -> String {
