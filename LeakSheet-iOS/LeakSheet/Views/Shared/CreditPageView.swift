@@ -298,6 +298,7 @@ struct CreditPageView: View {
     /// centred beside both: the era list's nested version row assumes a song header above it.
     private func trackRow(_ c: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
         let isCurrent = player.isNowPlaying(c.version, inEra: c.eraName)
+        let heard = ListeningHistory.shared.isHeard(c.version, artistSlug: vm.artist.slug, eraName: c.eraName)
         let detail = [c.version.trackLength, c.version.leakDate]
             .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && $0 != "?:??" }
@@ -314,6 +315,9 @@ struct CreditPageView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(isCurrent ? Color.lsAccent : .primary)
                         .lineLimit(1)
+                    if heard {
+                        HeardDot()
+                    }
                     if let tag = c.version.versionTag {
                         Text(tag)
                             .font(.caption.weight(.bold).monospacedDigit())
@@ -337,6 +341,7 @@ struct CreditPageView: View {
         .contentShape(Rectangle())
         .onTapGesture { description = payload(c) }
         .accessibilityElement(children: .combine)
+        .accessibilityValue(heard ? "played" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows details")
     }

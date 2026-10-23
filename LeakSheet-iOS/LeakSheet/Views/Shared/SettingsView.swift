@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
     @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault
+    @AppStorage(ListeningHistory.enabledKey) private var recordHistory = true
     @Environment(\.dismiss) private var dismiss
 
     /// Set when hosted as a sidebar destination rather than presented as a
@@ -21,6 +22,7 @@ struct SettingsView: View {
     @State private var imageCacheBytes: Int64 = 0
     @State private var clearingCache = false
     @State private var confirmingClearCache = false
+    @State private var confirmingClearHistory = false
     /// The server this screen opened with; compared on disappear, not per keystroke.
     @State private var openedBaseURL = ""
 
@@ -93,6 +95,38 @@ struct SettingsView: View {
                     .tint(Color.lsAccent)
                 } header: {
                     Text("Playback")
+                }
+
+                SwiftUI.Section {
+                    Toggle(isOn: $recordHistory) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Record Plays")
+                                .font(.subheadline.weight(.medium))
+                            Text("Count songs you listen to on this device")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(Color.lsAccent)
+                    Button(role: .destructive) {
+                        confirmingClearHistory = true
+                    } label: {
+                        Text("Clear History")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .confirmationDialog(
+                        "Clear your listening history?",
+                        isPresented: $confirmingClearHistory,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear History", role: .destructive) { ListeningHistory.shared.clear() }
+                    } message: {
+                        Text("Removes every play count, the Recently Played shelf and the era listening totals. This cannot be undone.")
+                    }
+                } header: {
+                    Text("Listening History")
+                } footer: {
+                    Text("Stored only on this device. Turning off recording keeps what is already saved.")
                 }
 
                 SwiftUI.Section {

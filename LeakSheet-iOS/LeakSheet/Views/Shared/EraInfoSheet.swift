@@ -48,6 +48,7 @@ struct EraInfoSheet: View {
     private var content: some View {
         if let era {
             let insights = EraInsights.compute(era: era, artist: vm.artist)
+            let listening = ListeningHistory.eraListening(era, entries: ListeningHistory.shared.entries(for: vm.artist.slug))
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -58,6 +59,7 @@ struct EraInfoSheet: View {
                             ("File Dates", insights.fileDates.map(rangeText)),
                             ("Tracker Total", era.stats?.statedTotal.flatMap { $0 > 0 ? "\($0)" : nil }),
                         ])
+                        listeningCard(listening)
                         qualitySection(insights)
                         trackerCounts(era.stats)
                         if let events = era.timeline, !events.isEmpty {
@@ -119,6 +121,30 @@ struct EraInfoSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.lsCard)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func listeningCard(_ listening: ListeningHistory.EraListening) -> some View {
+        if listening.plays > 0, let last = listening.last, listening.versions > 0 {
+            let fraction = Double(listening.heard) / Double(listening.versions)
+            CardSection(title: "Your Listening") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Heard \(listening.heard) of \(listening.versions) tracks (\(Int((fraction * 100).rounded()))%)")
+                        .font(.subheadline)
+                    ProgressView(value: fraction)
+                        .tint(Color.lsAccent)
+                        .accessibilityHidden(true)
+                    Text("Last played \(last.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.lsCard)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 
     @ViewBuilder
