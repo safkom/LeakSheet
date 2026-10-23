@@ -83,8 +83,8 @@ _DATE_CLASSES: list[tuple[str, re.Pattern, str]] = [
     ("d MMM yyyy",     re.compile(rf"^\d{{1,2}} (?:{_ABBR_STRICT}) \d{{4}}$"), "ios-full"),
     ("month-name variant", re.compile(
         rf"^(?:\d{{1,2}} )?(?:{_MONTHS_FULL}|{_MONTHS_ABBR})\.?(?: \d{{1,2}}(?:st|nd|rd|th)?,?)? \d{{4}}$"
-    ), "ios-year-only"),
-    ("dd/MM_or_MM/dd (2-digit yr)", re.compile(r"^\d{1,2}/\d{1,2}/\d{2}$"), "ios-zero"),
+    ), "ios-full"),  # parseLeakDate's normalizedDate retry
+    ("dd/MM_or_MM/dd (2-digit yr)", re.compile(r"^\d{1,2}/\d{1,2}/\d{2}$"), "ios-full"),
     ("n/a-ish",        re.compile(r"^(n/?a|none|unknown|\?+|tbd|-+)$", re.IGNORECASE), "absent"),
 ]
 
