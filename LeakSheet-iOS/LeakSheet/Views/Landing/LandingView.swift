@@ -69,6 +69,8 @@ struct LandingView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
+                RecentPlaysShelfView()
+
                 // Recent trackers
                 RecentTrackersListView { entry in
                     loader.url = entry.sourceUrl

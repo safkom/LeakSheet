@@ -178,6 +178,45 @@ final class ListeningHistory {
     }
 }
 
+// MARK: - Summaries
+
+extension ListeningHistory {
+    /// One era's listening, summed over its versions.
+    struct EraListening: Equatable {
+        /// Distinct versions played at least once.
+        let heard: Int
+        /// Versions in the era: the denominator for `heard`.
+        let versions: Int
+        let plays: Int
+        let last: Date?
+    }
+
+    /// Takes one artist's tallies (`entries(for:)`), so each version is a single key lookup.
+    static func eraListening(_ era: Era, entries: [String: Tally]) -> EraListening {
+        let versions = era.allSongs.flatMap(\.versions)
+        var heard = 0
+        var plays = 0
+        var last: Date?
+        for version in versions {
+            guard let tally = entries[versionKey(eraName: era.name, version: version)] else { continue }
+            heard += 1
+            plays += tally.count
+            last = max(last ?? tally.last, tally.last)
+        }
+        return EraListening(heard: heard, versions: versions.count, plays: plays, last: last)
+    }
+
+    /// Eras with plays, most played first; ties sort by name. Eras never played are dropped.
+    static func topEras(in artist: Artist, entries: [String: Tally], limit: Int = 5) -> [(name: String, plays: Int)] {
+        artist.eras
+            .map { (name: $0.name, plays: eraListening($0, entries: entries).plays) }
+            .filter { $0.plays > 0 }
+            .sorted { $0.plays != $1.plays ? $0.plays > $1.plays : $0.name < $1.name }
+            .prefix(limit)
+            .map { $0 }
+    }
+}
+
 /// Whether a play counts as heard: 30 seconds listened, or half the track when its length is known.
 /// Half only binds below 60 seconds, since 30 seconds comes first above that.
 nonisolated enum PlayThreshold {

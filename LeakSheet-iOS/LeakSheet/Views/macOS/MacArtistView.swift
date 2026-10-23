@@ -74,7 +74,7 @@ struct MacArtistView: View {
         .onChange(of: ui.focusSearchToken) { _, _ in searchFocused = true }
         .toolbar { toolbarItems }
         .sheet(isPresented: $showStats) {
-            if let trackerStats = artist.trackerStats { TrackerStatsSheet(stats: trackerStats) }
+            if let trackerStats = artist.trackerStats { TrackerStatsSheet(stats: trackerStats, artist: artist) }
         }
         .sheet(isPresented: $showTimeline) { TrackerTimelineSheet(artist: artist) }
         .sheet(isPresented: $showLegend) { BadgeLegendSheet() }

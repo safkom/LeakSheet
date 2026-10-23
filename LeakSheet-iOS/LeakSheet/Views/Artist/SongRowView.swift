@@ -39,6 +39,12 @@ struct SongRowView: View {
         return song.computedBadge
     }
 
+    /// A summary row speaks for its best playable take, as its badges do.
+    private var heard: Bool {
+        guard let shown = isSummary ? song.bestPlayableVersion : version else { return false }
+        return ListeningHistory.shared.isHeard(shown, artistSlug: artistSlug, eraName: eraName)
+    }
+
     private var isFavourite: Bool {
         favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
     }
@@ -74,7 +80,8 @@ struct SongRowView: View {
                     title: song.baseName,
                     badge: badge,
                     versionTag: showVersionBadge ? version?.versionTag : nil,
-                    isPlaying: isPlaying
+                    isPlaying: isPlaying,
+                    isHeard: heard
                 )
                 if let aka = akaTitle {
                     Text(aka)
@@ -182,6 +189,7 @@ struct SongRowView: View {
         if let badge { parts.append(badge.label) }
         parts.append(song.baseName)
         if let tag = showVersionBadge ? version?.versionTag : nil { parts.append(tag) }
+        if heard { parts.append("played") }
         if let aka = akaTitle { parts.append("also known as \(aka)") }
         let shown = isSummary ? song.bestPlayableVersion : version
         if let quality = shown?.quality, !quality.isEmpty { parts.append(quality) }
@@ -283,6 +291,7 @@ private struct SongTitleLine: View {
     let badge: Badge?
     let versionTag: String?
     let isPlaying: Bool
+    var isHeard: Bool = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -294,11 +303,24 @@ private struct SongTitleLine: View {
                 .font(.subheadline)
                 .foregroundStyle(isPlaying ? Color.lsAccent : .primary)
                 .fixedSize(horizontal: false, vertical: true)
+            if isHeard {
+                HeardDot()
+            }
             if let versionTag {
                 Text("[\(versionTag)]")
                     .font(.caption.weight(.bold).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// Marks a row whose version the listening history has played.
+struct HeardDot: View {
+    var body: some View {
+        Circle()
+            .fill(Color.secondary.opacity(0.6))
+            .frame(width: 6, height: 6)
+            .accessibilityHidden(true)
     }
 }

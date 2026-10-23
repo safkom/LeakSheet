@@ -306,7 +306,7 @@ private struct ArtistContentView: View {
         }
         .sheet(isPresented: $showStats) {
             if let trackerStats = artist.trackerStats {
-                TrackerStatsSheet(stats: trackerStats)
+                TrackerStatsSheet(stats: trackerStats, artist: artist)
             }
         }
         .sheet(isPresented: $showTimeline) {
