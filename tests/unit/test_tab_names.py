@@ -62,3 +62,14 @@ def test_new_must_be_the_whole_qualifier():
     # "(New Leaks)" is a subset of the catalogue, not its successor.
     assert _get_unreleased_tab_gid({"1": "Unreleased", "2": "Unreleased (New Leaks)"}) == "1"
     assert _get_unreleased_tab_gid({"1": "Unreleased", "2": "Unreleased (NEW!)"}) == "2"
+
+
+def test_version_one_is_not_newer_than_plain():
+    assert _get_unreleased_tab_gid({"1": "Unreleased (1.0)", "2": "Unreleased"}) == "2"
+    assert _get_unreleased_tab_gid({"1": "Unreleased (v1)", "2": "Unreleased"}) == "2"
+    assert _get_unreleased_tab_gid({"1": "Unreleased", "2": "Unreleased (v2)"}) == "2"
+
+
+def test_unspaced_slash_name_counts_as_plain():
+    tabs = {"1": "Unreleased (Notes)", "2": "Unreleased/Off-Streaming"}
+    assert _get_unreleased_tab_gid(tabs) == "2"

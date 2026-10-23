@@ -734,19 +734,23 @@ def _display_tab_name(name: str) -> str:
 # A trailing qualifier saying a tab replaced, or was replaced by, its namesake.
 # See docs/decisions.md::fetcher.py::tab-qualifier-rank
 # The whole qualifier must be the marker: "(New Leaks)" names a subset, not a successor.
-_NEW_TAB_QUALIFIER_RE = re.compile(r"^[\(\[]\s*(?:new|updated|current|latest|v\d+|\d+\.0)\s*!*\s*[\)\]]$")
+# Version marks count from 2 up: "(1.0)" or "(v1)" names the original.
+_NEW_TAB_QUALIFIER_RE = re.compile(
+    r"^[\(\[]\s*(?:new|updated|current|latest|v(?:[2-9]|\d{2,})|(?:[2-9]|\d{2,})\.0)\s*!*\s*[\)\]]$"
+)
 _STALE_TAB_QUALIFIER_RE = re.compile(
     r"\b(?:old|archived?|outdated|deprecated|backup|legacy|unused|do ?n[o']?t use)\b"
 )
 
 
-def _tab_qualifier_rank(name: str, clean: str) -> int:
+def _tab_qualifier_rank(name: str) -> int:
     """0 a newer copy, 1 the plain name, 2 any other qualifier, 3 a stale copy."""
     plain = re.sub(r"\s+", " ", _EMOJI_RE.sub(" ", name)).strip().lower()
-    if plain == clean:
-        return 1
+    # Plain means no trailing qualifier: slash spacing alone must not demote a name.
     m = _TAB_QUALIFIER_RE.search(plain)
-    qualifier = m.group(0) if m else plain
+    if not m:
+        return 1
+    qualifier = m.group(0)
     if _STALE_TAB_QUALIFIER_RE.search(qualifier):
         return 3
     if _NEW_TAB_QUALIFIER_RE.search(qualifier):
@@ -765,7 +769,7 @@ def _first_tab_gid(named_tabs: dict[str, str], names: frozenset) -> str | None:
         clean = _clean_tab_name(name)
         if clean not in names:
             continue
-        rank = _tab_qualifier_rank(name, clean)
+        rank = _tab_qualifier_rank(name)
         if best is None or rank < best[0]:
             best = (rank, gid)
     return best[1] if best else None
