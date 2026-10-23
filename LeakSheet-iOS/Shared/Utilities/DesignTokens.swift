@@ -169,19 +169,22 @@ enum BadgeVariant: String {
 
 func qualityVariant(_ quality: String?) -> BadgeVariant {
     guard let q = quality?.lowercased() else { return .na }
-    if q.contains("lossless") { return .lossless }
+    if q.contains("lossless") || q.contains("flac") || q.contains("wav") { return .lossless }
     if q.contains("og") { return .og }
     if q.contains("cd") { return .cd }
     if q.contains("high") { return .hq }
     if q.contains("low") { return .lq }
     if q.contains("recording") { return .rec }
     if q.contains("beat") { return .beatonly }
+    // Short forms are whole words only; Russian-language trackers name the tiers too.
+    if q.contains(/\bhq\b/) || q.contains("высок") { return .hq }
+    if q.contains(/\blq\b/) || q.contains("низк") { return .lq }
     return .na
 }
 
 func availabilityVariant(_ avail: String?) -> BadgeVariant {
     guard let a = avail?.lowercased() else { return .na }
-    if a.contains("og file") { return .ogfile }
+    if a.contains("og file") || a.contains("original file") { return .ogfile }
     if a == "full" { return .full }
     if a.contains("tagged") { return .tagged }
     if a.contains("stem") { return .stem }
@@ -191,7 +194,7 @@ func availabilityVariant(_ avail: String?) -> BadgeVariant {
     if a.contains("rumo") { return .rumored }  // rumored + British "rumoured"
     if a.contains("conflicting") { return .conflicting }
     if a.contains("confirmed") { return .confirmed }
-    if a.contains("unavailable") { return .unavailable }
+    if a.contains("unavailable") || a.contains(/\blost\b/) { return .unavailable }
     // Compound values ("Full Lossless") land here; without this they'd paint neutral
     // grey beside a blue "Full". Last, so it never outranks a more specific match.
     if a.contains("full") { return .full }
