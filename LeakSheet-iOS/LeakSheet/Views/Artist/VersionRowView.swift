@@ -27,6 +27,10 @@ struct VersionRowView: View {
         version.isStreamable
     }
 
+    private var heard: Bool {
+        ListeningHistory.shared.isHeard(version, artistSlug: artistSlug, eraName: eraName)
+    }
+
     private var versionLabel: String? {
         if let tag = version.versionTag { return tag }
         if let idx = versionIndex { return "#\(idx + 1)" }
@@ -70,6 +74,9 @@ struct VersionRowView: View {
                     if let b = version.badge, let badge = Badge(rawValue: b) {
                         Text(badge.emoji)
                             .font(.caption)
+                    }
+                    if heard {
+                        HeardDot()
                     }
                 }
                 BadgeRowView(version: version, trailing: detail)
@@ -145,6 +152,7 @@ struct VersionRowView: View {
         if let quality = version.quality, !quality.isEmpty { parts.append(quality) }
         if let availability = version.availableLength, !availability.isEmpty { parts.append(availability) }
         if let detail { parts.append(detail) }
+        if heard { parts.append("played") }
         return parts.joined(separator: ", ")
     }
 

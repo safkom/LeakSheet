@@ -4,6 +4,7 @@ import SwiftUI
 /// and data-completeness ("help wanted") signals from `TrackerStats`.
 struct TrackerStatsSheet: View {
     let stats: TrackerStats
+    let artist: Artist
     @Environment(\.dismiss) private var dismiss
 
     private struct Row: Identifiable {
@@ -55,6 +56,10 @@ struct TrackerStatsSheet: View {
         ].filter { $0.value > 0 }
     }
 
+    private var topEras: [(name: String, plays: Int)] {
+        ListeningHistory.topEras(in: artist, entries: ListeningHistory.shared.entries(for: artist.slug))
+    }
+
     private var missingLinks: Int { stats.missingLinks ?? 0 }
     private var sourcesNeeded: Int { stats.sourcesNeeded ?? 0 }
     private var totalLinks: Int { stats.totalLinks ?? 0 }
@@ -95,6 +100,15 @@ struct TrackerStatsSheet: View {
                             }
                             .listRowBackground(Color.lsCard)
                         }
+                    }
+                }
+                if !topEras.isEmpty {
+                    SwiftUI.Section {
+                        BarList(rows: topEras.map { .init(label: $0.name, value: $0.plays, unit: $0.plays == 1 ? "play" : "plays") })
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    } header: {
+                        Text("Your Top Eras")
                     }
                 }
                 if let health = linkHealth {

@@ -114,3 +114,87 @@ struct ListeningHistoryTests {
         #expect(reloaded.recent.first?.eraArt == "art.jpg")
     }
 }
+
+@MainActor
+struct ListeningSummaryTests {
+    private func era(_ name: String, songs: [Song]) -> Era {
+        Era(
+            name: name, altNames: nil, description: nil, timeline: nil, artUrl: nil,
+            sections: [Section(name: "", group: nil, songs: songs)],
+            songCount: nil, versionCount: nil
+        )
+    }
+
+    private func song(_ baseName: String, _ versions: [SongVersion]) -> Song {
+        Song(baseName: baseName, songKey: nil, versions: versions, badge: nil)
+    }
+
+    private func artist(_ eras: [Era]) -> Artist {
+        Artist(
+            name: "Artist", slug: "artist", sourceUrl: nil, eras: eras, trackerStats: nil,
+            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+        )
+    }
+
+    @Test func `era listening counts heard versions, plays and the latest play`() {
+        let (history, _) = makeHistory()
+        let eraA = era("Era A", songs: [
+            song("Alpha", [version("Alpha", tag: "V1"), version("Alpha", tag: "V2")]),
+            song("Beta", [version("Beta", tag: "V1")]),
+        ])
+        let early = Date(timeIntervalSince1970: 1_000)
+        let late = Date(timeIntervalSince1970: 3_000)
+        history.record(version("Alpha", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: early)
+        history.record(version("Alpha", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: early)
+        history.record(version("Beta", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: late)
+
+        let listening = ListeningHistory.eraListening(eraA, entries: history.entries(for: "artist"))
+
+        #expect(listening == ListeningHistory.EraListening(heard: 2, versions: 3, plays: 3, last: late))
+    }
+
+    @Test func `era listening is empty for an era never played`() {
+        let (history, _) = makeHistory()
+        let eraB = era("Era B", songs: [song("Gamma", [version("Gamma")])])
+
+        let listening = ListeningHistory.eraListening(eraB, entries: history.entries(for: "artist"))
+
+        #expect(listening.heard == 0)
+        #expect(listening.plays == 0)
+        #expect(listening.last == nil)
+        #expect(listening.versions == 1)
+    }
+
+    @Test func `top eras rank by plays, drop unplayed eras and cap the count`() {
+        let (history, _) = makeHistory()
+        let eras = [
+            era("Quiet", songs: [song("Q", [version("Q")])]),
+            era("Loud", songs: [song("L", [version("L")])]),
+            era("Middle", songs: [song("M", [version("M")])]),
+            era("Unplayed", songs: [song("U", [version("U")])]),
+        ]
+        for _ in 0..<3 { history.record(version("L"), artistSlug: "artist", artistName: "Artist", eraName: "Loud", eraArt: nil) }
+        history.record(version("M"), artistSlug: "artist", artistName: "Artist", eraName: "Middle", eraArt: nil)
+        history.record(version("M"), artistSlug: "artist", artistName: "Artist", eraName: "Middle", eraArt: nil)
+        history.record(version("Q"), artistSlug: "artist", artistName: "Artist", eraName: "Quiet", eraArt: nil)
+
+        let ranked = ListeningHistory.topEras(in: artist(eras), entries: history.entries(for: "artist"), limit: 2)
+
+        #expect(ranked.map(\.name) == ["Loud", "Middle"])
+        #expect(ranked.map(\.plays) == [3, 2])
+    }
+
+    @Test func `top eras break ties by name`() {
+        let (history, _) = makeHistory()
+        let eras = [
+            era("Zeta", songs: [song("Z", [version("Z")])]),
+            era("Alpha", songs: [song("A", [version("A")])]),
+        ]
+        history.record(version("Z"), artistSlug: "artist", artistName: "Artist", eraName: "Zeta", eraArt: nil)
+        history.record(version("A"), artistSlug: "artist", artistName: "Artist", eraName: "Alpha", eraArt: nil)
+
+        let ranked = ListeningHistory.topEras(in: artist(eras), entries: history.entries(for: "artist"))
+
+        #expect(ranked.map(\.name) == ["Alpha", "Zeta"])
+    }
+}
