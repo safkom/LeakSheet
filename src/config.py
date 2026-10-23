@@ -352,6 +352,12 @@ COLUMN_ALIASES: dict[str, str] = {
     "artists": "credited_artists",
     "credited artist": "credited_artists",
     "credited artists": "credited_artists",
+    "engineer": "engineer",
+    "engineers": "engineer",
+    "engineer(s)": "engineer",
+    "recording location": "recording_location",
+    "recorded at": "recording_location",
+    "studio": "recording_location",
 
     # Dedicated original-filename columns → og_filenames (merged with the
     # 'OG Filename:' notes convention).

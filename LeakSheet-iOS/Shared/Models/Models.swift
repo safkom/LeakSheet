@@ -334,6 +334,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let refs: String?
     /// Director credit, from "[dir. Name]" on music-video and visual rows.
     let director: String?
+    let engineer: String?
     /// Performer from a dedicated Artist / Credited Artist column (collab-style
     /// trackers), distinct from `featuring`.
     let creditedArtists: String?
@@ -353,6 +354,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     let streaming: Bool?
     let links: [String]?
     let dateOfRecording: String?
+    let recordingLocation: String?
     let type: String?
     /// Labeled evidence links (Sources column, Travis-style trackers).
     /// Optional so payloads persisted before the field existed still decode.
@@ -374,6 +376,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         collaboration: String? = nil,
         refs: String? = nil,
         director: String? = nil,
+        engineer: String? = nil,
         creditedArtists: String? = nil,
         altTitles: [String]? = nil,
         notes: String? = nil,
@@ -389,6 +392,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         streaming: Bool? = nil,
         links: [String]? = nil,
         dateOfRecording: String? = nil,
+        recordingLocation: String? = nil,
         type: String? = nil,
         sources: [SourceRef]? = nil,
         rating: Int? = nil
@@ -401,6 +405,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         self.collaboration = collaboration
         self.refs = refs
         self.director = director
+        self.engineer = engineer
         self.creditedArtists = creditedArtists
         self.altTitles = altTitles
         self.notes = notes
@@ -416,6 +421,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         self.streaming = streaming
         self.links = links
         self.dateOfRecording = dateOfRecording
+        self.recordingLocation = recordingLocation
         self.type = type
         self.sources = sources
         self.rating = rating
@@ -510,7 +516,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, director, notes, samples, quality, streaming, links, type, sources, rating
+        case name, badge, featuring, producers, collaboration, refs, director, engineer, notes, samples, quality, streaming, links, type, sources, rating
         case creditedArtists = "credited_artists"
         case versionTag = "version_tag"
         case altTitles = "alt_titles"
@@ -522,6 +528,7 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
         case previewDate = "preview_date"
         case availableLength = "available_length"
         case dateOfRecording = "date_of_recording"
+        case recordingLocation = "recording_location"
     }
 }
 

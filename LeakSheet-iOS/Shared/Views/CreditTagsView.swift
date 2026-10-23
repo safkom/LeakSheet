@@ -25,6 +25,9 @@ struct CreditTagsView: View {
             if let director = version.director, !director.isEmpty {
                 creditTag(type: .director, text: director)
             }
+            if let engineer = version.engineer, !engineer.isEmpty {
+                creditTag(type: .engineer, text: engineer)
+            }
             if let credited = version.creditedArtists, !credited.isEmpty {
                 creditTag(type: .creditedArtists, text: credited)
             }
@@ -76,7 +79,8 @@ struct CreditLineView: View {
         [
             (.featuring, version.featuring), (.producers, version.producers),
             (.collaboration, version.collaboration), (.refs, version.refs),
-            (.director, version.director), (.creditedArtists, version.creditedArtists),
+            (.director, version.director), (.engineer, version.engineer),
+            (.creditedArtists, version.creditedArtists),
         ].compactMap { type, text in
             guard let text, !text.isEmpty else { return nil }
             return (type, text)

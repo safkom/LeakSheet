@@ -2511,3 +2511,26 @@ def test_clean_link_matches_parse_qs(url):
 
     target = parse_qs(urlparse(url).query).get("q")
     assert _clean_link(url) == (target[0] if target and target[0] else url)
+
+
+class TestEngineerAndLocationColumns:
+    """'Engineer' and 'Recording Location' columns land in their own fields."""
+
+    HTML = (
+        "<table>"
+        "<tr><td>Era</td><td>Name</td><td>Engineer</td><td>Recording Location</td><td>Links</td></tr>"
+        "<tr><td>1 Full</td><td>Demo Era</td><td></td><td></td><td></td></tr>"
+        "<tr><td>Demo Era</td><td>Glass House</td><td>Mix Person</td><td>Studio North</td><td></td></tr>"
+        "</table>"
+    )
+
+    def test_columns_parse(self):
+        from src.parser import parse_sheet
+        v = parse_sheet(self.HTML, "Test").eras[0].songs[0].primary
+        assert v.engineer == "Mix Person"
+        assert v.recording_location == "Studio North"
+
+    def test_studio_and_recorded_at_aliases(self):
+        from src.parser import _Cell, detect_columns
+        assert detect_columns([_Cell(text=h) for h in ("Era", "Name", "Studio")]).get("recording_location") == 2
+        assert detect_columns([_Cell(text=h) for h in ("Era", "Name", "Engineers")]).get("engineer") == 2

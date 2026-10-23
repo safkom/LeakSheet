@@ -135,6 +135,7 @@ class SongVersion(BaseModel):
     collaboration: str | None = Field(None, description="Collaboration artist, e.g. 'Go Getters'")
     refs: str | None = Field(None, description="Reference track by, e.g. 'Keith Lawson'")
     director: str | None = Field(None, description="Director credit on video rows, e.g. 'Dave Meyers'")
+    engineer: str | None = Field(None, description="Engineer credit from a dedicated column, e.g. 'MIKE DEAN'")
     alt_titles: list[str] = Field(default_factory=list, description="Alternative song titles")
     notes: str | None = Field(None, description="Description/history text")
     og_filename: str | None = Field(None, description="First original filename (og_filenames holds every one)")
@@ -151,6 +152,7 @@ class SongVersion(BaseModel):
     links: list[str] = Field(default_factory=list, description="Download/reference URLs")
     # Carti-specific fields
     date_of_recording: str | None = Field(None, description="Date of recording (Carti tracker)")
+    recording_location: str | None = Field(None, description="Where it was recorded, e.g. 'Jungle City Studios'")
     preview_date: str | None = Field(
         None,
         description="When a snippet was first previewed. Distinct from "
