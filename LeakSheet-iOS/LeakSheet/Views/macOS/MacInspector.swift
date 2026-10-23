@@ -34,6 +34,19 @@ struct MacInspector: View {
                         description: Text("Select a song to see its versions, credits and links.")
                     )
                 }
+            case .era:
+                // The inspector's view model is optional (no tracker open); EraInfoSheet needs one.
+                if let eraName = ui.selectedEra, let artistVM {
+                    EraInfoSheet(eraName: eraName, embedded: true)
+                        .environment(artistVM)
+                        .id(eraName)
+                } else {
+                    ContentUnavailableView(
+                        "No Era Selected",
+                        systemImage: "info.circle",
+                        description: Text("Select an era's info button to see its description, dates and credits.")
+                    )
+                }
             case .queue:
                 QueueSheet(embedded: true)
             }

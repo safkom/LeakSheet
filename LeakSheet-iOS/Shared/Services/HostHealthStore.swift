@@ -42,9 +42,10 @@ final class HostHealthStore {
     }
 
     /// Drops the last answer, so a backend change doesn't inherit the old one's down hosts.
-    /// A refresh already in flight is discarded when it returns.
+    /// A refresh already in flight is discarded when it returns; clearing `refreshing` lets the next one run.
     func reset() {
         generation += 1
+        refreshing = false
         downHosts = [:]
         lastRefresh = nil
     }

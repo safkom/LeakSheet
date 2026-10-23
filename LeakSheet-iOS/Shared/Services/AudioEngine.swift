@@ -37,7 +37,8 @@ final class AudioEngine {
     var loading = false
     var error = "" {
         didSet {
-            guard !error.isEmpty, error != oldValue else { return }
+            // A failed load announces once, after the host check has picked its message.
+            guard !error.isEmpty, error != oldValue, !awaitingHostCheck else { return }
             AccessibilityNotification.Announcement(error).post()
         }
     }
@@ -77,6 +78,7 @@ final class AudioEngine {
     private var resumptionObserver: (any NSObjectProtocol)?
     /// Whether audio was playing when the system deactivated the session.
     @ObservationIgnored private var resumeAfterInterruption = false
+    @ObservationIgnored private var awaitingHostCheck = false
     private var loadingTimeoutTask: Task<Void, Never>?
     private var videoHintTask: Task<Void, Never>?
     private var routeChangeObserver: (any NSObjectProtocol)?
@@ -560,6 +562,7 @@ final class AudioEngine {
                     self.isPlaying = false
                     self.loadingTimeoutTask?.cancel()
                     self.loadingTimeoutTask = nil
+                    self.awaitingHostCheck = true
                     self.error = errDesc ?? "Playback failed"
                     Telemetry.report("Playback failed: \(errDesc ?? "unknown")", category: "Playback",
                                      attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
@@ -787,6 +790,7 @@ final class AudioEngine {
             guard !Task.isCancelled, let self, self.loading else { return }
             self.loading = false
             self.isPlaying = false
+            self.awaitingHostCheck = true
             self.error = "Connection timed out — try again"
             Telemetry.report("Stream timed out", category: "Playback",
                              attributes: ["host": URL(string: self.currentTrack?.streamableLink ?? "")?.host ?? "-"])
@@ -801,10 +805,15 @@ final class AudioEngine {
         let link = currentTrack?.streamableLink
         Task { [weak self] in
             await HostHealthStore.shared.refresh(force: true)
-            guard let self, let link, link == self.currentTrack?.streamableLink,
-                  !self.error.isEmpty,
-                  let host = HostHealthStore.shared.downHost(for: link) else { return }
-            self.error = "\(host) is down right now. Try again in a minute."
+            guard let self else { return }
+            self.awaitingHostCheck = false
+            if let link, link == self.currentTrack?.streamableLink, !self.error.isEmpty,
+               let host = HostHealthStore.shared.downHost(for: link) {
+                // Setting `error` announces the host-down message (the didSet is live again).
+                self.error = "\(host) is down right now. Try again in a minute."
+            } else if !self.error.isEmpty {
+                AccessibilityNotification.Announcement(self.error).post()
+            }
         }
     }
 

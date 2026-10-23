@@ -23,9 +23,15 @@ final class MacUIState {
     static let shared = MacUIState()
 
     enum InspectorTab: String, CaseIterable, Identifiable {
-        case details, queue
+        case details, era, queue
         var id: String { rawValue }
-        var title: String { self == .details ? "Details" : "Queue" }
+        var title: String {
+            switch self {
+            case .details: "Details"
+            case .era: "Era"
+            case .queue: "Queue"
+            }
+        }
     }
 
     /// Sidebar selection — drives the detail column directly. There is no
@@ -35,6 +41,9 @@ final class MacUIState {
     /// Trailing inspector rail (Details / Queue).
     var showInspector = false
     var inspectorTab: InspectorTab = .details
+
+    /// The era the Era tab describes, set by an era header's info button.
+    var selectedEra: String?
 
     /// The row the song list has selected. Drives the Details tab, so arrowing
     /// through a list updates the panel without opening anything.
