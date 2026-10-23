@@ -20,9 +20,15 @@ struct CreditNameLink: View {
     }
 
     private var pill: some View {
-        Text(text)
+        HStack(spacing: 3) {
+            Text(text)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Color.lsCard)
@@ -42,6 +48,9 @@ struct CreditPageView: View {
 
     @State private var role: ArtistViewModel.CreditRole
     @State private var profile: CreditProfile?
+    /// Best Of can run past a hundred rows for a main producer, burying everything below it.
+    @State private var showAllBest = false
+    private static let bestOfLimit = 10
     /// Set after the first compute, so a name with no page shows a message, not a spinner.
     @State private var resolved = false
     @State private var description: DescriptionSheet.Payload?
@@ -100,7 +109,7 @@ struct CreditPageView: View {
             Text(profile.role == .producer ? "Producer" : "Featured")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("\(profile.songCount.formatted()) songs · \(profile.versionCount.formatted()) tracks · \(profile.playableCount.formatted()) available")
+            Text("\(Self.count(profile.songCount, "song")) · \(Self.count(profile.versionCount, "track")) · \(profile.playableCount.formatted()) available")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             Text("Active: \(active)")
@@ -125,7 +134,18 @@ struct CreditPageView: View {
         if !profile.bestOf.isEmpty {
             CardSection(title: "Best Of") {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(profile.bestOf) { c in versionRow(c, profile) }
+                    ForEach(showAllBest ? profile.bestOf : Array(profile.bestOf.prefix(Self.bestOfLimit))) { c in
+                        songTitle(c.song)
+                        versionRow(c, profile)
+                    }
+                    if profile.bestOf.count > Self.bestOfLimit {
+                        Button(showAllBest ? "Show Less" : "Show All \(profile.bestOf.count)") {
+                            withAnimation { showAllBest.toggle() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.lsAccent)
+                        .padding(.leading, 4)
+                    }
                 }
             }
         }
@@ -135,7 +155,7 @@ struct CreditPageView: View {
     private func erasSection(_ profile: CreditProfile) -> some View {
         if !profile.topEras.isEmpty {
             countCard("Most Active Eras") {
-                ForEach(profile.topEras) { c in countRow(c.label, "\(c.value) tracks") }
+                ForEach(profile.topEras) { c in countRow(c.label, Self.count(c.value, "track")) }
             }
         }
     }
@@ -177,7 +197,10 @@ struct CreditPageView: View {
                         Text(era.eraName)
                             .font(.subheadline.weight(.semibold))
                             .padding(.leading, 4)
-                        ForEach(era.versions) { c in versionRow(c, profile) }
+                        ForEach(Self.songGroups(era.versions), id: \.first!.id) { group in
+                            songTitle(group[0].song)
+                            ForEach(group) { c in versionRow(c, profile) }
+                        }
                     }
                 }
             }
@@ -194,6 +217,32 @@ struct CreditPageView: View {
             onPlay: { play($0, in: profile.streamable) },
             onShowDescription: { description = $0 }
         )
+    }
+
+    private func songTitle(_ song: Song) -> some View {
+        Text(song.baseName)
+            .font(.subheadline.weight(.medium))
+            .padding(.leading, 4)
+            .padding(.top, 6)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Consecutive versions of one song, so its title shows once above them.
+    static func songGroups(_ versions: [CreditProfile.Credited]) -> [[CreditProfile.Credited]] {
+        var groups: [[CreditProfile.Credited]] = []
+        for c in versions {
+            if let last = groups.last?.last, last.hit.era == c.hit.era, last.hit.section == c.hit.section,
+               last.hit.song == c.hit.song {
+                groups[groups.count - 1].append(c)
+            } else {
+                groups.append([c])
+            }
+        }
+        return groups
+    }
+
+    static func count(_ n: Int, _ noun: String) -> String {
+        "\(n.formatted()) \(n == 1 ? noun : noun + "s")"
     }
 
     private func countCard<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {

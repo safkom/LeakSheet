@@ -315,6 +315,8 @@ final class ArtistViewModel {
                 for field in fields {
                     for name in CreditNames.split(field) {
                         let key = CreditNames.key(name)
+                        // A punctuation-only name keys to "", which would pool unrelated credits.
+                        guard !key.isEmpty else { continue }
                         keys.insert(key)
                         spellings[key, default: [:]][name, default: 0] += 1
                     }

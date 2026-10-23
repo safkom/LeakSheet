@@ -78,6 +78,17 @@ struct EraInsights {
     /// The sheet's name is unreliable ("Ye" credits as "Kanye West"), so the tracker-wide top
     /// feature counts too when it clearly leads: the artist guests on other people's songs.
     static func selfNames(_ artist: Artist) -> Set<String> {
+        // Scans the whole tracker, and every credit pill asks: cache per loaded tracker.
+        let cacheKey = "\(artist.slug)|\(artist.sourceUrl ?? "")|\(artist.computedTotalVersions)"
+        if let cached = selfNamesCache[cacheKey] { return cached }
+        let names = computeSelfNames(artist)
+        selfNamesCache = [cacheKey: names]
+        return names
+    }
+
+    private static var selfNamesCache: [String: Set<String>] = [:]
+
+    private static func computeSelfNames(_ artist: Artist) -> Set<String> {
         var counts: [String: Int] = [:]
         for version in artist.eras.flatMap(\.allSongs).flatMap(\.versions) {
             for raw in [version.featuring, version.creditedArtists] {
