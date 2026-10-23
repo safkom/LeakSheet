@@ -17,12 +17,14 @@ struct EraInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var accentColor: Color?
+    /// The credit page the embedded form presents, since it has no stack to push onto.
+    @State private var creditSheet: CreditRef?
 
     private var era: Era? { vm.artist.eras.first { $0.name == eraName } }
 
     var body: some View {
         if embedded {
-            content
+            content.sheet(item: $creditSheet) { CreditPageSheet(ref: $0) }
         } else {
             NavigationStack {
                 content
@@ -35,6 +37,7 @@ struct EraInfoSheet: View {
                             Button("Done") { dismiss() }
                         }
                     }
+                    .navigationDestination(for: CreditRef.self) { CreditPageView(ref: $0) }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -60,8 +63,8 @@ struct EraInfoSheet: View {
                         if let events = era.timeline, !events.isEmpty {
                             CardSection(title: "Timeline") { EraTimelineList(events: events) }
                         }
-                        creditSection("Producers", insights.topProducers)
-                        creditSection("Featuring", insights.topFeatures)
+                        creditSection("Producers", insights.topProducers, role: .producer)
+                        creditSection("Featuring", insights.topFeatures, role: .feature)
                         countList("Sections", insights.sections.map { ($0.label, "\($0.value) songs") })
                         countList("Misc & Videos", Self.typeCounts(insights.miscEntries))
                         neighbours(insights)
@@ -158,18 +161,18 @@ struct EraInfoSheet: View {
     }
 
     @ViewBuilder
-    private func creditSection(_ title: String, _ counts: [EraInsights.Count]) -> some View {
+    private func creditSection(_ title: String, _ counts: [EraInsights.Count], role: ArtistViewModel.CreditRole) -> some View {
         if !counts.isEmpty {
             CardSection(title: title) {
                 FlowLayout(spacing: 6) {
                     ForEach(counts) { c in
-                        Text("\(c.label) · \(c.value)")
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Color.lsCard)
-                            .clipShape(Capsule())
-                            .accessibilityLabel("\(c.label), \(c.value) tracks")
+                        CreditNameLink(
+                            ref: CreditRef(key: CreditNames.key(c.label), role: role),
+                            text: "\(c.label) · \(c.value)",
+                            spokenLabel: "\(c.label), \(c.value) tracks",
+                            pushes: !embedded,
+                            onOpen: { creditSheet = $0 }
+                        )
                     }
                 }
             }

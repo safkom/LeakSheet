@@ -647,3 +647,10 @@ Cached trackers and `HostHealthStore` answers come from whichever backend fetche
 URL is compared on disappear, not per keystroke, so typing a server address does not clear
 the cache mid-edit. A change clears `CacheService` and calls `HostHealthStore.reset()`.
 `TVSettingsView.swift` follows the same rule.
+
+## CreditPageView.swift::self-artist — the sheet's artist has no feature page
+
+The tracker's own artist can feature on their own sheet, so their name would link to a page that
+lists every song as a guest appearance. `CreditProfile.hasPage` refuses a feature page for the
+names `EraInsights.selfNames` returns, and the description and era sheets then show the name as plain
+text. A producer page for the same name still opens, since the artist can produce their own tracks.
