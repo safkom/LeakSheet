@@ -46,6 +46,8 @@ struct SongDescriptionSheet: View {
     /// In-app Safari for version links + evidence — the sheet must never
     /// bounce the user out to system Safari.
     @State private var safariItem: SafariItem?
+    /// The credit page the embedded (Mac inspector) form presents; it has no stack to push onto.
+    @State private var creditSheet: CreditRef?
     /// Present when the sheet is shown from the artist screen — powers the
     /// cross-era version picker. Nil from Now Playing / Favourites, where the
     /// picker falls back to just this song's own versions.
@@ -158,6 +160,7 @@ struct SongDescriptionSheet: View {
         if embedded {
             content
                 .webSheet(item: $safariItem)
+                .sheet(item: $creditSheet) { CreditPageSheet(ref: $0) }
         } else {
             NavigationStack {
                 content
@@ -166,6 +169,7 @@ struct SongDescriptionSheet: View {
                     .toolbarTitleDisplayMode(.inline)
                     #endif
                     .toolbar { chromeToolbar }
+                    .navigationDestination(for: CreditRef.self) { CreditPageView(ref: $0) }
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -623,26 +627,65 @@ struct SongDescriptionSheet: View {
         }
 
         if !credits.isEmpty {
-            FlowLayout(spacing: 6) {
+            // One row per role, the label in a fixed column beside its names so it lines up
+            // with the first pill instead of floating among them.
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(credits, id: \.0) { label, value in
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    HStack(alignment: .top, spacing: 8) {
                         Text(label)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.tertiary)
-                        Text(value)
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            // Allow the value to wrap to multiple lines when the
-                            // pill is width-constrained (long producer lists),
-                            // instead of forcing a single line that overflows.
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 44, alignment: .leading)
+                            .padding(.vertical, 4)
+                        FlowLayout(spacing: 6) {
+                            if let role = Self.creditRole(label) {
+                                ForEach(Array(CreditNames.split(value).enumerated()), id: \.offset) { _, name in
+                                    creditName(name, role: role)
+                                }
+                            } else {
+                                plainCredit(value)
+                            }
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.lsCard)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityElement(children: .contain)
                 }
             }
+        }
+    }
+
+    private func plainCredit(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.lsCard)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// The page role a credit label names, or nil for labels that stay plain text.
+    private static func creditRole(_ label: String) -> ArtistViewModel.CreditRole? {
+        switch label {
+        // "with" is a collaboration; the credit index files it with features.
+        case "feat.", "with": return .feature
+        case "prod.": return .producer
+        default: return nil
+        }
+    }
+
+    /// One credited name: a link to its page when it has one, plain text otherwise.
+    @ViewBuilder
+    private func creditName(_ name: String, role: ArtistViewModel.CreditRole) -> some View {
+        let key = CreditNames.key(name)
+        if let vm = artistVM, CreditProfile.hasPage(key: key, role: role, artist: vm.artist, index: vm.creditIndex) {
+            CreditNameLink(
+                ref: CreditRef(key: key, role: role), text: name,
+                spokenLabel: "\(name), open page", pushes: !embedded,
+                onOpen: { creditSheet = $0 }
+            )
+        } else {
+            plainCredit(name)
         }
     }
 

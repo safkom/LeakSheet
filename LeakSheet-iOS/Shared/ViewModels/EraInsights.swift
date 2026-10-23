@@ -40,7 +40,7 @@ struct EraInsights {
         for version in versions {
             tiers[qualityVariant(version.quality), default: 0] += 1
             for name in creditNames(version.producers) { tally(&producers, name) }
-            for raw in [version.featuring, version.creditedArtists] {
+            for raw in [version.featuring, version.creditedArtists, version.collaboration] {
                 for name in creditNames(raw) { tally(&features, name) }
             }
         }
@@ -56,7 +56,8 @@ struct EraInsights {
             versionCount: versions.count,
             playableCount: versions.filter(\.isStreamable).count,
             leakDates: dateRange(versions.compactMap(\.leakDate)),
-            fileDates: dateRange(versions.compactMap(\.fileDate)),
+            // Trackers name the same fact "File Date" or "Recording Date"; the parser keeps both.
+            fileDates: dateRange(versions.compactMap { $0.fileDate ?? $0.dateOfRecording }),
             quality: qualityOrder.compactMap { v in tiers[v].map { (v, $0) } },
             topProducers: top(producers, limit: topLimit),
             topFeatures: top(features, limit: topLimit),
@@ -78,9 +79,20 @@ struct EraInsights {
     /// The sheet's name is unreliable ("Ye" credits as "Kanye West"), so the tracker-wide top
     /// feature counts too when it clearly leads: the artist guests on other people's songs.
     static func selfNames(_ artist: Artist) -> Set<String> {
+        // Scans the whole tracker, and every credit pill asks: cache per loaded tracker.
+        let cacheKey = "\(artist.slug)|\(artist.sourceUrl ?? "")|\(artist.computedTotalVersions)"
+        if let cached = selfNamesCache[cacheKey] { return cached }
+        let names = computeSelfNames(artist)
+        selfNamesCache = [cacheKey: names]
+        return names
+    }
+
+    private static var selfNamesCache: [String: Set<String>] = [:]
+
+    private static func computeSelfNames(_ artist: Artist) -> Set<String> {
         var counts: [String: Int] = [:]
         for version in artist.eras.flatMap(\.allSongs).flatMap(\.versions) {
-            for raw in [version.featuring, version.creditedArtists] {
+            for raw in [version.featuring, version.creditedArtists, version.collaboration] {
                 for name in creditNames(raw) { counts[name.lowercased(), default: 0] += 1 }
             }
         }
