@@ -362,7 +362,7 @@ extension String {
 // MARK: - Credit Tag Colors
 
 enum CreditType: String {
-    case featuring, producers, collaboration, refs, director, creditedArtists
+    case featuring, producers, collaboration, refs, director, engineer, creditedArtists
 
     // `static let`, not literals in the switch: `Color.tone` builds a dynamic platform
     // colour, and `CreditTagsView` reads `color` twice per tag per body evaluation.
@@ -380,6 +380,8 @@ enum CreditType: String {
         case .collaboration: Self.collaborationColor
         case .refs: Self.refsColor
         case .director: Self.directorColor
+        // Shares the director tone: both are technical credits with no page of their own.
+        case .engineer: Self.directorColor
         case .creditedArtists: Self.creditedArtistsColor
         }
     }
@@ -391,6 +393,7 @@ enum CreditType: String {
         case .collaboration: "with"
         case .refs: "ref."
         case .director: "dir."
+        case .engineer: "eng."
         case .creditedArtists: "artist"
         }
     }
@@ -403,6 +406,7 @@ enum CreditType: String {
         case .collaboration: "With"
         case .refs: "Reference by"
         case .director: "Directed by"
+        case .engineer: "Engineered by"
         case .creditedArtists: "Artist"
         }
     }

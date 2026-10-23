@@ -620,6 +620,7 @@ struct SongDescriptionSheet: View {
             ("prod.", active.version.producers),
             ("with", active.version.collaboration),
             ("ref.", active.version.refs),
+            ("eng.", active.version.engineer),
             ("artist", active.version.creditedArtists),
         ].compactMap { label, val in
             guard let v = val, !v.isEmpty else { return nil }
@@ -702,6 +703,7 @@ struct SongDescriptionSheet: View {
             ("Preview Date", active.version.previewDate),
             ("Type", active.version.type),
             ("Recording", active.version.dateOfRecording),
+            ("Recorded At", active.version.recordingLocation),
         ])
     }
 

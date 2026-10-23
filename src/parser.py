@@ -2706,6 +2706,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         featuring=featuring,
         producers=producers,
         credited_artists=credited_artists,
+        engineer=_get_cell_text(row, col_map.get("engineer", -1)) or None,
         collaboration=collaboration,
         refs=refs,
         director=song_credits.director,
@@ -2724,6 +2725,7 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         rating=rating,
         links=merged_links,
         date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
+        recording_location=_get_cell_text(row, col_map.get("recording_location", -1)) or None,
         preview_date=_get_cell_text(row, col_map.get("preview_date", -1)) or None,
         type=_get_cell_text(row, col_map.get("type", -1)) or None,
     )
