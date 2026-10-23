@@ -202,6 +202,17 @@ struct MacArtistView: View {
 
             Spacer(minLength: 8)
 
+            Button {
+                ui.selectedEra = name
+                ui.inspectorTab = .era
+                ui.showInspector = true
+            } label: {
+                Image(systemName: "info.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("\(name) info")
+            .help("About this era")
+
             if let filtered, !filtered.streamableVersions.isEmpty {
                 Button {
                     player.playEra(filtered, artistName: artist.name, artistSlug: artist.slug)
