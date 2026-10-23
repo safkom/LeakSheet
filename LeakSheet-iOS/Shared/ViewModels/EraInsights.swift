@@ -56,7 +56,8 @@ struct EraInsights {
             versionCount: versions.count,
             playableCount: versions.filter(\.isStreamable).count,
             leakDates: dateRange(versions.compactMap(\.leakDate)),
-            fileDates: dateRange(versions.compactMap(\.fileDate)),
+            // Trackers name the same fact "File Date" or "Recording Date"; the parser keeps both.
+            fileDates: dateRange(versions.compactMap { $0.fileDate ?? $0.dateOfRecording }),
             quality: qualityOrder.compactMap { v in tiers[v].map { (v, $0) } },
             topProducers: top(producers, limit: topLimit),
             topFeatures: top(features, limit: topLimit),

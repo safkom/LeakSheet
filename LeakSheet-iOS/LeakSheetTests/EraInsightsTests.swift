@@ -77,6 +77,17 @@ struct EraInsightsTests {
         #expect(EraInsights.dateRange(["nope"]) == nil)
     }
 
+    @Test func `file dates fall back to the recording date`() throws {
+        let json: [String: Any] = [
+            "name": "A", "slug": "a",
+            "eras": [["name": "E", "sections": [["name": "", "songs": [["base_name": "S", "versions": [
+                ["name": "S", "date_of_recording": "02/03/2019"], ["name": "S [V2]", "file_date": "01/01/2018"],
+            ]]]]]]],
+        ]
+        let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(EraInsights.compute(era: a.eras[0], artist: a).fileDates == .init(first: "01/01/2018", last: "02/03/2019"))
+    }
+
     @Test func `misc entries match the era by key, and neighbours stop at the ends`() throws {
         let a = try artist()
         let first = EraInsights.compute(era: a.eras[0], artist: a)
