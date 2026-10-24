@@ -31,6 +31,7 @@ struct NowPlayingView: View {
     #endif
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showFullScreenVideo = false
+    @State private var showLyrics = false
 
     /// Era accent brightened until it reads against the actual backdrop at the
     /// controls, where the gradient fades into the background.
@@ -257,6 +258,15 @@ struct NowPlayingView: View {
                         .accessibilityLabel(isFav ? "Remove from favourites" : "Add to favourites")
                     }
 
+                    Button { showLyrics = true } label: {
+                        Image(systemName: "text.quote")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityLabel("Lyrics")
+
                     // Info
                     Button {
                         if let track = player.currentTrack {
@@ -303,6 +313,9 @@ struct NowPlayingView: View {
                     .environment(FavouritesManager.shared)
                     .environment(PlayerViewModel.shared)
                     .environment(artistVM)
+            }
+            .sheet(isPresented: $showLyrics) {
+                LyricsView().environment(PlayerViewModel.shared)
             }
             .task(id: player.artUrl) {
                 guard !player.artUrl.isEmpty,
