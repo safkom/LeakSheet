@@ -12,6 +12,10 @@
 	</dict>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>LeakSheet checks your library on this device to suggest trackers for artists you listen to. Artist names without matches may be looked up on MusicBrainz for alternate names.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>si.safko.LeakSheet.load</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
