@@ -74,8 +74,8 @@ struct BrowseArtistsView: View {
                             }
                         }
                         if !recommended.isEmpty && searchText.isEmpty {
-                            Section("For you") { ForEach(recommended, content: row) }
-                            Section("All trackers") { ForEach(filtered, content: row) }
+                            SwiftUI.Section("For you") { ForEach(recommended, content: row) }
+                            SwiftUI.Section("All trackers") { ForEach(filtered, content: row) }
                         } else {
                             ForEach(filtered, content: row)
                         }
