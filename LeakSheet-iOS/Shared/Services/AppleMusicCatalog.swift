@@ -24,7 +24,7 @@ actor AppleMusicCatalog {
         #else
         let key = LibraryMatcher.normalize(artist) + "|" + LibraryMatcher.normalize(title)
         if let cached = cache[key] { return cached }
-        var request = MusicCatalogSearchRequest(term: "\(artist) \(LyricsParsing.searchTitle(title))", types: [Song.self])
+        var request = MusicCatalogSearchRequest(term: "\(artist) \(LyricsParsing.searchTitle(title))", types: [MusicKit.Song.self])
         request.limit = 10
         guard let songs = try? await request.response().songs else { return nil }
         let url = songs.first {

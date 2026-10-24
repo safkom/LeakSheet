@@ -35,7 +35,7 @@ enum MusicLibraryService {
         []
         #else
         guard MusicAuthorization.currentStatus == .authorized else { return [] }
-        guard let songs = try? await MusicLibraryRequest<Song>().response().items else { return [] }
+        guard let songs = try? await MusicLibraryRequest<MusicKit.Song>().response().items else { return [] }
         var plays: [String: Int] = [:]
         for song in songs { plays[song.artistName, default: 0] += song.playCount ?? 0 }
         return plays.map { LibraryArtist(name: $0.key, plays: $0.value) }
