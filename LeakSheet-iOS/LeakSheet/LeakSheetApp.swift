@@ -14,6 +14,7 @@ struct LeakSheetApp: App {
     init() {
         Telemetry.start()
         configureAudioSession()
+        Task { await SpotlightIndexer.refresh() }
     }
 
     var body: some Scene {
@@ -33,6 +34,7 @@ struct LeakSheetApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
                 AudioEngine.shared.handleBackgrounding()
+                Task { await SpotlightIndexer.refresh() }
             }
         }
 
@@ -60,6 +62,7 @@ struct LeakSheetApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
                 AudioEngine.shared.handleBackgrounding()
+                Task { await SpotlightIndexer.refresh() }
             }
         }
         #endif

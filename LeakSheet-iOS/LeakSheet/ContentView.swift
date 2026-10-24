@@ -21,6 +21,12 @@ struct ContentView: View {
         return prepared.vm
     }
 
+    private func consumeDeepLink() {
+        guard let pending = DeepLinkRouter.shared.pending else { return }
+        DeepLinkRouter.shared.pending = nil
+        pendingBrowse = pending
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             LandingView(
@@ -79,6 +85,10 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(presenterScheme: colorScheme)
         }
+        // A Siri/Shortcuts/Spotlight open: consumed on change and on first appearance, since an
+        // intent can set it before this view exists.
+        .onChange(of: DeepLinkRouter.shared.pending) { _, _ in consumeDeepLink() }
+        .onAppear { consumeDeepLink() }
         .sheet(isPresented: $showBrowse) {
             BrowseArtistsView { pickedUrl, pickedName in
                 showBrowse = false
