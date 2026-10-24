@@ -16,6 +16,8 @@ struct BrowseArtistsView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var loadingUrl = ""
+    @State private var recommended: [DiscoveryArtist] = []
+    @State private var libraryAccess = MusicLibraryService.access
     @Environment(\.dismiss) private var dismiss
 
     private var filtered: [DiscoveryArtist] {
@@ -66,72 +68,16 @@ struct BrowseArtistsView: View {
                     }
                 } else {
                     List {
-                        ForEach(filtered) { artist in
-                            Button {
-                                loadingUrl = artist.url
-                                onPick(artist.url, artist.name)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    // Initials
-                                    Text(Format.initials(artist.name))
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 36, height: 36)
-                                        .background(Color.lsCard)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 6) {
-                                            Text(artist.name)
-                                                .font(.subheadline.weight(.medium))
-                                                .foregroundStyle(.primary)
-                                                .lineLimit(1)
-                                            if artist.best == true {
-                                                Image(systemName: "star.fill")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(Color.lsStar)
-                                                    .accessibilityLabel("Best of")
-                                            }
-                                        }
-                                        HStack(spacing: 6) {
-                                            if let credit = artist.credit, !credit.isEmpty {
-                                                // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
-                                                Text("by \(credit)")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                                    .lineLimit(1)
-                                            }
-                                            if artist.upToDate == false {
-                                                Text("outdated")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(Color.lsWarning)
-                                            }
-                                            // Link health is tri-state upstream: only a definite false is worth a warning,
-                                            // shown BEFORE the user opens a tracker whose files are gone.
-                                            if artist.workingLinks == false {
-                                                Text("dead links")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(Color.lsError)
-                                            }
-                                        }
-                                    }
-
-                                    Spacer()
-
-                                    if loadingUrl == artist.url {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                                // Inside the label, not outside the Button (DECISIONS.md::contentShape).
-                                .contentShape(Rectangle())
+                        if libraryAccess == .unknown && searchText.isEmpty {
+                            Button("Find trackers for my music library", systemImage: "music.note.list") {
+                                Task { await recommendFromLibrary(request: true) }
                             }
-                            .buttonStyle(.plain)
-                            .listRowBackground(Color.clear)
+                        }
+                        if !recommended.isEmpty && searchText.isEmpty {
+                            Section("For you") { ForEach(recommended, content: row) }
+                            Section("All trackers") { ForEach(filtered, content: row) }
+                        } else {
+                            ForEach(filtered, content: row)
                         }
                     }
                     .listStyle(.plain)
@@ -167,6 +113,74 @@ struct BrowseArtistsView: View {
             .onAppear { loadingUrl = "" }
     }
 
+    private func row(_ artist: DiscoveryArtist) -> some View {
+        Button {
+            loadingUrl = artist.url
+            onPick(artist.url, artist.name)
+        } label: {
+            HStack(spacing: 12) {
+                // Initials
+                Text(Format.initials(artist.name))
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .background(Color.lsCard)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(artist.name)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if artist.best == true {
+                            Image(systemName: "star.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.lsStar)
+                                .accessibilityLabel("Best of")
+                        }
+                    }
+                    HStack(spacing: 6) {
+                        if let credit = artist.credit, !credit.isEmpty {
+                            // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
+                            Text("by \(credit)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        if artist.upToDate == false {
+                            Text("outdated")
+                                .font(.caption2)
+                                .foregroundStyle(Color.lsWarning)
+                        }
+                        // Link health is tri-state upstream: only a definite false is worth a warning,
+                        // shown BEFORE the user opens a tracker whose files are gone.
+                        if artist.workingLinks == false {
+                            Text("dead links")
+                                .font(.caption2)
+                                .foregroundStyle(Color.lsError)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if loadingUrl == artist.url {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            // Inside the label, not outside the Button (DECISIONS.md::contentShape).
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
+    }
+
     /// `force` is pull-to-refresh: refetch even though a list is showing.
     private func loadArtists(force: Bool = false) async {
         guard force || artists.isEmpty else { return }
@@ -183,6 +197,7 @@ struct BrowseArtistsView: View {
                     if a.best != true && b.best == true { return false }
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
+            await recommendFromLibrary()
         } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
             // The refresh gesture was released or the view went away.
             // URLSession reports cancellation as URLError, not CancellationError.
@@ -195,4 +210,12 @@ struct BrowseArtistsView: View {
         }
     }
 
+    /// `request` is the user tapping the prompt button; otherwise only an already-granted library is read.
+    private func recommendFromLibrary(request: Bool = false) async {
+        if request { _ = await MusicLibraryService.requestAccess() }
+        libraryAccess = MusicLibraryService.access
+        guard libraryAccess == .granted else { return }
+        let library = await MusicLibraryService.libraryArtists()
+        recommended = LibraryMatcher.recommend(library: library, trackers: artists)
+    }
 }
