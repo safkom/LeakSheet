@@ -11,7 +11,7 @@
 		<string>LaunchBackground</string>
 	</dict>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>LeakSheet checks your library on this device to suggest trackers for artists you listen to. Nothing is uploaded.</string>
+	<string>LeakSheet checks your library on this device to suggest trackers for artists you listen to. Artist names without matches may be looked up on MusicBrainz for alternate names.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

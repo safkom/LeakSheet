@@ -217,5 +217,9 @@ struct BrowseArtistsView: View {
         guard libraryAccess == .granted else { return }
         let library = await MusicLibraryService.libraryArtists()
         recommended = LibraryMatcher.recommend(library: library, trackers: artists)
+        // Aliases ("Ye" for "Kanye West") arrive a second apart, so they refine the list afterwards.
+        let missing = LibraryMatcher.unmatched(library: library, trackers: artists, limit: 15)
+        let aliases = await ArtistAliasService.shared.aliases(for: missing.map(\.name))
+        recommended = LibraryMatcher.recommend(library: library, trackers: artists, aliases: aliases)
     }
 }
