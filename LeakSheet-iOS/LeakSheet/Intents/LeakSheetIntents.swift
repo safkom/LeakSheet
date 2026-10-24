@@ -15,10 +15,11 @@ nonisolated struct IntentFailure: Error, CustomLocalizedStringResourceConvertibl
 }
 
 /// Also what Spotlight runs when a tracker result is tapped.
-nonisolated struct OpenTrackerIntent: OpenIntent {
-    static let title: LocalizedStringResource = "Open Tracker"
-    static let description = IntentDescription("Opens a music tracker in LeakSheet.")
-    static let openAppWhenRun = true
+struct OpenTrackerIntent: OpenIntent {
+    // Not a nonisolated type: a nonisolated @Parameter var doesn't compile, so only the statics are.
+    nonisolated static let title: LocalizedStringResource = "Open Tracker"
+    nonisolated static let description = IntentDescription("Opens a music tracker in LeakSheet.")
+    nonisolated static let openAppWhenRun = true
 
     @Parameter(title: "Tracker")
     var target: TrackerEntity
@@ -30,9 +31,9 @@ nonisolated struct OpenTrackerIntent: OpenIntent {
     }
 }
 
-nonisolated struct PlayFavouriteIntent: AudioPlaybackIntent {
-    static let title: LocalizedStringResource = "Play Favourite Song"
-    static let description = IntentDescription("Plays a song from your favourites.")
+struct PlayFavouriteIntent: AudioPlaybackIntent {
+    nonisolated static let title: LocalizedStringResource = "Play Favourite Song"
+    nonisolated static let description = IntentDescription("Plays a song from your favourites.")
 
     @Parameter(title: "Song")
     var song: FavouriteSongEntity
