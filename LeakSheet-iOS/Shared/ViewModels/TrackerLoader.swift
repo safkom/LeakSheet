@@ -8,7 +8,9 @@ import SwiftUI
 final class TrackerLoader {
     var url: String = ""
     private(set) var loading = false
-    private(set) var loadPhase: APIClient.LoadPhase?
+    private(set) var loadPhase: APIClient.LoadPhase? {
+        didSet { LoadActivity.shared.report(loadPhase) }
+    }
     private(set) var error: String? {
         didSet {
             guard let error, !error.isEmpty, error != oldValue else { return }
@@ -48,9 +50,11 @@ final class TrackerLoader {
         staleNotice = nil
         loading = true
         loadPhase = nil
+        LoadActivity.shared.begin(name: resolvedName ?? URL(string: trimmed)?.host() ?? "tracker")
         defer {
             loading = false
             loadPhase = nil
+            LoadActivity.shared.end(success: error == nil)
         }
 
         // Conditional request: send the cached ETag (a sidecar read) so an unchanged

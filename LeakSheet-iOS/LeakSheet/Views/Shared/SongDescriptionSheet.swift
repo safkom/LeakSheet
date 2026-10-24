@@ -287,6 +287,10 @@ struct SongDescriptionSheet: View {
                             FileInfoSection(version: active.version)
                         }
 
+                        if active.version.streaming == true, !payload.artistName.isEmpty {
+                            AppleMusicSection(artist: payload.artistName, title: active.version.name)
+                        }
+
                         if active.version.streamableLinks.count > 1 {
                             SourcesSection(
                                 version: active.version,

@@ -58,6 +58,9 @@ struct MacRootView: View {
             loader.url = pasted
             Task { await open(pasted) }
         }
+        // A Siri/Shortcuts/Spotlight open; also checked on appear, as an intent can run before this view exists.
+        .onChange(of: DeepLinkRouter.shared.pending) { _, _ in consumeDeepLink() }
+        .onAppear { consumeDeepLink() }
         // Selecting a tracker that isn't parsed yet (a sidebar row from a
         // previous launch) loads it on demand.
         .onChange(of: ui.selection) { _, selection in
@@ -78,6 +81,13 @@ struct MacRootView: View {
             else { return }
             Task { await open(url, forceRefresh: true, select: false) }
         }
+    }
+
+    private func consumeDeepLink() {
+        guard let pending = DeepLinkRouter.shared.pending else { return }
+        DeepLinkRouter.shared.pending = nil
+        ui.selection = .browse
+        Task { await open(pending.url, artistName: pending.name) }
     }
 
     // MARK: - Detail column
