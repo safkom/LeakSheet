@@ -1,14 +1,20 @@
 import Foundation
 import Observation
 
-/// Manages recently viewed trackers with UserDefaults persistence. Cap: 20.
+/// Manages recently viewed trackers with UserDefaults persistence. Cap: 20 (Mac: 200).
 @MainActor
 @Observable
 final class RecentTrackersManager {
     static let shared = RecentTrackersManager()
 
     private static let storageKey = "leaksheet_recent_trackers"
+    /// The Mac sidebar is a user-curated list that never reorders, so dropping its tail
+    /// would drop a tracker by when it was added, not when it was last used.
+    #if os(macOS)
+    private nonisolated static let maxEntries = 200
+    #else
     private nonisolated static let maxEntries = 20
+    #endif
 
     var trackers: [RecentTracker] = []
 

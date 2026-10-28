@@ -69,8 +69,8 @@ struct MacRootView: View {
             // can't resolve against another tracker's era tree.
             ui.selectedSong = nil
             ui.selectedEra = nil
-            // Browse has nothing to inspect.
-            if selection == .browse { ui.showInspector = false }
+            // Browse has nothing to inspect; the queue stays, it is not about the pane.
+            if selection == .browse || selection == nil, ui.inspectorTab != .queue { ui.showInspector = false }
             if case .tracker(let slug) = selection { ui.touch(slug) }
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })

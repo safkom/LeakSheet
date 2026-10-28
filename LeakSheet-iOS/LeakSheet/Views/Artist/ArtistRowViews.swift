@@ -159,8 +159,8 @@ struct NoticesView: View {
     var onOpenLink: (URL) -> Void
 
     var body: some View {
-        let banners = notices.filter { $0.isAlert || $0.link == nil }
-        let links = notices.filter { !$0.isAlert && $0.link != nil }
+        let banners = notices.filter { $0.isAlert || $0.webURL == nil }
+        let links = notices.filter { !$0.isAlert && $0.webURL != nil }
         VStack(spacing: 4) {
             ForEach(banners) { notice in
                 NoticeBannerView(notice: notice, onOpenLink: onOpenLink)
@@ -171,7 +171,7 @@ struct NoticesView: View {
                     HStack(spacing: 8) {
                         ForEach(links) { notice in
                             Button {
-                                if let link = notice.link, let url = URL(string: link) { onOpenLink(url) }
+                                if let url = notice.webURL { onOpenLink(url) }
                             } label: {
                                 Label(notice.text, systemImage: "arrow.up.right")
                                     .labelStyle(TrailingIconLabelStyle())
@@ -202,6 +202,13 @@ private struct TrailingIconLabelStyle: LabelStyle {
     }
 }
 
+extension Notice {
+    /// Tracker cells are free text ("N/A", "discord"): only a web link may render as one.
+    var webURL: URL? {
+        link.flatMap(URL.init(string:)).flatMap { SafariItem.isWebURL($0) ? $0 : nil }
+    }
+}
+
 struct NoticeBannerView: View {
     let notice: Notice
     /// Parent owns the presentation (in-app Safari sheet).
@@ -211,7 +218,7 @@ struct NoticeBannerView: View {
     private var tintColor: Color { isAlert ? .badgeRec : .secondary }
     private var bgColor: Color { isAlert ? Color.badgeRec.opacity(0.12) : Color.lsCard }
 
-    private var url: URL? { notice.link.flatMap(URL.init(string:)) }
+    private var url: URL? { notice.webURL }
 
     var body: some View {
         // A plain label without a link: a disabled Button dims the text past legibility in Light.
