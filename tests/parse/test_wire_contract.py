@@ -84,9 +84,12 @@ def test_the_shared_fixture_matches_the_serializer():
 
 def test_edge_payload_is_what_swift_can_decode():
     payload = edge_payload()
-    assert payload.get("tracker_stats") is None and payload.get("parse_metadata") is None
+    assert payload.get("tracker_stats") is None
+    assert payload.get("parse_metadata") is None
     entry = payload["misc_entries"][0]
-    assert entry["links"] == [] and entry["era_name"] == "" and entry["source_tab"] == "other"
+    assert entry["links"] == []
+    assert entry["era_name"] == ""
+    assert entry["source_tab"] == "other"
     assert payload["eras"][0]["sections"][0]["songs"][0]["versions"] == []
     # An empty versions list decodes; the invariant flags it as a content defect.
     assert ios_contract_violations(payload) == ["Song 'Hollow' has no versions"]

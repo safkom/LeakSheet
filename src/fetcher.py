@@ -62,6 +62,12 @@ from src.parser import (
     _era_match_key,
 )
 
+# Literals used in several places.
+_HTTPS = "https://"
+_HTTP = "http://"
+_TABLE_OPEN = "<table"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -449,8 +455,8 @@ def _normalize_url(url: str) -> str:
     directly, bypassing GID discovery and missing the main tracker tab.
     """
     url = url.strip()
-    if not url.lower().startswith(("http://", "https://")):
-        url = "https://" + url
+    if not url.lower().startswith((_HTTP, _HTTPS)):
+        url = _HTTPS + url
     # urlparse and .port raise ValueError on an unclosed "[" or an out-of-range port.
     try:
         parsed = urlparse(url)
@@ -528,7 +534,7 @@ def _build_sheet_html_url(
     parsed = urlparse(base_url)
 
     if page_paths and (path := page_paths.get(gid)):
-        if path.startswith(("http://", "https://")):
+        if path.startswith((_HTTP, _HTTPS)):
             # page_paths come from the fetched page's own JS, so an absolute entry is untrusted:
             # only allow-listed hosts or the sheet's own site (docs/decisions.md::config.py — the /sheet host allowlist).
             tab_host = urlparse(path).hostname
@@ -1501,7 +1507,7 @@ async def async_fetch_sheet_html(
             r = await _get_capped(client, sheet_url, timeout=timeout)
             _raise_if_signed_out(r, sheet_url)
             r.raise_for_status()
-            if "<table" not in r.text.lower():
+            if _TABLE_OPEN not in r.text.lower():
                 raise NoTablesError(f"No table in tab gid={gid} of {url}")
             title_match = TITLE_PATTERN.search(r.text)
             title = title_match.group(1) if title_match else ""
@@ -1524,7 +1530,7 @@ async def async_fetch_sheet_html(
         title_match = TITLE_PATTERN.search(base_html)
         title = title_match.group(1) if title_match else ""
 
-        if "<table" in base_html.lower():
+        if _TABLE_OPEN in base_html.lower():
             if use_cache:
                 await _async_set_cache(url, base_html, title)
             return base_html, title
@@ -1541,7 +1547,7 @@ async def async_fetch_sheet_html(
             try:
                 sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
                 r = await _get_capped(client, sheet_url, timeout=timeout)
-                if r.status_code == 200 and "<table" in r.text.lower():
+                if r.status_code == 200 and _TABLE_OPEN in r.text.lower():
                     if use_cache:
                         await _async_set_cache(url, r.text, title)
                     return r.text, title
@@ -1581,7 +1587,7 @@ async def _fetch_gid_page(
                         t.tab_loaded(gid_val, True)
                         return (gid_val, cached[0])
                 resp = await _get_capped(client, sheet_url, timeout=timeout)
-                if resp.status_code != 200 or "<table" not in resp.text.lower():
+                if resp.status_code != 200 or _TABLE_OPEN not in resp.text.lower():
                     t.tab_loaded(gid_val, False)
                     return None
                 if use_cache and cache_ttl > 0:
@@ -2029,7 +2035,7 @@ def _finalize(artist: Artist, url_norm: str) -> None:
         url = era.art_url or ""
         if url.startswith("//"):
             url = "https:" + url
-        if not url.startswith(("http://", "https://")) or not _image_host_allowed(url):
+        if not url.startswith((_HTTP, _HTTPS)) or not _image_host_allowed(url):
             continue
         base = _era_art_base(url_norm, era.name)
         try:
@@ -2152,7 +2158,7 @@ async def async_fetch_and_parse(
             base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
 
         # If base page has tables, try parsing directly
-        if "<table" in base_html.lower():
+        if _TABLE_OPEN in base_html.lower():
             name = _resolve_artist_name(title, artist_name)
             t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
             with t.phase("parse"):

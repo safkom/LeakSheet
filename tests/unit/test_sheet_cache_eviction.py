@@ -156,7 +156,9 @@ class TestEraOriginalBudget:
 
         api._evict_image_cache()
 
-        assert orig.exists() and var2.exists() and not var1.exists()
+        assert orig.exists()
+        assert var2.exists()
+        assert not var1.exists()
 
     def test_originals_only_overflow_is_bounded_oldest_first(self, _isolate_cache, monkeypatch):
         import src.api as api
@@ -168,8 +170,10 @@ class TestEraOriginalBudget:
 
         api._evict_image_cache()
 
-        assert not old.exists() and not old_meta.exists()
-        assert mid.exists() and new.exists()
+        assert not old.exists()
+        assert not old_meta.exists()
+        assert mid.exists()
+        assert new.exists()
 
     def test_expired_originals_are_dropped(self, _isolate_cache, monkeypatch):
         import json
@@ -184,7 +188,9 @@ class TestEraOriginalBudget:
 
         api._evict_image_cache()
 
-        assert not old.exists() and not meta.exists() and fresh.exists()
+        assert not old.exists()
+        assert not meta.exists()
+        assert fresh.exists()
 
     def test_victim_rewritten_during_scan_is_kept(self, _isolate_cache, monkeypatch):
         import src.api as api

@@ -9,6 +9,14 @@ from typing import NamedTuple
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
+# Stat labels that appear in several vocabulary tables.
+_OG_FILES = "og files"
+_OG_FILE = "og file"
+_TOTAL_FULL = "total full"
+_STEM_BOUNCE = "stem bounce"
+_STEM_BOUNCES = "stem bounces"
+
+
 class Badge(str, Enum):
     """Song badge / emoji classification."""
     BEST = "best"          # ⭐ ⭐️
@@ -631,9 +639,9 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
 # Labels consumed by the typed leak-status fields. Anything else is a release-type
 # count, kept verbatim in EraStats.release_types so new wording isn't dropped.
 _LEAK_STATUS_LABELS = frozenset({
-    "og file", "og files", "full", "total full", "tagged",
+    _OG_FILE, _OG_FILES, "full", _TOTAL_FULL, "tagged",
     "partial", "partial / cut", "snippet", "snippets",
-    "stem bounce", "stem bounces", "unavailable", "total",
+    _STEM_BOUNCE, _STEM_BOUNCES, "unavailable", "total",
 })
 
 
@@ -642,14 +650,14 @@ def parse_era_stats(raw: str) -> EraStats:
     pairs = _extract_stat_pairs(raw)
 
     return EraStats(
-        og_files=pairs.get("og file", pairs.get("og files", 0)),
+        og_files=pairs.get(_OG_FILE, pairs.get(_OG_FILES, 0)),
         # Kept apart, not aliased — see EraStats.total.
         full=pairs.get("full", 0),
-        total_full=pairs.get("total full", 0),
+        total_full=pairs.get(_TOTAL_FULL, 0),
         tagged=pairs.get("tagged", 0),
         partial=_match_stat(pairs, ["partial", "partial / cut"]),
         snippets=pairs.get("snippet", pairs.get("snippets", 0)),
-        stem_bounces=pairs.get("stem bounce", pairs.get("stem bounces", 0)),
+        stem_bounces=pairs.get(_STEM_BOUNCE, pairs.get(_STEM_BOUNCES, 0)),
         unavailable=pairs.get("unavailable", 0),
         stated_total=pairs.get("total", 0),
         release_types={
@@ -699,9 +707,9 @@ def parse_tracker_stats(
         not_available_quality=_match_stat(qp, ["not available", "not avaliable"]),
 
         # Availability
-        total_full=ap.get("total full", 0),
-        og_files=ap.get("og files", ap.get("og file", 0)),
-        stem_bounces=ap.get("stem bounces", ap.get("stem bounce", 0)),
+        total_full=ap.get(_TOTAL_FULL, 0),
+        og_files=ap.get(_OG_FILES, ap.get(_OG_FILE, 0)),
+        stem_bounces=ap.get(_STEM_BOUNCES, ap.get(_STEM_BOUNCE, 0)),
         full=ap.get("full", 0),
         tagged=ap.get("tagged", 0),
         partial=ap.get("partial", 0),

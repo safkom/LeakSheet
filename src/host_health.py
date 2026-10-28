@@ -220,7 +220,8 @@ def _touch_checked(provider: str) -> None:
 async def probe_once() -> None:
     """Re-probe every down provider, in the one worker holding the probe lock."""
     fetcher.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(fetcher.CACHE_DIR / "host_health.probe.lock", "a") as lock:
+    lock = await asyncio.to_thread(open, fetcher.CACHE_DIR / "host_health.probe.lock", "a")
+    with lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:

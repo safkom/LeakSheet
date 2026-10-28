@@ -50,6 +50,10 @@ import httpx
 
 from src.config import USER_AGENT
 
+# Literals used in several places.
+_DRIVE_HOST = "drive.google.com"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -244,26 +248,26 @@ async def get_capped(
 
 # pillows.su / pillowcase.su / plwcse.top: one id space, all served by api.pillows.su
 _PILLOWS_PATTERN = re.compile(
-    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 
 # imgur.gg / temp.imgur.gg
 _IMGUR_PATTERN = re.compile(
-    r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 # music.froste.lol
 # The lookahead stops a non-hex id resolving to its hex prefix; "&sa=…" tracking
 # glued onto the path still matches.
 _FROSTE_PATTERN = re.compile(
-    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?![A-Za-z0-9])",
+    r"https?://music\.froste\.lol/song/([a-f0-9]+)(?![a-z0-9])",
     re.IGNORECASE | re.ASCII,
 )
 
 # krakenfiles.com
 _KRAKEN_PATTERN = re.compile(
-    r"https?://(?:www\.)?krakenfiles\.com/view/([A-Za-z0-9_-]+)/file\.html",
+    r"https?://(?:www\.)?krakenfiles\.com/view/([a-z0-9_-]+)/file\.html",
     re.IGNORECASE | re.ASCII,
 )
 
@@ -277,13 +281,13 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
 
 # pixeldrain.com: /u/ is a single file; /l/ lists are deliberately unsupported.
 _PIXELDRAIN_PATTERN = re.compile(
-    r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
+    r"https?://(?:www\.)?pixeldrain\.com/u/([a-z0-9]+)",
     re.IGNORECASE | re.ASCII,
 )
 
 # gdrive URL forms — see docs/decisions.md::streaming.py::gdrive-url-forms
 _GDRIVE_FILE_D_PATTERN = re.compile(
-    r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?drive\.google\.com/file/d/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 _GDRIVE_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -298,7 +302,7 @@ ALLOWED_STREAM_HOSTS = frozenset({
     "krakenfiles.com",    # view URL passes through; CDN host validated by
                           # _KRAKEN_CDN_AUDIO_PATTERN when resolved lazily
     "pixeldrain.com",
-    "drive.google.com",   # uc?export=download form; the usercontent.google.com
+    _DRIVE_HOST,   # uc?export=download form; the usercontent.google.com
                           # confirm retry is validated inside _fetch_gdrive
 })
 
@@ -452,7 +456,7 @@ def _extract_gdrive_id(link: str) -> str | None:
     except ValueError:  # unclosed "[" in the host
         return None
     # netloc, not hostname: a port or userinfo is no more welcome here than in the regex forms.
-    if parsed.netloc.lower() not in ("drive.google.com", "www.drive.google.com"):
+    if parsed.netloc.lower() not in (_DRIVE_HOST, "www.drive.google.com"):
         return None
     if parsed.path.lower() not in ("/open", "/uc"):
         return None
@@ -691,7 +695,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
-_GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
+_GDRIVE_ALLOWED_HOSTS = {_DRIVE_HOST, "drive.usercontent.google.com"}
 _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com\Z")
 
 
@@ -759,7 +763,7 @@ def is_gdrive_stream_url(url: str) -> bool:
     """Return True if *url* is the drive.google.com stream URL produced by
     ``resolve_stream_url`` (used to dispatch into the gdrive fetch path)."""
     try:
-        return (urlparse(url).hostname or "").lower() == "drive.google.com"
+        return (urlparse(url).hostname or "").lower() == _DRIVE_HOST
     except Exception:
         return False
 

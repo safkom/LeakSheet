@@ -425,7 +425,7 @@ def extract_grid(sheet: dict) -> list[list[_Cell]]:
         if hidden(row_meta, r):
             continue
         values = (row_data[r].get("values") or []) if r < len(row_data) else []
-        row = build(r, lambda c: _grid_cell(values[c]) if c < len(values) else _Cell())
+        row = build(r, lambda c, values=values: _grid_cell(values[c]) if c < len(values) else _Cell())
         if row:
             rows.append(row)
     return rows
@@ -3419,11 +3419,12 @@ def parse_artistgrid_csv(csv_text: str) -> list[TrackerEntry]:
         raw_url = (row.get("url") or "").strip()
         if not name or not raw_url:
             continue
-        url = (
-            raw_url if re.match(r"https?://", raw_url, re.IGNORECASE)
-            else f"https://{raw_url}/" if "." in raw_url
-            else f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
-        )
+        if re.match(r"https?://", raw_url, re.IGNORECASE):
+            url = raw_url
+        elif "." in raw_url:
+            url = f"https://{raw_url}/"
+        else:
+            url = f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
         entries.append(TrackerEntry(
             name=name,
             url=url,

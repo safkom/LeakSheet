@@ -54,7 +54,8 @@ def test_source_column(bad):
     v = _version(["Era", "Name", "Notes", "Link(s)", "Sources"], ["E", "S", "n", "", f"{_a(bad)}{_a(GOOD)}"])
     assert [s.url for s in v.sources] == [GOOD]
     v = _version(["Era", "Name", "Notes", "Quality", "Source"], ["E", "S", "n", "CD", _a(bad)])
-    assert v.links == [] and v.sources == []
+    assert v.links == []
+    assert v.sources == []
 
 
 @pytest.mark.parametrize("bad", BAD)

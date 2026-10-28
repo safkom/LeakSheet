@@ -105,6 +105,22 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# Media types and metadata tags used in several places.
+_MIME_MP4 = "audio/mp4"
+_MIME_OGG = "audio/ogg"
+_MIME_FLAC = "audio/flac"
+_MIME_WAV = "audio/wav"
+_MIME_MPEG = "audio/mpeg"
+_MIME_OCTET = "application/octet-stream"
+_MIME_JSON = "application/json"
+_UNEXPECTED_HEAD = "unexpected payload head"
+_UPSTREAM_ERROR = "Upstream error"
+_TAG_CODEC_PROFILE = "CODEC PROFILE"
+_TAG_SAMPLE_RATE = "SAMPLE RATE"
+_TAG_BITS = "BITS PER SAMPLE"
+_TAG_CHANNELS = "NUMBER OF CHANNELS"
+
+
 # Secrets this process holds. Frame locals are scrubbed only by variable name, so these
 # are also replaced by value anywhere in an event or log line.
 _SECRET_ENV = ("LEAKSHEET_GOOGLE_API_KEY", "LEAKSHEET_ADMIN_TOKEN")
@@ -176,9 +192,9 @@ logger = logging.getLogger(__name__)
 
 _MIME_CORRECTIONS: dict[str, str] = {
     # audio/m4a, audio/x-m4a are not registered IANA types; Safari needs audio/mp4
-    "audio/m4a": "audio/mp4",
-    "audio/m4b": "audio/mp4",
-    "audio/x-m4a": "audio/mp4",
+    "audio/m4a": _MIME_MP4,
+    "audio/m4b": _MIME_MP4,
+    "audio/x-m4a": _MIME_MP4,
 }
 
 # Audio format sniffing — see docs/decisions.md::api.py::mime-sniffing
@@ -201,35 +217,35 @@ def _sniff_audio_format(header: bytes) -> str | None:
 
     # Ogg container (Vorbis, Opus, FLAC-in-Ogg) — "OggS"
     if header[:4] == b"OggS":
-        return "audio/ogg"
+        return _MIME_OGG
     # Partial Ogg: a short read (Safari's bytes=0-1 probe) that is a genuine prefix of
     # "OggS", not any byte starting 'O', which would misclassify tiny bodies.
     if 0 < len(header) < 4 and b"OggS".startswith(header):
-        return "audio/ogg"
+        return _MIME_OGG
 
     # FLAC — "fLaC"
     if header[:4] == b"fLaC":
-        return "audio/flac"
+        return _MIME_FLAC
 
     # WAV — "RIFF....WAVE"
     if header[:4] == b"RIFF" and (len(header) < 12 or header[8:12] == b"WAVE"):
-        return "audio/wav"
+        return _MIME_WAV
 
     # MP3 — ID3 tag header
     if header[:3] == b"ID3":
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     # MP3 — raw sync frame (0xFF 0xEx or 0xFF 0xFx)
     if len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0:
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     # MP4 / M4A — standard ftyp box at offset 4
     if len(header) >= 8 and header[4:8] == b"ftyp":
-        return "audio/mp4"
+        return _MIME_MP4
 
     # Other MP4 boxes at offset 4 (moov, mdat, free, skip, wide)
     if len(header) >= 8 and header[4:8] in _MP4_BOXES:
-        return "audio/mp4"
+        return _MIME_MP4
 
     return None
 
@@ -241,23 +257,23 @@ _SNIFF_BYTES = 16
 # Map file extensions to MIME types — used to resolve generic upstream types
 # (application/octet-stream) when the URL contains a recognisable extension.
 _EXT_TO_MIME: dict[str, str] = {
-    ".m4a": "audio/mp4",
-    ".m4b": "audio/mp4",
-    ".mp3": "audio/mpeg",
-    ".ogg": "audio/ogg",
-    ".oga": "audio/ogg",
-    ".flac": "audio/flac",
+    ".m4a": _MIME_MP4,
+    ".m4b": _MIME_MP4,
+    ".mp3": _MIME_MPEG,
+    ".ogg": _MIME_OGG,
+    ".oga": _MIME_OGG,
+    ".flac": _MIME_FLAC,
     ".aac": "audio/aac",
-    ".wav": "audio/wav",
+    ".wav": _MIME_WAV,
 }
 
 # Map corrected MIME types to file extensions for Content-Disposition
 _MIME_TO_EXT: dict[str, str] = {
-    "audio/mp4": ".m4a",
-    "audio/mpeg": ".mp3",
-    "audio/ogg": ".ogg",
-    "audio/wav": ".wav",
-    "audio/flac": ".flac",
+    _MIME_MP4: ".m4a",
+    _MIME_MPEG: ".mp3",
+    _MIME_OGG: ".ogg",
+    _MIME_WAV: ".wav",
+    _MIME_FLAC: ".flac",
     "audio/aac": ".aac",
 }
 
@@ -303,7 +319,7 @@ def _fix_audio_mime(
         return _MIME_CORRECTIONS[base]
 
     # For generic binary types, try to determine the real format.
-    if base in ("application/octet-stream", "binary/octet-stream", ""):
+    if base in (_MIME_OCTET, "binary/octet-stream", ""):
         # 1. Content-Disposition filename (e.g. 'attachment; filename="track.m4a"')
         if content_disposition:
             ext = _ext_from_content_disposition(content_disposition)
@@ -319,7 +335,7 @@ def _fix_audio_mime(
                 return _EXT_TO_MIME[ext]
 
         # Unknown format — fall back to a safe generic
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     return base
 
@@ -635,8 +651,8 @@ async def _background_revalidate(url: str) -> None:
         if isinstance(e, (SignedOutError, SourceGoneError)):
             try:
                 await asyncio.to_thread(drop_cached_entry, url)
-            except OSError as exc:
-                logger.error("Could not drop the cached entry for %s: %s", url[:80], exc)
+            except OSError:
+                logger.exception("Could not drop the cached entry for %s", url[:80])
 
 
 # Per worker, like _parses. Keyed by normalized URL.
@@ -671,7 +687,11 @@ class SheetRequest(BaseModel):
     force_refresh: bool = Field(False, description="Force a fresh fetch, ignoring cache")
 
 
-@app.post("/sheet")
+@app.post("/sheet", responses={
+    400: {"description": "Bad Request"},
+    404: {"description": "Not Found"},
+    503: {"description": "Service Unavailable"},
+})
 async def parse_sheet(
     req: SheetRequest,
     request: Request,
@@ -732,7 +752,7 @@ async def parse_sheet(
 
             return Response(
                 content=raw,
-                media_type="application/json",
+                media_type=_MIME_JSON,
                 headers={
                     "ETag": f'"{etag}"',
                     "X-Cache-Status": "stale" if is_stale else "hit",
@@ -756,7 +776,7 @@ async def parse_sheet(
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
     return Response(
         content=body,
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={
             "ETag": f'"{etag}"',
             "X-Cache-Status": "miss",
@@ -817,7 +837,7 @@ def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
     Raises ValueError unless the object opens with exactly those two keys.
     """
     if not head.startswith("{"):
-        raise ValueError("unexpected payload head")
+        raise ValueError(_UNEXPECTED_HEAD)
     decoder = json.JSONDecoder()
     values = []
     i = 0
@@ -826,12 +846,12 @@ def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
         found, i = decoder.raw_decode(head, i)
         i = _skip_json_ws(head, i)
         if found != key or head[i:i + 1] != ":":
-            raise ValueError("unexpected payload head")
+            raise ValueError(_UNEXPECTED_HEAD)
         value, i = decoder.raw_decode(head, _skip_json_ws(head, i + 1))
         values.append(value)
         i = _skip_json_ws(head, i)
         if head[i:i + 1] != ",":
-            raise ValueError("unexpected payload head")
+            raise ValueError(_UNEXPECTED_HEAD)
     return (values[0], values[1]), i
 
 
@@ -976,7 +996,10 @@ def _stream_sheet(req: SheetRequest) -> StreamingResponse:
 # POST /cache/clear — clear the fetch cache (served as /api/cache/clear in prod)
 # ---------------------------------------------------------------------------
 
-@app.post("/cache/clear")
+@app.post("/cache/clear", responses={
+    401: {"description": "Unauthorized"},
+    503: {"description": "Service Unavailable"},
+})
 async def clear_fetch_cache(request: Request):
     """Clear the URL fetch cache (privileged).
 
@@ -1461,7 +1484,12 @@ async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
         logger.warning("slot original not stored: %s", exc)
 
 
-@app.get("/image-proxy")
+@app.get("/image-proxy", responses={
+    400: {"description": "Bad Request"},
+    403: {"description": "Forbidden"},
+    404: {"description": "Not Found"},
+    503: {"description": "Service Unavailable"},
+})
 async def proxy_image(
     request: Request,
     url: str = Query(..., description="Image URL to proxy"),
@@ -1683,12 +1711,12 @@ _metadata_cache = TTLCache(ttl=3600.0, max_entries=500)
 
 
 # Known fields in pillows.su metadata — longer multi-word keys first to avoid
-# partial matches (e.g. "CODEC PROFILE" before "CODEC").
+# partial matches (e.g. _TAG_CODEC_PROFILE before "CODEC").
 _PILLOWS_FIELDS = [
     "FILE FORMAT INFO", "COMMON INFO",
-    "CODEC PROFILE", "CODEC", "CONTAINER",
-    "DURATION", "BITRATE", "SAMPLE RATE", "BITS PER SAMPLE",
-    "LOSSLESS", "NUMBER OF CHANNELS",
+    _TAG_CODEC_PROFILE, "CODEC", "CONTAINER",
+    "DURATION", "BITRATE", _TAG_SAMPLE_RATE, _TAG_BITS,
+    "LOSSLESS", _TAG_CHANNELS,
     "CREATION TIME", "MODIFICATION TIME",
     "TRACK GAIN", "ALBUM GAIN",
     "ALBUM ARTIST", "ARTIST", "ALBUM", "TITLE", "TRACK",
@@ -1757,18 +1785,18 @@ def _parse_pillows_metadata(text: str) -> dict:
         result["container"] = pairs["CONTAINER"]
     if "CODEC" in pairs:
         result["codec"] = pairs["CODEC"]
-    if "CODEC PROFILE" in pairs:
-        result["codec_profile"] = pairs["CODEC PROFILE"]
+    if _TAG_CODEC_PROFILE in pairs:
+        result["codec_profile"] = pairs[_TAG_CODEC_PROFILE]
     if "BITRATE" in pairs:
         result["bitrate"] = pairs["BITRATE"]
-    if "SAMPLE RATE" in pairs:
-        result["sample_rate"] = pairs["SAMPLE RATE"]
-    if "BITS PER SAMPLE" in pairs:
-        result["bits_per_sample"] = pairs["BITS PER SAMPLE"]
+    if _TAG_SAMPLE_RATE in pairs:
+        result["sample_rate"] = pairs[_TAG_SAMPLE_RATE]
+    if _TAG_BITS in pairs:
+        result["bits_per_sample"] = pairs[_TAG_BITS]
     if "LOSSLESS" in pairs:
         result["lossless"] = pairs["LOSSLESS"].lower() == "true"
-    if "NUMBER OF CHANNELS" in pairs:
-        v = pairs["NUMBER OF CHANNELS"]
+    if _TAG_CHANNELS in pairs:
+        v = pairs[_TAG_CHANNELS]
         result["channels"] = int(v) if v.isdigit() else v
     if "DURATION" in pairs:
         result["duration"] = pairs["DURATION"]
@@ -1857,7 +1885,7 @@ async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
         return None
 
 
-@app.get("/metadata")
+@app.get("/metadata", responses={404: {"description": "Not Found"}, 503: {"description": "Service Unavailable"}})
 async def proxy_metadata(
     url: str = Query(..., description="Original file-sharing link"),
 ):
@@ -1873,7 +1901,7 @@ async def proxy_metadata(
     if cached is not None:
         return Response(
             content=cached,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "hit",
@@ -1901,7 +1929,7 @@ async def proxy_metadata(
                         _metadata_cache.set(meta_url, payload)
                         return Response(
                             content=payload,
-                            media_type="application/json",
+                            media_type=_MIME_JSON,
                             headers={
                                 "Cache-Control": _CC_METADATA,
                                 "X-Cache-Status": "miss",
@@ -1933,7 +1961,7 @@ async def proxy_metadata(
             _metadata_cache.set(meta_url, payload)
             return Response(
                 content=payload,
-                media_type="application/json",
+                media_type=_MIME_JSON,
                 headers={
                     "Cache-Control": _CC_METADATA,
                     "X-Cache-Status": "miss",
@@ -1975,7 +2003,7 @@ async def health() -> Response:
     return Response(
         # Compact: uptime monitors match the keyword "status":"ok" in this body.
         content=json.dumps({"status": "ok", "version": VERSION}, separators=(",", ":")),
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={"Cache-Control": "no-store"},
     )
 
@@ -1998,7 +2026,7 @@ async def list_trackers():
     if cached is not None:
         return Response(
             content=cached,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "hit",
@@ -2009,7 +2037,7 @@ async def list_trackers():
         payload = await _load_trackers_once()
         return Response(
             content=payload,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "miss",
@@ -2051,7 +2079,7 @@ def _trackers_fallback_response() -> Response:
     if _trackers_stale is not None:
         return Response(
             content=_trackers_stale,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_TRACKERS_STALE,
                 "X-Cache-Status": "stale",
@@ -2059,7 +2087,7 @@ def _trackers_fallback_response() -> Response:
         )
     return Response(
         content=_SEED_PAYLOAD,
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={
             "Cache-Control": _CC_TRACKERS_STALE,
             "X-Cache-Status": "seed",
@@ -2200,12 +2228,21 @@ async def list_stream_hosts() -> Response:
     hosts = await asyncio.to_thread(host_health.snapshot)
     return Response(
         content=json.dumps({"hosts": hosts}),
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={"Cache-Control": "public, max-age=30"},
     )
 
 
-@app.get("/stream")
+@app.get("/stream", responses={
+    400: {"description": "Bad Request"},
+    403: {"description": "Forbidden"},
+    404: {"description": "Not Found"},
+    409: {"description": "Conflict"},
+    415: {"description": "Unsupported Media Type"},
+    424: {"description": "Failed Dependency"},
+    429: {"description": "Too Many Requests"},
+    503: {"description": "Service Unavailable"},
+})
 async def proxy_stream(
     request: Request,
     url: str = Query(..., description="Original file-sharing link"),
@@ -2276,7 +2313,7 @@ async def proxy_stream(
             raise HTTPException(status_code=424, detail="upstream_forbidden")
         if 400 <= e.status_code < 500:
             raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
-        raise HTTPException(status_code=503, detail="Upstream error")
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
     except NonMediaError as e:
         logger.warning("Stream non-media for %s: %s", stream_url, e)
         await _record_stream_outcome(provider, url, e)
@@ -2286,11 +2323,11 @@ async def proxy_stream(
         # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
         await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail="Upstream error")
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
     except Exception as e:
         _log_upstream_failure("Stream error", stream_url, e)
         await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail="Upstream error")
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
     await _record_stream_outcome(provider, url, None)
 
     # Permission-required/private gdrive files come back from stream_audio
@@ -2390,7 +2427,7 @@ async def proxy_stream(
             _closing(_iter_upstream()),
             status_code=206,
             headers=headers,
-            media_type=ct or "application/octet-stream",
+            media_type=ct or _MIME_OCTET,
         )
 
     # ---------- upstream returned 200 (no Range support) ----------------
@@ -2408,7 +2445,7 @@ async def proxy_stream(
             _closing(_iter_upstream()),
             status_code=200,
             headers=headers,
-            media_type=ct or "application/octet-stream",
+            media_type=ct or _MIME_OCTET,
         )
 
     # Client requested Range but upstream ignored it — plan the response.
@@ -2426,7 +2463,7 @@ async def proxy_stream(
         # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
         _unknown_headers: dict[str, str] = {
             "Accept-Ranges": "bytes",
-            "Content-Type": ct or "application/octet-stream",
+            "Content-Type": ct or _MIME_OCTET,
         }
         if _disposition:
             _unknown_headers["Content-Disposition"] = _disposition
@@ -2435,7 +2472,7 @@ async def proxy_stream(
             _closing(_iter_upstream()),
             status_code=200,
             headers=_unknown_headers,
-            media_type=ct or "application/octet-stream",
+            media_type=ct or _MIME_OCTET,
         )
 
     # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233
@@ -2447,7 +2484,7 @@ async def proxy_stream(
     # A 'partial' plan is only made when total_size is known.
     partial_headers = {
         "Accept-Ranges": "bytes",
-        "Content-Type": ct or "application/octet-stream",
+        "Content-Type": ct or _MIME_OCTET,
         "Content-Length": str(content_length),
         "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
     }
@@ -2457,5 +2494,5 @@ async def proxy_stream(
         _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
         status_code=206,
         headers=partial_headers,
-        media_type=ct or "application/octet-stream",
+        media_type=ct or _MIME_OCTET,
     )

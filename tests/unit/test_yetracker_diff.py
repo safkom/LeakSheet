@@ -19,6 +19,7 @@ def test_local_parse_leaves_the_corpus_cache_untouched(monkeypatch):
     monkeypatch.setattr(fetcher, "async_fetch_and_parse", fake_fetch_and_parse)
 
     assert yetracker_diff.ours(None) == {}
-    assert seen and seen[0] != corpus
+    assert seen
+    assert seen[0] != corpus
     assert list(corpus.glob("imgsrc_*")) == []
     assert fetcher.CACHE_DIR == corpus

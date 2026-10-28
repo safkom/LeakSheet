@@ -24,7 +24,8 @@ def test_gid_fetch_slot_survives_a_second_event_loop():
         async with _gid_fetch_slot():
             return True
 
-    assert asyncio.run(use()) and asyncio.run(use())
+    assert asyncio.run(use())
+    assert asyncio.run(use())
 
 
 def test_tab_discovery_handles_escaped_quote_in_name():

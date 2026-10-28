@@ -187,7 +187,8 @@ class TestFallback:
     ):
         rec = Recorder(api=lambda r: httpx.Response(200, json={"sheets": [_api_sheet("200")]}))
         assert await _parse(rec, patch_sheets_client) == htmlview_only
-        assert "500" in rec.htmlview_gids() and "200" not in rec.htmlview_gids()
+        assert "500" in rec.htmlview_gids()
+        assert "200" not in rec.htmlview_gids()
 
     async def test_titles_htmlview_trims_are_looked_up_by_sheet_id(self, with_key, htmlview_only, patch_sheets_client):
         # The tab listing strips names, so a title with edge spaces is not a valid range.
@@ -285,7 +286,8 @@ class TestBoundsAndPauses:
         huge["properties"]["gridProperties"] = {"rowCount": 1000, "columnCount": 18278}
         rec = Recorder(api=lambda r: httpx.Response(200, json={"sheets": [_api_sheet("200"), huge]}))
         assert await _parse(rec, patch_sheets_client) == htmlview_only
-        assert "500" in rec.htmlview_gids() and "200" not in rec.htmlview_gids()
+        assert "500" in rec.htmlview_gids()
+        assert "200" not in rec.htmlview_gids()
 
     def test_the_field_mask_asks_for_checkbox_validation(self):
         import src.sheets_api as sheets_api
