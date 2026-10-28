@@ -6,7 +6,10 @@ import SwiftUI
 @MainActor
 @Observable
 final class TrackerLoader {
-    var url: String = ""
+    /// Editing the link clears the last load's error, which described the old one.
+    var url: String = "" {
+        didSet { if url != oldValue, error != nil { error = nil } }
+    }
     private(set) var loading = false
     private(set) var loadPhase: APIClient.LoadPhase? {
         didSet { LoadActivity.shared.report(loadPhase) }
@@ -39,7 +42,7 @@ final class TrackerLoader {
         guard !trimmed.isEmpty else { return nil }
         // A tracker keeps the name it was first opened under, whichever entry point
         // reopens it: see DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
-        let resolvedName = artistName ?? recents.savedName(forSourceUrl: trimmed)
+        let resolvedName = Self.resolvedName(override: artistName, saved: recents.savedName(forSourceUrl: trimmed))
         // One load at a time, across every call site: concurrent loads raced into
         // multiple navigation pushes.
         // `waitForInFlight` (Mac sidebar, where a dropped selection leaves the pane spinning)
@@ -246,6 +249,12 @@ final class TrackerLoader {
         }
     }
 
+    /// The name Recents pinned wins over a caller's override, so the order the entry
+    /// points are used in can't change the slug.
+    nonisolated static func resolvedName(override: String?, saved: String?) -> String? {
+        saved ?? override
+    }
+
     /// Maps a backend HTTP failure to a plain, actionable message: a big tracker can
     /// hit the gateway timeout on a cold parse, and "HTTP 504" means nothing to a user.
     ///
@@ -254,6 +263,10 @@ final class TrackerLoader {
     nonisolated static func friendlyLoadError(status: Int, fallback: String) -> String {
         if status == 502 || status == 503, fallback != APIClient.bareStatusMessage(status) {
             return fallback
+        }
+        // The server's 400 for an unsupported host names an ops variable.
+        if status == 400, fallback.contains("host not allowed") {
+            return "That link isn't a supported tracker. Paste a Google Sheets tracker link, or pick one from Explore Trackers."
         }
         switch status {
         case 502, 503, 504, 524:  // 524: Cloudflare's origin timeout

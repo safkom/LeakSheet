@@ -321,10 +321,17 @@ struct CrossArtistEraListTests {
         #expect(playedName(logic.next()) == "b")
     }
 
-    @Test func `upcoming is empty without a list context`() {
+    @Test func `upcoming lists the rest of the playing era`() {
         var logic = PlaybackQueueLogic()
-        let ctx = EraSongContext(eraName: "Yeezus", artistName: "Ye", artUrl: "", versions: [version("A"), version("B")])
+        let ctx = EraSongContext(eraName: "Yeezus", artistName: "Ye", artUrl: "", versions: [version("A"), version("B"), version("C")])
         _ = logic.playInEra(ctx.versions[0], context: ctx)
-        #expect(logic.upcoming(limit: 10).isEmpty)
+        #expect(logic.upcoming(limit: 10).map(\.version.name) == ["B", "C"])
+        #expect(logic.upcoming(limit: 10).allSatisfy { $0.eraName == "Yeezus" })
+        _ = logic.next()
+        #expect(logic.upcoming(limit: 1).map(\.version.name) == ["C"])
+    }
+
+    @Test func `upcoming is empty with no context`() {
+        #expect(PlaybackQueueLogic().upcoming(limit: 10).isEmpty)
     }
 }

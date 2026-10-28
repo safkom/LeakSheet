@@ -185,6 +185,14 @@ final class FavouritesManager {
         )
     }
 
+    /// The player and details sheet don't carry the tracker URL; Recents knows it by slug.
+    nonisolated static func resolvedSourceUrl(
+        _ given: String?, artistSlug: String, recents: [RecentTrackersManager.RecentTracker]
+    ) -> String? {
+        if let given, !given.isEmpty { return given }
+        return recents.first { $0.slug == artistSlug && !$0.sourceUrl.isEmpty }?.sourceUrl
+    }
+
     @discardableResult
     private func toggleEntry(
         baseName: String, discriminator: String?, versionCount: Int, badge: String?,
@@ -201,7 +209,9 @@ final class FavouritesManager {
                 key: k,
                 artistSlug: artistSlug,
                 artistName: artistName,
-                sourceUrl: sourceUrl,
+                sourceUrl: Self.resolvedSourceUrl(
+                    sourceUrl, artistSlug: artistSlug, recents: RecentTrackersManager.shared.trackers
+                ),
                 eraName: eraName,
                 eraArt: eraArt,
                 songBaseName: baseName,

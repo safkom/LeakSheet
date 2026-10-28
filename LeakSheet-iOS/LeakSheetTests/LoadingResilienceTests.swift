@@ -110,6 +110,19 @@ struct LoadingResilienceTests {
         #expect(TrackerLoader.friendlyLoadError(status: status, fallback: message) == message)
     }
 
+    @Test func `an unsupported host reads as plain advice, not the server's ops detail`() {
+        let detail = "Invalid URL: host not allowed for tracker fetching: hel. Add others via LEAKSHEET_EXTRA_SHEET_HOSTS."
+        let shown = TrackerLoader.friendlyLoadError(status: 400, fallback: detail)
+        #expect(!shown.contains("LEAKSHEET"))
+        #expect(shown.contains("Google Sheets"))
+    }
+
+    @Test func `the pinned name wins over an override in either entry order`() {
+        #expect(TrackerLoader.resolvedName(override: "Billie Eilish Alt 3", saved: "Billie Eilish") == "Billie Eilish")
+        #expect(TrackerLoader.resolvedName(override: "Billie Eilish Alt 3", saved: nil) == "Billie Eilish Alt 3")
+        #expect(TrackerLoader.resolvedName(override: nil, saved: nil) == nil)
+    }
+
     @Test(arguments: [502, 503, 504, 524])
     func `a bare gateway error reads as a timeout`(status: Int) {
         let shown = TrackerLoader.friendlyLoadError(status: status, fallback: APIClient.bareStatusMessage(status))

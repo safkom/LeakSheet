@@ -26,8 +26,15 @@ enum TrackerCatalog {
         RecentTrackersManager.shared.trackers.map { TrackerEntity(id: $0.sourceUrl, name: $0.name) }
     }
 
-    static func all() async -> [TrackerEntity] {
-        let listed = (try? await APIClient.shared.fetchTrackers()) ?? []
+    /// Offline, an intent can still resolve the trackers in Recents.
+    static func allOrRecents() async -> [TrackerEntity] {
+        if let all = await all() { return all }
+        return await recents()
+    }
+
+    /// Nil when the tracker list can't be fetched, so callers keep what they have.
+    static func all() async -> [TrackerEntity]? {
+        guard let listed = try? await APIClient.shared.fetchTrackers() else { return nil }
         let merged = await recents() + listed.map { TrackerEntity(id: $0.url, name: $0.name) }
         var seen = Set<String>()
         return merged.filter { seen.insert(LibraryMatcher.normalize($0.name)).inserted }
@@ -36,12 +43,12 @@ enum TrackerCatalog {
 
 nonisolated struct TrackerQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [TrackerEntity] {
-        await TrackerCatalog.all().filter { identifiers.contains($0.id) }
+        await TrackerCatalog.allOrRecents().filter { identifiers.contains($0.id) }
     }
 
     func entities(matching string: String) async throws -> [TrackerEntity] {
         let wanted = LibraryMatcher.normalize(string)
-        return await TrackerCatalog.all().filter { LibraryMatcher.normalize($0.name).contains(wanted) }
+        return await TrackerCatalog.allOrRecents().filter { LibraryMatcher.normalize($0.name).contains(wanted) }
     }
 
     func suggestedEntities() async throws -> [TrackerEntity] {

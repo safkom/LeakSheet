@@ -36,6 +36,12 @@ struct RecentTrackersListView: View {
                             onSelect(entry)
                         }
                         .rowHoverHighlight()
+                        // One entry at a time; removing it also releases its pinned artist name.
+                        .contextMenu {
+                            Button("Remove from Recents", systemImage: "trash", role: .destructive) {
+                                recents.remove(entry)
+                            }
+                        }
                         .padding(.horizontal, 20)
                     }
                 }

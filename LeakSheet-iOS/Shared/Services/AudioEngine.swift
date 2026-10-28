@@ -326,10 +326,17 @@ final class AudioEngine {
     /// (the session is configured for it); this is where debounced writes are
     /// forced out before the process can be suspended or killed.
     func handleBackgrounding() {
+        #if canImport(UIKit)
+        // With nothing playing, the process can suspend before the writes finish.
+        let assertion = UIApplication.shared.beginBackgroundTask(withName: "Flush saved state")
+        #endif
         Task {
             await FavouritesManager.shared.flush()
             await ListeningHistory.shared.flush()
             await EraColorExtractor.shared.flush()
+            #if canImport(UIKit)
+            UIApplication.shared.endBackgroundTask(assertion)
+            #endif
         }
     }
 
