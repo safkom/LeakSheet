@@ -82,17 +82,17 @@ struct LoadingResilienceTests {
     // all of it read as a hang.
 
     @Test func `the connecting label escalates with elapsed time`() {
-        #expect(TrackerInputView.connectingLabel(elapsed: 0) == "Contacting server…")
-        #expect(TrackerInputView.connectingLabel(elapsed: 1.0) == "Contacting server…")
-        #expect(TrackerInputView.connectingLabel(elapsed: 2.0) == "Fetching tracker…")
-        #expect(TrackerInputView.connectingLabel(elapsed: 4.9) == "Fetching tracker…")
-        #expect(TrackerInputView.connectingLabel(elapsed: 30) == "Parsing a large tracker…")
+        #expect(LoadPhaseRow.connectingLabel(elapsed: 0) == "Contacting server…")
+        #expect(LoadPhaseRow.connectingLabel(elapsed: 1.0) == "Contacting server…")
+        #expect(LoadPhaseRow.connectingLabel(elapsed: 2.0) == "Fetching tracker…")
+        #expect(LoadPhaseRow.connectingLabel(elapsed: 4.9) == "Fetching tracker…")
+        #expect(LoadPhaseRow.connectingLabel(elapsed: 30) == "Parsing a large tracker…")
     }
 
     @Test func `the label never goes backwards as time passes`() {
         var seen: [String] = []
         for tenths in 0...200 {
-            let label = TrackerInputView.connectingLabel(elapsed: Double(tenths) / 10)
+            let label = LoadPhaseRow.connectingLabel(elapsed: Double(tenths) / 10)
             if seen.last != label { seen.append(label) }
         }
         #expect(seen == ["Contacting server…", "Fetching tracker…", "Parsing a large tracker…"])

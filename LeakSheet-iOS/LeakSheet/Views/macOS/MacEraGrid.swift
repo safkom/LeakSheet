@@ -6,6 +6,9 @@ import SwiftUI
 struct MacEraGrid: View {
     let vm: ArtistViewModel
     let onSelect: (String) -> Void
+    let onInfo: (String) -> Void
+
+    @Environment(PlayerViewModel.self) private var player
 
     private static let columns = [GridItem(.adaptive(minimum: 168, maximum: 240), spacing: 16)]
 
@@ -30,6 +33,10 @@ struct MacEraGrid: View {
                         era: filtered.era,
                         songCount: filtered.allSongs.count,
                         displayColors: vm.eraDisplay[filtered.era.name],
+                        actions: EraAction.all(
+                            for: filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug,
+                            player: player, onInfo: { onInfo(filtered.era.name) }
+                        ),
                         onSelect: { onSelect(filtered.era.name) },
                         onColorExtracted: { vm.setEraColor(eraName: filtered.era.name, dominant: $0) }
                     )
@@ -52,6 +59,7 @@ private struct MacEraTile: View {
     let era: Era
     let songCount: Int
     let displayColors: EraDisplayColors?
+    let actions: [EraAction]
     let onSelect: () -> Void
     let onColorExtracted: (Color) -> Void
 
@@ -92,6 +100,10 @@ private struct MacEraTile: View {
         .onHover { hovering = $0 }
         .accessibilityLabel("\(era.name), \(songCount) songs")
         .accessibilityHint("Show this era's songs")
+        .accessibilityActions {
+            ForEach(actions) { action in Button(action.id, action: action.run) }
+        }
+        .contextMenu { EraContextMenu(actions: actions) }
         .help(era.altNames?.joined(separator: " · ") ?? era.name)
     }
 

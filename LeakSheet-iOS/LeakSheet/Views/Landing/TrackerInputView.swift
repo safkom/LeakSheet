@@ -11,7 +11,6 @@ struct TrackerInputView: View {
     @State private var selection: TextSelection?
     /// Seconds spent in the current phase: `.connecting` is one long server-side wait,
     /// so the label escalates rather than sitting on "Contacting server…".
-    @State private var phaseElapsed: TimeInterval = 0
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -26,17 +25,9 @@ struct TrackerInputView: View {
             // Below the glass, not inside it: growing the glass shape while
             // this faded in drew the line clipped under the field's edge.
             if loading, let loadPhase {
-                progressRow(for: loadPhase)
+                LoadPhaseRow(phase: loadPhase)
                     .padding(.horizontal, 14)
                     .transition(.opacity)
-                    .task(id: loadPhase) {
-                        phaseElapsed = 0
-                        while !Task.isCancelled {
-                            try? await Task.sleep(for: .milliseconds(500))
-                            if Task.isCancelled { break }
-                            phaseElapsed += 0.5
-                        }
-                    }
             }
         }
         .animation(.default, value: loading)
@@ -130,10 +121,27 @@ struct TrackerInputView: View {
             }
     }
 
-    /// One line of honest progress: fraction when the payload size is known,
-    /// a byte counter otherwise, and a phase label either way.
-    @ViewBuilder
-    private func progressRow(for phase: APIClient.LoadPhase) -> some View {
+    /// Backstop against a concatenated result reaching submit
+    /// ("https://a.com/xhttps://b.com/y"): keeps only the last "http" occurrence.
+    private func normalizeIfConcatenated() {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = url.startIndex
+        while let match = url.range(of: "http", range: searchStart..<url.endIndex) {
+            ranges.append(match)
+            searchStart = match.upperBound
+        }
+        guard ranges.count > 1, let last = ranges.last else { return }
+        url = String(url[last.lowerBound...])
+    }
+}
+
+/// One line of honest progress: fraction when the payload size is known,
+/// a byte counter otherwise, and a phase label either way.
+struct LoadPhaseRow: View {
+    let phase: APIClient.LoadPhase
+    @State private var phaseElapsed: TimeInterval = 0
+
+    var body: some View {
         HStack(spacing: 8) {
             switch phase {
             case .readingCache:
@@ -175,6 +183,14 @@ struct TrackerInputView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: phase) {
+            phaseElapsed = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { break }
+                phaseElapsed += 0.5
+            }
+        }
     }
 
     static func formatBytes(_ bytes: Int64) -> String {
@@ -189,18 +205,5 @@ struct TrackerInputView: View {
         case ..<5: "Fetching tracker…"
         default: "Parsing a large tracker…"
         }
-    }
-
-    /// Backstop against a concatenated result reaching submit
-    /// ("https://a.com/xhttps://b.com/y"): keeps only the last "http" occurrence.
-    private func normalizeIfConcatenated() {
-        var ranges: [Range<String.Index>] = []
-        var searchStart = url.startIndex
-        while let match = url.range(of: "http", range: searchStart..<url.endIndex) {
-            ranges.append(match)
-            searchStart = match.upperBound
-        }
-        guard ranges.count > 1, let last = ranges.last else { return }
-        url = String(url[last.lowerBound...])
     }
 }

@@ -132,10 +132,15 @@ struct MacRootView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
-                ProgressView()
-                Text("Loading tracker…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if let phase = loader.loadPhase {
+                    LoadPhaseRow(phase: phase)
+                        .fixedSize()
+                } else {
+                    ProgressView()
+                    Text("Loading tracker…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
