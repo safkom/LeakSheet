@@ -573,6 +573,42 @@ def _is_alert_line(line: str) -> bool:
     return False
 
 
+def _line_links(cell: _Cell) -> dict[int, str]:
+    """Line index → cleaned URL of the link on that line."""
+    out: dict[int, str] = {}
+    for link_idx, line_num in enumerate(cell.link_lines):
+        if link_idx < len(cell.links):
+            cleaned = _clean_link(cell.links[link_idx])
+            if cleaned:
+                out[line_num] = cleaned
+    return out
+
+
+def _is_column_label(line: str) -> bool:
+    """A header-cell line that names a column (parenthetical ignored), not a notice."""
+    norm = re.sub(r'\s+', ' ', line.lower())
+    p = norm.find("(")
+    return bool(_match_column_alias(norm[:p].strip() if p > 0 else norm))
+
+
+class _NoticeCollector:
+    """Deduplicated notices, at least 10 characters, outer parentheses dropped."""
+
+    def __init__(self) -> None:
+        self.notices: list[Notice] = []
+        self._seen: set[str] = set()
+
+    def add(self, text: str, link: str | None = None) -> None:
+        text = text.strip()
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1].strip()
+        if len(text) < 10 or text.lower() in self._seen:
+            return
+        self._seen.add(text.lower())
+        kind = "alert" if any(_is_alert_line(line) for line in text.split("\n")) else "info"
+        self.notices.append(Notice(text=text, link=link, kind=kind))
+
+
 def _extract_header_notices(
     header_row: list[_Cell],
     pre_header_rows: list[list[_Cell]],
@@ -586,78 +622,27 @@ def _extract_header_notices(
 
     Returns a deduplicated list of Notice objects.
     """
-
-    notices: list[Notice] = []
-    seen: set[str] = set()
-
-    def _clean(text: str) -> str:
-        text = text.strip()
-        if text.startswith("(") and text.endswith(")"):
-            text = text[1:-1].strip()
-        return text
-
-    def _is_alert(text: str) -> bool:
-        return any(_is_alert_line(line) for line in text.split("\n"))
-
-    def _add(text: str, link: str | None = None) -> None:
-        text = _clean(text)
-        if len(text) < 10:
-            return
-        key = text.lower()
-        if key not in seen:
-            seen.add(key)
-            kind = "alert" if _is_alert(text) else "info"
-            notices.append(Notice(text=text, link=link, kind=kind))
-
-    # --- Header cell notices ---
+    collector = _NoticeCollector()
     for cell in header_row:
-        raw = cell.text.strip()
-        if not raw:
-            continue
-        # Build per-line link mapping: line_index → cleaned URL
-        line_link_map: dict[int, str] = {}
-        for link_idx, line_num in enumerate(cell.link_lines):
-            if link_idx < len(cell.links):
-                cleaned = _clean_link(cell.links[link_idx])
-                if cleaned:
-                    line_link_map[line_num] = cleaned
-
-        lines = raw.split("\n")
-        for line_idx, line in enumerate(lines):
+        links = _line_links(cell)
+        for line_idx, line in enumerate(cell.text.strip().split("\n")):
             stripped = line.strip()
-            if not stripped:
-                continue
-            # Normalise for alias matching
-            norm = re.sub(r'\s+', ' ', stripped.lower())
-            # Remove parenthetical for matching
-            p = norm.find("(")
-            match_key = norm[:p].strip() if p > 0 else norm
-            if _match_column_alias(match_key):
-                continue
-            _add(stripped, line_link_map.get(line_idx))
-
-    # --- Pre-header rows ---
+            if stripped and not _is_column_label(stripped):
+                collector.add(stripped, links.get(line_idx))
     artist_lower = artist_name.lower() if artist_name else ""
-    for row in pre_header_rows:
-        for cell in row:
-            text = cell.text.strip()
-            if not text:
-                continue
-            norm = text.lower()
-            # Skip if it's just the artist/tracker name
-            if norm == artist_lower or "tracker" in norm and len(text) < 40:
-                continue
-            # Build per-line link mapping
-            line_link_map = {}
-            for link_idx, line_num in enumerate(cell.link_lines):
-                if link_idx < len(cell.links):
-                    cleaned = _clean_link(cell.links[link_idx])
-                    if cleaned:
-                        line_link_map[line_num] = cleaned
-            for line_idx, line in enumerate(text.split("\n")):
-                _add(line.strip(), line_link_map.get(line_idx))
+    for cell in (c for row in pre_header_rows for c in row):
+        _add_pre_header_notices(collector, cell, artist_lower)
+    return collector.notices
 
-    return notices
+
+def _add_pre_header_notices(collector: _NoticeCollector, cell: _Cell, artist_lower: str) -> None:
+    text = cell.text.strip()
+    # Skip empty cells and ones that are just the artist/tracker name
+    if not text or text.lower() == artist_lower or ("tracker" in text.lower() and len(text) < 40):
+        return
+    links = _line_links(cell)
+    for line_idx, line in enumerate(text.split("\n")):
+        collector.add(line.strip(), links.get(line_idx))
 
 
 # ---------------------------------------------------------------------------
