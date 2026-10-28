@@ -98,13 +98,22 @@ nonisolated struct PlaybackQueueLogic {
         return Self.target(for: items[index])
     }
 
-    /// The list items after the cursor, up to `limit`. The manual queue is not included:
-    /// it plays first and is shown above these.
+    /// What auto-advance plays next, up to `limit`: the list remainder, or the rest of the
+    /// playing era (rollover into the next era is not previewed). The manual queue is not
+    /// included: it plays first and is shown above these.
     func upcoming(limit: Int) -> [PlaybackListItem] {
-        guard let list = playbackList, let idx = listIndex, limit > 0 else { return [] }
-        let start = idx + 1
-        guard start < list.count else { return [] }
-        return Array(list[start..<min(list.count, start + limit)])
+        guard limit > 0 else { return [] }
+        if let list = playbackList {
+            guard let idx = listIndex else { return [] }
+            return Array(list.dropFirst(idx + 1).prefix(limit))
+        }
+        guard let context = eraSongs, let idx = songIndex else { return [] }
+        return context.versions.dropFirst(idx + 1).prefix(limit).map {
+            PlaybackListItem(
+                version: $0, artistName: context.artistName, eraName: context.eraName,
+                artUrl: context.artUrl, artistSlug: context.artistSlug, isInserted: context.isInserted
+            )
+        }
     }
 
     /// Register an artist's ordered era list, filed under that artist so it never

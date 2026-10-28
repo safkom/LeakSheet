@@ -104,9 +104,16 @@ nonisolated struct LeakSheetShortcuts: AppShortcutsProvider {
 enum SpotlightIndexer {
     @MainActor
     static func refresh() async {
-        let trackers = await TrackerCatalog.all()
-        let songs = FavouritesManager.shared.entries.map(FavouriteSongEntity.init(entry:))
         let index = CSSearchableIndex.default()
+        let fetched = await TrackerCatalog.all()
+        let songs = FavouritesManager.shared.entries.map(FavouriteSongEntity.init(entry:))
+        // Offline: add to the last good catalog instead of wiping it down to the recents.
+        // A favourite removed meanwhile stays findable until the next online refresh.
+        guard let trackers = fetched else {
+            try? await index.indexAppEntities(TrackerCatalog.recents())
+            try? await index.indexAppEntities(songs)
+            return
+        }
         // Wiped first so removed favourites don't linger.
         try? await index.deleteAllSearchableItems()
         try? await index.indexAppEntities(trackers)

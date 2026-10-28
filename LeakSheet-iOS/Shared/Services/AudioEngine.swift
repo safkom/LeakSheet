@@ -326,12 +326,32 @@ final class AudioEngine {
     /// (the session is configured for it); this is where debounced writes are
     /// forced out before the process can be suspended or killed.
     func handleBackgrounding() {
+        #if canImport(UIKit)
+        // With nothing playing, the process can suspend before the writes finish. An
+        // assertion still open at expiry gets the app killed, so expiry ends them all.
+        let assertion = UIApplication.shared.beginBackgroundTask(withName: "Flush saved state") { [weak self] in
+            self?.endFlushAssertions()
+        }
+        flushAssertions.insert(assertion)
+        #endif
         Task {
             await FavouritesManager.shared.flush()
             await ListeningHistory.shared.flush()
             await EraColorExtractor.shared.flush()
+            #if canImport(UIKit)
+            if flushAssertions.remove(assertion) != nil { UIApplication.shared.endBackgroundTask(assertion) }
+            #endif
         }
     }
+
+    #if canImport(UIKit)
+    private var flushAssertions: Set<UIBackgroundTaskIdentifier> = []
+
+    private func endFlushAssertions() {
+        flushAssertions.forEach(UIApplication.shared.endBackgroundTask)
+        flushAssertions.removeAll()
+    }
+    #endif
 
     /// Adds the ticks since the last one, if they are one tick long: a seek jumps further.
     /// See DECISIONS.md::ListeningHistory.swift::listened-not-position.

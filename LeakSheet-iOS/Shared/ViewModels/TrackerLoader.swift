@@ -6,7 +6,10 @@ import SwiftUI
 @MainActor
 @Observable
 final class TrackerLoader {
-    var url: String = ""
+    /// Editing the link clears the last load's error, which described the old one.
+    var url: String = "" {
+        didSet { if url != oldValue, error != nil { error = nil } }
+    }
     private(set) var loading = false
     private(set) var loadPhase: APIClient.LoadPhase? {
         didSet { LoadActivity.shared.report(loadPhase) }
@@ -254,6 +257,10 @@ final class TrackerLoader {
     nonisolated static func friendlyLoadError(status: Int, fallback: String) -> String {
         if status == 502 || status == 503, fallback != APIClient.bareStatusMessage(status) {
             return fallback
+        }
+        // The server's 400 for an unsupported host names an ops variable.
+        if status == 400, fallback.contains("host not allowed") {
+            return "That link isn't a supported tracker. Paste a Google Sheets tracker link, or pick one from Explore Trackers."
         }
         switch status {
         case 502, 503, 504, 524:  // 524: Cloudflare's origin timeout

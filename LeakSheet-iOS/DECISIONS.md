@@ -106,6 +106,8 @@ inferred names disagree (e.g. `billie-eilish-alt-3` vs `billie-eilish`).
 
 `load()` therefore resolves the name once, from the caller's override or else
 from what Recents recorded for that normalized URL, so every entry point agrees.
+The override stays first: a name inferred from a pasted alt tracker can collide
+with the main tracker's slug, and opening it from Explore is what corrects that.
 `replayFromCache` additionally refuses a cached copy whose name disagrees with
 the resolved one: the client caches the *response*, which already has any
 override applied, so a mismatched copy carries the other slug and would
@@ -114,7 +116,7 @@ reintroduce the split on the 304 fast path.
 The tradeoff is deliberate: a tracker renamed upstream keeps the name it was
 first opened under for as long as it stays in Recents, because the alternative
 is silently splitting the user's favourites in two. Removing the Recents entry
-(swipe, or Clear All) drops the pin and the next open re-infers the name.
+(its context menu, or Clear All) drops the pin and the next open re-infers the name.
 
 ## PlaybackQueueLogic.swift::era-identity — era match excludes the version count
 
