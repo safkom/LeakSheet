@@ -253,12 +253,6 @@ versions, i.e. `ArtistViewModel.artistStats.total`) — previously this showed
 header's count but disagrees with it for any tracker with multi-version songs (see
 U-4).
 
-## NowPlayingView.swift::original-label-width — pinned single-line width
-
-The row's other controls compress this label until "Original" wraps onto a second
-line inside the glass capsule; pinning it to one line at its natural width lets the
-row lay out around it instead.
-
 ## NowPlayingView.swift::video-in-artwork-slot — video renders in the artwork slot
 
 Video items (e.g. an `.mp4` behind an opaque pillows id) render their picture in
@@ -595,10 +589,10 @@ reads an unset key as true and an explicit choice as stored, so a user who turne
 keeps it off. Costs: lossless files stream whole (one WAV: 72 MB against 1.5 MB), and
 the original URL is fetched directly, so the backend's MIME sniffing, its 415 on non-media
 bodies and its host-health outcomes do not apply to pillows plays; a failed item shows
-its error and the Stream toggle is the manual fallback. froste stays proxied in original
+its error and switching Settings → Playback Quality to Streaming is the manual fallback. froste stays proxied in original
 mode because its download needs a Referer that AVPlayer does not send; pixeldrain and
 pillows play direct. For froste the original and streaming URLs are therefore the same,
-so the Playback Quality toggle changes nothing there, and whether the proxied
+so the Playback Quality setting changes nothing there, and whether the proxied
 `/song/{hash}/file` is the original file is unverified.
 
 ## EraInfoSheet.swift::two-stat-sources — tracker counts beside parsed counts
