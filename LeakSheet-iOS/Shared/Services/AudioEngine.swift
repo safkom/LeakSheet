@@ -1051,8 +1051,6 @@ struct EraSongContext: Sendable {
     /// Canonical API slug — optional so older call sites keep compiling;
     /// playback falls back to a slugified artist name when absent.
     var artistSlug: String? = nil
-    /// Set on a smart-shuffle suggestion, so the queue can label it.
-    var isInserted: Bool = false
 }
 
 /// One entry of an ad-hoc playback list — each item carries its own era

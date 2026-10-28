@@ -101,8 +101,7 @@ struct MiscLinkClassifierTests {
         ("https://example.com/page", "example.com"),
     ])
     func `label derives a short host name`(url: String, expected: String) {
-        let kind = MiscLinkClassifier.classify(url)
-        #expect(MiscLinkClassifier.label(for: url, kind: kind) == expected)
+        #expect(MiscLinkClassifier.label(for: url) == expected)
     }
 
     @Test func `image links use themselves as the thumbnail`() {

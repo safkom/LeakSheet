@@ -72,7 +72,7 @@ nonisolated enum MiscLinkClassifier {
 
     /// Short, human-friendly label derived from the host — falls back to the
     /// bare host for anything not specifically named.
-    static func label(for urlString: String, kind: MiscLinkKind) -> String {
+    static func label(for urlString: String) -> String {
         guard let url = URL(string: urlString), let host = normalizedHost(url) else { return "Link" }
         switch host {
         case "youtube.com", "m.youtube.com", "youtu.be": return "YouTube"

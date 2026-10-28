@@ -111,7 +111,7 @@ nonisolated struct PlaybackQueueLogic {
         return context.versions.dropFirst(idx + 1).prefix(limit).map {
             PlaybackListItem(
                 version: $0, artistName: context.artistName, eraName: context.eraName,
-                artUrl: context.artUrl, artistSlug: context.artistSlug, isInserted: context.isInserted
+                artUrl: context.artUrl, artistSlug: context.artistSlug
             )
         }
     }

@@ -352,7 +352,7 @@ struct FavouriteKeyCaseTests {
 struct FavouriteSourceUrlTests {
     private let recent = RecentTrackersManager.RecentTracker(
         name: "Ye", slug: "ye", sourceUrl: "https://docs.google.com/spreadsheets/d/AAA/htmlview", totalSongs: 0,
-        artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+        artUrl: nil, availableCount: 0, snippetCount: 0
     )
 
     @Test func `a favourite made without a url takes it from recents by slug`() {
@@ -365,7 +365,7 @@ struct FavouriteSourceUrlTests {
     @Test func `two trackers sharing a slug leave the url unset`() {
         let alt = RecentTrackersManager.RecentTracker(
             name: "Ye", slug: "ye", sourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", totalSongs: 0,
-            artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+            artUrl: nil, availableCount: 0, snippetCount: 0
         )
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent, alt]) == nil)
     }

@@ -102,7 +102,7 @@ struct RadioBuilderTests {
             songCount: nil, versionCount: nil
         )
         return Artist(name: "Ye", slug: "ye", sourceUrl: nil, eras: [era], trackerStats: nil,
-                      notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil)
+                      notices: nil, totalSongs: nil, totalVersions: nil, tabs: nil)
     }
 
     @Test func `newest leaks run newest first and skip unplayable versions`() {

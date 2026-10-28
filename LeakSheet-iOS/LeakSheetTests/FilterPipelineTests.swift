@@ -58,7 +58,7 @@ struct FilterPipelineTests {
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
             eras: [eraA, eraB], trackerStats: nil,
-            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            notices: nil, totalSongs: nil, totalVersions: nil,
             tabs: nil
         )
     }
@@ -176,7 +176,7 @@ struct FilterPipelineTests {
         let withPreview = Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,
             eras: [eraC], trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let content = ArtistViewModel.computeContent(
             artist: withPreview, state: FilterState(recents: true), eraStats: [:]
@@ -258,7 +258,7 @@ struct FilterPipelineTests {
         let a = Artist(
             name: "PH", slug: "ph", sourceUrl: nil, eras: [mysteryEra],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = ArtistViewModel(artist: a)
         vm.toggleEra("Mystery Era")  // expand so the song rows materialize
@@ -285,7 +285,7 @@ struct FilterPipelineTests {
         )
         let a = Artist(
             name: "G", slug: "g", sourceUrl: nil, eras: [grouped, era("Next Era", songs: [mystery()])],
-            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = ArtistViewModel(artist: a)
         vm.toggleEra("Grouped Era")
@@ -385,7 +385,6 @@ struct TabModeFilterTests {
             name: "Test", slug: "test", sourceUrl: nil, eras: [],
             trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil,
-            miscEntries: [entry("Old Flat Misc", tab: "misc")],
             tabs: [released, stems]
         )
     }
@@ -449,7 +448,7 @@ struct WorstOfFilterTests {
         return Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [era],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
     }
 
@@ -465,7 +464,7 @@ struct WorstOfFilterTests {
         let tabbed = Artist(
             name: "T", slug: "t", sourceUrl: nil, eras: [],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil,
+            totalSongs: nil, totalVersions: nil,
             tabs: [
                 TabSection(kind: "released", name: "Released", entries: []),
                 TabSection(kind: "best_of", name: "Best Of", entries: []),
@@ -515,7 +514,7 @@ struct CrossEraIndexTests {
                 ]),
             ],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
         func payload(_ name: String, _ key: String?, era: String) -> DescriptionSheet.Payload {
@@ -551,7 +550,7 @@ struct CrossEraIndexTests {
                 era("Donda 2", songs: [song("???", key: ""), song("Real Song", key: "real song")]),
             ],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
         let placeholder = song("???", key: "")
@@ -576,7 +575,7 @@ struct CrossEraIndexTests {
             name: "T", slug: "t", sourceUrl: nil,
             eras: [era("War", songs: [song("???", key: ""), song("Real Song", key: "real song")])],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
         let bare = song("???", key: "").versions[0]
@@ -609,7 +608,7 @@ struct CrossEraIndexTests {
             name: "T", slug: "t", sourceUrl: nil,
             eras: [era("War", songs: [fullSong])],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
         let payload = DescriptionSheet.Payload(
@@ -636,7 +635,7 @@ struct CrossEraIndexTests {
             name: "T", slug: "t", sourceUrl: nil,
             eras: [era("War", songs: [fullSong])],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
 
@@ -689,7 +688,7 @@ struct CrossEraIndexTests {
             name: "K", slug: "k", sourceUrl: nil,
             eras: [era("Era A", songs: [full])],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let filtered = ArtistViewModel.computeContent(
             artist: artist,
@@ -711,7 +710,7 @@ struct CrossEraIndexTests {
             name: "T", slug: "t", sourceUrl: nil,
             eras: [era("War", songs: [song("Something Else", key: "something else")])],
             trackerStats: nil, notices: nil,
-            totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            totalSongs: nil, totalVersions: nil, tabs: nil
         )
         let vm = await MainActor.run { ArtistViewModel(artist: artist) }
         let orphan = SongVersion(
@@ -1018,7 +1017,7 @@ struct TabBadgeFilterTests {
         let artist = Artist(
             name: "Test", slug: "test", sourceUrl: nil, eras: [],
             trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil,
-            miscEntries: nil, tabs: [tab]
+            tabs: [tab]
         )
         var state = FilterState()
         state.tabKey = tab.id

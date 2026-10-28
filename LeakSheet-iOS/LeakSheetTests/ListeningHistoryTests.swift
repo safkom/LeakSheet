@@ -132,7 +132,7 @@ struct ListeningSummaryTests {
     private func artist(_ eras: [Era]) -> Artist {
         Artist(
             name: "Artist", slug: "artist", sourceUrl: nil, eras: eras, trackerStats: nil,
-            notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            notices: nil, totalSongs: nil, totalVersions: nil, tabs: nil
         )
     }
 
