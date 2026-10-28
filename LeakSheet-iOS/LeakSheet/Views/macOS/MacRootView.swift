@@ -132,10 +132,17 @@ struct MacRootView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
-                ProgressView()
-                Text("Loading tracker…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                // A queued open waits behind another tracker's load: that progress isn't this pane's.
+                if let phase = loader.loadPhase, let slug = ui.selectedSlug,
+                   loader.loadingURL == recents.trackers.first(where: { $0.slug == slug })?.sourceUrl {
+                    LoadPhaseRow(phase: phase)
+                        .fixedSize()
+                } else {
+                    ProgressView()
+                    Text("Loading tracker…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -9,6 +9,7 @@ struct LeakSheetCommands: Commands {
     private static let skipInterval: TimeInterval = 15
 
     private var showingQueue: Bool { ui.showInspector && ui.inspectorTab == .queue }
+    private var showingDetails: Bool { ui.showInspector && ui.inspectorTab == .details }
 
     @State private var player = PlayerViewModel.shared
     @State private var ui = MacUIState.shared
@@ -53,6 +54,16 @@ struct LeakSheetCommands: Commands {
             .disabled(player.currentTrack == nil || player.duration <= 0)
         }
 
+        CommandMenu("Go") {
+            Button("Browse") { ui.selection = .browse; openWindow(id: "main") }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("Favourites") { ui.selection = .favourites; openWindow(id: "main") }
+                .keyboardShortcut("2", modifiers: .command)
+        }
+
+        // The app ships no help book, so the stock Help item would open nothing.
+        CommandGroup(replacing: .help) {}
+
         CommandMenu("Tracker") {
             Button("Refresh Tracker") { ui.refreshToken += 1 }
                 .keyboardShortcut("r", modifiers: .command)
@@ -82,9 +93,13 @@ struct LeakSheetCommands: Commands {
         CommandGroup(after: .toolbar) {
             // The inspector lives only in the main window: bring it forward too, or toggling
             // while Now Playing is key has no visible effect.
-            Button("Song Details") {
-                ui.inspectorTab = .details
-                ui.showInspector = true
+            Button(showingDetails ? "Hide Song Details" : "Show Song Details") {
+                if showingDetails {
+                    ui.showInspector = false
+                } else {
+                    ui.inspectorTab = .details
+                    ui.showInspector = true
+                }
                 openWindow(id: "main")
             }
             .keyboardShortcut("i", modifiers: .command)

@@ -68,6 +68,8 @@ struct MacSongList<Header: View>: View {
             onSelect(id.flatMap { id in rows.first { $0.id == id } })
         }
         .onKeyPress(.return) { playSelection() ? .handled : .ignored }
+        .onKeyPress(.rightArrow) { setSelectionExpanded(true) }
+        .onKeyPress(.leftArrow) { setSelectionExpanded(false) }
         // Space is safe here (see DECISIONS.md::LeakSheetCommands.swift::arrow-modifiers):
         // `onKeyPress` fires only while the list has focus.
         .onKeyPress(.space) {
@@ -113,7 +115,7 @@ struct MacSongList<Header: View>: View {
                 if let v = version, v.isStreamable { onPlay(v, eraName) }
             }
 
-        case .version(let version, let song, let eraName, let eraArt, let index, _):
+        case .version(let version, let song, let eraName, let eraArt, _, _):
             MacSongRow(
                 song: song, version: version,
                 artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
@@ -122,10 +124,34 @@ struct MacSongList<Header: View>: View {
                 onPlay: { onPlay($0, eraName) },
                 onShowDescription: onShowDescription
             )
-            .id(index)
             .onTapGesture(count: 2) {
                 if version.isStreamable { onPlay(version, eraName) }
             }
+        }
+    }
+
+    /// → expands the selected multi-version song; ← collapses it, also from one of its
+    /// versions, and moves the selection up to the song.
+    private func setSelectionExpanded(_ expand: Bool) -> KeyPress.Result {
+        guard let onToggleExpansion, let selection,
+              let i = rows.firstIndex(where: { $0.id == selection }) else { return .ignored }
+        switch rows[i] {
+        case .song(let song, _, let eraName, _, let ordinal) where song.hasMultipleVersions:
+            var expanded = false
+            if i + 1 < rows.count, case .version(_, _, let e, _, _, let o) = rows[i + 1] {
+                expanded = e == eraName && o == ordinal
+            }
+            guard expand != expanded else { return .ignored }
+            onToggleExpansion(eraName, ordinal)
+            return .handled
+        case .version(_, _, let eraName, _, _, let ordinal) where !expand:
+            if let parent = rows[..<i].lastIndex(where: { if case .song = $0 { true } else { false } }) {
+                self.selection = rows[parent].id
+            }
+            onToggleExpansion(eraName, ordinal)
+            return .handled
+        default:
+            return .ignored
         }
     }
 

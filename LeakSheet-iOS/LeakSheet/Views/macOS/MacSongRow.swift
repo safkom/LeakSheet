@@ -30,6 +30,13 @@ struct MacSongRow: View {
     }
 
     private var canStream: Bool { version?.isStreamable ?? false }
+
+    /// A collapsed multi-version row speaks for its best playable take, as its badges do.
+    private var isHeard: Bool {
+        let shown = hasMultiple && !showVersionBadge ? song.bestPlayableVersion : version
+        guard let shown else { return false }
+        return ListeningHistory.shared.isHeard(shown, artistSlug: artistSlug, eraName: eraName)
+    }
     private var hasMultiple: Bool { song.hasMultipleVersions }
 
     /// First alternate title that differs from the base name.
@@ -58,6 +65,9 @@ struct MacSongRow: View {
                         // `backgroundProminence` doesn't reach this read, so the speaker glyph marks playing.
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+                    if isHeard {
+                        HeardDot()
+                    }
                     if showVersionBadge, let tag = version?.versionTag {
                         Text("[\(tag)]")
                             .font(.caption.weight(.bold).monospacedDigit())

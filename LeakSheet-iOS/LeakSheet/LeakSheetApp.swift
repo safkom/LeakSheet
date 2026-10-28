@@ -30,7 +30,11 @@ struct LeakSheetApp: App {
         }
         .defaultSize(width: 1180, height: 800)
         .windowResizability(.contentMinSize)
-        .commands { LeakSheetCommands() }
+        .commands {
+            SidebarCommands()
+            InspectorCommands()
+            LeakSheetCommands()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
                 AudioEngine.shared.handleBackgrounding()
