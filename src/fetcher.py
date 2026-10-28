@@ -2048,6 +2048,258 @@ def _finalize(artist: Artist, url_norm: str) -> None:
     artist._art_sources = sources
 
 
+class _FetchRun:
+    """The settings one `async_fetch_and_parse` call threads through its stages."""
+
+    def __init__(
+        self, url: str, url_norm: str, artist_name: str | None, client: httpx.AsyncClient, *,
+        timeout: float, cache_ttl: float, use_cache: bool, write_cache: bool, t: PhaseTimer,
+    ):
+        self.url = url
+        self.url_norm = url_norm
+        self.artist_name = artist_name
+        self.client = client
+        self.timeout = timeout
+        self.cache_ttl = cache_ttl
+        self.use_cache = use_cache
+        self.write_cache = write_cache
+        self.t = t
+
+    def name(self, title: str) -> str:
+        return _resolve_artist_name(title, self.artist_name)
+
+    async def load_secondary(
+        self, artist: Artist, art_gid: str | None, content_tabs: list, title: str,
+        page_paths: dict[str, str], api_tabs: asyncio.Task | None = None,
+    ) -> None:
+        await _load_secondary_tabs(
+            artist, art_gid, content_tabs, self.url_norm, title,
+            client=self.client, timeout=self.timeout, cache_ttl=self.cache_ttl,
+            use_cache=self.use_cache, t=self.t, page_paths=page_paths, api_tabs=api_tabs,
+        )
+
+
+def _song_count(artist: Artist) -> int:
+    return sum(len(s.songs) for era in artist.eras for s in era.sections)
+
+
+async def _base_tab_listing(run: _FetchRun) -> tuple[dict[str, str], dict[str, str]]:
+    """Named tabs and page paths of the base page; empty when it can't be fetched."""
+    try:
+        with run.t.phase("base_fetch"):
+            base_html, _ = await _fetch_base_html(run.client, run.url_norm, timeout=run.timeout)
+    except httpx.HTTPError:
+        return {}, {}  # Can't tell — fall back to trusting parse_sheet
+    return _discover_named_tabs(base_html), _page_path_map(base_html)
+
+
+async def _parse_requested_gid(run: _FetchRun, gid: str) -> Artist | None:
+    """The requested tab when it is the tracker; None falls through to GID discovery."""
+    t = run.t
+    with t.phase("gid_fetch"), t.phase("stage_select"):
+        html, title = await async_fetch_sheet_html(
+            run.url, gid=gid, timeout=run.timeout, cache_ttl=run.cache_ttl, use_cache=run.use_cache
+        )
+    # Base-page tab listing needed — see docs/decisions.md::fetcher.py::gid-subpage-discovery
+    named_tabs, base_page_paths = await _base_tab_listing(run)
+    # A content or excluded tab is never the tracker; its parse would be cached
+    # under the gid-less URL every user reads (docs/decisions.md::fetcher.py::gid-subpage-discovery).
+    side_tabs = {g for g, _kind, _n in _get_content_tabs(named_tabs)}
+    if gid in side_tabs | _excluded_tab_gids(named_tabs):
+        return None
+    t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
+    with t.phase("parse"), t.phase("stage_select"):
+        artist = await asyncio.to_thread(parse_sheet, html, run.name(title), run.url_norm)
+    # Eras alone aren't enough — a hub tab parses to eras with no
+    # songs, and accepting it here would skip discovery entirely.
+    if not (artist.eras and _song_count(artist)):
+        return None
+    # This page may reveal a better "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
+    unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
+    if unreleased_tab_gid and unreleased_tab_gid != gid:
+        return None
+    # Load Art + content tabs here too, so a gid URL returns the same content as discovery.
+    with t.phase("stage_enrich"):
+        await run.load_secondary(
+            artist, _get_art_tab_gid(named_tabs), _get_content_tabs(named_tabs), title, base_page_paths
+        )
+    _warn_failed_tabs(run.url_norm, t)
+    await asyncio.to_thread(_finalize, artist, run.url_norm)
+    if run.write_cache:
+        await _async_set_cached_parsed(run.url_norm, artist, t=t)
+    return artist
+
+
+async def _parse_base_page(run: _FetchRun, base_html: str, title: str) -> Artist | None:
+    """A base page with tables is parsed directly; None unless it holds songs."""
+    run.t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
+    with run.t.phase("parse"):
+        artist = await asyncio.to_thread(parse_sheet, base_html, run.name(title), run.url_norm)
+    # As in the gid path: eras without songs are a hub, and discovery may find more.
+    if not artist.total_versions:
+        return None
+    await asyncio.to_thread(_finalize, artist, run.url_norm)
+    if run.write_cache:
+        await _async_set_cache(run.url_norm, base_html, title)
+        await _async_set_cached_parsed(run.url_norm, artist, t=run.t)
+    return artist
+
+
+class _TabRanking:
+    """Parses fetched tabs as they arrive and keeps the best one.
+
+    Rank tuple order — see docs/decisions.md::fetcher.py::gid-fetch-priority"""
+
+    def __init__(self, run: _FetchRun, title: str, named_tabs: dict[str, str], unreleased_gid: str | None):
+        self.run = run
+        self.title = title
+        self.named_tabs = named_tabs
+        self.unreleased_gid = unreleased_gid
+        self.best_artist: Artist | None = None
+        self.best_score = (0, 0, 0)
+        self.best_gid: str | None = None
+        self.hub_gid: str | None = None
+        self.best_html = ""
+
+    async def consider(self, task: asyncio.Task) -> bool:
+        """Parse one fetched tab and fold it into the ranking. True = stop."""
+        result = await task
+        if result is None:
+            return False
+        result_gid, sheet_html = result
+        try:
+            self.run.t.report(
+                "parsing", f"Parsing {self.named_tabs.get(result_gid, 'a tab')} ({_megabytes(sheet_html)})",
+            )
+            with self.run.t.phase("parse"):
+                candidate = await asyncio.to_thread(parse_sheet, sheet_html, self.run.name(self.title), self.run.url_norm)
+            return self._fold(result_gid, candidate, sheet_html)
+        except (ValueError, KeyError):
+            return False
+
+    def _fold(self, result_gid: str, candidate: Artist, sheet_html: str) -> bool:
+        n_eras = len(candidate.eras)
+        n_songs = _song_count(candidate)
+        logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
+        if n_eras >= 1 and n_songs == 0 and result_gid == self.unreleased_gid:
+            self.hub_gid = result_gid
+        # Songs outrank eras: flat-era tabs yield real era counts, so a small badge sub-tab
+        # could otherwise outrank the main tab (docs/decisions.md::fetcher.py::gid-fetch-priority).
+        score = (1 if n_songs else 0, n_songs, n_eras)
+        if score > self.best_score:
+            self.best_score = score
+            self.best_artist = candidate
+            self.best_gid = result_gid
+            self.best_html = sheet_html
+        if n_songs == 0:
+            return False  # never short-circuit on a song-less tab
+        # Unreleased tab wins as long as it has at least 1 era —
+        # prevents Recents/landing tabs from outcompeting it on era count.
+        if result_gid == self.unreleased_gid:
+            logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
+            return True
+        # Only stop early on a tab that is actually leading: stopping abandons every
+        # gid still in flight.
+        return n_eras >= _MIN_ERAS_FOR_VALID_GID and score == self.best_score
+
+
+async def _rank_tabs(
+    run: _FetchRun, ranking: _TabRanking, gids: list[str], title: str, page_paths: dict[str, str]
+) -> None:
+    """Priority-ordered concurrent fetch with cancellation — see
+    docs/decisions.md::fetcher.py::gid-fetch-priority"""
+    fetch_tasks: list[asyncio.Task] = []
+
+    def start(gid_list: list[str]) -> list[asyncio.Task]:
+        started = [
+            asyncio.create_task(_fetch_gid_page(
+                run.url_norm, g, title, client=run.client, timeout=run.timeout, cache_ttl=run.cache_ttl,
+                use_cache=run.use_cache, t=run.t, page_paths=page_paths,
+            ))
+            for g in gid_list
+        ]
+        fetch_tasks.extend(started)
+        return started
+
+    # A tab NAMED Unreleased with songs decides the result alone, so fetch it first and
+    # fan out only if it is empty or missing (docs/decisions.md::fetcher.py::gid-fetch-priority).
+    if ranking.unreleased_gid and gids and gids[0] == ranking.unreleased_gid:
+        waves = [gids[:1], gids[1:]]
+    else:
+        waves = [gids]
+    try:
+        for wave in waves:
+            if await _first_stop(ranking, start(wave)):
+                break
+    finally:
+        for task in fetch_tasks:
+            task.cancel()
+        await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+
+async def _first_stop(ranking: _TabRanking, tasks: list[asyncio.Task]) -> bool:
+    for task in tasks:
+        if await ranking.consider(task):
+            return True
+    return False
+
+
+async def _finish_best(
+    run: _FetchRun, ranking: _TabRanking, title: str, named_tabs: dict[str, str], art_gid: str | None,
+    content_tabs: list, page_paths: dict[str, str], api_tabs: asyncio.Task | None,
+) -> Artist:
+    best_artist = ranking.best_artist
+    t = run.t
+    t.report("parsing", f"Found {ranking.best_score[1]:,} songs in {ranking.best_score[2]:,} eras")
+    with t.phase("stage_enrich"):
+        # Hub workbook: the main tab held no songs, so the catalogue is spread across
+        # unclassified sibling tabs. Gated, so a healthy tracker never pays for the fetches.
+        if ranking.hub_gid is not None:
+            await _aggregate_hub_workbook(
+                best_artist,
+                _hub_workbook_candidates(
+                    named_tabs,
+                    {ranking.best_gid, ranking.hub_gid, art_gid} | {g for g, _k, _n in content_tabs},
+                ),
+                run.url_norm, title,
+                client=run.client, timeout=run.timeout, cache_ttl=run.cache_ttl,
+                use_cache=run.use_cache, t=t, page_paths=page_paths,
+            )
+        # Secondary tabs (Art + content tabs) — fetched concurrently,
+        # all optional: a failure never fails the request.
+        await run.load_secondary(best_artist, art_gid, content_tabs, title, page_paths, api_tabs)
+    _warn_failed_tabs(run.url_norm, t)
+    await asyncio.to_thread(_finalize, best_artist, run.url_norm)
+    if run.write_cache:
+        t.report("saving", "Saving")
+    with t.phase("cache_write"):
+        if run.write_cache and ranking.best_html:
+            await _async_set_cache(run.url_norm, ranking.best_html, title)
+        if run.write_cache:
+            await _async_set_cached_parsed(run.url_norm, best_artist, t=t)
+    return best_artist
+
+
+async def _parse_fallback(
+    run: _FetchRun, art_gid: str | None, content_tabs: list, page_paths: dict[str, str],
+    api_tabs: asyncio.Task | None,
+) -> Artist:
+    """No tab yielded songs, often because the tabs that held them failed."""
+    try:
+        html, title = await async_fetch_sheet_html(
+            run.url, timeout=run.timeout, cache_ttl=run.cache_ttl, use_cache=run.use_cache
+        )
+        artist = await asyncio.to_thread(parse_sheet, html, run.name(title), run.url_norm)
+        # A workbook of content tabs only (Misc, Music Videos) has no song tab to win discovery.
+        await run.load_secondary(artist, art_gid, content_tabs, title, page_paths, api_tabs)
+    finally:
+        _warn_failed_tabs(run.url_norm, run.t)  # also when the fallback itself fails
+    await asyncio.to_thread(_finalize, artist, run.url_norm)
+    if run.write_cache:
+        await _async_set_cached_parsed(run.url_norm, artist, t=run.t)
+    return artist
+
+
 async def async_fetch_and_parse(
     url: str,
     *,
@@ -2068,12 +2320,9 @@ async def async_fetch_and_parse(
     defaults to ``use_cache``. A force-refresh passes ``use_cache=False`` but
     ``write_cache=True`` so the fresh parse still populates the cache.
     """
-    if write_cache is None:
-        write_cache = use_cache
     t = timer if timer is not None else PhaseTimer()
     # Extract GID from original URL BEFORE normalization strips query/fragment
-    if not gid:
-        gid = _extract_gid_from_url(url)
+    gid = gid or _extract_gid_from_url(url)
     url_norm = _normalize_url(url)
     await _assert_sheet_host_allowed(url_norm)
     t.report("fetching", "Opening the tracker")
@@ -2086,271 +2335,58 @@ async def async_fetch_and_parse(
             cached_artist.source_url = url_norm
             return cached_artist
 
-    # If a specific GID was requested, try it first.
-    # If it produces 0 eras, fall through to GID discovery.
-    client = _get_sheets_client()
+    run = _FetchRun(
+        url, url_norm, artist_name, _get_sheets_client(), timeout=timeout, cache_ttl=cache_ttl,
+        use_cache=use_cache, write_cache=use_cache if write_cache is None else write_cache, t=t,
+    )
+    # A requested GID is tried first; a miss falls through to GID discovery.
     if gid:
         try:
-            with t.phase("gid_fetch"), t.phase("stage_select"):
-                html, title = await async_fetch_sheet_html(
-                    url, gid=gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-                )
-            # Base-page tab listing needed — see docs/decisions.md::fetcher.py::gid-subpage-discovery
-            named_tabs: dict[str, str] = {}
-            base_page_paths: dict[str, str] = {}
-            try:
-                with t.phase("base_fetch"):
-                    base_html, _ = await _fetch_base_html(client, url_norm, timeout=timeout)
-                named_tabs = _discover_named_tabs(base_html)
-                base_page_paths = _page_path_map(base_html)
-            except httpx.HTTPError:
-                pass  # Can't tell — fall back to trusting parse_sheet below
-            # A content or excluded tab is never the tracker; its parse would be cached
-            # under the gid-less URL every user reads.
-            side_tabs = {g for g, _kind, _n in _get_content_tabs(named_tabs)}
-            if gid not in side_tabs | _excluded_tab_gids(named_tabs):
-                name = _resolve_artist_name(title, artist_name)
-                t.report("parsing", f"Parsing {named_tabs.get(gid, 'the tab')} ({_megabytes(html)})")
-                with t.phase("parse"), t.phase("stage_select"):
-                    artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
-                # Eras alone aren't enough — a hub tab parses to eras with no
-                # songs, and accepting it here would skip discovery entirely.
-                gid_songs = sum(
-                    len(s.songs) for era in artist.eras for s in era.sections
-                )
-                if artist.eras and gid_songs:
-                    # Before returning, check if this page reveals a better
-                    # "Unreleased" tab (e.g. Travis Scott's "Recents" landing tab).
-                    unreleased_tab_gid = _get_unreleased_tab_gid(named_tabs)
-                    if not unreleased_tab_gid or unreleased_tab_gid == gid:
-                        # Load Art + content tabs here too, so a gid URL returns the same content
-                        # as discovery.
-                        with t.phase("stage_enrich"):
-                            await _load_secondary_tabs(
-                                artist,
-                                _get_art_tab_gid(named_tabs),
-                                _get_content_tabs(named_tabs),
-                                url_norm, title,
-                                client=client, timeout=timeout,
-                                cache_ttl=cache_ttl, use_cache=use_cache, t=t,
-                                page_paths=base_page_paths,
-                            )
-                        _warn_failed_tabs(url_norm, t)
-                        await asyncio.to_thread(_finalize, artist, url_norm)
-                        if write_cache:
-                            await _async_set_cached_parsed(url_norm, artist, t=t)
-                        return artist
-                    # A better "Unreleased" tab exists — fall through to full discovery
-                # GID produced 0 eras or 0 songs — fall through to discovery
-            # else: gid is a content or excluded tab — fall through to full discovery,
-            # see docs/decisions.md::fetcher.py::gid-subpage-discovery
+            artist = await _parse_requested_gid(run, gid)
+            if artist is not None:
+                return artist
         except AccessDeniedError:
             # "This tracker is private" is an answer, not a failure: let the API's dedicated
             # 403 through instead of falling back to discovery.
             raise
         except (FetchError, httpx.HTTPError, ValueError):
             pass  # GID failed — fall through to GID discovery
+    return await _discover_and_parse(run)
 
-    # Discover all GIDs and try them
+
+async def _discover_and_parse(run: _FetchRun) -> Artist:
+    """Discover all GIDs and parse the best tab."""
+    t = run.t
     api_tabs: asyncio.Task | None = None
     try:
         with t.phase("base_fetch"):
-            base_html, title = await _fetch_base_html(client, url_norm, timeout=timeout)
-
-        # If base page has tables, try parsing directly
+            base_html, title = await _fetch_base_html(run.client, run.url_norm, timeout=run.timeout)
         if _TABLE_OPEN in base_html.lower():
-            name = _resolve_artist_name(title, artist_name)
-            t.report("parsing", f"Parsing the tracker ({_megabytes(base_html)})")
-            with t.phase("parse"):
-                artist = await asyncio.to_thread(parse_sheet, base_html, name, url_norm)
-            # As in the gid path: eras without songs are a hub, and discovery may find more.
-            if artist.total_versions:
-                await asyncio.to_thread(_finalize, artist, url_norm)
-                if write_cache:
-                    await _async_set_cache(url_norm, base_html, title)
-                    await _async_set_cached_parsed(url_norm, artist, t=t)
+            artist = await _parse_base_page(run, base_html, title)
+            if artist is not None:
                 return artist
 
         # The page-switcher is authoritative for both tab names and sub-page
         # URLs — see _discover_page_urls.
         page_paths = _page_path_map(base_html)
-        gids = _discover_gids(base_html) or list(page_paths)
-        if not gids:
-            gids = ["0"]
-
+        gids = _discover_gids(base_html) or list(page_paths) or ["0"]
         # Prioritize the "Unreleased" tab; identify Art and content-tab GIDs
-        gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(
-            base_html, gids
-        )
-        api_tabs = _start_api_tabs(url_norm, content_tabs, client, timeout)
+        gids, art_gid, unreleased_gid, content_tabs, named_tabs = _prioritize_gids(base_html, gids)
+        api_tabs = _start_api_tabs(run.url_norm, content_tabs, run.client, run.timeout)
         first_tab = named_tabs.get(gids[0]) if gids else None
         t.report(
             "fetching",
             f"Found {len(named_tabs)} tabs — downloading {first_tab}"
             if named_tabs and first_tab else "Downloading the tracker",
         )
-
-        # --- Fetch all GID pages concurrently, then parse to pick best ---
-        async def _fetch_gid(gid_val: str) -> tuple[str, str] | None:
-            return await _fetch_gid_page(
-                url_norm, gid_val, title,
-                client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t, page_paths=page_paths,
-            )
-
-        # Priority-ordered concurrent fetch with cancellation — see
-        # docs/decisions.md::fetcher.py::gid-fetch-priority
-        fetch_tasks: list[asyncio.Task] = []
-
-        def _start(gid_list: list[str]) -> list[asyncio.Task]:
-            started = [asyncio.create_task(_fetch_gid(g)) for g in gid_list]
-            fetch_tasks.extend(started)
-            return started
-
-        best_artist: Artist | None = None
-        # Rank tuple order — see docs/decisions.md::fetcher.py::gid-fetch-priority
-        best_score = (0, 0, 0)
-        best_gid: str | None = None
-        hub_gid: str | None = None
-        best_html = ""
-
-        async def _consider(task: asyncio.Task) -> bool:
-            """Parse one fetched tab and fold it into the ranking. True = stop."""
-            nonlocal best_artist, best_score, best_gid, hub_gid, best_html
-            result = await task
-            if result is None:
-                return False
-            result_gid, sheet_html = result
-            try:
-                name = _resolve_artist_name(title, artist_name)
-                t.report(
-                    "parsing",
-                    f"Parsing {named_tabs.get(result_gid, 'a tab')} ({_megabytes(sheet_html)})",
-                )
-                with t.phase("parse"):
-                    candidate = await asyncio.to_thread(parse_sheet, sheet_html, name, url_norm)
-                n_eras = len(candidate.eras)
-                n_songs = sum(
-                    len(s.songs)
-                    for era in candidate.eras
-                    for s in era.sections
-                )
-
-                logger.debug("GID %s → %d eras, %d songs", result_gid, n_eras, n_songs)
-                if n_eras >= 1 and n_songs == 0 and result_gid == unreleased_gid:
-                    hub_gid = result_gid
-                # Songs outrank eras: flat-era tabs yield real era counts, so a small badge sub-tab
-                # could otherwise outrank the main tab (docs/decisions.md::fetcher.py::gid-fetch-priority).
-                score = (1 if n_songs else 0, n_songs, n_eras)
-                if score > best_score:
-                    best_score = score
-                    best_artist = candidate
-                    best_gid = result_gid
-                    best_html = sheet_html
-
-                if n_songs == 0:
-                    return False  # never short-circuit on a song-less tab
-                # Unreleased tab wins as long as it has at least 1 era —
-                # prevents Recents/landing tabs from outcompeting it on era count.
-                if result_gid == unreleased_gid:
-                    logger.debug("Selected unreleased GID %s (%d eras)", result_gid, n_eras)
-                    return True
-                if n_eras >= _MIN_ERAS_FOR_VALID_GID and score == best_score:
-                    # Only stop early on a tab that is actually leading: stopping abandons every
-                    # gid still in flight.
-                    return True
-            except (ValueError, KeyError):
-                pass
-            return False
-
-        # A tab NAMED Unreleased with songs decides the result alone, so fetch it first and
-        # fan out only if it is empty or missing (docs/decisions.md::fetcher.py::gid-fetch-priority).
-        if unreleased_gid and gids and gids[0] == unreleased_gid:
-            first_wave, second_wave = gids[:1], gids[1:]
-        else:
-            first_wave, second_wave = gids, []
-
+        ranking = _TabRanking(run, title, named_tabs, unreleased_gid)
         with t.phase("stage_select"):
-            try:
-                stopped = False
-                for task in _start(first_wave):
-                    if await _consider(task):
-                        stopped = True
-                        break
-                if not stopped and second_wave:
-                    for task in _start(second_wave):
-                        if await _consider(task):
-                            break
-            finally:
-                for task in fetch_tasks:
-                    task.cancel()
-                await asyncio.gather(*fetch_tasks, return_exceptions=True)
-
-        if best_artist and best_score[1] > 0:
-            t.report(
-                "parsing",
-                f"Found {best_score[1]:,} songs in {best_score[2]:,} eras",
-            )
-
-            with t.phase("stage_enrich"):
-                # Hub workbook: the main tab held no songs, so the catalogue is spread across
-                # unclassified sibling tabs. Gated, so a healthy tracker never pays for the fetches.
-                if hub_gid is not None:
-                    await _aggregate_hub_workbook(
-                        best_artist,
-                        _hub_workbook_candidates(
-                            named_tabs,
-                            {best_gid, hub_gid, art_gid}
-                            | {g for g, _k, _n in content_tabs},
-                        ),
-                        url_norm, title,
-                        client=client, timeout=timeout, cache_ttl=cache_ttl,
-                        use_cache=use_cache, t=t, page_paths=page_paths,
-                    )
-
-                # Secondary tabs (Art + content tabs) — fetched concurrently,
-                # all optional: a failure never fails the request.
-                await _load_secondary_tabs(
-                    best_artist, art_gid, content_tabs, url_norm, title,
-                    client=client, timeout=timeout, cache_ttl=cache_ttl,
-                    use_cache=use_cache, t=t, page_paths=page_paths,
-                    api_tabs=api_tabs,
-                )
-
-            _warn_failed_tabs(url_norm, t)
-            await asyncio.to_thread(_finalize, best_artist, url_norm)
-
-            if write_cache:
-                t.report("saving", "Saving")
-            with t.phase("cache_write"):
-                if write_cache and best_html:
-                    await _async_set_cache(url_norm, best_html, title)
-                if write_cache:
-                    await _async_set_cached_parsed(url_norm, best_artist, t=t)
-            return best_artist
-
-        # Fallback: no tab yielded songs, often because the tabs that held them failed.
-        try:
-            html, title = await async_fetch_sheet_html(
-                url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache
-            )
-            name = _resolve_artist_name(title, artist_name)
-            artist = await asyncio.to_thread(parse_sheet, html, name, url_norm)
-            # A workbook of content tabs only (Misc, Music Videos) has no song tab to win discovery.
-            await _load_secondary_tabs(
-                artist, art_gid, content_tabs, url_norm, title,
-                client=client, timeout=timeout, cache_ttl=cache_ttl,
-                use_cache=use_cache, t=t, page_paths=page_paths, api_tabs=api_tabs,
-            )
-        finally:
-            _warn_failed_tabs(url_norm, t)  # also when the fallback itself fails
-        await asyncio.to_thread(_finalize, artist, url_norm)
-        if write_cache:
-            await _async_set_cached_parsed(url_norm, artist, t=t)
-        return artist
-
+            await _rank_tabs(run, ranking, gids, title, page_paths)
+        if ranking.best_artist and ranking.best_score[1] > 0:
+            return await _finish_best(run, ranking, title, named_tabs, art_gid, content_tabs, page_paths, api_tabs)
+        return await _parse_fallback(run, art_gid, content_tabs, page_paths, api_tabs)
     except httpx.HTTPError as e:
-        _raise_fetch_error(e, url)
+        _raise_fetch_error(e, run.url)
     finally:
         if api_tabs is not None:
             api_tabs.cancel()  # a no-op once consumed; frees the request on every other exit
