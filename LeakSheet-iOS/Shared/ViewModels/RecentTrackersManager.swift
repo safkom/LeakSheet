@@ -83,11 +83,11 @@ final class RecentTrackersManager {
             confirmedCount: stats.confirmed
         )
 
-        trackers.removeAll { $0.id == entry.id }
-        trackers.insert(entry, at: 0)
-        if trackers.count > Self.maxEntries {
-            trackers = Array(trackers.prefix(Self.maxEntries))
-        }
+        #if os(macOS)
+        trackers = Self.upserted(entry, into: trackers, keepPosition: true)
+        #else
+        trackers = Self.upserted(entry, into: trackers, keepPosition: false)
+        #endif
         save()
     }
 
@@ -133,6 +133,22 @@ final class RecentTrackersManager {
             if result.count == cap { break }
         }
         return result
+    }
+
+    /// New entries go first. An existing one moves to the front unless `keepPosition`:
+    /// the Mac sidebar lists these, and a row jumping under the pointer on each load misleads.
+    nonisolated static func upserted(
+        _ entry: RecentTracker, into entries: [RecentTracker], keepPosition: Bool,
+        cap: Int = RecentTrackersManager.maxEntries
+    ) -> [RecentTracker] {
+        var result = entries
+        if keepPosition, let i = result.firstIndex(where: { $0.id == entry.id }) {
+            result[i] = entry
+            return result
+        }
+        result.removeAll { $0.id == entry.id }
+        result.insert(entry, at: 0)
+        return Array(result.prefix(cap))
     }
 
     func clearAll() {

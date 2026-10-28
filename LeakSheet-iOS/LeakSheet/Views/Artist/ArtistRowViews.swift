@@ -211,38 +211,46 @@ struct NoticeBannerView: View {
     private var tintColor: Color { isAlert ? .badgeRec : .secondary }
     private var bgColor: Color { isAlert ? Color.badgeRec.opacity(0.12) : Color.lsCard }
 
+    private var url: URL? { notice.link.flatMap(URL.init(string:)) }
+
     var body: some View {
-        Button {
-            if let link = notice.link, let url = URL(string: link) {
-                onOpenLink(url)
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: isAlert ? "exclamationmark.triangle.fill" : "info.circle.fill")
-                    .foregroundStyle(tintColor)
-                    .accessibilityHidden(true)
-                Text(notice.text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                Spacer()
-                if notice.link != nil {
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(tintColor.opacity(0.7))
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(12)
-            .background(bgColor)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+        // A plain label without a link: a disabled Button dims the text past legibility in Light.
+        if let url {
+            Button { onOpenLink(url) } label: { content }
+                .buttonStyle(.plain)
+                .accessibilityLabel(accessibilityText)
+                .accessibilityHint("Opens in the browser")
+        } else {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityText)
         }
-        .buttonStyle(.plain)
-        .disabled(notice.link == nil)
-        // The kind is carried by an icon a screen reader cannot see, and the
-        // arrow that signals "this opens something" is decoration.
-        .accessibilityLabel("\(isAlert ? "Alert" : "Notice"): \(notice.text)")
-        .accessibilityHint(notice.link == nil ? "" : "Opens in the browser")
+    }
+
+    // The kind is carried by an icon a screen reader cannot see, and the
+    // arrow that signals "this opens something" is decoration.
+    private var accessibilityText: String { "\(isAlert ? "Alert" : "Notice"): \(notice.text)" }
+
+    private var content: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isAlert ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                .foregroundStyle(tintColor)
+                .accessibilityHidden(true)
+            Text(notice.text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+            Spacer()
+            if url != nil {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(tintColor.opacity(0.7))
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(12)
+        .background(bgColor)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
