@@ -2581,137 +2581,143 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     return text, quality, rating
 
 
-def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
-    """Parse a song data row into a SongVersion."""
-    name_idx = col_map.get("name", 1)
-    raw_name = _get_cell_text(row, name_idx)
+def _opt_col(row: list[_Cell], col_map: dict[str, int], key: str) -> str | None:
+    """A dedicated column's text, or None when the column is absent or empty."""
+    return _get_cell_text(row, col_map.get(key, -1)) or None
 
-    if not raw_name:
-        return None
 
-    # Extract badge emoji
-    badge, after_badge = extract_badge(raw_name)
-
-    # Parse credits and alt titles from the multi-line name
-    song_credits = parse_song_credits(after_badge)
-    title = song_credits.title
-    featuring = song_credits.featuring
-    producers = song_credits.producers
-    collaboration = song_credits.collaboration
-    refs = song_credits.refs
-    alt_titles = song_credits.alt_titles
-
+def _song_title(after_badge: str, title: str, alt_titles: list[str]) -> tuple[str, str | None, list[str]] | None:
+    """(title, version tag, alt titles) of a name cell, or None when nothing names the song."""
     # "(unfinished)"/"[unfinished]" is a status tag, not an alt name: move it from
     # alt_titles to version_tag (only if no tag was found).
-    _found_unfinished = any(_UNFINISHED_RE.fullmatch(t.strip()) for t in alt_titles)
-    if _found_unfinished:
+    found_unfinished = any(_UNFINISHED_RE.fullmatch(t.strip()) for t in alt_titles)
+    if found_unfinished:
         alt_titles = [t for t in alt_titles if not _UNFINISHED_RE.fullmatch(t.strip())]
-
-    # Extract version tag from the clean title
-    version_tag, _base = extract_version_tag(title)
-    # Use base name (tag stripped) to avoid duplication in the UI
-    title = _base
+    # Base name (tag stripped), so the UI doesn't show the tag twice.
+    version_tag, title = extract_version_tag(title)
     # A credit-only name cell leaves no title: borrow an alt title or the raw line.
     if not title:
         raw_line = next((ln.strip() for ln in after_badge.split("\n") if ln.strip()), "")
         title = alt_titles.pop(0) if alt_titles else raw_line
         if not title:
             return None
-
-    # If found unfinished tag but no explicit version tag, set one
-    if _found_unfinished and not version_tag:
+    if found_unfinished and not version_tag:
         version_tag = "Unfinished"
+    return title, version_tag, alt_titles
 
-    # Build the version object
-    notes_idx = col_map.get("notes", 2)
-    notes_cell = _get_cell(row, notes_idx)
+
+def _song_notes(row: list[_Cell], col_map: dict[str, int], notes_cell: _Cell) -> tuple[str | None, list[str], list]:
+    """(notes, OG filenames, samples). The OG lines leave the notes so clients don't
+    render the filenames twice."""
     notes_text = notes_cell.text.strip() if notes_cell.text else None
-
-    # Extract structured metadata from notes, then strip the OG lines so clients
-    # don't render the filenames twice.
     og_filenames = extract_og_filenames(notes_text) if notes_text else []
     samples = extract_samples(notes_text) if notes_text else []
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
-
     # Dedicated File Name / Instrumental Name column: column values lead, notes-derived
     # names follow (docs/decisions.md::parser.py — dedicated credit and filename columns).
     og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
     if og_col_text:
         col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
         og_filenames = col_names + [n for n in og_filenames if n not in col_names]
+    return notes_text, og_filenames, samples
 
-    # Dedicated credit columns: a Producer column fills producers only when inline
-    # '(prod. …)' didn't; Artist columns are the performer, NOT a feature (same entry).
-    if not producers:
-        producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
-    credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
 
-    links_idx = col_map.get("links")
-    alt_links_idx = col_map.get("alt_links")
-    link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
-    alt_link_cell = _get_cell(row, alt_links_idx) if alt_links_idx is not None else _Cell()
+def _song_sources(row: list[_Cell], sources_idx: int | None, has_link_column: bool) -> tuple[list[SourceRef], list[str]]:
+    """Sources column (Travis Scott): labeled evidence links, kept apart from listen
+    links; each URL pairs with its text line (link_lines, as for notices).
 
-    # Sources column (Travis Scott): labeled evidence links, kept apart from listen
-    # links; each URL pairs with its text line (link_lines, as for notices).
+    Returns (sources, listen links). With no link column, "Source" is the link column
+    (docs/decisions.md::parser.py::sources-as-links)."""
     sources: list[SourceRef] = []
-    source_listen: list[str] = []
-    sources_idx = col_map.get("sources")
-    if sources_idx is not None:
-        src_cell = _get_cell(row, sources_idx)
-        src_lines = src_cell.text.split("\n")
-        for link_idx, link in enumerate(src_cell.links):
-            line_num = (
-                src_cell.link_lines[link_idx]
-                if link_idx < len(src_cell.link_lines)
-                else -1
-            )
-            label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
-            for cleaned in _split_links(link):
-                # With no link column, "Source" is the link column (docs/decisions.md::parser.py::sources-as-links).
-                if links_idx is None and resolve_stream_url(cleaned):
-                    source_listen.append(cleaned)
-                else:
-                    sources.append(SourceRef(label=label, url=cleaned))
-    # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
-    # merging them while preserving order and removing duplicates.
-    all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell) + source_listen
-    note_links = _extract_links_from_cell(notes_cell)
-    seen: set[str] = set()
-    merged_links: list[str] = []
-    for lnk in all_links + note_links:
-        if lnk not in seen:
-            seen.add(lnk)
-            merged_links.append(lnk)
+    listen: list[str] = []
+    if sources_idx is None:
+        return sources, listen
+    src_cell = _get_cell(row, sources_idx)
+    src_lines = src_cell.text.split("\n")
+    for link_idx, link in enumerate(src_cell.links):
+        line_num = src_cell.link_lines[link_idx] if link_idx < len(src_cell.link_lines) else -1
+        label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
+        for cleaned in _split_links(link):
+            if not has_link_column and resolve_stream_url(cleaned):
+                listen.append(cleaned)
+            else:
+                sources.append(SourceRef(label=label, url=cleaned))
+    return sources, listen
 
+
+def _song_availability(row: list[_Cell], col_map: dict[str, int]) -> tuple[str, str, bool | None, int | None]:
+    """(availability, quality, streaming, rating)."""
     avail_text = _get_cell_text(row, col_map.get("available_length", -1))
     quality_text = _get_cell_text(row, col_map.get("quality", -1))
     streaming_text = _get_cell_text(row, col_map.get("streaming", -1)).strip().lower()
-    streaming = {"yes": True, "no": False}.get(streaming_text)
     rating = None
     if avail_text and "quality" not in col_map:
         # Travis-style trackers fold quality (and a fan star rating) into the
         # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
         avail_text, split_quality, rating = _split_compound_availability(avail_text)
         quality_text = split_quality or ""
+    return avail_text, quality_text, {"yes": True, "no": False}.get(streaming_text), rating
 
+
+def _song_links(row: list[_Cell], col_map: dict[str, int], notes_cell: _Cell, source_listen: list[str]) -> list[str]:
+    """The links cell, alternate links cell, Sources listen links and the notes cell,
+    merged in that order without duplicates."""
+    def column_links(key: str) -> list[str]:
+        idx = col_map.get(key)
+        return _extract_links_from_cell(_get_cell(row, idx)) if idx is not None else []
+
+    return list(dict.fromkeys(
+        column_links("links") + column_links("alt_links") + source_listen + _extract_links_from_cell(notes_cell)
+    ))
+
+
+def _move_unplayable_to_sources(links: list[str], sources: list[SourceRef]) -> list[str]:
+    """On a no-audio row only what /stream cannot play is evidence
+    (docs/decisions.md::parser.py::sources-as-links): those links join `sources`."""
+    known = {s.url for s in sources}
+    playable = {u: _playable_no_audio(u) for u in links}
+    sources += [SourceRef(url=u) for u in links if u not in known and not playable[u]]
+    return [u for u in links if playable[u]]
+
+
+def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
+    """Parse a song data row into a SongVersion."""
+    raw_name = _get_cell_text(row, col_map.get("name", 1))
+    if not raw_name:
+        return None
+
+    badge, after_badge = extract_badge(raw_name)
+    # Parse credits and alt titles from the multi-line name
+    song_credits = parse_song_credits(after_badge)
+    named = _song_title(after_badge, song_credits.title, song_credits.alt_titles)
+    if named is None:
+        return None
+    title, version_tag, alt_titles = named
+
+    notes_cell = _get_cell(row, col_map.get("notes", 2))
+    notes_text, og_filenames, samples = _song_notes(row, col_map, notes_cell)
+
+    # Dedicated credit columns: a Producer column fills producers only when inline
+    # '(prod. …)' didn't; Artist columns are the performer, NOT a feature (same entry).
+    producers = song_credits.producers or _opt_col(row, col_map, "producers_col")
+
+    sources, source_listen = _song_sources(row, col_map.get("sources"), "links" in col_map)
+    merged_links = _song_links(row, col_map, notes_cell, source_listen)
+    avail_text, quality_text, streaming, rating = _song_availability(row, col_map)
     if _has_no_audio(avail_text, quality_text):
-        # Only what /stream cannot play is evidence (docs/decisions.md::parser.py::sources-as-links).
-        known = {s.url for s in sources}
-        playable = {u: _playable_no_audio(u) for u in merged_links}
-        sources += [SourceRef(url=u) for u in merged_links if u not in known and not playable[u]]
-        merged_links = [u for u in merged_links if playable[u]]
+        merged_links = _move_unplayable_to_sources(merged_links, sources)
 
-    version = SongVersion(
+    return SongVersion(
         name=title,
         version_tag=version_tag,
         badge=badge,
-        featuring=featuring,
+        featuring=song_credits.featuring,
         producers=producers,
-        credited_artists=credited_artists,
-        engineer=_get_cell_text(row, col_map.get("engineer", -1)) or None,
-        collaboration=collaboration,
-        refs=refs,
+        credited_artists=_opt_col(row, col_map, "credited_artists"),
+        engineer=_opt_col(row, col_map, "engineer"),
+        collaboration=song_credits.collaboration,
+        refs=song_credits.refs,
         director=song_credits.director,
         alt_titles=alt_titles,
         notes=notes_text,
@@ -2719,21 +2725,19 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         og_filenames=og_filenames,
         samples=samples,
         sources=sources,
-        track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
-        file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
-        leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,
+        track_length=_opt_col(row, col_map, "track_length"),
+        file_date=_opt_col(row, col_map, "file_date"),
+        leak_date=_opt_col(row, col_map, "leak_date"),
         available_length=avail_text or None,
         quality=quality_text or None,
         streaming=streaming,
         rating=rating,
         links=merged_links,
-        date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
-        recording_location=_get_cell_text(row, col_map.get("recording_location", -1)) or None,
-        preview_date=_get_cell_text(row, col_map.get("preview_date", -1)) or None,
-        type=_get_cell_text(row, col_map.get("type", -1)) or None,
+        date_of_recording=_opt_col(row, col_map, "date_of_recording"),
+        recording_location=_opt_col(row, col_map, "recording_location"),
+        preview_date=_opt_col(row, col_map, "preview_date"),
+        type=_opt_col(row, col_map, "type"),
     )
-
-    return version
 
 
 _NO_AUDIO_AVAILABILITY = frozenset({"rumored", "rumoured", "confirmed"})
