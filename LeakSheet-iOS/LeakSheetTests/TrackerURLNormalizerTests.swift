@@ -115,4 +115,16 @@ struct RecentTrackerDedupTests {
         #expect(RecentTrackersManager.deduplicated(entries, cap: 5).count == 5)
     }
 
+    @Test func `reopening moves a tracker to the front unless its position is kept`() {
+        let a = entry(url: "https://a.example/", name: "A")
+        let b = entry(url: "https://b.example/", name: "B")
+        let reopened = entry(url: "https://b.example/", name: "B2")
+        let moved = RecentTrackersManager.upserted(reopened, into: [a, b], keepPosition: false)
+        let kept = RecentTrackersManager.upserted(reopened, into: [a, b], keepPosition: true)
+        #expect(moved.map(\.name) == ["B2", "A"])
+        #expect(kept.map(\.name) == ["A", "B2"])
+        let new = entry(url: "https://c.example/", name: "C")
+        #expect(RecentTrackersManager.upserted(new, into: [a, b], keepPosition: true, cap: 2).map(\.name) == ["C", "A"])
+    }
+
 }

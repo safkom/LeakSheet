@@ -59,10 +59,6 @@ final class MacUIState {
     /// command nudges this and the screen focuses on the change.
     var focusSearchToken = 0
 
-    /// Measured height of the mini player bar: the window-level `safeAreaBar` insets
-    /// the detail column but NOT the inspector. Measured, since the bar grows a slider.
-    var playerBarHeight: CGFloat = 0
-
     /// Parsed trackers keyed by slug, most-recently-opened last. Capped: a big tracker
     /// plus its view model is tens of MB.
     private(set) var trackers: [String: LoadedTracker] = [:]
