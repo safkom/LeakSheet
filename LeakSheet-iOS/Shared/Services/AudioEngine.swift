@@ -43,7 +43,6 @@ final class AudioEngine {
         }
     }
     var streamUrl = ""
-    var originalQuality = false
     /// Format info read from the live AVPlayerItem once playback is ready —
     /// the fallback source for File Info when a provider has no metadata API.
     private(set) var streamFormat: StreamFormatInfo?
@@ -132,7 +131,6 @@ final class AudioEngine {
         self.artUrl = artUrl
         currentTime = 0
         error = ""
-        originalQuality = false
         streamFormat = nil
         hasVideo = false
         videoAspectRatio = nil
@@ -175,7 +173,6 @@ final class AudioEngine {
         let initialURL = originalURL ?? url
 
         streamUrl = initialURL.absoluteString
-        originalQuality = originalURL != nil
         loading = true
 
         let asset = AVURLAsset(url: initialURL)
@@ -352,57 +349,6 @@ final class AudioEngine {
             track, artistSlug: artistSlug, artistName: artistName,
             eraName: eraName, eraArt: artUrl.isEmpty ? nil : artUrl
         )
-    }
-
-    // MARK: - Original Quality
-
-    func playOriginalQuality() {
-        guard let track = currentTrack, let link = track.streamableLink else { return }
-        guard let downloadURL = StreamResolver.originalQualityURL(for: link) else {
-            error = "No original quality URL for this provider"
-            return
-        }
-
-        let savedTime = currentTime
-        let wasPlaying = isPlaying
-        loading = true
-        originalQuality = true
-        error = ""
-        // A different file: re-derive duration, never inherit it. `.status` often sees an
-        // indefinite duration, so seed from the tracker's length; the duration observer corrects it.
-        duration = Self.parseDuration(track.trackLength)
-        // The new item is a different file for the same track — trackKey
-        // alone can't tell captureStreamFormat this is stale.
-        streamFormat = nil
-
-        let asset = AVURLAsset(url: downloadURL)
-        let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 10
-        setupPlayer(with: item, restoreTime: savedTime, autoPlay: wasPlaying)
-        startLoadingTimeout()
-    }
-
-    func playCompressedStream() {
-        guard let track = currentTrack, let link = track.streamableLink else { return }
-        guard let url = StreamResolver.streamURL(for: link) else { return }
-
-        let savedTime = currentTime
-        let wasPlaying = isPlaying
-        loading = true
-        originalQuality = false
-        streamUrl = url.absoluteString
-        error = ""
-        // See playOriginalQuality: duration belongs to the item, not the track.
-        duration = Self.parseDuration(track.trackLength)
-        // The new item is a different file for the same track — trackKey
-        // alone can't tell captureStreamFormat this is stale.
-        streamFormat = nil
-
-        let asset = AVURLAsset(url: url)
-        let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 10
-        setupPlayer(with: item, restoreTime: savedTime, autoPlay: wasPlaying)
-        startLoadingTimeout()
     }
 
     // MARK: - Queue

@@ -31,7 +31,6 @@ struct NowPlayingView: View {
     #endif
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showFullScreenVideo = false
-    @State private var showLyrics = false
 
     /// Era accent brightened until it reads against the actual backdrop at the
     /// controls, where the gradient fades into the background.
@@ -189,34 +188,6 @@ struct NowPlayingView: View {
                 // Secondary controls row. Every child is incompressible, so tight spacing plus
                 // horizontal padding keeps it inside a non-Max iPhone's width.
                 HStack(spacing: 16) {
-                    // Quality toggle
-                    if player.currentTrack != nil {
-                        Button {
-                            if player.originalQuality {
-                                player.playCompressedStream()
-                            } else {
-                                player.playOriginalQuality()
-                            }
-                        } label: {
-                            Label(
-                                player.originalQuality ? "Original" : "Stream",
-                                systemImage: player.originalQuality ? "waveform" : "antenna.radiowaves.left.and.right"
-                            )
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(player.originalQuality ? (readableAccent ?? Color.lsAccent) : .secondary)
-                            // lineLimit(1) without fixedSize: the label may truncate on the narrowest devices
-                            // rather than push the row past the bezel (DECISIONS.md::NowPlayingView.swift::original-label-width).
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.glass)
-                        // Label and state, not a word that could be either.
-                        .accessibilityLabel("Audio quality")
-                        .accessibilityValue(player.originalQuality ? "Original file" : "Compressed stream")
-                        .accessibilityHint(player.originalQuality ? "Switches to the compressed stream" : "Switches to the original file")
-                    }
-
                     // Queue
                     Button {
                         #if os(macOS)
@@ -257,15 +228,6 @@ struct NowPlayingView: View {
                         .buttonStyle(.glass)
                         .accessibilityLabel(isFav ? "Remove from favourites" : "Add to favourites")
                     }
-
-                    Button { showLyrics = true } label: {
-                        Image(systemName: "text.quote")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Lyrics")
 
                     // Info
                     Button {
@@ -313,9 +275,6 @@ struct NowPlayingView: View {
                     .environment(FavouritesManager.shared)
                     .environment(PlayerViewModel.shared)
                     .environment(artistVM)
-            }
-            .sheet(isPresented: $showLyrics) {
-                LyricsView().environment(PlayerViewModel.shared)
             }
             .task(id: player.artUrl) {
                 guard !player.artUrl.isEmpty,

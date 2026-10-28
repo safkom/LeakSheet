@@ -180,7 +180,8 @@ MiniPlayerBar (fixed bottom overlay, Liquid Glass)
 NowPlayingView (sheet)
   ├── CachedImage album art
   ├── Track info + progress bar + seek
-  ├── Play/pause + prev/next + quality toggle
+  ├── Play/pause + prev/next
+  ├── Favourite + details buttons
   └── Queue button → QueueSheet
 
 Sheets:
@@ -442,7 +443,7 @@ streamable hosts.
 - Original quality (default, Settings → Playback Quality): pillows and pixeldrain play the host's
   download URL directly; froste, kraken, imgur and gdrive stay on `/api/stream`
 - Compressed stream via `/api/stream`
-- Preserves playback position on switch
+- The setting applies from the next track; the player has no in-place switch
 
 ---
 

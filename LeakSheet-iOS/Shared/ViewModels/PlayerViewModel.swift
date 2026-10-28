@@ -37,7 +37,6 @@ final class PlayerViewModel {
     var error: String { engine.error }
     var queue: [QueueItem] { engine.queue }
     var upNext: [PlaybackListItem] { engine.upNext }
-    var originalQuality: Bool { engine.originalQuality }
     /// Live-captured stream format for the current track — File Info fallback.
     var streamFormat: StreamFormatInfo? { engine.streamFormat }
     var hasVideo: Bool { engine.hasVideo }
@@ -102,14 +101,6 @@ final class PlayerViewModel {
 
     func playPrevious() {
         engine.playPrevious()
-    }
-
-    func playOriginalQuality() {
-        engine.playOriginalQuality()
-    }
-
-    func playCompressedStream() {
-        engine.playCompressedStream()
     }
 
     /// Set era context and start playback in a single call so the two states

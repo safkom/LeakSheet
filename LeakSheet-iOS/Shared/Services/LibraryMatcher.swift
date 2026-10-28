@@ -17,6 +17,21 @@ nonisolated enum LibraryMatcher {
         return key.hasPrefix("the ") ? String(key.dropFirst(4)) : key
     }
 
+    /// Tracker names carry tags like "[V2]" or "(OG)" that no catalog title has.
+    static func searchTitle(_ name: String) -> String {
+        var out = ""
+        var depth = 0
+        for c in name {
+            switch c {
+            case "(", "[": depth += 1
+            case ")", "]": depth = max(0, depth - 1)
+            default: if depth == 0 { out.append(c) }
+            }
+        }
+        let title = out.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? name : title
+    }
+
     /// A library artistName can be "A & B" or "A, B feat. C": the whole string plus each part.
     /// shortcut: splitting also cuts "Earth, Wind & Fire" into parts, harmless (parts never match).
     static func candidates(_ artistName: String) -> [String] {

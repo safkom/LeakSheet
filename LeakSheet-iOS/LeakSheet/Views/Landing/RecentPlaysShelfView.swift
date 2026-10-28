@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// Horizontal shelf of the latest plays. Each entry carries its version snapshot,
-/// so tapping one plays it without loading its tracker.
+/// so tapping one opens its details without loading its tracker.
 struct RecentPlaysShelfView: View {
     @AppStorage(ListeningHistory.enabledKey) private var historyEnabled = true
-    @Environment(PlayerViewModel.self) private var player
+    @State private var showDescription: SongDetailPayload?
 
     var body: some View {
         let entries = Self.oneTakePerSong(ListeningHistory.shared.recent)
@@ -17,13 +17,18 @@ struct RecentPlaysShelfView: View {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 14) {
                         ForEach(entries) { entry in
-                            Button { play(entry) } label: { card(entry) }
+                            Button { showDetails(entry) } label: { card(entry) }
                                 .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 20)
                 }
                 .scrollIndicators(.hidden)
+            }
+            .sheet(item: $showDescription) { payload in
+                SongDescriptionSheet(payload: payload)
+                    .environment(FavouritesManager.shared)
+                    .environment(PlayerViewModel.shared)
             }
         }
     }
@@ -51,7 +56,7 @@ struct RecentPlaysShelfView: View {
         .frame(width: 120, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Plays")
+        .accessibilityHint("Shows details")
     }
 
     /// An era plays its takes back to back, so V1 and V2 of one song would fill two cards.
@@ -62,11 +67,10 @@ struct RecentPlaysShelfView: View {
         }
     }
 
-    private func play(_ entry: ListeningHistory.RecentPlay) {
-        Haptics.light()
-        player.playTrack(
-            entry.version, artistName: entry.artistName, eraName: entry.eraName,
-            artUrl: entry.eraArt ?? "", artistSlug: entry.artistSlug
+    private func showDetails(_ entry: ListeningHistory.RecentPlay) {
+        showDescription = SongDetailPayload(
+            song: nil, version: entry.version, artistName: entry.artistName,
+            artistSlug: entry.artistSlug, eraName: entry.eraName, eraArt: entry.eraArt
         )
     }
 }
