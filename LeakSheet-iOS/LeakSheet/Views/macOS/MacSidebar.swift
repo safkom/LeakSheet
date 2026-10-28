@@ -24,6 +24,16 @@ struct MacSidebar: View {
                         MacTrackerRow(entry: entry)
                             .tag(MacSelection.tracker(slug: entry.slug))
                             .contextMenu {
+                                // Only for a parsed tracker: selecting an unparsed one already loads it.
+                                if MacUIState.shared.tracker(entry.slug) != nil {
+                                    Button("Refresh") {
+                                        selection = .tracker(slug: entry.slug)
+                                        MacUIState.shared.refreshToken += 1
+                                    }
+                                }
+                                Button("Copy Tracker URL") { Pasteboard.copy(entry.sourceUrl) }
+                                    .disabled(entry.sourceUrl.isEmpty)
+                                Divider()
                                 Button("Remove from Sidebar", role: .destructive) {
                                     remove(entry)
                                 }
@@ -31,6 +41,13 @@ struct MacSidebar: View {
                     }
                 }
             }
+        }
+        // Delete removes the selected tracker, as in Finder's sidebar.
+        .onDeleteCommand {
+            guard case .tracker(let slug) = selection,
+                  let entry = recents.trackers.first(where: { $0.slug == slug })
+            else { return }
+            remove(entry)
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 320)
         .safeAreaInset(edge: .bottom) {

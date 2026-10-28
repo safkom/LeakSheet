@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// Mac shell: a source-list sidebar over a detail column, with the player bar
-/// pinned to the window bottom and a Details/Queue inspector on the trailing edge.
+/// pinned to the detail column's bottom and a Details/Queue inspector on the trailing edge.
 /// See DECISIONS.md::MacRootView.swift::selection-shell.
 struct MacRootView: View {
     @Environment(RecentTrackersManager.self) private var recents
@@ -35,6 +35,12 @@ struct MacRootView: View {
                 detail
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
+            // On the detail column, not the split view: window-wide, it covers the sidebar and inspector.
+            .safeAreaBar(edge: .bottom) {
+                MiniPlayerBar()
+                    .environment(PlayerViewModel.shared)
+                    .environment(vmForCurrentPlayback)
+            }
             .background(Color.lsBackground)
         }
         .frame(minWidth: 900, minHeight: 620)
@@ -44,11 +50,6 @@ struct MacRootView: View {
                 .environment(FavouritesManager.shared)
                 .environment(vmForInspector)
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 460)
-        }
-        .safeAreaBar(edge: .bottom) {
-            MiniPlayerBar()
-                .environment(PlayerViewModel.shared)
-                .environment(vmForCurrentPlayback)
         }
         // ⇧⌘V routes a pasted URL into the Browse pane and loads it.
         .onChange(of: ui.pastedURL) { _, pasted in
@@ -67,6 +68,9 @@ struct MacRootView: View {
             // The Details panel is scoped to what you are looking at, so a stale song
             // can't resolve against another tracker's era tree.
             ui.selectedSong = nil
+            ui.selectedEra = nil
+            // Browse has nothing to inspect; the queue stays, it is not about the pane.
+            if selection == .browse || selection == nil, ui.inspectorTab != .queue { ui.showInspector = false }
             if case .tracker(let slug) = selection { ui.touch(slug) }
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })
@@ -128,10 +132,17 @@ struct MacRootView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
-                ProgressView()
-                Text("Loading tracker…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                // A queued open waits behind another tracker's load: that progress isn't this pane's.
+                if let phase = loader.loadPhase, let slug = ui.selectedSlug,
+                   loader.loadingURL == recents.trackers.first(where: { $0.slug == slug })?.sourceUrl {
+                    LoadPhaseRow(phase: phase)
+                        .fixedSize()
+                } else {
+                    ProgressView()
+                    Text("Loading tracker…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

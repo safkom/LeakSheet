@@ -1,14 +1,20 @@
 import Foundation
 import Observation
 
-/// Manages recently viewed trackers with UserDefaults persistence. Cap: 20.
+/// Manages recently viewed trackers with UserDefaults persistence. Cap: 20 (Mac: 200).
 @MainActor
 @Observable
 final class RecentTrackersManager {
     static let shared = RecentTrackersManager()
 
     private static let storageKey = "leaksheet_recent_trackers"
+    /// The Mac sidebar is a user-curated list that never reorders, so dropping its tail
+    /// would drop a tracker by when it was added, not when it was last used.
+    #if os(macOS)
+    private nonisolated static let maxEntries = 200
+    #else
     private nonisolated static let maxEntries = 20
+    #endif
 
     var trackers: [RecentTracker] = []
 
@@ -79,11 +85,11 @@ final class RecentTrackersManager {
             snippetCount: stats.snippets
         )
 
-        trackers.removeAll { $0.id == entry.id }
-        trackers.insert(entry, at: 0)
-        if trackers.count > Self.maxEntries {
-            trackers = Array(trackers.prefix(Self.maxEntries))
-        }
+        #if os(macOS)
+        trackers = Self.upserted(entry, into: trackers, keepPosition: true)
+        #else
+        trackers = Self.upserted(entry, into: trackers, keepPosition: false)
+        #endif
         save()
     }
 
@@ -129,6 +135,22 @@ final class RecentTrackersManager {
             if result.count == cap { break }
         }
         return result
+    }
+
+    /// New entries go first. An existing one moves to the front unless `keepPosition`:
+    /// the Mac sidebar lists these, and a row jumping under the pointer on each load misleads.
+    nonisolated static func upserted(
+        _ entry: RecentTracker, into entries: [RecentTracker], keepPosition: Bool,
+        cap: Int = RecentTrackersManager.maxEntries
+    ) -> [RecentTracker] {
+        var result = entries
+        if keepPosition, let i = result.firstIndex(where: { $0.id == entry.id }) {
+            result[i] = entry
+            return result
+        }
+        result.removeAll { $0.id == entry.id }
+        result.insert(entry, at: 0)
+        return Array(result.prefix(cap))
     }
 
     func clearAll() {

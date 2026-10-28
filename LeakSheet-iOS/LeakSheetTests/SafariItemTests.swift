@@ -21,3 +21,14 @@ struct SafariItemTests {
         #expect(!SafariItem.isWebURL(parsed))
     }
 }
+
+struct NoticeWebURLTests {
+    @Test(arguments: ["N/A", "discord", "mailto:mods@x.test", "javascript:alert(1)", ""])
+    func `a notice whose link is not a web URL has none`(link: String) {
+        #expect(Notice(text: "t", link: link, kind: nil).webURL == nil)
+    }
+
+    @Test func `a web link is kept`() {
+        #expect(Notice(text: "t", link: "https://discord.gg/x", kind: nil).webURL?.host() == "discord.gg")
+    }
+}

@@ -73,6 +73,12 @@ struct MacArtistView: View {
         // belongs to this view.
         .onChange(of: ui.focusSearchToken) { _, _ in searchFocused = true }
         .toolbar { toolbarItems }
+        // Esc leaves an open era, as ⌘[ does.
+        .onExitCommand {
+            guard openEra != nil else { return }
+            vm.openEra(nil)
+            ui.selectedSong = nil
+        }
         .sheet(isPresented: $showStats) {
             if let trackerStats = artist.trackerStats { TrackerStatsSheet(stats: trackerStats, artist: artist) }
         }
@@ -101,9 +107,9 @@ struct MacArtistView: View {
     private var subtitleText: String {
         if let openEra, let era = vm.filteredEra(named: openEra) {
             let n = era.allSongs.count
-            return "\(n) song\(n == 1 ? "" : "s") · \(artist.name)"
+            return "\(n.formatted()) song\(n == 1 ? "" : "s") · \(artist.name)"
         }
-        return "\(vm.artistStats.total) tracks"
+        return "\(vm.artistStats.total.formatted()) tracks"
     }
 
     // MARK: - Page header
@@ -129,7 +135,7 @@ struct MacArtistView: View {
                 MacFilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tint: .filterNoSnippets) { vm.toggleNoSnippets() }
                 ForEach(vm.availableTabs) { tab in
                     MacFilterChip(
-                        label: tab.name,
+                        label: ContentTabsView.labelText(for: tab.name),
                         icon: ContentTabsView.tabIcon(for: tab.kind),
                         isActive: vm.selectedTabKey == tab.id,
                         tint: .filterMisc
@@ -203,9 +209,7 @@ struct MacArtistView: View {
             Spacer(minLength: 8)
 
             Button {
-                ui.selectedEra = name
-                ui.inspectorTab = .era
-                ui.showInspector = true
+                showEraInfo(name)
             } label: {
                 Image(systemName: "info.circle")
             }
@@ -242,7 +246,18 @@ struct MacArtistView: View {
         }
     }
 
+    @ViewBuilder
     private func statTile(_ value: Int, _ label: String, _ color: Color) -> some View {
+        if artist.trackerStats != nil {
+            Button { showStats = true } label: { statTileBody(value, label, color) }
+                .buttonStyle(.plain)
+                .help("Show tracker stats")
+        } else {
+            statTileBody(value, label, color)
+        }
+    }
+
+    private func statTileBody(_ value: Int, _ label: String, _ color: Color) -> some View {
         VStack(spacing: 1) {
             Text("\(value)")
                 .font(.subheadline.weight(.semibold).monospacedDigit())
@@ -266,7 +281,8 @@ struct MacArtistView: View {
                 } label: {
                     Label("All Eras", systemImage: "chevron.backward")
                 }
-                .help("Back to all eras")
+                .keyboardShortcut("[", modifiers: .command)
+                .help("Back to all eras (⌘[)")
             }
 
             Menu {
@@ -277,6 +293,9 @@ struct MacArtistView: View {
                     Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
                 }
                 Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
+                Button { player.playNewestLeaks(vm.artist) } label: {
+                    Label("Newest Leaks", systemImage: "clock.arrow.circlepath")
+                }
             } label: {
                 Label("More", systemImage: "ellipsis")
             }
@@ -320,10 +339,14 @@ struct MacArtistView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     pageHeader
-                    MacEraGrid(vm: vm) { eraName in
-                        vm.openEra(eraName)
-                        ui.selectedSong = nil
-                    }
+                    MacEraGrid(
+                        vm: vm,
+                        onSelect: { eraName in
+                            vm.openEra(eraName)
+                            ui.selectedSong = nil
+                        },
+                        onInfo: showEraInfo
+                    )
                 }
                 .frame(maxWidth: Metrics.contentMaxWidth)
                 .frame(maxWidth: .infinity)
@@ -448,6 +471,12 @@ struct MacArtistView: View {
     }
 
     // MARK: - Actions
+
+    private func showEraInfo(_ name: String) {
+        ui.selectedEra = name
+        ui.inspectorTab = .era
+        ui.showInspector = true
+    }
 
     /// Details is a panel, never a modal — selecting a row already updates it,
     /// and an explicit Details action just makes sure the rail is showing.

@@ -11,6 +11,9 @@ final class TrackerLoader {
         didSet { if url != oldValue, error != nil { error = nil } }
     }
     private(set) var loading = false
+    /// The URL of the latest `load`, kept through `preparing`, so a pane can tell its own
+    /// progress from another load's.
+    private(set) var loadingURL: String?
     private(set) var loadPhase: APIClient.LoadPhase? {
         didSet { LoadActivity.shared.report(loadPhase) }
     }
@@ -52,6 +55,7 @@ final class TrackerLoader {
         withAnimation { error = nil }
         staleNotice = nil
         loading = true
+        loadingURL = urlString
         loadPhase = nil
         LoadActivity.shared.begin(name: resolvedName ?? URL(string: trimmed)?.host() ?? "tracker")
         defer {
