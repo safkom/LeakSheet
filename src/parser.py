@@ -3037,6 +3037,171 @@ def _looks_like_section_label(text: str) -> bool:
     return len(text) <= 40 and not text.startswith(("<", "-", "*")) and not text.endswith((".", ":"))
 
 
+def _misc_header(rows: list[list[_Cell]]) -> tuple[int, dict[str, int]]:
+    """The header row of a content tab: needs a name column plus era, links or date."""
+    for idx, row in enumerate(rows[: _MAX_HEADER_SCAN_ROWS]):
+        candidate: dict[str, int] = {}
+        for c_idx, cell in enumerate(row):
+            canonical = _MISC_COLUMN_ALIASES.get(_misc_header_key(cell.text))
+            if canonical and canonical not in candidate:
+                candidate[canonical] = c_idx
+        # A name column plus any second content signal qualifies — "date"
+        # covers Stems layouts that have neither an Era nor a Links header.
+        if "name" in candidate and ("era" in candidate or "links" in candidate or "date" in candidate):
+            return idx, candidate
+    return -1, {}
+
+
+def _misc_cell_text(row: list[_Cell], col_map: dict[str, int], field: str) -> str:
+    idx = col_map.get(field, -1)
+    if idx < 0 or idx >= len(row):
+        return ""
+    return row[idx].text.strip()
+
+
+def _misc_known_eras(
+    rows: list[list[_Cell]], header_idx: int, col_map: dict[str, int], artist_eras: Iterable[str]
+) -> set[str]:
+    """Every value the era column uses: a title naming one is a header for the rows
+    that follow (the empty-era-cell header style), no keyword list needed."""
+    known: set[str] = {k for k in map(_era_match_key, artist_eras) if k}
+    era_col = col_map.get("era", -1)
+    if era_col < 0:
+        return known
+    for row in rows[header_idx + 1:]:
+        if era_col < len(row):
+            key = _era_match_key(row[era_col].text.split("\n")[0].strip())
+            if key:
+                known.add(key)
+    return known
+
+
+def _misc_links(row: list[_Cell], col_map: dict[str, int]) -> list[str]:
+    """Parsed <a href> targets, else URL-ish text."""
+    links_idx = col_map.get("links", -1)
+    if not 0 <= links_idx < len(row):
+        return []
+    cell = row[links_idx]
+    links = [l for raw in cell.links for l in _split_links(raw)]
+    if not links:
+        text = cell.text.strip()
+        if text.startswith(("http://", "https://")):
+            links = _split_links(text)
+    return [l for l in links if l]
+
+
+def _misc_optional(field: str, val: str) -> str | None:
+    if field == "date" and not _looks_like_date(val):
+        return None
+    # A length carries a digit ("3:14") or is a tiny placeholder ("?:??", "N/A", "-");
+    # era header rows put a description in Full Length instead.
+    if field == "length" and not (_looks_like_date(val) or (val and len(val) <= 5)):
+        return None
+    return val or None
+
+
+class _MiscWalk:
+    """The row walk of `parse_misc_tab`: era headers, section labels and entries."""
+
+    def __init__(self, kind: str, col_map: dict[str, int], known_eras: set[str]):
+        self.kind = kind
+        self.col_map = col_map
+        self.known_eras = known_eras
+        # Only highlight tabs carry block separators; elsewhere a lone "Special"
+        # cell is an entry, not a label.
+        self.is_badge_tab = kind in _BADGE_BY_TAB_KIND
+        self.entries: list[MiscEntry] = []
+        self.current_era = ""
+        self.current_section = ""
+
+    def _text(self, row: list[_Cell], field: str) -> str:
+        return _misc_cell_text(row, self.col_map, field)
+
+    def _set_era(self, era: str) -> None:
+        # A content tab's sub-sections belong to one era. Badge-tab blocks
+        # (Grails / Wanted) span eras, so theirs carry over.
+        if era != self.current_era and not self.is_badge_tab:
+            self.current_section = ""
+        self.current_era = era
+
+    def row(self, row: list[_Cell]) -> None:
+        if all(not c.text.strip() for c in row) or self._badge_separator(row):
+            return
+        era_text = self._text(row, "era")
+        name = self._text(row, "name")
+        # Era header row: stats text in the era column, era name in the name
+        # column (mirrors the main tab's grammar).
+        if era_text and _MISC_ERA_STATS_RE.search(era_text):
+            if name:
+                self._set_era(name.split("\n")[0].strip())
+            return
+        if name:
+            self._named_row(row, era_text, name)
+
+    def _badge_separator(self, row: list[_Cell]) -> bool:
+        """Grails/Wanted section separator — see docs/decisions.md::parser.py::grails-wanted-separator"""
+        if not self.is_badge_tab:
+            return False
+        lone = [c.text.strip() for c in row if c.text.strip()]
+        if len(lone) != 1:
+            return False
+        _, label = extract_badge(lone[0])
+        if label.lower() not in BADGE_SECTION_LABELS:
+            return False
+        self.current_section = label
+        return True
+
+    def _named_row(self, row: list[_Cell], era_text: str, name: str) -> None:
+        first_line = name.split("\n")[0].strip()
+        name_key = _era_match_key(first_line)
+        era_key = _era_match_key(era_text.split("\n")[0].strip()) if era_text else ""
+        if era_text:
+            self._set_era(era_text.split("\n")[0].strip())
+        entry = self._entry(row, first_line)
+        # Structural-row detection — see docs/decisions.md::parser.py::badge-tab-structural-rows
+        has_track_data = any((
+            entry.date, entry.length,
+            entry.available, entry.quality, entry.links,
+        )) or entry.streaming is not None
+        # Two more era-header shapes — see docs/decisions.md::parser.py::badge-tab-structural-rows
+        stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
+        if (
+            name_key and name_key in self.known_eras and name_key != era_key
+            and (stats_era or (not era_text and not has_track_data))
+        ):
+            self._set_era(first_line)
+            return
+        # Bare label rows: docs/decisions.md::parser.py::badge-tab-structural-rows. A divider
+        # keyword with no track data is a label even with an aside (Travis's "Project" rows).
+        if not has_track_data and (
+            (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS
+        ):
+            if not self.is_badge_tab and _looks_like_section_label(first_line):
+                self.current_section = first_line
+            return
+        self.entries.append(entry)
+
+    def _entry(self, row: list[_Cell], first_line: str) -> MiscEntry:
+        def opt(field: str) -> str | None:
+            return _misc_optional(field, self._text(row, field))
+
+        return MiscEntry(
+            era_name=self.current_era,
+            row_index=len(self.entries),
+            section=self.current_section,
+            name=first_line,
+            notes=opt("notes"),
+            entry_type=opt("entry_type"),
+            date=opt("date"),
+            length=opt("length"),
+            available=opt("available"),
+            quality=opt("quality"),
+            streaming={"yes": True, "no": False}.get(self._text(row, "streaming").lower()),
+            links=_misc_links(row, self.col_map),
+            source_tab=self.kind,
+        )
+
+
 def parse_misc_tab(
     html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
@@ -3052,157 +3217,13 @@ def parse_misc_tab(
     rows = extract_table(html) if isinstance(html, str) else html
     if not rows:
         return []
-
-    # Find the header row: needs at least era+name (or name+links) matches.
-    col_map: dict[str, int] = {}
-    header_idx = -1
-    for idx, row in enumerate(rows[: _MAX_HEADER_SCAN_ROWS]):
-        candidate: dict[str, int] = {}
-        for c_idx, cell in enumerate(row):
-            key = _misc_header_key(cell.text)
-            canonical = _MISC_COLUMN_ALIASES.get(key)
-            if canonical and canonical not in candidate:
-                candidate[canonical] = c_idx
-        # A name column plus any second content signal qualifies — "date"
-        # covers Stems layouts that have neither an Era nor a Links header.
-        if "name" in candidate and (
-            "era" in candidate or "links" in candidate or "date" in candidate
-        ):
-            col_map = candidate
-            header_idx = idx
-            break
+    header_idx, col_map = _misc_header(rows)
     if header_idx < 0:
         return []
-
-    def cell_text(row: list[_Cell], field: str) -> str:
-        idx = col_map.get(field, -1)
-        if idx < 0 or idx >= len(row):
-            return ""
-        return row[idx].text.strip()
-
-    # Every value the era column uses: a title naming one is a header for the rows
-    # that follow (the empty-era-cell header style), no keyword list needed.
-    era_col = col_map.get("era", -1)
-    known_eras: set[str] = {k for k in map(_era_match_key, artist_eras) if k}
-    if era_col >= 0:
-        for row in rows[header_idx + 1:]:
-            if era_col < len(row):
-                key = _era_match_key(row[era_col].text.split("\n")[0].strip())
-                if key:
-                    known_eras.add(key)
-
-    entries: list[MiscEntry] = []
-    current_era = ""
-    current_section = ""
-    # Only highlight tabs carry block separators; elsewhere a lone "Special"
-    # cell is an entry, not a label.
-    is_badge_tab = kind in _BADGE_BY_TAB_KIND
-
-    def set_era(era: str) -> None:
-        # A content tab's sub-sections belong to one era. Badge-tab blocks
-        # (Grails / Wanted) span eras, so theirs carry over.
-        nonlocal current_era, current_section
-        if era != current_era and not is_badge_tab:
-            current_section = ""
-        current_era = era
-
+    walk = _MiscWalk(kind, col_map, _misc_known_eras(rows, header_idx, col_map, artist_eras))
     for row in rows[header_idx + 1:]:
-        if all(not c.text.strip() for c in row):
-            continue
-
-        era_text = cell_text(row, "era")
-        name = cell_text(row, "name")
-
-        # Grails/Wanted section separator — see docs/decisions.md::parser.py::grails-wanted-separator
-        lone = [c.text.strip() for c in row if c.text.strip()]
-        if is_badge_tab and len(lone) == 1:
-            _, label = extract_badge(lone[0])
-            if label.lower() in BADGE_SECTION_LABELS:
-                current_section = label
-                continue
-
-        # Era header row: stats text in the era column, era name in the name
-        # column (mirrors the main tab's grammar).
-        if era_text and _MISC_ERA_STATS_RE.search(era_text):
-            if name:
-                set_era(name.split("\n")[0].strip())
-            continue
-        if not name:
-            continue
-
-        first_line = name.split("\n")[0].strip()
-        name_key = _era_match_key(first_line)
-        era_key = _era_match_key(era_text.split("\n")[0].strip()) if era_text else ""
-
-        if era_text:
-            set_era(era_text.split("\n")[0].strip())
-
-        # Links: prefer parsed <a href> targets, fall back to URL-ish text.
-        links: list[str] = []
-        links_idx = col_map.get("links", -1)
-        if 0 <= links_idx < len(row):
-            cell = row[links_idx]
-            links.extend(l for raw in cell.links for l in _split_links(raw))
-            if not links:
-                text = cell.text.strip()
-                if text.startswith(("http://", "https://")):
-                    links.extend(_split_links(text))
-        links = [l for l in links if l]
-
-        streaming_text = cell_text(row, "streaming").lower()
-        streaming = {"yes": True, "no": False}.get(streaming_text)
-
-        def opt(field: str) -> str | None:
-            val = cell_text(row, field)
-            if field == "date" and not _looks_like_date(val):
-                return None
-            # A length carries a digit ("3:14") or is a tiny placeholder ("?:??", "N/A", "-");
-            # era header rows put a description in Full Length instead.
-            if field == "length" and not (
-                _looks_like_date(val) or (val and len(val) <= 5)
-            ):
-                return None
-            return val or None
-
-        entry = MiscEntry(
-            era_name=current_era,
-            row_index=len(entries),
-            section=current_section,
-            name=first_line,
-            notes=opt("notes"),
-            entry_type=opt("entry_type"),
-            date=opt("date"),
-            length=opt("length"),
-            available=opt("available"),
-            quality=opt("quality"),
-            streaming=streaming,
-            links=links,
-            source_tab=kind,
-        )
-        # Structural-row detection — see docs/decisions.md::parser.py::badge-tab-structural-rows
-        has_track_data = any((
-            entry.date, entry.length,
-            entry.available, entry.quality, entry.links,
-        )) or entry.streaming is not None
-
-        # Two more era-header shapes — see docs/decisions.md::parser.py::badge-tab-structural-rows
-        stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
-        if name_key and name_key in known_eras and name_key != era_key:
-            if stats_era or (not era_text and not has_track_data):
-                set_era(first_line)
-                continue
-
-        if not has_track_data:
-            # Bare label rows: docs/decisions.md::parser.py::badge-tab-structural-rows. A divider
-            # keyword with no track data is a label even with an aside (Travis's "Project" rows).
-            if (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS:
-                if not is_badge_tab and _looks_like_section_label(first_line):
-                    current_section = first_line
-                continue
-
-        entries.append(entry)
-
-    return entries
+        walk.row(row)
+    return walk.entries
 
 
 # ---------------------------------------------------------------------------
