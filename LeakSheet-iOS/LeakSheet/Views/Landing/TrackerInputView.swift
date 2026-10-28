@@ -9,9 +9,6 @@ struct TrackerInputView: View {
 
     @FocusState private var focused: Bool
     @State private var selection: TextSelection?
-    /// Seconds spent in the current phase: `.connecting` is one long server-side wait,
-    /// so the label escalates rather than sitting on "Contacting server…".
-
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -139,6 +136,8 @@ struct TrackerInputView: View {
 /// a byte counter otherwise, and a phase label either way.
 struct LoadPhaseRow: View {
     let phase: APIClient.LoadPhase
+    /// Seconds spent in the current phase: `.connecting` is one long server-side wait,
+    /// so the label escalates rather than sitting on "Contacting server…".
     @State private var phaseElapsed: TimeInterval = 0
 
     var body: some View {
