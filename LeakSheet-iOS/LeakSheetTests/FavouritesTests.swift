@@ -361,4 +361,12 @@ struct FavouriteSourceUrlTests {
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "joji", recents: [recent]) == nil)
         #expect(FavouritesManager.resolvedSourceUrl("https://x.example/", artistSlug: "ye", recents: [recent]) == "https://x.example/")
     }
+
+    @Test func `two trackers sharing a slug leave the url unset`() {
+        let alt = RecentTrackersManager.RecentTracker(
+            name: "Ye", slug: "ye", sourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", totalSongs: 0,
+            artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+        )
+        #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent, alt]) == nil)
+    }
 }

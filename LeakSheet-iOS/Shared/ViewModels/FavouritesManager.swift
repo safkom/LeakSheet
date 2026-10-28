@@ -190,7 +190,9 @@ final class FavouritesManager {
         _ given: String?, artistSlug: String, recents: [RecentTrackersManager.RecentTracker]
     ) -> String? {
         if let given, !given.isEmpty { return given }
-        return recents.first { $0.slug == artistSlug && !$0.sourceUrl.isEmpty }?.sourceUrl
+        // Two trackers can share a slug (alt trackers); guessing would store the wrong one.
+        let matches = recents.filter { $0.slug == artistSlug && !$0.sourceUrl.isEmpty }
+        return matches.count == 1 ? matches[0].sourceUrl : nil
     }
 
     @discardableResult

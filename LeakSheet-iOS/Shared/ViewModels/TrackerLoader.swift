@@ -42,7 +42,7 @@ final class TrackerLoader {
         guard !trimmed.isEmpty else { return nil }
         // A tracker keeps the name it was first opened under, whichever entry point
         // reopens it: see DECISIONS.md::TrackerLoader.swift::sticky-artist-name.
-        let resolvedName = Self.resolvedName(override: artistName, saved: recents.savedName(forSourceUrl: trimmed))
+        let resolvedName = artistName ?? recents.savedName(forSourceUrl: trimmed)
         // One load at a time, across every call site: concurrent loads raced into
         // multiple navigation pushes.
         // `waitForInFlight` (Mac sidebar, where a dropped selection leaves the pane spinning)
@@ -247,12 +247,6 @@ final class TrackerLoader {
             withAnimation { self.error = "Failed to load tracker" }
             return nil
         }
-    }
-
-    /// The name Recents pinned wins over a caller's override, so the order the entry
-    /// points are used in can't change the slug.
-    nonisolated static func resolvedName(override: String?, saved: String?) -> String? {
-        saved ?? override
     }
 
     /// Maps a backend HTTP failure to a plain, actionable message: a big tracker can

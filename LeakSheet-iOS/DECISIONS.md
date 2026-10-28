@@ -104,9 +104,10 @@ slug — every favourite saved through the other route silently stopped matching
 A sweep of the live corpus found 14 of 356 trackers where the curated and
 inferred names disagree (e.g. `billie-eilish-alt-3` vs `billie-eilish`).
 
-`load()` therefore resolves the name once, from what Recents recorded for that
-normalized URL or else the caller's override (Explore's curated name). The pin
-wins over the override, so pasting first and opening from Explore later agrees too.
+`load()` therefore resolves the name once, from the caller's override or else
+from what Recents recorded for that normalized URL, so every entry point agrees.
+The override stays first: a name inferred from a pasted alt tracker can collide
+with the main tracker's slug, and opening it from Explore is what corrects that.
 `replayFromCache` additionally refuses a cached copy whose name disagrees with
 the resolved one: the client caches the *response*, which already has any
 override applied, so a mismatched copy carries the other slug and would

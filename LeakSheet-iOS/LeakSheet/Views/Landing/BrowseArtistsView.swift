@@ -18,6 +18,7 @@ struct BrowseArtistsView: View {
     @State private var loadingUrl = ""
     @State private var recommended: [DiscoveryArtist] = []
     @State private var libraryAccess = MusicLibraryService.access
+    @State private var recommendTask: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
 
     private var filtered: [DiscoveryArtist] {
@@ -74,7 +75,8 @@ struct BrowseArtistsView: View {
                             }
                         }
                         if libraryAccess == .denied && searchText.isEmpty {
-                            Label("Allow LeakSheet to access your music in Settings to see trackers for artists you listen to.",
+                            // Denied and restricted (parental controls) look alike here, so no "go to Settings".
+                            Label("Music access is off, so there are no recommendations from your library.",
                                   systemImage: "music.note.list")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
@@ -204,7 +206,8 @@ struct BrowseArtistsView: View {
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
             // Not awaited: alias lookups take seconds and would hold the refresh spinner.
-            Task { await recommendFromLibrary() }
+            recommendTask?.cancel()
+            recommendTask = Task { await recommendFromLibrary() }
         } catch where error is CancellationError || (error as? URLError)?.code == .cancelled {
             // The refresh gesture was released or the view went away.
             // URLSession reports cancellation as URLError, not CancellationError.
@@ -223,10 +226,12 @@ struct BrowseArtistsView: View {
         libraryAccess = MusicLibraryService.access
         guard libraryAccess == .granted else { return }
         let library = await MusicLibraryService.libraryArtists()
+        guard !Task.isCancelled else { return }
         recommended = LibraryMatcher.recommend(library: library, trackers: artists)
         // Aliases ("Ye" for "Kanye West") arrive a second apart, so they refine the list afterwards.
         let missing = LibraryMatcher.unmatched(library: library, trackers: artists, limit: 15)
         let aliases = await ArtistAliasService.shared.aliases(for: missing.map(\.name))
+        guard !Task.isCancelled else { return }
         recommended = LibraryMatcher.recommend(library: library, trackers: artists, aliases: aliases)
     }
 }
