@@ -98,11 +98,13 @@ sonarqube:
   variables:
     GIT_DEPTH: "0"
     SONAR_USER_HOME: $CI_PROJECT_DIR/.sonar
+    # The GitLab-imported project on that server, not the LAN key in sonar-project.properties.
+    SONAR_PROJECT_KEY: safko_leaksheet_ccdc0356-e598-4098-95bc-392eed429112
   cache:
     key: sonar
     paths: [.sonar/cache]
   rules:
     - if: $SONAR_HOST_URL && $SONAR_TOKEN && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    # sonar-project.properties pins a LAN host URL; the CI variable must win.
-    - sonar-scanner -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.qualitygate.wait=true
+    # sonar-project.properties pins the LAN host and key; the CI values must win.
+    - sonar-scanner -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.projectKey="$SONAR_PROJECT_KEY" -Dsonar.qualitygate.wait=true
