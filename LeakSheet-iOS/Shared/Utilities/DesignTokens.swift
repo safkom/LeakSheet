@@ -182,24 +182,28 @@ func qualityVariant(_ quality: String?) -> BadgeVariant {
     return .na
 }
 
-func availabilityVariant(_ avail: String?) -> BadgeVariant {
-    guard let a = avail?.lowercased() else { return .na }
-    if a.contains("og file") || a.contains("original file") { return .ogfile }
-    if a == "full" { return .full }
-    if a.contains("tagged") { return .tagged }
-    if a.contains("stem") { return .stem }
-    if a.contains("beat") { return .beatonly }
-    if a.contains("partial") || a.contains("cut") { return .partial }
-    if a.contains("snippet") { return .snippet }
-    if a.contains("rumo") { return .rumored }  // rumored + British "rumoured"
-    if a.contains("conflicting") { return .conflicting }
-    if a.contains("confirmed") { return .confirmed }
-    if a.contains("unavailable") || a.contains(/\blost\b/) { return .unavailable }
+/// Availability wording → variant, first match wins.
+private nonisolated let availabilityRules: [(matches: @Sendable (String) -> Bool, variant: BadgeVariant)] = [
+    ({ $0.contains("og file") || $0.contains("original file") }, .ogfile),
+    ({ $0 == "full" }, .full),
+    ({ $0.contains("tagged") }, .tagged),
+    ({ $0.contains("stem") }, .stem),
+    ({ $0.contains("beat") }, .beatonly),
+    ({ $0.contains("partial") || $0.contains("cut") }, .partial),
+    ({ $0.contains("snippet") }, .snippet),
+    ({ $0.contains("rumo") }, .rumored),  // rumored + British "rumoured"
+    ({ $0.contains("conflicting") }, .conflicting),
+    ({ $0.contains("confirmed") }, .confirmed),
+    ({ $0.contains("unavailable") || $0.contains(/\blost\b/) }, .unavailable),
     // Compound values ("Full Lossless") land here; without this they'd paint neutral
     // grey beside a blue "Full". Last, so it never outranks a more specific match.
-    if a.contains("full") { return .full }
-    if a.contains("lossless") { return .lossless }
-    return .na
+    ({ $0.contains("full") }, .full),
+    ({ $0.contains("lossless") }, .lossless),
+]
+
+func availabilityVariant(_ avail: String?) -> BadgeVariant {
+    guard let a = avail?.lowercased() else { return .na }
+    return availabilityRules.first { $0.matches(a) }?.variant ?? .na
 }
 
 // MARK: - Color Utilities

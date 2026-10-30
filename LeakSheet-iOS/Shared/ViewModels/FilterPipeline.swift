@@ -37,55 +37,48 @@ extension ArtistViewModel {
         }
 
         if state.recents {
-            let results = computeRecentResults(artist: artist, state: state)
-            var playbackItems: [PlaybackListItem] = []
-            var streamIndex: [String: Int] = [:]
-            for result in results where result.version.isStreamable {
-                streamIndex[result.id] = playbackItems.count
-                playbackItems.append(PlaybackListItem(
-                    version: result.version,
-                    artistName: artist.name,
-                    eraName: result.era.name,
-                    artUrl: result.era.artUrl ?? "",
-                    artistSlug: artist.slug
-                ))
-            }
-            return FilteredContent(
-                state: state, eras: [], searchResults: [],
-                recentResults: results,
-                recentPlaybackItems: playbackItems,
-                recentStreamIndex: streamIndex,
-                miscResults: []
-            )
+            return recentContent(artist: artist, state: state)
         }
+        guard let eras = filteredEras(artist: artist, state: state, eraStats: eraStats) else { return empty }
+        return FilteredContent(
+            state: state, eras: eras, searchResults: [], recentResults: [],
+            recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
+        )
+    }
 
-        // Eras branch
+    private nonisolated static func recentContent(artist: Artist, state: FilterState) -> FilteredContent {
+        let results = computeRecentResults(artist: artist, state: state)
+        var playbackItems: [PlaybackListItem] = []
+        var streamIndex: [String: Int] = [:]
+        for result in results where result.version.isStreamable {
+            streamIndex[result.id] = playbackItems.count
+            playbackItems.append(PlaybackListItem(
+                version: result.version,
+                artistName: artist.name,
+                eraName: result.era.name,
+                artUrl: result.era.artUrl ?? "",
+                artistSlug: artist.slug
+            ))
+        }
+        return FilteredContent(
+            state: state, eras: [], searchResults: [],
+            recentResults: results,
+            recentPlaybackItems: playbackItems,
+            recentStreamIndex: streamIndex,
+            miscResults: []
+        )
+    }
+
+    /// The eras with songs left after the filters, or nil when the task was cancelled.
+    private nonisolated static func filteredEras(
+        artist: Artist, state: FilterState, eraStats: [String: Stats]
+    ) -> [FilteredEra]? {
         var eras: [FilteredEra] = []
         eras.reserveCapacity(artist.eras.count)
         for era in artist.eras {
-            if Task.isCancelled { return empty }
+            if Task.isCancelled { return nil }
             let allSongs = era.allSongs
-            guard !allSongs.isEmpty else { continue }
-
-            if state.bestOf {
-                let hasBest = allSongs.contains { song in
-                    song.versions.contains { isBestOfVersion($0) }
-                }
-                guard hasBest else { continue }
-            }
-            if state.worstOf {
-                let hasWorst = allSongs.contains { song in
-                    song.versions.contains { isWorstOfVersion($0) }
-                }
-                guard hasWorst else { continue }
-            }
-            if state.grails {
-                let hasGrail = allSongs.contains { song in
-                    song.versions.contains { isGrailOrWantedVersion($0) }
-                }
-                guard hasGrail else { continue }
-            }
-
+            guard !allSongs.isEmpty, allSongs.contains(where: { songPassesBadgeFilters($0, state: state) }) else { continue }
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
                 guard !songs.isEmpty else { return nil }
@@ -95,7 +88,6 @@ extension ArtistViewModel {
             // sections were just filtered into — not a second filter pass.
             let songs = sections.flatMap(\.songs)
             guard !songs.isEmpty else { continue }
-
             eras.append(FilteredEra(
                 era: era,
                 sections: sections,
@@ -103,21 +95,28 @@ extension ArtistViewModel {
                 stats: eraStats[era.name] ?? Stats(total: 0, available: 0, snippets: 0, confirmed: 0, fullHQ: 0)
             ))
         }
-        return FilteredContent(
-            state: state, eras: eras, searchResults: [], recentResults: [],
-            recentPlaybackItems: [], recentStreamIndex: [:], miscResults: []
-        )
+        return eras
+    }
+
+    /// Each active badge filter needs at least one version carrying that badge.
+    private nonisolated static func songPassesBadgeFilters(_ song: Song, state: FilterState) -> Bool {
+        (!state.bestOf || song.versions.contains(where: isBestOfVersion))
+            && (!state.worstOf || song.versions.contains(where: isWorstOfVersion))
+            && (!state.grails || song.versions.contains(where: isGrailOrWantedVersion))
+    }
+
+    private nonisolated static func versionPassesFilters(_ version: SongVersion, state: FilterState) -> Bool {
+        (!state.bestOf || isBestOfVersion(version))
+            && (!state.worstOf || isWorstOfVersion(version))
+            && (!state.grails || isGrailOrWantedVersion(version))
+            && !(state.noSnippets && shouldFilterForNoSnippets(version))
     }
 
     private nonisolated static func filterSongs(_ songs: [Song], state: FilterState) -> [Song] {
         guard state.bestOf || state.worstOf || state.grails || state.noSnippets else { return songs }
         return songs.compactMap { song in
             song.withFilteredVersions { version in
-                if state.bestOf && !isBestOfVersion(version) { return false }
-                if state.worstOf && !isWorstOfVersion(version) { return false }
-                if state.grails && !isGrailOrWantedVersion(version) { return false }
-                if state.noSnippets && shouldFilterForNoSnippets(version) { return false }
-                return true
+                versionPassesFilters(version, state: state)
             }
         }
     }
@@ -194,24 +193,8 @@ extension ArtistViewModel {
         var results: [RecentResult] = []
         for era in artist.eras {
             if Task.isCancelled { return [] }
-            for (songOrdinal, song) in era.allSongs.enumerated() {
-                if state.bestOf {
-                    let hasBestVersion = song.versions.contains { isBestOfVersion($0) }
-                    if !hasBestVersion { continue }
-                }
-                if state.worstOf {
-                    let hasWorstVersion = song.versions.contains { isWorstOfVersion($0) }
-                    if !hasWorstVersion { continue }
-                }
-                if state.grails {
-                    let hasGrail = song.versions.contains { isGrailOrWantedVersion($0) }
-                    if !hasGrail { continue }
-                }
-                for version in song.versions {
-                    if state.bestOf && !isBestOfVersion(version) { continue }
-                    if state.worstOf && !isWorstOfVersion(version) { continue }
-                    if state.grails && !isGrailOrWantedVersion(version) { continue }
-                    if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
+            for (songOrdinal, song) in era.allSongs.enumerated() where songPassesBadgeFilters(song, state: state) {
+                for version in song.versions where versionPassesFilters(version, state: state) {
                     // previewDate last: a leak/file date is the real event, but a preview-only
                     // version has nothing else.
                     let dateStr = [version.leakDate, version.fileDate, version.previewDate]

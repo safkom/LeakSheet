@@ -72,59 +72,9 @@ final class TrackerLoader {
             cachedEtag = await CacheService.shared.getCachedEtag(for: trimmed)
         }
 
-        // What went wrong, for telemetry: `error` holds only the user-facing message.
-        var cause: Error?
+        let request = LoadRequest(url: trimmed, artistName: resolvedName, recents: recents)
         do {
-            let result = try await APIClient.shared.parseSheet(
-                url: trimmed,
-                artistName: resolvedName,
-                forceRefresh: forceRefresh,
-                cachedEtag: cachedEtag,
-                onProgress: { @Sendable phase in
-                    // `publish` serialises phases, so a late .downloading can't follow .preparing.
-                    Self.publish(phase, to: self)
-                }
-            )
-            if let etag = result.etag {
-                await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
-            }
-            recents.saveTracker(artist: result.artist)
-            return result.artist
-        } catch let apiError as APIError {
-            switch apiError {
-            case .notModified:
-                // The sweep ages by mtime; a 304 proves the copy is current, so it counts as use.
-                await CacheService.shared.touch(url: trimmed)
-                return await replayFromCache(trimmed, artistName: resolvedName, recents: recents)
-            case .httpError(let status, let msg):
-                // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403
-                // refused); serving the cached copy would hide that forever.
-                if status >= 500,
-                   let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
-                    return cached
-                }
-                cause = apiError
-                withAnimation { error = Self.friendlyLoadError(status: status, fallback: msg) }
-            case .invalidURL:
-                cause = apiError
-                withAnimation { error = "Invalid URL" }
-            }
-        } catch let urlError as URLError where urlError.code == .timedOut {
-            if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
-                return cached
-            }
-            cause = urlError
-            withAnimation { error = "This tracker is taking a while to load. Please try again." }
-        } catch let decodingError as DecodingError {
-            // The server answered, but with data this build can't read. Not
-            // an outage, so don't say "couldn't reach the server". Reported here, before
-            // the fallback: a cached copy hides it from the user, not from us.
-            Telemetry.report("Tracker payload did not decode: \(decodingError)", category: "TrackerLoader", attributes: ["tracker": trimmed])
-            if let cached = await cachedFallback(trimmed, artistName: resolvedName, recents: recents) {
-                staleNotice = "Couldn't read the latest data — showing the last saved copy."
-                return cached
-            }
-            withAnimation { error = "This tracker's data couldn't be read. The app may need an update." }
+            return try await fetchFresh(request, forceRefresh: forceRefresh, cachedEtag: cachedEtag)
         } catch is CancellationError {
             // The user navigated away: not a failure to recover from, and a fallback would
             // write a recents entry for an abandoned tracker.
@@ -132,16 +82,93 @@ final class TrackerLoader {
         } catch let urlError as URLError where urlError.code == .cancelled {
             return nil
         } catch {
-            if let cached = await offlineFallback(trimmed, artistName: resolvedName, recents: recents) {
-                return cached
+            switch await recovery(for: error, request) {
+            case .done(let artist):
+                return artist
+            case .failed(let message, let cause):
+                withAnimation { self.error = message }
+                // `error` holds only the user-facing message; telemetry gets what went wrong.
+                if let cause {
+                    Telemetry.report("Tracker load failed: \(cause)", category: "TrackerLoader", attributes: ["tracker": trimmed])
+                }
+                return nil
             }
-            cause = error
-            withAnimation { self.error = error.localizedDescription }
         }
-        if let cause {
-            Telemetry.report("Tracker load failed: \(cause)", category: "TrackerLoader", attributes: ["tracker": trimmed])
+    }
+
+    /// One load's tracker URL, the name it loads under, and the recents it files into.
+    private struct LoadRequest {
+        let url: String
+        let artistName: String?
+        let recents: RecentTrackersManager
+    }
+
+    /// What a failed fetch comes to: a result to return (a cached copy, or nil), or a
+    /// user-facing message plus the cause to report.
+    private enum Recovery {
+        case done(Artist?)
+        case failed(String, cause: Error?)
+    }
+
+    private func fetchFresh(_ request: LoadRequest, forceRefresh: Bool, cachedEtag: String?) async throws -> Artist {
+        let result = try await APIClient.shared.parseSheet(
+            url: request.url,
+            artistName: request.artistName,
+            forceRefresh: forceRefresh,
+            cachedEtag: cachedEtag,
+            onProgress: { @Sendable phase in
+                // `publish` serialises phases, so a late .downloading can't follow .preparing.
+                Self.publish(phase, to: self)
+            }
+        )
+        if let etag = result.etag {
+            await CacheService.shared.cacheTracker(url: request.url, data: result.rawData, etag: etag)
         }
-        return nil
+        request.recents.saveTracker(artist: result.artist)
+        return result.artist
+    }
+
+    private func recovery(for error: Error, _ request: LoadRequest) async -> Recovery {
+        if let apiError = error as? APIError {
+            return await recovery(for: apiError, request)
+        }
+        if let decodingError = error as? DecodingError {
+            // The server answered, but with data this build can't read. Not
+            // an outage, so don't say "couldn't reach the server". Reported here, before
+            // the fallback: a cached copy hides it from the user, not from us.
+            Telemetry.report("Tracker payload did not decode: \(decodingError)", category: "TrackerLoader", attributes: ["tracker": request.url])
+            if let cached = await cachedFallback(request.url, artistName: request.artistName, recents: request.recents) {
+                staleNotice = "Couldn't read the latest data — showing the last saved copy."
+                return .done(cached)
+            }
+            return .failed("This tracker's data couldn't be read. The app may need an update.", cause: nil)
+        }
+        if let cached = await offlineFallback(request.url, artistName: request.artistName, recents: request.recents) {
+            return .done(cached)
+        }
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return .failed("This tracker is taking a while to load. Please try again.", cause: urlError)
+        }
+        return .failed(error.localizedDescription, cause: error)
+    }
+
+    private func recovery(for apiError: APIError, _ request: LoadRequest) async -> Recovery {
+        switch apiError {
+        case .notModified:
+            // The sweep ages by mtime; a 304 proves the copy is current, so it counts as use.
+            await CacheService.shared.touch(url: request.url)
+            return .done(await replayFromCache(request.url, artistName: request.artistName, recents: request.recents))
+        case .httpError(let status, let msg):
+            // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403
+            // refused); serving the cached copy would hide that forever.
+            if status >= 500,
+               let cached = await offlineFallback(request.url, artistName: request.artistName, recents: request.recents) {
+                return .done(cached)
+            }
+            return .failed(Self.friendlyLoadError(status: status, fallback: msg), cause: apiError)
+        case .invalidURL:
+            return .failed("Invalid URL", cause: apiError)
+        }
     }
 
     /// `cachedFallback` for the failure paths: same lookup, but it marks the

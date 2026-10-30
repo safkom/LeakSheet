@@ -3,6 +3,11 @@ import Testing
 
 @testable import LeakSheet
 
+private struct StreamLinkVector: Decodable { let link: String; let provider: String? }
+private struct TrackerURLVector: Decodable { let raw: String; let normalized: String }
+private struct KnownLinkVector: Decodable { let link: String; let python: String?; let swift: String? }
+private struct KnownURLVector: Decodable { let raw: String; let python: String?; let swift: String }
+
 /// Replays Fixtures/stream_links.json, which tests/parse/test_link_rule_contract.py builds from
 /// the backend's own resolver and normalizer: a rule the two sides read differently fails here.
 /// The known differences are pinned both ways, so closing one also fails until it is moved.
@@ -10,14 +15,10 @@ struct LinkRuleContractTests {
     private final class BundleToken {}
 
     private struct Vectors: Decodable {
-        struct StreamLink: Decodable { let link: String; let provider: String? }
-        struct TrackerURL: Decodable { let raw: String; let normalized: String }
-        struct KnownLink: Decodable { let link: String; let python: String?; let swift: String? }
-        struct KnownURL: Decodable { let raw: String; let python: String?; let swift: String }
-        let streamLinks: [StreamLink]
-        let trackerUrls: [TrackerURL]
-        let knownDifferences: [KnownLink]
-        let knownUrlDifferences: [KnownURL]
+        let streamLinks: [StreamLinkVector]
+        let trackerUrls: [TrackerURLVector]
+        let knownDifferences: [KnownLinkVector]
+        let knownUrlDifferences: [KnownURLVector]
 
         enum CodingKeys: String, CodingKey {
             case streamLinks = "stream_links"
