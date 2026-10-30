@@ -1484,6 +1484,123 @@ async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
         logger.warning("slot original not stored: %s", exc)
 
 
+async def _image_source(url: str) -> tuple[str, str | None]:
+    """(upstream URL, cover slot). A payload's stable cover key is served from its slot,
+    filled from the slot's latest source on a miss (docs/decisions.md::api.py::_era_art_base)."""
+    slot = None
+    if url.startswith("leaksheet:"):
+        match = _ART_SLOT_RE.fullmatch(url)
+        if match is None:
+            raise HTTPException(status_code=400, detail="Invalid cover key")
+        slot = match.group(1)
+        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
+    # Fix protocol-relative URLs
+    if url.startswith("//"):
+        url = "https:" + url
+    # A slot with no recorded source can still be served from its stored copy.
+    if slot is None or url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme")
+        if not _image_host_allowed(url):
+            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
+    return url, slot
+
+
+def _image_base_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": _CC_IMAGE,
+        # Wider than the app CORS allowlist: web clients read covers through a canvas
+        # (crossorigin="anonymous"). Reach is bounded by _image_host_allowed.
+        "Access-Control-Allow-Origin": "*",
+        # Served from the app's own origin: an image must never run script.
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+    }
+
+
+async def _google_resized(url: str, width: int, headers: dict, base_headers: dict) -> Response | None:
+    """Google-side resizing, preferred: no local decode, no disk cache (the CDN did the work)."""
+    google_url = _rewrite_google_size(url, width)
+    if google_url is None:
+        return None
+    try:
+        # Capped, like the fallback path: a plain .get() buffers the whole body.
+        resp, gdata = await _get_image_capped(google_url, headers)
+    except httpx.HTTPError as exc:
+        # Fall through to the original URL + Pillow path.
+        logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
+        return None
+    ct = resp.headers.get("content-type", "")
+    if resp.status_code == 200 and _is_raster_image(ct):
+        return Response(content=gdata, media_type=ct, headers={**base_headers, "X-Cache-Status": "origin"})
+    return None
+
+
+async def _original_image(url: str, slot: str | None, headers: dict, stored) -> tuple[bytes, str, int]:
+    """(bytes, content type, upstream status) of the original: the stored copy, else the
+    upstream, streamed with a byte cap (the allowlist admits drive.usercontent.google.com,
+    so a plain .get() of a huge user upload could OOM the worker before any check)."""
+    if stored is not None:
+        return stored[0], stored[1], 200
+    if not url:
+        raise HTTPException(status_code=404, detail="Unknown cover")
+    resp, data = await _get_image_capped(url, headers)
+    ct = resp.headers.get("content-type", "")
+    if slot is not None and resp.status_code == 200 and _is_raster_image(ct):
+        # A cold slot keeps its original, so other widths need no upstream; the
+        # capping decode runs after the response, not before it.
+        _spawn_detached(_store_slot_original(slot, data, ct))
+    return data, ct, resp.status_code
+
+
+async def _resized_image_response(
+    data: bytes, ct: str, width: int, cache_key: str, base_headers: dict
+) -> Response:
+    original_len = len(data)
+    async with _resize_slot():
+        data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
+    # _resize_image_bytes returns the input untouched when it refuses to decode;
+    # only a resize, or an original that already fits, is filed under the width.
+    status = "origin"
+    if len(data) < original_len or _fits_width(data, width):
+        written_etag = await asyncio.to_thread(_write_image_cache, cache_key, data, ct)
+        if written_etag:
+            base_headers["ETag"] = f'"{written_etag}"'
+        status = "miss"
+    return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": status})
+
+
+def _image_failure(upstream_status: int, url: str) -> HTTPException:
+    # An expired Google cover token is a cover that is gone, not an outage; a 503 here
+    # would also read as one.
+    if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
+        logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
+        return HTTPException(status_code=404, detail="Cover token expired")
+    # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
+    # is 503 (Cloudflare masks a 502).
+    logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
+    return HTTPException(
+        status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
+        detail="Upstream image fetch failed",
+    )
+
+
+async def _serve_image(url: str, slot: str | None, width: int | None, cache_base: str, cache_key: str | None, base_headers: dict) -> Response:
+    headers = _image_request_headers(url)
+    # A cover _warm_era_art downloaded while its token worked. Read before any
+    # upstream request, but after the thumbnail hit, which never needs the original.
+    stored = await asyncio.to_thread(_read_image_cache, _image_cache_key(cache_base, None))
+    if width is not None and stored is None:
+        resized = await _google_resized(url, width, headers, base_headers)
+        if resized is not None:
+            return resized
+    data, ct, upstream_status = await _original_image(url, slot, headers, stored)
+    if upstream_status != 200 or not _is_raster_image(ct):
+        raise _image_failure(upstream_status, url)
+    if width is not None:
+        return await _resized_image_response(data, ct, width, cache_key, base_headers)
+    return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": "origin"})
+
+
 @app.get("/image-proxy", responses={
     400: {"description": "Bad Request"},
     403: {"description": "Forbidden"},
@@ -1501,140 +1618,26 @@ async def proxy_image(
     supports ``=sNNN`` sizing, else locally with Pillow (result disk-cached
     in CACHE_DIR as flat ``img_*`` files, cleared by /cache/clear).
     """
-    # A payload's stable cover key: served from its slot, filled from the slot's latest
-    # source on a miss (docs/decisions.md::api.py::_era_art_base).
-    slot = None
-    if url.startswith("leaksheet:"):
-        match = _ART_SLOT_RE.fullmatch(url)
-        if match is None:
-            raise HTTPException(status_code=400, detail="Invalid cover key")
-        slot = match.group(1)
-        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
-
-    # Fix protocol-relative URLs
-    if url.startswith("//"):
-        url = "https:" + url
-
-    # A slot with no recorded source can still be served from its stored copy.
-    if slot is None or url:
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Invalid URL scheme")
-        if not _image_host_allowed(url):
-            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
-
+    url, slot = await _image_source(url)
     width = _snap_image_width(w) if w else None
-    base_headers = {
-        "Cache-Control": _CC_IMAGE,
-        # Wider than the app CORS allowlist: web clients read covers through a canvas
-        # (crossorigin="anonymous"). Reach is bounded by _image_host_allowed.
-        "Access-Control-Allow-Origin": "*",
-        # Served from the app's own origin: an image must never run script.
-        "Content-Security-Policy": "sandbox; default-src 'none'",
-    }
-
+    base_headers = _image_base_headers()
     # The client's URL may be an expired cover token: resolve the (tracker, era) slot
     # it was warmed into, so original and thumbnail survive the next reparse.
     cache_base = slot or await asyncio.to_thread(_read_image_alias, url) or url
 
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
-    cached = None
     if width is not None:
         cache_key = _image_cache_key(cache_base, width)
         cached = await asyncio.to_thread(_read_image_cache, cache_key)
         if cached is not None:
-            entry_etag = cached[2]
+            data, ct, entry_etag = cached
             base_headers["ETag"] = f'"{entry_etag}"'
             if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
-
-    headers = _image_request_headers(url)
-
+            return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": "hit"})
     try:
-        if cached is not None:
-            data, ct, _etag = cached
-            return Response(
-                content=data, media_type=ct,
-                headers={**base_headers, "X-Cache-Status": "hit"},
-            )
-
-        # A cover _warm_era_art downloaded while its token worked. Read before any
-        # upstream request, but after the thumbnail hit, which never needs the original.
-        stored = await asyncio.to_thread(
-            _read_image_cache, _image_cache_key(cache_base, None)
-        )
-
-        if width is not None:
-
-            # Prefer Google-side resizing — no local decode, no disk cache
-            # needed (the CDN did the work).
-            google_url = _rewrite_google_size(url, width)
-            if google_url is not None and stored is None:
-                try:
-                    # Capped, like the fallback path below: a plain .get() buffers the whole body.
-                    resp, gdata = await _get_image_capped(google_url, headers)
-                    ct = resp.headers.get("content-type", "")
-                    if resp.status_code == 200 and _is_raster_image(ct):
-                        return Response(
-                            content=gdata, media_type=ct,
-                            headers={**base_headers, "X-Cache-Status": "origin"},
-                        )
-                except httpx.HTTPError as exc:
-                    # Fall through to the original URL + Pillow path.
-                    logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
-
-        # Streamed with a byte cap: the allowlist admits drive.usercontent.google.com, so
-        # a plain .get() of a huge user upload could OOM the worker before any check.
-        if stored is not None:
-            data, ct = stored[0], stored[1]
-            upstream_status = 200
-        elif not url:
-            raise HTTPException(status_code=404, detail="Unknown cover")
-        else:
-            resp, data = await _get_image_capped(url, headers)
-            ct = resp.headers.get("content-type", "")
-            upstream_status = resp.status_code
-            if slot is not None and upstream_status == 200 and _is_raster_image(ct):
-                # A cold slot keeps its original, so other widths need no upstream; the
-                # capping decode runs after the response, not before it.
-                _spawn_detached(_store_slot_original(slot, data, ct))
-        if upstream_status == 200 and _is_raster_image(ct):
-            if width is not None:
-                original_len = len(data)
-                async with _resize_slot():
-                    data, ct = await asyncio.to_thread(
-                        _resize_image_bytes, data, width, ct
-                    )
-                # _resize_image_bytes returns the input untouched when it refuses to decode;
-                # only a resize, or an original that already fits, is filed under the width.
-                if len(data) < original_len or _fits_width(data, width):
-                    written_etag = await asyncio.to_thread(
-                        _write_image_cache, cache_key, data, ct
-                    )
-                    if written_etag:
-                        base_headers["ETag"] = f'"{written_etag}"'
-                    status = "miss"
-                else:
-                    status = "origin"
-            else:
-                status = "origin"
-            return Response(
-                content=data, media_type=ct,
-                headers={**base_headers, "X-Cache-Status": status},
-            )
-
-        # An expired Google cover token is a cover that is gone, not an outage; a 503 here
-        # would also read as one.
-        if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
-            logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
-            raise HTTPException(status_code=404, detail="Cover token expired")
-        # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
-        # is 503 (Cloudflare masks a 502).
-        logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
-        raise HTTPException(
-            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
-            detail="Upstream image fetch failed",
-        )
+        return await _serve_image(url, slot, width, cache_base, cache_key, base_headers)
     except HTTPException:
         raise
     except Exception as e:
@@ -2233,6 +2236,206 @@ async def list_stream_hosts() -> Response:
     )
 
 
+async def _stream_target(url: str) -> tuple[str, str | None]:
+    """The resolved stream URL and its provider; refuses unsupported, disallowed or down hosts."""
+    stream_url = resolve_stream_url(url)
+    if stream_url is None:
+        raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
+    if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
+        raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
+    # A provider known to be down is refused at once, until a retry is due: see
+    # docs/decisions.md::host_health.py.
+    provider = host_health.provider_of(stream_url)
+    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{outage['host']} is temporarily unavailable",
+            headers={"Retry-After": "60"},
+        )
+    return stream_url, provider
+
+
+def _client_range(range_header: str | None) -> tuple[str | None, int, bool]:
+    """(Range header to forward, its start byte, whether it is a suffix range).
+
+    Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
+    not forwarded: upstreams turn garbage Range values into hard errors."""
+    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
+    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
+        return None, 0, False  # malformed or inverted: ignored, never forwarded
+    if not range_header:
+        return None, 0, False
+    start = re.match(r"bytes=(\d{1,19})-", range_header)
+    if start:
+        return range_header, int(start.group(1)), False
+    return range_header, 0, bool(re.match(r"bytes=-\d+", range_header))
+
+
+def _upstream_status_exception(e: UpstreamStatusError) -> HTTPException:
+    """Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
+    crosses over (see UpstreamStatusError). Everything else is 503."""
+    if e.status_code in (404, 410):
+        return HTTPException(status_code=404, detail="Upstream file not found")
+    if e.status_code == 429:
+        return HTTPException(status_code=429, detail="Upstream rate limited", headers={"Retry-After": "30"})
+    if e.status_code in (401, 403):
+        # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
+        return HTTPException(status_code=424, detail="upstream_forbidden")
+    if 400 <= e.status_code < 500:
+        return HTTPException(status_code=e.status_code, detail="Upstream refused the request")
+    return HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+
+
+async def _open_stream(url: str, stream_url: str, provider: str | None, range_header: str | None) -> httpx.Response:
+    """The upstream response, with every failure mapped to the status a client acts on."""
+    try:
+        resp = await stream_audio(stream_url, range_header=range_header)
+    except GdriveInterstitialError as e:
+        # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
+        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
+        raise HTTPException(status_code=409, detail="gdrive_interstitial")
+    except UpstreamStatusError as e:
+        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        await _record_stream_outcome(provider, url, e)
+        raise _upstream_status_exception(e)
+    except NonMediaError as e:
+        logger.warning("Stream non-media for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=415, detail="not_media")
+    except ValueError as e:
+        # The message can name internal hosts and SSRF-check internals: log it, return
+        # something generic.
+        logger.warning("Stream error for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+    except Exception as e:
+        _log_upstream_failure("Stream error", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+    await _record_stream_outcome(provider, url, None)
+    return resp
+
+
+async def _refusal_response(resp: httpx.Response) -> Response | None:
+    """A 403 or 416 the upstream returned (not raised), closed and relayed."""
+    # Permission-required/private gdrive files come back from stream_audio
+    # as a real 403 response object (not raised); see the 424 mapping above.
+    if resp.status_code == 403:
+        await resp.aclose()
+        raise HTTPException(status_code=424, detail="upstream_forbidden")
+    # Upstream judged the (valid) range unsatisfiable — relay it faithfully
+    # instead of collapsing it into a generic 503.
+    if resp.status_code == 416:
+        cr = resp.headers.get("content-range")
+        await resp.aclose()
+        return Response(status_code=416, headers={"Content-Range": cr or "bytes */*"})
+    return None
+
+
+class _UpstreamBody:
+    """The upstream body with its sniffed first chunk put back in front; every stream
+    it hands out closes the upstream response when done."""
+
+    def __init__(self, resp: httpx.Response):
+        self.resp = resp
+        self.iterator = resp.aiter_bytes()
+        self.prepend = b""
+
+    async def sniff(self, url: str) -> bytes:
+        """Read the first _SNIFF_BYTES for MIME sniffing — see docs/decisions.md::api.py::mime-sniffing"""
+        try:
+            while len(self.prepend) < _SNIFF_BYTES:
+                self.prepend += await self.iterator.__anext__()
+        except StopAsyncIteration:
+            pass
+        except Exception as exc:
+            # A read error while sniffing would leak `resp`'s pooled connection: close it and
+            # surface a 503.
+            await self.resp.aclose()
+            logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
+            raise HTTPException(status_code=503, detail="Upstream read error") from exc
+        return self.prepend
+
+    async def _chunks(self):
+        if self.prepend:
+            yield self.prepend
+        async for chunk in self.iterator:
+            yield chunk
+
+    async def _closing(self, iterator):
+        try:
+            async for chunk in iterator:
+                yield chunk
+        finally:
+            await self.resp.aclose()
+
+    def stream(self):
+        return self._closing(self._chunks())
+
+    def slice(self, start: int, end: int):
+        # The slice operates on the FULL byte-offset stream (prepend chunk first).
+        return self._closing(_slice_byte_stream(self._chunks(), start, end))
+
+
+def _passthrough_206_headers(resp: httpx.Response, ct: str | None, disposition: str | None) -> dict[str, str]:
+    headers: dict[str, str] = {"Accept-Ranges": "bytes"}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    if ct:
+        headers["Content-Type"] = ct
+    cr = resp.headers.get("content-range")
+    if cr:
+        headers["Content-Range"] = cr
+        # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
+        # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
+        cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
+        if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
+            headers["Content-Length"] = str(int(cr_match.group(2)) - int(cr_match.group(1)) + 1)
+    if "Content-Length" not in headers:
+        cl = _parse_content_length(resp.headers.get("content-length"))
+        if cl is not None:
+            headers["Content-Length"] = str(cl)
+    return headers
+
+
+def _full_body_headers(ct: str | None, disposition: str | None, total_size: int | None) -> dict[str, str]:
+    headers = {"Accept-Ranges": "bytes"}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    if ct:
+        headers["Content-Type"] = ct
+    if total_size is not None:
+        headers["Content-Length"] = str(total_size)
+    return headers
+
+
+async def _synthesized_range_response(
+    body: _UpstreamBody, range_header: str, total_size: int | None, ct: str | None, disposition: str | None,
+) -> Response:
+    """Client requested Range but upstream ignored it — plan the response."""
+    plan = _plan_synthesized_range(range_header, total_size)
+    if plan.kind == "unsatisfiable":
+        await body.resp.aclose()
+        cr_total = str(total_size) if total_size is not None else "*"
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{cr_total}"})
+    headers = {"Accept-Ranges": "bytes", "Content-Type": ct or _MIME_OCTET}
+    if plan.kind == "full":
+        # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
+        if disposition:
+            headers["Content-Disposition"] = disposition
+        return StreamingResponse(body.stream(), status_code=200, headers=headers, media_type=ct or _MIME_OCTET)
+    # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233 when the complete
+    # length is unknown). A 'partial' plan is only made when total_size is known.
+    headers["Content-Length"] = str(plan.end - plan.start + 1)
+    headers["Content-Range"] = f"bytes {plan.start}-{plan.end}/{total_size}"
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    return StreamingResponse(
+        body.slice(plan.start, plan.end), status_code=206, headers=headers, media_type=ct or _MIME_OCTET,
+    )
+
+
 @app.get("/stream", responses={
     400: {"description": "Bad Request"},
     403: {"description": "Forbidden"},
@@ -2254,245 +2457,38 @@ async def proxy_stream(
     When upstream doesn't support Range, synthesises partial responses locally.
     Pass ?download=true to get a Content-Disposition: attachment header.
     """
-    stream_url = resolve_stream_url(url)
-    if stream_url is None:
-        raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
+    stream_url, provider = await _stream_target(url)
+    # The range shape is parsed early: the MIME sniffing decision below needs it.
+    range_header, range_start, is_suffix_range = _client_range(request.headers.get("range"))
+    resp = await _open_stream(url, stream_url, provider, range_header)
+    refusal = await _refusal_response(resp)
+    if refusal is not None:
+        return refusal
 
-    if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
-        raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
-
-    # A provider known to be down is refused at once, until a retry is due: see
-    # docs/decisions.md::host_health.py.
-    provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
-        raise HTTPException(
-            status_code=503,
-            detail=f"{outage['host']} is temporarily unavailable",
-            headers={"Retry-After": "60"},
-        )
-
-    # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
-    # not forwarded: upstreams turn garbage Range values into hard errors.
-    range_header = request.headers.get("range")
-    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
-    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
-        range_header = None  # malformed or inverted: ignored, never forwarded
-
-    # Parse range shape early — needed for the MIME sniffing decision below.
-    _range_start = 0
-    _is_suffix_range = False
-    if range_header:
-        _rs_m = re.match(r"bytes=(\d{1,19})-", range_header)
-        if _rs_m:
-            _range_start = int(_rs_m.group(1))
-        else:
-            _is_suffix_range = bool(re.match(r"bytes=-\d+", range_header))
-
-    try:
-        resp = await stream_audio(stream_url, range_header=range_header)
-    except GdriveInterstitialError as e:
-        # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
-        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
-        raise HTTPException(status_code=409, detail="gdrive_interstitial")
-    except UpstreamStatusError as e:
-        # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
-        # crosses over (see UpstreamStatusError). Everything else is 503.
-        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
-        await _record_stream_outcome(provider, url, e)
-        if e.status_code in (404, 410):
-            raise HTTPException(status_code=404, detail="Upstream file not found")
-        if e.status_code == 429:
-            raise HTTPException(
-                status_code=429,
-                detail="Upstream rate limited",
-                headers={"Retry-After": "30"},
-            )
-        if e.status_code in (401, 403):
-            # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
-            raise HTTPException(status_code=424, detail="upstream_forbidden")
-        if 400 <= e.status_code < 500:
-            raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
-        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
-    except NonMediaError as e:
-        logger.warning("Stream non-media for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=415, detail="not_media")
-    except ValueError as e:
-        # The message can name internal hosts and SSRF-check internals: log it, return
-        # something generic.
-        logger.warning("Stream error for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
-    except Exception as e:
-        _log_upstream_failure("Stream error", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
-    await _record_stream_outcome(provider, url, None)
-
-    # Permission-required/private gdrive files come back from stream_audio
-    # as a real 403 response object (not raised); see the 424 mapping above.
-    if resp.status_code == 403:
-        await resp.aclose()
-        raise HTTPException(status_code=424, detail="upstream_forbidden")
-
-    # Upstream judged the (valid) range unsatisfiable — relay it faithfully
-    # instead of collapsing it into a generic 503.
-    if resp.status_code == 416:
-        cr = resp.headers.get("content-range")
-        await resp.aclose()
-        return Response(
-            status_code=416,
-            headers={"Content-Range": cr} if cr else {"Content-Range": "bytes */*"},
-        )
-
-    raw_ct = resp.headers.get("content-type")
-    raw_cd = resp.headers.get("content-disposition")
-    ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
+    ct = _fix_audio_mime(
+        resp.headers.get("content-type"), url=str(resp.url), content_disposition=resp.headers.get("content-disposition")
+    )
     total_size = _parse_content_length(resp.headers.get("content-length"))
-
-    # MIME sniffing on the first bytes — see docs/decisions.md::api.py::mime-sniffing
-    _stream_iter = resp.aiter_bytes()
-    _prepend_chunk: bytes = b""
-
+    body = _UpstreamBody(resp)
     # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
     # A 206 to a suffix range ('bytes=-N') starts at the file TAIL: never sniff it.
-    _body_starts_at_zero = resp.status_code == 200 or (
-        _range_start == 0 and not _is_suffix_range
-    )
-    if _body_starts_at_zero:
-        try:
-            while len(_prepend_chunk) < _SNIFF_BYTES:
-                _prepend_chunk += await _stream_iter.__anext__()
-        except StopAsyncIteration:
-            pass
-        except Exception as exc:
-            # A read error while sniffing would leak `resp`'s pooled connection: close it and
-            # surface a 503.
-            await resp.aclose()
-            logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
-            raise HTTPException(status_code=503, detail="Upstream read error") from exc
-        sniffed = _sniff_audio_format(_prepend_chunk[:_SNIFF_BYTES])
+    if resp.status_code == 200 or (range_start == 0 and not is_suffix_range):
+        head = await body.sniff(url)
+        sniffed = _sniff_audio_format(head[:_SNIFF_BYTES])
         if sniffed:
             ct = sniffed
-        elif _is_non_media(_prepend_chunk):
+        elif _is_non_media(head):
             await resp.aclose()
             raise HTTPException(status_code=415, detail="Not an audio or video file")
 
     # When ?download=true, add Content-Disposition with correct extension
-    if download:
-        ext = _MIME_TO_EXT.get(ct, ".mp3")
-        _disposition = f'attachment; filename="track{ext}"'
-    else:
-        _disposition = None
-
-    async def _iter_upstream():
-        """Prepend the sniffed first chunk, then relay the upstream body."""
-        if _prepend_chunk:
-            yield _prepend_chunk
-        async for chunk in _stream_iter:
-            yield chunk
-
-    async def _closing(iterator):
-        """Relay *iterator*, guaranteeing the upstream response is closed."""
-        try:
-            async for chunk in iterator:
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    # ---------- upstream DID handle Range → pass through as-is ----------
+    disposition = f'attachment; filename="track{_MIME_TO_EXT.get(ct, ".mp3")}"' if download else None
+    # Upstream DID handle Range: pass through as-is.
     if resp.status_code == 206:
-        headers: dict[str, str] = {"Accept-Ranges": "bytes"}
-        if _disposition:
-            headers["Content-Disposition"] = _disposition
-        if ct:
-            headers["Content-Type"] = ct
-        cr = resp.headers.get("content-range")
-        if cr:
-            headers["Content-Range"] = cr
-            # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
-            # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
-            cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
-            if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
-                headers["Content-Length"] = str(
-                    int(cr_match.group(2)) - int(cr_match.group(1)) + 1
-                )
-        if "Content-Length" not in headers:
-            cl = _parse_content_length(resp.headers.get("content-length"))
-            if cl is not None:
-                headers["Content-Length"] = str(cl)
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=206,
-            headers=headers,
-            media_type=ct or _MIME_OCTET,
-        )
-
-    # ---------- upstream returned 200 (no Range support) ----------------
-    # If the client didn't ask for Range either, just pass the full body.
+        headers = _passthrough_206_headers(resp, ct, disposition)
+        return StreamingResponse(body.stream(), status_code=206, headers=headers, media_type=ct or _MIME_OCTET)
+    # Upstream returned 200 (no Range support) and the client didn't ask for Range either.
     if not range_header:
-        headers = {"Accept-Ranges": "bytes"}
-        if _disposition:
-            headers["Content-Disposition"] = _disposition
-        if ct:
-            headers["Content-Type"] = ct
-        if total_size is not None:
-            headers["Content-Length"] = str(total_size)
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=200,
-            headers=headers,
-            media_type=ct or _MIME_OCTET,
-        )
-
-    # Client requested Range but upstream ignored it — plan the response.
-    plan = _plan_synthesized_range(range_header, total_size)
-
-    if plan.kind == "unsatisfiable":
-        await resp.aclose()
-        cr_total = str(total_size) if total_size is not None else "*"
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{cr_total}"},
-        )
-
-    if plan.kind == "full":
-        # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
-        _unknown_headers: dict[str, str] = {
-            "Accept-Ranges": "bytes",
-            "Content-Type": ct or _MIME_OCTET,
-        }
-        if _disposition:
-            _unknown_headers["Content-Disposition"] = _disposition
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=200,
-            headers=_unknown_headers,
-            media_type=ct or _MIME_OCTET,
-        )
-
-    # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233
-    # when the complete length is unknown).
-    range_start, range_end = plan.start, plan.end
-    content_length = range_end - range_start + 1
-
-    # The slice operates on the FULL byte-offset stream (prepend chunk first).
-    # A 'partial' plan is only made when total_size is known.
-    partial_headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Type": ct or _MIME_OCTET,
-        "Content-Length": str(content_length),
-        "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
-    }
-    if _disposition:
-        partial_headers["Content-Disposition"] = _disposition
-    return StreamingResponse(
-        _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
-        status_code=206,
-        headers=partial_headers,
-        media_type=ct or _MIME_OCTET,
-    )
+        headers = _full_body_headers(ct, disposition, total_size)
+        return StreamingResponse(body.stream(), status_code=200, headers=headers, media_type=ct or _MIME_OCTET)
+    return await _synthesized_range_response(body, range_header, total_size, ct, disposition)
