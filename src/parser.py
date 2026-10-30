@@ -470,6 +470,29 @@ def _match_column_alias(key: str) -> str | None:
     return None
 
 
+def _header_cell_column(text: str) -> str | None:
+    """The canonical column a header cell names, or None."""
+    raw = text.strip()
+    # Only the first word/phrase before any parenthetical (links/descriptions)
+    paren_idx = raw.find("(")
+    if paren_idx > 0:
+        raw = raw[:paren_idx]
+    # Normalize internal whitespace ('file \ndate' → 'file date'); colon-suffixed
+    # headers ('Track Titles:') must still match their alias.
+    key = re.sub(r'\s+', ' ', raw.strip().lower()).rstrip(":").strip()
+    canonical = _match_column_alias(key)
+    if canonical:
+        return canonical
+    # No match on the full cell: try each line, for a column name on its own line
+    # among notice text (e.g. "[notice]\nNotes").
+    for line in raw.split("\n"):
+        line_key = re.sub(r'\s+', ' ', line.strip().lower())
+        canonical = _match_column_alias(line_key) if line_key else None
+        if canonical:
+            return canonical
+    return None
+
+
 def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     """Map canonical field names to column indices from the header row.
 
@@ -477,35 +500,11 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     """
     col_map: dict[str, int] = {}
     for idx, cell in enumerate(header_row):
-        # Normalize: lowercase, strip parenthetical content (which contains links/descriptions)
-        raw = cell.text.strip()
-        # Take only the first word/phrase before any parenthetical
-        paren_idx = raw.find("(")
-        if paren_idx > 0:
-            raw = raw[:paren_idx]
-        key = raw.strip().lower()
-        key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
-        # Colon-suffixed headers ('Track Titles:') must still match their alias.
-        key = key.rstrip(":").strip()
-
-        canonical = _match_column_alias(key)
-
-        # No match on the full cell: try each line, for a column name on its own line
-        # among notice text (e.g. "[notice]\nNotes").
-        if not canonical:
-            for line in raw.split("\n"):
-                line_key = re.sub(r'\s+', ' ', line.strip().lower())
-                if line_key:
-                    canonical = _match_column_alias(line_key)
-                    if canonical:
-                        break
-
+        canonical = _header_cell_column(cell.text)
         if canonical and canonical not in col_map:
             col_map[canonical] = idx
-
     if "name" not in col_map:
         col_map |= _infer_name_column(header_row, col_map)
-
     return col_map
 
 
@@ -1569,29 +1568,14 @@ def _era_own_keys(era: Era) -> set[str]:
     sibling era registered the shared key first in the global dicts. The tag
     keys also find a tagged row's sibling era.
     """
-    keys: set[str] = set()
-    primary = _era_match_key(era.name)
-    if primary:
-        keys.add(primary)
-    full = _normalize_unicode(era.name).lower().strip()
-    if full:
-        keys.add(full)
-    tag_key = _era_tag_key(era.name)
-    if tag_key:
-        keys.add(tag_key)
+    keys = {_era_match_key(era.name), _normalize_unicode(era.name).lower().strip(), _era_tag_key(era.name)}
     for alt in era.alt_names:
-        alt_key = _era_match_key(alt)
-        if alt_key:
-            keys.add(alt_key)
-        for part in _split_alt_aliases(alt):
-            part_key = _era_match_key(part)
-            if part_key:
-                keys.add(part_key)
+        keys.add(_era_match_key(alt))
+        keys.update(_era_match_key(part) for part in _split_alt_aliases(alt))
     if " / " in era.name:
         for part in era.name.split(" / "):
-            for part_key in (_era_match_key(part), _era_tag_key(part)):
-                if part_key:
-                    keys.add(part_key)
+            keys.update((_era_match_key(part), _era_tag_key(part)))
+    keys.discard("")
     return keys
 
 
@@ -1803,6 +1787,42 @@ class _TagIndex:
         return self.latest.get(tag_key)
 
 
+def _cached_own_keys(own_keys_cache: dict[int, set[str]]):
+    def own_keys(era: Era) -> set[str]:
+        own = own_keys_cache.get(id(era))
+        if own is None:
+            own = own_keys_cache[id(era)] = _era_own_keys(era)
+        return own
+    return own_keys
+
+
+def _keyed_era(norm: str, stripped: str, era_by_key: dict[str, Era], era_by_key_fallback: dict[str, Era]) -> Era | None:
+    """The primary then the fallback keys, each by full then stripped key."""
+    for keys in (era_by_key, era_by_key_fallback):
+        for key in (norm, stripped):
+            era = keys.get(key)
+            if era is not None:
+                return era
+    return None
+
+
+def _fuzzy_row_era(
+    norm: str, stripped: str, current_era: Era | None,
+    era_by_key: dict[str, Era], era_by_key_fallback: dict[str, Era],
+) -> tuple[Era | None, bool, bool]:
+    """A fuzzy match on the current era, then on all. A positional fuzzy hit is
+    registered as a fallback key for the rows that follow."""
+    cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
+    if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
+        era_by_key_fallback.setdefault(stripped, current_era)
+        logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
+        return current_era, True, False
+    era = _fuzzy_era_match(norm, era_by_key)
+    if era is not None:
+        logger.debug("Fuzzy era match: %r → %r", norm, era.name)
+    return era, era is not None, False
+
+
 def _resolve_row_era(
     row_era: str,
     current_era: Era | None,
@@ -1820,12 +1840,7 @@ def _resolve_row_era(
     (each by full then stripped key), a fuzzy match on the current era, then on all.
     A positional fuzzy hit is registered as a fallback key for the rows that follow.
     """
-    def own_keys(era: Era) -> set[str]:
-        own = own_keys_cache.get(id(era))
-        if own is None:
-            own = own_keys_cache[id(era)] = _era_own_keys(era)
-        return own
-
+    own_keys = _cached_own_keys(own_keys_cache)
     norm = _normalize_unicode(row_era).lower()
     stripped = _era_match_key(row_era)
     tag_key = _era_tag_key(row_era)
@@ -1838,20 +1853,10 @@ def _resolve_row_era(
         return tagged, False, stripped in own
     if stripped in own:
         return current_era, False, False
-    for keys in (era_by_key, era_by_key_fallback):
-        for key in (norm, stripped):
-            era = keys.get(key)
-            if era is not None:
-                return era, False, False
-    cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
-    if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
-        era_by_key_fallback.setdefault(stripped, current_era)
-        logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
-        return current_era, True, False
-    era = _fuzzy_era_match(norm, era_by_key)
-    if era is not None:
-        logger.debug("Fuzzy era match: %r → %r", norm, era.name)
-    return era, era is not None, False
+    keyed = _keyed_era(norm, stripped, era_by_key, era_by_key_fallback)
+    if keyed is not None:
+        return keyed, False, False
+    return _fuzzy_row_era(norm, stripped, current_era, era_by_key, era_by_key_fallback)
 
 
 def _heads_tagged_era(
@@ -2733,6 +2738,28 @@ def _sort_era_versions(era: Era) -> None:
             ]
 
 
+def _add_placeholder_version(
+    era: Era, version: SongVersion, base_key: str, song_index: dict[tuple[int, str], Song]
+) -> None:
+    """A placeholder name groups by a fan-made alt title; without one the row is its own Song."""
+    alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
+    if not alts:
+        # No fan-made identity — song_key stays empty (no cross-era link).
+        era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
+        return
+    # Any shared alt title joins the group — a row listing several alts
+    # bridges renames (e.g. '???. Bon Iver' later known as 'Time2Time').
+    alt_keys = [(id(era), f"alt::{a}") for a in alts]
+    song = next((song_index[k] for k in alt_keys if k in song_index), None)
+    if song is None:
+        song = Song(base_name=base_key, song_key=_song_match_key(alts[0]), versions=[version])
+        era.sections[-1].songs.append(song)
+    else:
+        song.versions.append(version)
+    for k in alt_keys:
+        song_index.setdefault(k, song)
+
+
 def _add_version_to_era(
     era: Era,
     version: SongVersion,
@@ -2750,34 +2777,11 @@ def _add_version_to_era(
     """
     if not era.sections:
         era.sections.append(Section())
-
     _, base_name = extract_version_tag(version.name)
     base_key = base_name.strip()
-
     if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
-        alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
-        if not alts:
-            # No fan-made identity — song_key stays empty (no cross-era link).
-            era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
-            return
-        # Group by fan-made alt title instead of the placeholder name. Any
-        # shared alt title joins the group — a row listing several alts
-        # bridges renames (e.g. '???. Bon Iver' later known as 'Time2Time').
-        alt_keys = [(id(era), f"alt::{a}") for a in alts]
-        song = next((song_index[k] for k in alt_keys if k in song_index), None)
-        if song is None:
-            song = Song(
-                base_name=base_key,
-                song_key=_song_match_key(alts[0]),
-                versions=[version],
-            )
-            era.sections[-1].songs.append(song)
-        else:
-            song.versions.append(version)
-        for k in alt_keys:
-            song_index.setdefault(k, song)
+        _add_placeholder_version(era, version, base_key, song_index)
         return
-
     song_key = _song_match_key(base_key)
     # A name of pure punctuation has an empty key; fall back to the exact text
     # rather than lumping every such row into one song.
@@ -2786,13 +2790,8 @@ def _add_version_to_era(
     if song is not None:
         song.versions.append(version)
         return
-
     # Create new song in the last (current) section
-    song = Song(
-        base_name=base_key,
-        song_key=song_key,
-        versions=[version],
-    )
+    song = Song(base_name=base_key, song_key=song_key, versions=[version])
     era.sections[-1].songs.append(song)
     song_index[key] = song
 
