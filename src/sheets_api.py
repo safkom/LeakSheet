@@ -110,6 +110,41 @@ async def _get(
     return resp, body
 
 
+async def _exact_titles(get, sheet_id: str, tabs: dict[str, str]) -> dict[str, str] | None:
+    """{gid: exact title}: the htmlview tab listing trims names, so a 400 asks for the
+    exact titles by sheet id. None when that lookup fails."""
+    got = await get([("fields", "sheets.properties(sheetId,title)")])
+    if got is None:
+        return None
+    if got[0].status_code != 200:
+        # Without a pause, a key this lookup cannot pass costs two calls on every parse.
+        _pause(_retry_after(got[0]) if _quota_hit(*got) else _DEFAULT_BACKOFF_S)
+        return None
+    try:
+        exact = {str(p.get("sheetId")): p.get("title") for p in
+                 (sh.get("properties") or {} for sh in json.loads(got[1]).get("sheets") or [])}
+    except (ValueError, AttributeError) as e:
+        logger.warning("Sheets API titles for %s unreadable: %s", sheet_id, e)
+        return None
+    return {gid: exact[gid] for gid in tabs if exact.get(gid)}
+
+
+async def _request_tabs(get, sheet_id: str, tabs: dict[str, str]) -> tuple[httpx.Response, bytes] | None:
+    """The grid-data response, retried once with exact titles after a 400."""
+    titles = tabs
+    for attempt in range(2):
+        params = [("includeGridData", "true"), ("fields", _FIELDS)]
+        got = await get(params + [("ranges", _a1(title)) for title in titles.values()])
+        if got is None or _key_refused(*got):
+            return None
+        if got[0].status_code != 400 or attempt:
+            return got
+        titles = await _exact_titles(get, sheet_id, tabs)
+        if not titles:
+            return None
+    return None
+
+
 async def fetch_tabs(
     client: httpx.AsyncClient,
     sheet_id: str,
@@ -126,41 +161,9 @@ async def fetch_tabs(
     if not key or not tabs or time.monotonic() < _backoff_until:
         return None
     get = functools.partial(_get, client, sheet_id, key, timeout=timeout, max_bytes=max_bytes)
-
-    async def request() -> tuple[httpx.Response, bytes] | None:
-        titles = tabs
-        for attempt in range(2):
-            params = [("includeGridData", "true"), ("fields", _FIELDS)]
-            got = await get(params + [("ranges", _a1(title)) for title in titles.values()])
-            if got is None:
-                return None
-            resp, body = got
-            if _key_refused(resp, body):
-                return None
-            if resp.status_code != 400 or attempt:
-                return resp, body
-            # The htmlview tab listing trims names; ask for the exact titles by sheet id.
-            got = await get([("fields", "sheets.properties(sheetId,title)")])
-            if got is None:
-                return None
-            if got[0].status_code != 200:
-                # Without a pause, a key this lookup cannot pass costs two calls on every parse.
-                _pause(_retry_after(got[0]) if _quota_hit(*got) else _DEFAULT_BACKOFF_S)
-                return None
-            try:
-                exact = {str(p.get("sheetId")): p.get("title") for p in
-                         (sh.get("properties") or {} for sh in json.loads(got[1]).get("sheets") or [])}
-            except (ValueError, AttributeError) as e:
-                logger.warning("Sheets API titles for %s unreadable: %s", sheet_id, e)
-                return None
-            titles = {gid: exact[gid] for gid in tabs if exact.get(gid)}
-            if not titles:
-                return None
-        return None
-
     try:
         async with asyncio.timeout(min(timeout, TIMEOUT_S)):
-            got = await request()
+            got = await _request_tabs(get, sheet_id, tabs)
     except TimeoutError:
         logger.warning("Sheets API for %s timed out; reading htmlview", sheet_id)
         return None
