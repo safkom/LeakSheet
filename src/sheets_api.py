@@ -85,7 +85,7 @@ def _rows_by_gid(body: bytes, gids: set[str]) -> dict[str, list[list[_Cell]]]:
 
 
 async def _get(
-    client: httpx.AsyncClient, sheet_id: str, key: str, params: list, *, timeout: float, max_bytes: int,
+    client: httpx.AsyncClient, sheet_id: str, key: str, params: list, *, timeout: float, max_bytes: int,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
 ) -> tuple[httpx.Response, bytearray] | None:
     request = client.build_request(
         "GET", API_URL + sheet_id, params=params, timeout=timeout,
@@ -150,7 +150,7 @@ async def fetch_tabs(
     sheet_id: str,
     tabs: dict[str, str],
     *,
-    timeout: float,
+    timeout: float,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     max_bytes: int,
 ) -> dict[str, list[list[_Cell]]] | None:
     """{gid: rows} for the tabs named in *tabs* ({gid: title}); None when the API is off or fails.

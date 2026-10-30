@@ -741,9 +741,21 @@ def _display_tab_name(name: str) -> str:
 # See docs/decisions.md::fetcher.py::tab-qualifier-rank
 # The whole qualifier must be the marker: "(New Leaks)" names a subset, not a successor.
 # Version marks count from 2 up: "(1.0)" or "(v1)" names the original.
-_NEW_TAB_QUALIFIER_RE = re.compile(
-    r"^[\(\[]\s*(?:new|updated|current|latest|v(?:[2-9]|\d{2,})|(?:[2-9]|\d{2,})\.0)\s*!*\s*[\)\]]$"
-)
+_NEW_TAB_QUALIFIER_RE = re.compile(r"^[\(\[]\s*([a-z]+|v?\d+(?:\.0)?)\s*!*\s*[\)\]]$")
+_NEW_TAB_WORDS = frozenset({"new", "updated", "current", "latest"})
+_VERSION_MARK_RE = re.compile(r"(v)?(\d+)(\.0)?")
+
+
+def _is_newer_qualifier(qualifier: str) -> bool:
+    """A "new"-style word, or a version mark from 2 up: "v2" or "2.0", never both forms."""
+    m = _NEW_TAB_QUALIFIER_RE.search(qualifier)
+    if m is None:
+        return False
+    mark = _VERSION_MARK_RE.fullmatch(m.group(1))
+    if mark is None:
+        return m.group(1) in _NEW_TAB_WORDS
+    v, number, dot_zero = mark.groups()
+    return bool(v) != bool(dot_zero) and (len(number) >= 2 or number >= "2")
 _STALE_TAB_QUALIFIER_RE = re.compile(
     r"\b(?:old|archived?|outdated|deprecated|backup|legacy|unused|do ?n[o']?t use)\b"
 )
@@ -759,7 +771,7 @@ def _tab_qualifier_rank(name: str) -> int:
     qualifier = m.group(0)
     if _STALE_TAB_QUALIFIER_RE.search(qualifier):
         return 3
-    if _NEW_TAB_QUALIFIER_RE.search(qualifier):
+    if _is_newer_qualifier(qualifier):
         return 0
     return 2
 
@@ -1464,7 +1476,7 @@ def _raise_if_signed_out(r: httpx.Response, url: str) -> None:
 
 
 async def _fetch_base_html(
-    client: httpx.AsyncClient, url_norm: str, *, timeout: float
+    client: httpx.AsyncClient, url_norm: str, *, timeout: float  # NOSONAR(S7483): httpx timeout, not an asyncio wait
 ) -> tuple[str, str]:
     """Base page HTML + title, always from the network.
 
@@ -1486,7 +1498,7 @@ def _page_title(html: str) -> str:
 
 
 async def _fetch_one_tab(
-    client: httpx.AsyncClient, url: str, gid: str, *, timeout: float, cache_ttl: float, use_cache: bool,
+    client: httpx.AsyncClient, url: str, gid: str, *, timeout: float, cache_ttl: float, use_cache: bool,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
 ) -> tuple[str, str]:
     sheet_url = _build_sheet_html_url(url, gid)
     # Read the SAME key the write below uses; a base-keyed entry may hold a different tab.
@@ -1508,7 +1520,7 @@ async def _fetch_one_tab(
 
 
 async def _first_tab_with_table(
-    client: httpx.AsyncClient, url: str, base_html: str, title: str, *, timeout: float, use_cache: bool,
+    client: httpx.AsyncClient, url: str, base_html: str, title: str, *, timeout: float, use_cache: bool,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
 ) -> tuple[str, str]:
     """Discover the GIDs and return the first tab holding a table."""
     page_paths = _page_path_map(base_html)
@@ -1531,7 +1543,7 @@ async def _first_tab_with_table(
 
 
 async def _fetch_base_sheet(
-    client: httpx.AsyncClient, url: str, *, timeout: float, cache_ttl: float, use_cache: bool,
+    client: httpx.AsyncClient, url: str, *, timeout: float, cache_ttl: float, use_cache: bool,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
 ) -> tuple[str, str]:
     # The base page is cached under the base URL, which this path both reads and writes.
     if use_cache and cache_ttl > 0:
@@ -1554,7 +1566,7 @@ async def async_fetch_sheet_html(
     url: str,
     *,
     gid: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT,
+    timeout: float = DEFAULT_TIMEOUT,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
 ) -> tuple[str, str]:
@@ -1578,7 +1590,7 @@ async def _fetch_gid_page(
     title: str,
     *,
     client: httpx.AsyncClient,
-    timeout: float,
+    timeout: float,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
@@ -1644,7 +1656,7 @@ async def _load_secondary_tabs(
     title: str,
     *,
     client: httpx.AsyncClient,
-    timeout: float,
+    timeout: float,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
@@ -1762,7 +1774,7 @@ async def _load_secondary_tabs_with(
     title: str,
     *,
     client: httpx.AsyncClient,
-    timeout: float,
+    timeout: float,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
@@ -1954,7 +1966,7 @@ async def _aggregate_hub_workbook(
     title: str,
     *,
     client: httpx.AsyncClient,
-    timeout: float,
+    timeout: float,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float,
     use_cache: bool,
     t: PhaseTimer,
@@ -2320,7 +2332,7 @@ async def async_fetch_and_parse(
     *,
     artist_name: str | None = None,
     gid: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT,
+    timeout: float = DEFAULT_TIMEOUT,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
     cache_ttl: float = DEFAULT_CACHE_TTL,
     use_cache: bool = True,
     write_cache: bool | None = None,
