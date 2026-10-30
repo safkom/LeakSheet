@@ -200,6 +200,48 @@ except ImportError:  # pragma: no cover - lxml is a pinned dependency
     _lxml_html = None
 
 
+class _TdWalk:
+    """Text, links (with the line each anchor closes on) and images of one lxml <td>."""
+
+    __slots__ = ("parts", "links", "link_lines", "images", "newlines")
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.links: list[str] = []
+        self.link_lines: list[int] = []
+        self.images: list[str] = []
+        self.newlines = 0  # running count of "\n" appended so far
+
+    def _text(self, text: str | None) -> None:
+        if text:
+            self.parts.append(text)
+            self.newlines += text.count("\n")
+
+    def _void(self, el, tag: str) -> None:
+        if tag == "br":
+            self.parts.append("\n")
+            self.newlines += 1
+        elif tag == "img":
+            src = el.get("src")
+            if src:
+                self.images.append(src)
+            self._text(el.get("alt"))
+
+    def walk(self, el) -> None:
+        tag = el.tag
+        if not isinstance(tag, str):  # comment / processing instruction
+            return
+        self._void(el, tag)
+        self._text(el.text)
+        for child in el:
+            self.walk(child)
+            self._text(child.tail)
+        href = el.get("href") if tag == "a" else None
+        if href:
+            self.links.append(href)
+            self.link_lines.append(self.newlines)
+
+
 def _cell_from_td(td) -> _Cell:
     """Build a _Cell from an lxml <td> element.
 
@@ -209,51 +251,9 @@ def _cell_from_td(td) -> _Cell:
     """
     if not len(td):  # most cells: plain text, nothing to walk
         return _Cell(text=(td.text or "").strip())
-    parts: list[str] = []
-    links: list[str] = []
-    link_lines: list[int] = []
-    images: list[str] = []
-    newlines = 0  # running count of "\n" appended so far
-
-    def walk(el) -> None:
-        nonlocal newlines
-        tag = el.tag
-        if not isinstance(tag, str):  # comment / processing instruction
-            return
-        if tag == "br":
-            parts.append("\n")
-            newlines += 1
-        elif tag == "img":
-            src = el.get("src")
-            if src:
-                images.append(src)
-            alt = el.get("alt")
-            if alt:
-                parts.append(alt)
-                newlines += alt.count("\n")
-        text = el.text
-        if text:
-            parts.append(text)
-            newlines += text.count("\n")
-        for child in el:
-            walk(child)
-            tail = child.tail
-            if tail:
-                parts.append(tail)
-                newlines += tail.count("\n")
-        if tag == "a":
-            href = el.get("href")
-            if href:
-                links.append(href)
-                link_lines.append(newlines)
-
-    walk(td)
-    return _Cell(
-        text="".join(parts).strip(),
-        links=links,
-        link_lines=link_lines,
-        images=images,
-    )
+    w = _TdWalk()
+    w.walk(td)
+    return _Cell(text="".join(w.parts).strip(), links=w.links, link_lines=w.link_lines, images=w.images)
 
 
 def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
@@ -793,6 +793,29 @@ _NAME_FOOTER_KEYWORDS: frozenset[str] = frozenset({
 })
 
 
+_NUMERIC_STAT_RE = re.compile(r"^\d+\s")
+
+
+def _names_an_era(cell: _Cell) -> bool:
+    """Whether a cell of a stats-led row holds an era name or era art, not just counts."""
+    text = cell.text.strip()
+    if not text:
+        return False
+    # Images (era art) are a strong signal this is an era header
+    if cell.images:
+        return True
+    # A cell of nothing but counts holds no era name, whatever its vocabulary; without
+    # this the global stats footer's cells read as digit-leading era names.
+    if _is_stats_only_cell(text):
+        return False
+    first_line = text.split("\n")[0].strip()
+    # A first line that doesn't start with a digit is likely an era name.
+    # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
+    return not _NUMERIC_STAT_RE.match(first_line) or (
+        not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit()
+    )
+
+
 def _is_era_header(row: list[_Cell]) -> bool:
     """Check if a row is an era header (contains stats pattern in first cell).
 
@@ -806,40 +829,18 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     text = row[0].text
-    if not era_stats_match(text):
-        if not _is_spreadsheet_error(text):
-            return False
-        # The stats cell is unreadable, so it can carry no evidence either
-        # way — require the era name (or the era art) from another cell.
-        for c in row[1:]:
-            if c.images:
-                return True
-            first_line = c.text.split("\n")[0].strip()
-            if first_line and not re.match(r"^\d+\s", first_line):
-                return True
+    if era_stats_match(text):
+        # Real era headers have a non-stats era name in some cell (or cell 0's first
+        # line); global stats rows have only stat-like content.
+        return any(_names_an_era(c) for c in row)
+    if not _is_spreadsheet_error(text):
         return False
-    # Real era headers have a non-stats era name in some cell (or cell 0's first
-    # line); global stats rows have only stat-like content.
-    _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
-    for c in row:
-        text = c.text.strip()
-        if not text:
-            continue
-        # Check for images (era art) — a strong signal this is an era header
-        if c.images:
+    # The stats cell is unreadable, so it can carry no evidence either
+    # way — require the era name (or the era art) from another cell.
+    for c in row[1:]:
+        first_line = c.text.split("\n")[0].strip()
+        if c.images or (first_line and not re.match(r"^\d+\s", first_line)):
             return True
-        # A cell of nothing but counts holds no era name, whatever its vocabulary; without
-        # this the global stats footer's cells read as digit-leading era names.
-        if _is_stats_only_cell(text):
-            continue
-        first_line = text.split("\n")[0].strip()
-        # If the first line doesn't start with a digit, it's likely an era name
-        if not _NUMERIC_STAT_RE.match(first_line):
-            return True
-        # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
-        if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
-            return True
-    # Every non-empty cell states counts — pure stats row
     return False
 
 
@@ -1506,6 +1507,13 @@ def _extract_links_from_cell(cell: _Cell) -> list[str]:
     return [link for raw in cell.links for link in _split_links(raw)]
 
 
+def _set_part_keys(parts: Iterable[str], era: Era, target: dict[str, Era]) -> None:
+    for part in parts:
+        part_key = _era_match_key(part)
+        if part_key:
+            target.setdefault(part_key, era)
+
+
 def _register_era_keys(
     era: Era,
     era_name: str,
@@ -1529,26 +1537,16 @@ def _register_era_keys(
     full = _normalize_unicode(era_name).lower().strip()
     if full and full != primary:
         era_by_key.setdefault(full, era)
-    # Alt names
+    target = fallback_keys if fallback_keys is not None else era_by_key
     for alt in era.alt_names:
-        alt_key = _era_match_key(alt)
-        if alt_key:
-            era_by_key.setdefault(alt_key, era)
+        _set_part_keys([alt], era, era_by_key)
         # Comma alias list → fallback dict — see docs/decisions.md::parser.py::era-key-shadowing
         parts = _split_alt_aliases(alt)
         if len(parts) > 1:
-            target = fallback_keys if fallback_keys is not None else era_by_key
-            for part in parts:
-                part_key = _era_match_key(part)
-                if part_key:
-                    target.setdefault(part_key, era)
+            _set_part_keys(parts, era, target)
     # Slash-separated: "38 Baby / Ay Ay" → register both parts
     if " / " in era_name:
-        target = fallback_keys if fallback_keys is not None else era_by_key
-        for part in era_name.split(" / "):
-            part_key = _era_match_key(part)
-            if part_key:
-                target.setdefault(part_key, era)
+        _set_part_keys(era_name.split(" / "), era, target)
 
 
 # ---------------------------------------------------------------------------
@@ -2335,6 +2333,33 @@ def parse_sheet(
     )
 
 
+def _title_index(songs: list[Song]) -> tuple[set[str], dict[str, set[str]]]:
+    """(every title key, family key → its titles and alt titles)."""
+    titles: set[str] = set()
+    family_names: dict[str, set[str]] = {}
+    for song in songs:
+        title_key = _song_match_key(song.base_name)
+        titles.add(title_key)
+        names = family_names.setdefault(song.song_key or title_key, set())
+        names.add(title_key)
+        for version in song.versions:
+            names.update(_song_match_key(alt) for alt in version.alt_titles)
+    titles.discard("")
+    return titles, family_names
+
+
+def _undo_alias_collab(version: SongVersion, names: set[str]) -> None:
+    """An alias line misread as a "(with X)" credit: every part names the song family."""
+    parts = [p.strip() for p in (version.collaboration or "").split(", ") if p.strip()]
+    if not parts or _song_match_key(f"With {parts[0]}") not in names:
+        return
+    if not all(_song_match_key(p) in names or _song_match_key(f"With {p}") in names for p in parts[1:]):
+        return
+    restored = [f"With {parts[0]}", *parts[1:]]
+    version.alt_titles = version.alt_titles + [alt for alt in restored if alt not in version.alt_titles]
+    version.collaboration = None
+
+
 def _reconcile_title_misreads(eras: list[Era]) -> None:
     """Undo two name-cell misreads by checking them against the tracker's own names.
 
@@ -2351,40 +2376,15 @@ def _reconcile_title_misreads(eras: list[Era]) -> None:
       title somewhere in the tracker.
     """
     songs = [song for era in eras for section in era.sections for song in section.songs]
-    titles: set[str] = set()
-    family_names: dict[str, set[str]] = {}
-    for song in songs:
-        title_key = _song_match_key(song.base_name)
-        titles.add(title_key)
-        names = family_names.setdefault(song.song_key or title_key, set())
-        names.add(title_key)
-        for version in song.versions:
-            names.update(_song_match_key(alt) for alt in version.alt_titles)
-    titles.discard("")
-
+    titles, family_names = _title_index(songs)
     for song in songs:
         names = family_names.get(song.song_key or _song_match_key(song.base_name), set())
         names.discard("")
         for version in song.versions:
             if len(version.alt_titles) > 1:
                 version.alt_titles = _rejoin_split_aliases(version.alt_titles, titles)
-            collab = version.collaboration
-            if not collab:
-                continue
-            parts = [p.strip() for p in collab.split(", ") if p.strip()]
-            if (
-                parts
-                and _song_match_key(f"With {parts[0]}") in names
-                and all(
-                    _song_match_key(p) in names or _song_match_key(f"With {p}") in names
-                    for p in parts[1:]
-                )
-            ):
-                restored = [f"With {parts[0]}", *parts[1:]]
-                version.alt_titles = version.alt_titles + [
-                    alt for alt in restored if alt not in version.alt_titles
-                ]
-                version.collaboration = None
+            if version.collaboration:
+                _undo_alias_collab(version, names)
 
 
 def _rejoin_split_aliases(alts: list[str], titles: set[str]) -> list[str]:
