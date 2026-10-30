@@ -867,6 +867,72 @@ _HANDLE_RE = re.compile(r"@\w+")
 _CHANGELOG_SLASH_RE = re.compile(r"^\d{1,2}/\d{1,2}\s*[-\u2013]")
 
 
+# Known non-era labels that appear in the era column.
+_NON_ERA_LABELS = frozenset({
+    "links", "link", "changelog", "changelogs", "notes",
+    "tracker guidelines", "guidelines", "discord", "credits",
+    "editors", "current editors", "update notes", "resources",
+    "template", "template:", "about", "info", "key", "legend",
+    "recent additions", "what's new", "what's new?",
+    # Meta-labels that aren't music eras
+    "types", "type", "owner", "general information", "release date",
+    "updates", "mega folder", "performance tracks",
+    "progress reports", "rules", "highlighted",
+    "current editor", "editor comments",
+    # Collaboration/feature labels → should be sections, not eras
+    "features", "collaborations", "collaboration", "featured",
+    "collaborations & features", "loosies", "guest verses",
+    "guest features",
+})
+_NON_ERA_PREFIXES = (
+    "collaboration with",  # a section label, not an era
+    "skip to ",  # navigation rows: "Skip to DRILL"
+    "*",  # asterisk-prefixed labels: "*New* Unreleased Guidelines"
+    # Changelog verbs: "Added ...", "Removed ...", "Updated ...", "Renamed ..."
+    "added ", "removed ", "updated ", "renamed ", "started ", "finished ",
+)
+_NON_ERA_SUBSTRINGS = (
+    "tracker",  # a header/label, not an era
+    "click to view", "click here",  # navigation rows
+    "discord.gg/", "discord.com/", "http://", "https://", ".gg/",  # links
+    "playlist", "spotify",  # streaming/playlist references
+    "sent all", "onlyfiles",  # changelog phrasing
+)
+_CONTACT_TLDS = (".icu", ".su", ".gg", ".com", ".net", ".org", ".io")
+
+
+def _is_contact_line(line: str) -> bool:
+    """A person/service with a handle ("symex (@symex.b) [vaulted.icu]") or a domain
+    ("pillows.su"), judged on the text before its parenthetical is stripped."""
+    if _HANDLE_RE.search(line) and len(line.split()) <= 4:
+        return True
+    lower = line.lower()
+    return bool(re.search(r"\.\w{2,4}\b", lower)) and any(tld in lower for tld in _CONTACT_TLDS)
+
+
+def _is_non_era_label(name: str) -> bool:
+    """Announcement, changelog, navigation and meta rows, judged on the stripped name."""
+    words = name.split()
+    lower = name.lower()
+    return (
+        len(words) > 10 or len(name) > 80  # too long: an announcement
+        or name.endswith(":")  # an announcement or label
+        or lower in _NON_ERA_LABELS
+        or lower.startswith(_NON_ERA_PREFIXES)
+        or any(tok in lower for tok in _NON_ERA_SUBSTRINGS)
+        # Date-prefixed changelog: "22.10.2025 - Big findings", "2024-01-05: ..."
+        or bool(_DATE_PREFIX_RE.match(name))
+        or (name.isdigit() and len(name) <= 3)  # "31", "7"
+        # Person name + social handle after paren stripping: "Fly (@damn4k)"
+        or (bool(_HANDLE_RE.search(name)) and len(words) <= 3)
+        # Short date-slash changelog: "1/23 - Sent all links"
+        or bool(_CHANGELOG_SLASH_RE.match(name))
+        or name.count("!") >= 2  # "NEW FINDINGS!!!"
+        # Era stats pattern masquerading as era name: "718 Total Full", "3 Leaks"
+        or bool(ERA_STATS_PATTERN.match(name))
+    )
+
+
 def _looks_like_era_name(text: str) -> bool:
     """Check if text looks like a plausible era name (not an announcement/footer).
 
@@ -879,129 +945,16 @@ def _looks_like_era_name(text: str) -> bool:
     lines = [l for l in text.split("\n") if l.strip()]
     if len(lines) >= 3:
         return False
-
-    # Take the first line only
     first_line = lines[0].strip() if lines else text.strip()
-
-    # Empty or whitespace-only → not an era
-    if not first_line:
-        return False
-
     # A broken formula is not a name; as an era, the abbreviated-era-name rule
-    # below would absorb every later era into it.
-    if _is_spreadsheet_error(first_line):
+    # would absorb every later era into it.
+    if not first_line or _is_spreadsheet_error(first_line) or _is_contact_line(first_line):
         return False
-
-    # Check original text for handles/domains before stripping
-    orig_lower = first_line.lower()
-
-    # Person/service + social handle in original: "symex (@symex.b) [vaulted.icu]"
-    if _HANDLE_RE.search(first_line):
-        # Check original (not stripped) text for handle detection
-        orig_words = first_line.split()
-        if len(orig_words) <= 4:
-            return False
-
-    # Domain names in original text: "vaulted.icu", "pillows.su"
-    if re.search(r"\.\w{2,4}\b", orig_lower) and any(
-        tld in orig_lower for tld in (".icu", ".su", ".gg", ".com", ".net", ".org", ".io")
-    ):
-        return False
-
-    # Strip parenthetical suffix for length check
+    # Strip parenthetical suffix for the remaining checks
     paren_idx = first_line.find("(")
     if paren_idx > 0:
         first_line = first_line[:paren_idx].strip()
-
-    words = first_line.split()
-    # Too long or too many words → announcement
-    if len(words) > 10 or len(first_line) > 80:
-        return False
-    # Ends with colon → announcement/label
-    if first_line.endswith(":"):
-        return False
-
-    lower = first_line.lower()
-
-    # Known non-era labels that appear in the era column
-    non_era = {
-        "links", "link", "changelog", "changelogs", "notes",
-        "tracker guidelines", "guidelines", "discord", "credits",
-        "editors", "current editors", "update notes", "resources",
-        "template", "template:", "about", "info", "key", "legend",
-        "recent additions", "what's new", "what's new?",
-        # Meta-labels that aren't music eras
-        "types", "type", "owner", "general information", "release date",
-        "updates", "mega folder", "performance tracks",
-        "progress reports", "rules", "highlighted",
-        "current editor", "editor comments",
-        # Collaboration/feature labels → should be sections, not eras
-        "features", "collaborations", "collaboration", "featured",
-        "collaborations & features", "loosies", "guest verses",
-        "guest features",
-    }
-    if lower in non_era:
-        return False
-
-    # Starts with "Collaboration with" → section label, not era
-    if lower.startswith("collaboration with"):
-        return False
-
-    # Contains "tracker" → likely a header/label, not an era
-    if "tracker" in lower:
-        return False
-
-    # Navigation rows: "Skip to DRILL", "Click to view..."
-    if lower.startswith("skip to ") or "click to view" in lower or "click here" in lower:
-        return False
-
-    # URLs / discord links → not an era name
-    if any(tok in lower for tok in ("discord.gg/", "discord.com/", "http://", "https://", ".gg/")):
-        return False
-
-    # Date-prefixed changelog: "22.10.2025 - Big findings", "2024-01-05: ..."
-    if _DATE_PREFIX_RE.match(first_line):
-        return False
-
-    # Changelog verbs: "Added ...", "Removed ...", "Updated ...", "Renamed ..."
-    changelog_verbs = ("added ", "removed ", "updated ", "renamed ", "started ", "finished ")
-    if lower.startswith(changelog_verbs):
-        return False
-
-    # Pure number or very short numeric: "31", "7", "3" — not an era
-    if first_line.isdigit() and len(first_line) <= 3:
-        return False
-
-    # Person name + social handle after paren stripping: "Fly (@damn4k)" (the
-    # check above runs on the original text).
-    if _HANDLE_RE.search(first_line) and len(words) <= 3:
-        return False
-
-    # Short date-slash changelog: "1/23 - Sent all links", "11/21 - All eras in"
-    if _CHANGELOG_SLASH_RE.match(first_line):
-        return False
-
-    # Streaming/playlist references: "Spotify playlist for every..."
-    if "playlist" in lower or "spotify" in lower:
-        return False
-
-    # Exclamation-heavy announcements: "NEW FINDINGS!!!"
-    if first_line.count("!") >= 2:
-        return False
-
-    # Asterisk-prefixed labels: "*New* Unreleased Guidelines"
-    if lower.startswith("*"):
-        return False
-
-    # "sent all" / "onlyfiles" patterns in changelogs
-    if "sent all" in lower or "onlyfiles" in lower:
-        return False
-
-    # Era stats pattern masquerading as era name: "718 Total Full", "3 Leaks"
-    if ERA_STATS_PATTERN.match(first_line):
-        return False
-
-    return len(words) >= 1
+    return not _is_non_era_label(first_line) and bool(first_line.split())
 
 
 def _is_section_separator(row: list[_Cell]) -> bool:
@@ -1158,6 +1111,41 @@ def _transfer_era_metadata(source: Era, target: Era) -> None:
         target.name = source.name
 
 
+def _era_song_count(era: Era) -> int:
+    return sum(len(s.songs) for s in era.sections)
+
+
+def _merge_stubs_forward(eras: list[Era]) -> list[Era]:
+    """A 0-song era followed by a related songs-bearing era hands it its metadata and goes."""
+    result: list[Era] = []
+    for i, era in enumerate(eras):
+        nxt = eras[i + 1] if i + 1 < len(eras) else None
+        if (
+            nxt is not None and _era_song_count(era) == 0 and _era_song_count(nxt) > 0
+            and (_era_names_are_related(era.name, nxt.name) or _is_collab_stub_match(era.name, nxt.name))
+        ):
+            _transfer_era_metadata(era, nxt)
+            continue
+        result.append(era)
+    return result
+
+
+def _merge_tagged_stubs(eras: list[Era]) -> list[Era]:
+    """Version-tagged empty eras merge into ANY era with a matching base name:
+    "HiTunes [V3]" (0 songs) → "HiTunes" (has songs)."""
+    merged_away: set[int] = set()
+    for empty_era in [e for e in eras if _era_song_count(e) == 0]:
+        base_key = _era_match_key(empty_era.name)
+        target = next((
+            t for t in eras
+            if base_key and t is not empty_era and _era_match_key(t.name) == base_key and _era_song_count(t) > 0
+        ), None)
+        if target is not None:
+            _transfer_era_metadata(empty_era, target)
+            merged_away.add(id(empty_era))
+    return [e for e in eras if id(e) not in merged_away]
+
+
 def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     """Merge 0-song stub eras into adjacent songs-bearing eras, transferring metadata.
 
@@ -1169,46 +1157,7 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     """
     if not eras:
         return eras
-    result: list[Era] = []
-    i = 0
-    while i < len(eras):
-        era = eras[i]
-        era_songs = sum(len(s.songs) for s in era.sections)
-        if era_songs == 0 and i + 1 < len(eras):
-            next_era = eras[i + 1]
-            next_songs = sum(len(s.songs) for s in next_era.sections)
-            if next_songs > 0 and (
-                _era_names_are_related(era.name, next_era.name)
-                or _is_collab_stub_match(era.name, next_era.name)
-            ):
-                _transfer_era_metadata(era, next_era)
-                # Skip this empty stub
-                i += 1
-                continue
-        result.append(era)
-        i += 1
-
-    # Second pass: merge version-tagged empty eras into ANY era with matching base name.
-    # e.g. "HiTunes [V3]" (0 songs) → merge into "HiTunes" (has songs).
-    remaining_empty = [e for e in result if sum(len(s.songs) for s in e.sections) == 0]
-    merged_away: set[int] = set()
-    for empty_era in remaining_empty:
-        base_key = _era_match_key(empty_era.name)
-        if not base_key:
-            continue
-        for target in result:
-            if target is empty_era:
-                continue
-            target_key = _era_match_key(target.name)
-            target_songs = sum(len(s.songs) for s in target.sections)
-            if target_key == base_key and target_songs > 0:
-                _transfer_era_metadata(empty_era, target)
-                merged_away.add(id(empty_era))
-                break
-    if merged_away:
-        result = [e for e in result if id(e) not in merged_away]
-
-    return result
+    return _merge_tagged_stubs(_merge_stubs_forward(eras))
 
 
 def _consolidate_group_labels(era: Era) -> None:
@@ -1489,6 +1438,31 @@ def _netloc(url: str) -> str:
     return parts[2].lower() if len(parts) > 2 else ""
 
 
+def _url_split_start(text: str, i: int) -> int:
+    """Where the piece before the URL at *i* ends: back over whitespace, raw or percent-encoded."""
+    j = i
+    while True:
+        if j and text[j - 1].isspace():
+            j -= 1
+        elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
+            j -= 3
+        else:
+            return j
+
+
+def _is_url_split(text: str, i: int, j: int, start: int, wrappers_only: bool) -> bool:
+    """Whether the URL at *i* (preceded by whitespace from *j*) starts a new piece."""
+    if wrappers_only and not (_GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])):
+        return False
+    if j != i:
+        return True
+    if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
+        return False
+    # A same-host scheme after "/" is a paste restarted, not a wrapper.
+    prev = text[i - 1]
+    return prev not in _PAYLOAD_PREV or (prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300]))
+
+
 def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
     """Split *text* at each URL that starts after whitespace or glued onto the previous one.
 
@@ -1501,27 +1475,9 @@ def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
     start = 0
     for m in _URL_START_RE.finditer(text, 1):
         i = m.start()
-        j = i
-        while True:  # step back over whitespace, raw or percent-encoded
-            if j and text[j - 1].isspace():
-                j -= 1
-            elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
-                j -= 3
-            else:
-                break
-        if wrappers_only and not (
-            _GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])
-        ):
+        j = _url_split_start(text, i)
+        if not _is_url_split(text, i, j, start, wrappers_only):
             continue
-        if j == i:
-            prev = text[i - 1]
-            if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
-                continue
-            # A same-host scheme after "/" is a paste restarted, not a wrapper.
-            if prev in _PAYLOAD_PREV and not (
-                prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300])
-            ):
-                continue
         if j > start:
             pieces.append(text[start:j].rstrip(" ,;|"))
             glued.append(j == i)
@@ -1696,6 +1652,46 @@ def _first_row_image(row: list[_Cell], prefer_idx: int | None = None) -> str | N
     return None
 
 
+def _era_header_extras(row: list[_Cell], art_url: str | None, notes_col: int) -> tuple[str | None, list[str], str | None]:
+    """(art, highlighted producers, description) from the cells after the timeline column."""
+    highlighted_producers: list[str] = []
+    desc_candidates: list[str] = []
+    for cell in row[notes_col + 1:]:
+        if cell.images and not art_url:
+            art_url = cell.images[0]
+        text = cell.text.strip()
+        if text and "Highlighted" in text and "Producer" in text:
+            highlighted_producers = parse_highlighted_producers(text)
+        elif text:
+            desc_candidates.append(text)
+    return art_url, highlighted_producers, max(desc_candidates, key=len) if desc_candidates else None
+
+
+def _is_parenthesised(text: str) -> bool:
+    return text.startswith("(") and text.endswith(")")
+
+
+def _era_header_names(era_name_full: str) -> tuple[str, list[str], bool]:
+    """(name, alt names, needs backfill). Alt names follow on their own lines, in parens.
+
+    An image-based era name leaves no usable text (empty, or purely parenthetical):
+    the real name is backfilled from the first song row."""
+    name_lines = era_name_full.split("\n") if era_name_full else [""]
+    era_name = name_lines[0].strip()
+    alt_names: list[str] = []
+    for line in name_lines[1:]:
+        line = line.strip()
+        line = line[1:-1].strip() if _is_parenthesised(line) else line
+        if line:
+            alt_names.append(line)
+    if era_name and not _is_parenthesised(era_name):
+        return era_name, alt_names, False
+    inner = era_name[1:-1].strip() if era_name else ""
+    if inner and inner not in alt_names:
+        alt_names.insert(0, inner)
+    return "", alt_names, True
+
+
 def _parse_era_header_row(
     row: list[_Cell], col_map: dict[str, int]
 ) -> tuple[Era, bool]:
@@ -1713,71 +1709,23 @@ def _parse_era_header_row(
     """
     era_name_col = col_map.get("name", 1)
     notes_col = col_map.get("notes", 2)
-
-    era_name_full = _get_cell_text(row, era_name_col)
     timeline_raw = _get_cell_text(row, notes_col)
     era_stats_raw = _get_cell_text(row, 0)
-
-    # Extract era art, highlighted producers, and description from trailing cells.
-    art_url = None
-    highlighted_producers: list[str] = []
-    desc_candidates: list[str] = []
 
     # Image-only era name vs. album art — see docs/decisions.md::parser.py::name-cell-image
     name_cell = _get_cell(row, era_name_col)
     name_text = name_cell.text.strip()
-    name_has_usable_text = bool(
-        name_text
-        and not (name_text.startswith("(") and name_text.endswith(")"))
-    )
-    if name_cell.images and name_has_usable_text:
-        art_url = name_cell.images[0]
-
-    for i, cell in enumerate(row):
-        if i <= notes_col:
-            continue  # skip stats, name, timeline columns
-        if cell.images and not art_url:
-            art_url = cell.images[0]
-        text = cell.text.strip()
-        if text:
-            if "Highlighted" in text and "Producer" in text:
-                highlighted_producers = parse_highlighted_producers(text)
-            else:
-                desc_candidates.append(text)
-
-    era_desc = max(desc_candidates, key=len) if desc_candidates else None
-    timeline = parse_timeline(timeline_raw) if timeline_raw else []
-    era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
-
-    # Split main name from alt names (newline-separated, alts in parens)
-    name_lines = era_name_full.split("\n") if era_name_full else [""]
-    era_name = name_lines[0].strip()
-    alt_names: list[str] = []
-    for _line in name_lines[1:]:
-        _line = _line.strip()
-        if _line.startswith("(") and _line.endswith(")"):
-            _line = _line[1:-1].strip()
-        if _line:
-            alt_names.append(_line)
-
-    # Image-based era name: the name cell has an image but no usable text (empty, or
-    # purely parenthetical). The real name is backfilled from the first song row.
-    needs_backfill = False
-    if not era_name or (era_name.startswith("(") and era_name.endswith(")")):
-        if era_name.startswith("(") and era_name.endswith(")"):
-            inner = era_name[1:-1].strip()
-            if inner and inner not in alt_names:
-                alt_names.insert(0, inner)
-            era_name = ""
-        needs_backfill = True
+    name_art = name_cell.images[0] if name_cell.images and name_text and not _is_parenthesised(name_text) else None
+    art_url, highlighted_producers, era_desc = _era_header_extras(row, name_art, notes_col)
+    era_name, alt_names, needs_backfill = _era_header_names(_get_cell_text(row, era_name_col))
 
     era = Era(
         name=era_name,
         alt_names=alt_names,
-        description=era_desc if era_desc else None,
-        timeline=timeline,
-        stats_raw=era_stats_raw if era_stats_raw else None,
-        stats=era_stats,
+        description=era_desc or None,
+        timeline=parse_timeline(timeline_raw) if timeline_raw else [],
+        stats_raw=era_stats_raw or None,
+        stats=parse_era_stats(era_stats_raw) if era_stats_raw else None,
         art_url=art_url,
         highlighted_producers=highlighted_producers,
         sections=[Section()],  # default unnamed section
@@ -1785,8 +1733,6 @@ def _parse_era_header_row(
     return era, needs_backfill
 
 
-# Column labels that mark an artwork tab, which otherwise parses as one "song" per
-# cover. Two hits required: a lone "Image" column also appears on physical-release tabs.
 _ARTWORK_COLUMN_SIGNS = frozenset({
     "art type", "project type", "designer", "cover art", "image type",
     "cover type", "photo type", "use", "used", "used?", "made by", "image",
@@ -2905,6 +2851,40 @@ def _badge_target(song: Song, entry_tag: str | None) -> SongVersion:
     return song.versions[0]
 
 
+def _badge_song_index(artist: Artist) -> tuple[dict[tuple[str, str], Song], dict[str, list[Song]]]:
+    """Songs keyed by (era key, song key) and by song key alone, placeholders left out."""
+    by_era_and_name: dict[tuple[str, str], Song] = {}
+    by_name: dict[str, list[Song]] = {}
+    for era in artist.eras:
+        era_key = _era_match_key(era.name)
+        for song in (song for section in era.sections for song in section.songs):
+            _, song_name = extract_badge(song.base_name)
+            song_key = _song_match_key(song_name)
+            if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES or not song_key:
+                continue
+            by_era_and_name.setdefault((era_key, song_key), song)
+            by_name.setdefault(song_key, []).append(song)
+    return by_era_and_name, by_name
+
+
+def _badge_entry_target(
+    entry: MiscEntry, by_era_and_name: dict[tuple[str, str], Song], by_name: dict[str, list[Song]]
+) -> tuple[Song, str | None] | None:
+    """The unbadged song a highlight entry names, with the entry's version tag."""
+    _, entry_name = extract_badge(entry.name)
+    entry_tag, base_name = extract_version_tag(entry_name)
+    song_key = _song_match_key(base_name)
+    if not song_key:
+        return None
+    song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
+    candidates = by_name.get(song_key, [])
+    if song is None and len(candidates) == 1:
+        song = candidates[0]
+    if song is None or not song.versions or any(v.badge is not None for v in song.versions):
+        return None
+    return song, entry_tag
+
+
 def apply_badge_tabs(
     artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
 ) -> int:
@@ -2917,44 +2897,16 @@ def apply_badge_tabs(
     """
     if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
         return 0
-
-    by_era_and_name: dict[tuple[str, str], Song] = {}
-    by_name: dict[str, list[Song]] = {}
-    for era in artist.eras:
-        era_key = _era_match_key(era.name)
-        for section in era.sections:
-            for song in section.songs:
-                _, song_name = extract_badge(song.base_name)
-                if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
-                    continue
-                song_key = _song_match_key(song_name)
-                if not song_key:
-                    continue
-                by_era_and_name.setdefault((era_key, song_key), song)
-                by_name.setdefault(song_key, []).append(song)
-
+    by_era_and_name, by_name = _badge_song_index(artist)
     applied = 0
     for kind, entries in tabs:
         tab_default = _BADGE_BY_TAB_KIND.get(kind)
-        if tab_default is None:
-            continue
-        for entry in entries:
-            _, entry_name = extract_badge(entry.name)
-            entry_tag, base_name = extract_version_tag(entry_name)
-            song_key = _song_match_key(base_name)
-            if not song_key:
-                continue
-            song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
-            if song is None:
-                candidates = by_name.get(song_key, [])
-                if len(candidates) == 1:
-                    song = candidates[0]
-            if song is None or not song.versions:
-                continue
-            if any(v.badge is not None for v in song.versions):
-                continue
-            _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
-            applied += 1
+        for entry in entries if tab_default is not None else ():
+            target = _badge_entry_target(entry, by_era_and_name, by_name)
+            if target is not None:
+                song, entry_tag = target
+                _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
+                applied += 1
     return applied
 
 
