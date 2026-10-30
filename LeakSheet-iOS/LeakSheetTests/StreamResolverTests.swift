@@ -192,7 +192,11 @@ struct VersionSourceTests {
         #expect(SongVersion(name: "S", availableLength: "Snippet", links: Self.snippets).recentLeakLink
                 == "https://imgur.gg/f/new-lossless")
         #expect(SongVersion(name: "S", availableLength: "Full", links: Self.snippets).recentLeakLink == nil)
-        #expect(SongVersion(name: "S", availableLength: "Snippet", links: ["https://pillows.su/f/one"]).recentLeakLink == nil)
+        #expect(SongVersion(
+            name: "S",
+            availableLength: "Snippet",
+            links: ["https://pillows.su/f/one"]
+        ).recentLeakLink == nil)
     }
 
     @Test func `a chosen source plays and is its own track, without changing the row's links`() {

@@ -132,7 +132,10 @@ struct DesignTokensColorTests {
     @Test("Body tones clear AA on the app background", arguments: [ColorScheme.dark, .light])
     func onBackgroundContrast(scheme: ColorScheme) {
         for (color, label) in [
-            (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (.lsFavourite, "lsFavourite"), (.lsWarning, "lsWarning"),
+            (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (
+                .lsFavourite,
+                "lsFavourite"
+            ), (.lsWarning, "lsWarning"),
             (.lsSuccess, "lsSuccess"),
         ] {
             expectAA(color, on: .lsBackground, label, scheme)
@@ -210,7 +213,10 @@ struct EraDisplayColorsContrastTests {
             let colors = EraDisplayColors.derive(from: dominant, in: scheme)
             for (stop, which) in [(colors.gradientTop, "top"), (colors.gradientBottom, "bottom")] {
                 let ratio = colors.title.contrastRatio(against: stop, in: scheme)
-                #expect(ratio >= 4.5, "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)")
+                #expect(
+                    ratio >= 4.5,
+                    "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)"
+                )
             }
         }
     }
@@ -223,7 +229,10 @@ struct EraDisplayColorsContrastTests {
         for (dominant, label) in Self.dominants {
             let panel = EraDisplayColors.derive(from: dominant, in: scheme).panel
             let ratio = panel.relativeLuminance(in: scheme) / card
-            #expect(abs(ratio - 1) < 0.1, "\(label) panel luminance is \(String(format: "%.2f", ratio))x lsCard in \(scheme)")
+            #expect(
+                abs(ratio - 1) < 0.1,
+                "\(label) panel luminance is \(String(format: "%.2f", ratio))x lsCard in \(scheme)"
+            )
         }
     }
 

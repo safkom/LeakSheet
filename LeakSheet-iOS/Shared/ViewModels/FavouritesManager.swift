@@ -156,7 +156,14 @@ final class FavouritesManager {
     // MARK: - Mutations
 
     @discardableResult
-    func toggle(song: Song, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
+    func toggle(
+        song: Song,
+        artistSlug: String,
+        artistName: String,
+        sourceUrl: String?,
+        eraName: String,
+        eraArt: String?
+    ) -> Bool {
         toggleEntry(
             baseName: song.baseName,
             discriminator: Self.discriminator(for: song.primary),
@@ -173,7 +180,14 @@ final class FavouritesManager {
     /// Toggle favourite from a single version (e.g. from description sheet or now playing).
     /// Derives `baseName` by stripping the version tag suffix from the version name.
     @discardableResult
-    func toggleFromVersion(version: SongVersion, artistSlug: String, artistName: String, sourceUrl: String?, eraName: String, eraArt: String?) -> Bool {
+    func toggleFromVersion(
+        version: SongVersion,
+        artistSlug: String,
+        artistName: String,
+        sourceUrl: String?,
+        eraName: String,
+        eraArt: String?
+    ) -> Bool {
         toggleEntry(
             baseName: version.derivedBaseName,
             discriminator: Self.discriminator(for: version),
@@ -248,7 +262,12 @@ final class FavouritesManager {
 
     // MARK: - Grouped cache
 
-    typealias GroupedArtist = (artistName: String, artistSlug: String, sourceUrl: String?, eras: [(eraName: String, eraArt: String?, entries: [FavouriteEntry])])
+    typealias GroupedArtist = (
+        artistName: String,
+        artistSlug: String,
+        sourceUrl: String?,
+        eras: [(eraName: String, eraArt: String?, entries: [FavouriteEntry])]
+    )
 
     @ObservationIgnored private var _groupedCache: [GroupedArtist]?
 
@@ -346,7 +365,10 @@ final class FavouritesManager {
             // Persist the rewrite, or it re-runs on every launch forever.
             if migrated.map(\.key) != stored.map(\.key) { save() }
         } catch {
-            Self.log.error("Failed to decode favourites (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
+            Self.log.error("""
+                Failed to decode favourites (\(data.count, privacy: .public) bytes): \
+                \(error.localizedDescription, privacy: .public)
+                """)
             // Keep the unreadable file: the next save would otherwise replace
             // every favourite with whatever the user hearts next.
             let aside = Self.storageFile.deletingPathExtension().appendingPathExtension("unreadable.json")
@@ -374,7 +396,8 @@ final class FavouritesManager {
     ///
     /// ponytail: delete once no install predates the backend change.
     private static let orphanedTagRE = try? NSRegularExpression(
-        pattern: #"\s*\[(?:Demo(?:\s+\d+)?|OG File|Master File|Instrumental|Rough Mix|Final(?:\s+Mix)?(?:\s+\d+)?|Remix|Mix [A-Z]|Live)\]\s*$"#,
+        pattern: #"\s*\[(?:Demo(?:\s+\d+)?|OG File|Master File|Instrumental|Rough Mix|"#
+            + #"Final(?:\s+Mix)?(?:\s+\d+)?|Remix|Mix [A-Z]|Live)\]\s*$"#,
         options: [.caseInsensitive]
     )
 

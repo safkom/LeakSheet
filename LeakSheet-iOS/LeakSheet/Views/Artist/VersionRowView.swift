@@ -162,7 +162,13 @@ struct VersionRowView: View {
         if let onPlay {
             onPlay(version)
         } else {
-            player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+            player.playTrack(
+                version,
+                artistName: artistName,
+                eraName: eraName,
+                artUrl: eraArt ?? "",
+                artistSlug: artistSlug
+            )
         }
     }
 
@@ -172,7 +178,14 @@ struct VersionRowView: View {
 
     private func enqueue(next: Bool) {
         guard canStream else { return }
-        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug, playNext: next)
+        player.addToQueue(
+            version,
+            artistName: artistName,
+            eraName: eraName,
+            artUrl: eraArt ?? "",
+            artistSlug: artistSlug,
+            playNext: next
+        )
         Haptics.light()
     }
 }

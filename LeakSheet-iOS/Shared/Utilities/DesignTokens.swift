@@ -109,7 +109,8 @@ extension Color {
     static let badgeBeatOnly = tone(hue: 275 / 360, saturation: 0.50, brightness: 0.96)
     static let badgeStem = tone(hue: 270 / 360, saturation: 0.50, brightness: 0.96)
     static let badgeUnavailable = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.88, lightBrightness: 0.40)
-    static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)      // tentative amber
+    // tentative amber
+    static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)
     static let badgeConflicting = tone(hue: 15 / 360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
     // Content-tab entry type ("Production", "Music Video"). Deliberately neutral:
@@ -318,8 +319,10 @@ extension Color {
     // MARK: - Filter-specific accent colors
 
     static let filterBestOf = tone(hue: 45 / 360, saturation: 0.85, brightness: 0.90, lightBrightness: 0.46)
-    static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)   // trophy gold (grails + wanted)
-    static let filterWorstOf = tone(hue: 20 / 360, saturation: 0.45, brightness: 0.80, lightBrightness: 0.40)  // rust, not Best Of's gold
+    // trophy gold (grails + wanted)
+    static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)
+    // rust, not Best Of's gold
+    static let filterWorstOf = tone(hue: 20 / 360, saturation: 0.45, brightness: 0.80, lightBrightness: 0.40)
     static let filterRecent = tone(hue: 140 / 360, saturation: 0.70, brightness: 0.80, lightBrightness: 0.42)
     static let filterNoSnippets = tone(hue: 280 / 360, saturation: 0.60, brightness: 0.85)
     static let filterMisc = tone(hue: 200 / 360, saturation: 0.65, brightness: 0.85)
@@ -370,12 +373,37 @@ enum CreditType: String {
 
     // `static let`, not literals in the switch: `Color.tone` builds a dynamic platform
     // colour, and `CreditTagsView` reads `color` twice per tag per body evaluation.
-    private static let featuringColor = Color.tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
-    private static let producersColor = Color.tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
-    private static let collaborationColor = Color.tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)
+    private static let featuringColor = Color.tone(
+        hue: 200 / 360,
+        saturation: 0.60,
+        brightness: 0.78,
+        lightBrightness: 0.46
+    )
+    private static let producersColor = Color.tone(
+        hue: 280 / 360,
+        saturation: 0.50,
+        brightness: 0.87,
+        lightBrightness: 0.46
+    )
+    private static let collaborationColor = Color.tone(
+        hue: 160 / 360,
+        saturation: 0.50,
+        brightness: 0.72,
+        lightBrightness: 0.38
+    )
     private static let refsColor = Color.tone(hue: 30 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.44)
-    private static let directorColor = Color.tone(hue: 250 / 360, saturation: 0.45, brightness: 0.90, lightBrightness: 0.48)
-    private static let creditedArtistsColor = Color.tone(hue: 340 / 360, saturation: 0.50, brightness: 0.84, lightBrightness: 0.46)
+    private static let directorColor = Color.tone(
+        hue: 250 / 360,
+        saturation: 0.45,
+        brightness: 0.90,
+        lightBrightness: 0.48
+    )
+    private static let creditedArtistsColor = Color.tone(
+        hue: 340 / 360,
+        saturation: 0.50,
+        brightness: 0.84,
+        lightBrightness: 0.46
+    )
 
     var color: Color {
         switch self {

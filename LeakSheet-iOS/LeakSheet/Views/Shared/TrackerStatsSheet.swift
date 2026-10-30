@@ -104,7 +104,11 @@ struct TrackerStatsSheet: View {
                 }
                 if !topEras.isEmpty {
                     SwiftUI.Section {
-                        BarList(rows: topEras.map { .init(label: $0.name, value: $0.plays, unit: $0.plays == 1 ? "play" : "plays") })
+                        BarList(rows: topEras.map { .init(
+                            label: $0.name,
+                            value: $0.plays,
+                            unit: $0.plays == 1 ? "play" : "plays"
+                        ) })
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                     } header: {

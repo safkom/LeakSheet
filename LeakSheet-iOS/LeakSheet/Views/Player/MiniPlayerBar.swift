@@ -41,7 +41,10 @@ struct MiniPlayerBar: View {
                         HStack(spacing: 10) {
                             // Art
                             if !player.artUrl.isEmpty {
-                                CachedImage(url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 128), maxPixelSize: 128) {
+                                CachedImage(
+                                    url: APIClient.shared.imageProxyURL(for: player.artUrl, width: 128),
+                                    maxPixelSize: 128
+                                ) {
                                     artPlaceholder
                                 }
                                 .frame(width: 40, height: 40)
@@ -65,7 +68,11 @@ struct MiniPlayerBar: View {
                                         .lineLimit(1)
                                 } else {
                                 HStack(spacing: 4) {
-                                    Text(player.eraName.isEmpty ? player.artistName : "\(player.artistName) · \(player.eraName)")
+                                    Text(
+                                        player.eraName.isEmpty
+                                            ? player.artistName
+                                            : "\(player.artistName) · \(player.eraName)"
+                                    )
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)

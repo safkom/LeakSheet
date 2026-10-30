@@ -65,7 +65,10 @@ struct FavouritesView: View {
                                             HStack(spacing: 10) {
                                                 // Era art thumbnail
                                                 if let artStr = entry.eraArt, !artStr.isEmpty {
-                                                    CachedImage(url: APIClient.shared.imageProxyURL(for: artStr, width: 128), maxPixelSize: 128) {
+                                                    CachedImage(
+                                                        url: APIClient.shared.imageProxyURL(for: artStr, width: 128),
+                                                        maxPixelSize: 128
+                                                    ) {
                                                         favArtPlaceholder
                                                     }
                                                     .frame(width: 40, height: 40)
@@ -94,7 +97,8 @@ struct FavouritesView: View {
                                                     // legacy flat fields nil.
                                                     DedupedBadgePills(
                                                         quality: entry.primaryVersion?.quality ?? entry.quality,
-                                                        availability: entry.primaryVersion?.availableLength ?? entry.availableLength
+                                                        availability: entry.primaryVersion?.availableLength
+                                                            ?? entry.availableLength
                                                     )
                                                 }
                                                 Spacer()
@@ -119,7 +123,11 @@ struct FavouritesView: View {
                                         // macOS ignores swipeActions; the context menu is its
                                         // only way to un-favourite.
                                         .contextMenu {
-                                            Button("Remove from Favourites", systemImage: "heart.slash", role: .destructive) {
+                                            Button(
+                                                "Remove from Favourites",
+                                                systemImage: "heart.slash",
+                                                role: .destructive
+                                            ) {
                                                 favourites.remove(key: entry.key)
                                             }
                                         }

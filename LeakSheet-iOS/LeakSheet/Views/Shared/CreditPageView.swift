@@ -217,7 +217,11 @@ struct CreditPageView: View {
     private func erasSection(_ profile: CreditProfile) -> some View {
         if !profile.topEras.isEmpty {
             CardSection(title: "Most Active Eras") {
-                BarList(rows: profile.topEras.map { .init(label: $0.label, value: $0.value, unit: $0.value == 1 ? "track" : "tracks") })
+                BarList(rows: profile.topEras.map { .init(
+                    label: $0.label,
+                    value: $0.value,
+                    unit: $0.value == 1 ? "track" : "tracks"
+                ) })
             }
         }
     }
@@ -263,7 +267,10 @@ struct CreditPageView: View {
             ForEach(Array(profile.eras.enumerated()), id: \.offset) { _, era in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        if let art = era.versions.first?.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 96) {
+                        if let art = era.versions.first?.eraArt, let url = APIClient.shared.imageProxyURL(
+                            for: art,
+                            width: 96
+                        ) {
                             CachedImage(url: url, maxPixelSize: 96) { ArtworkPlaceholder(cornerRadius: 0) }
                                 .frame(width: 28, height: 28)
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

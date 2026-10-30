@@ -79,7 +79,10 @@ enum StreamResolver {
         if hasWWW { host = String(host.dropFirst(4)) }
 
         // Empty segments stay: the backend's patterns need the literal /f/{id} shape.
-        let path = comps.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+        let path = comps.percentEncodedPath.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).dropFirst().map(String.init)
         return hostResolvers[host]?(LinkParts(path: path, comps: comps, hasWWW: hasWWW, rawLink: rawLink))
     }
 

@@ -118,7 +118,9 @@ struct CreditProfile {
                     sharedVersions: entry.value.count
                 )
             }
-            .sorted { $0.sharedVersions != $1.sharedVersions ? $0.sharedVersions > $1.sharedVersions : $0.name < $1.name }
+            .sorted {
+                $0.sharedVersions != $1.sharedVersions ? $0.sharedVersions > $1.sharedVersions : $0.name < $1.name
+            }
             .prefix(8)
 
         return CreditProfile(

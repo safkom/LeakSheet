@@ -146,7 +146,11 @@ private struct ArtistContentView: View {
                 // can't shunt the list down under the user's finger.
                 // The timeline re-evaluates the label so "N seconds ago" keeps ticking.
                 TimelineView(.periodic(from: .now, by: 15)) { _ in
-                Text(vm.loadNotice ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" } ?? " ")
+                Text(
+                    vm.loadNotice
+                        ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" }
+                        ?? " "
+                )
                     .font(.caption2)
                     .foregroundStyle(vm.loadNotice == nil ? Color.secondary : Color.lsError)
                     .multilineTextAlignment(.center)

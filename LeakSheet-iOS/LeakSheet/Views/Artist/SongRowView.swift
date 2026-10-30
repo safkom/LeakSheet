@@ -147,7 +147,9 @@ struct SongRowView: View {
                 Image(systemName: isFavourite ? "heart.fill" : "heart")
             }
             .tint(Color.lsFavourite)
-            .accessibilityLabel(isFavourite ? "Remove \(song.baseName) from favourites" : "Add \(song.baseName) to favourites")
+            .accessibilityLabel(
+                isFavourite ? "Remove \(song.baseName) from favourites" : "Add \(song.baseName) to favourites"
+            )
 
             if canStream {
                 Button(action: queue) {
@@ -211,7 +213,13 @@ struct SongRowView: View {
         if let onPlay {
             onPlay(version)
         } else {
-            player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+            player.playTrack(
+                version,
+                artistName: artistName,
+                eraName: eraName,
+                artUrl: eraArt ?? "",
+                artistSlug: artistSlug
+            )
         }
     }
 
@@ -221,7 +229,14 @@ struct SongRowView: View {
 
     private func enqueue(next: Bool) {
         guard canStream, let version else { return }
-        player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug, playNext: next)
+        player.addToQueue(
+            version,
+            artistName: artistName,
+            eraName: eraName,
+            artUrl: eraArt ?? "",
+            artistSlug: artistSlug,
+            playNext: next
+        )
         Haptics.light()
     }
 

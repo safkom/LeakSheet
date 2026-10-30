@@ -59,7 +59,13 @@ final class PlayerViewModel {
 
     private init() {}
 
-    func playTrack(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "") {
+    func playTrack(
+        _ version: SongVersion,
+        artistName: String = "",
+        eraName: String = "",
+        artUrl: String = "",
+        artistSlug: String = ""
+    ) {
         engine.playTrack(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
     }
 
@@ -75,8 +81,22 @@ final class PlayerViewModel {
         engine.seekTo(time)
     }
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "", playNext: Bool = false) {
-        engine.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug, playNext: playNext)
+    func addToQueue(
+        _ version: SongVersion,
+        artistName: String = "",
+        eraName: String = "",
+        artUrl: String = "",
+        artistSlug: String = "",
+        playNext: Bool = false
+    ) {
+        engine.addToQueue(
+            version,
+            artistName: artistName,
+            eraName: eraName,
+            artUrl: artUrl,
+            artistSlug: artistSlug,
+            playNext: playNext
+        )
     }
 
     func removeFromQueue(at index: Int) {
@@ -106,8 +126,22 @@ final class PlayerViewModel {
     /// Set era context and start playback in a single call so the two states
     /// can never be observed out of sync. Prefer this over calling
     /// `setEraSongs(...)` followed by `playTrack(...)`.
-    func playInEra(_ version: SongVersion, eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
-        engine.playInEra(version, eraName: eraName, artistName: artistName, artUrl: artUrl, versions: versions, artistSlug: artistSlug)
+    func playInEra(
+        _ version: SongVersion,
+        eraName: String,
+        artistName: String,
+        artUrl: String,
+        versions: [SongVersion],
+        artistSlug: String? = nil
+    ) {
+        engine.playInEra(
+            version,
+            eraName: eraName,
+            artistName: artistName,
+            artUrl: artUrl,
+            versions: versions,
+            artistSlug: artistSlug
+        )
     }
 
     func setArtistEras(_ eras: [EraSongContext]) {
@@ -175,7 +209,11 @@ final class PlayerViewModel {
         let station = RadioBuilder.smartShuffle(
             favourites: favourites,
             candidatesByEra: RadioBuilder.candidatesByEra(artists: artists),
-            isHeard: { ListeningHistory.shared.isHeard($0.version, artistSlug: $0.artistSlug ?? "", eraName: $0.eraName) },
+            isHeard: { ListeningHistory.shared.isHeard(
+                $0.version,
+                artistSlug: $0.artistSlug ?? "",
+                eraName: $0.eraName
+            ) },
             using: &rng
         )
         playInList(station, startAt: 0)

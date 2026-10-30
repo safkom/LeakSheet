@@ -510,7 +510,8 @@ nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, director, engineer, notes, samples, quality, streaming, links, type, sources, rating
+        case name, badge, featuring, producers, collaboration, refs, director, engineer, notes, samples
+        case quality, streaming, links, type, sources, rating
         case creditedArtists = "credited_artists"
         case versionTag = "version_tag"
         case altTitles = "alt_titles"

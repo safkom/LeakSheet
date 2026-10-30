@@ -158,7 +158,11 @@ final class AudioEngine {
             isPlaying = false
             loading = false
             error = "Stream host not supported"
-            Telemetry.report("Unsupported stream host", category: "Playback", attributes: ["host": URL(string: link)?.host ?? "-"])
+            Telemetry.report(
+                "Unsupported stream host",
+                category: "Playback",
+                attributes: ["host": URL(string: link)?.host ?? "-"]
+            )
             updateNowPlayingInfo()
             return
         }
@@ -373,8 +377,22 @@ final class AudioEngine {
 
     // MARK: - Queue
 
-    func addToQueue(_ version: SongVersion, artistName: String = "", eraName: String = "", artUrl: String = "", artistSlug: String = "", playNext: Bool = false) {
-        logic.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug, playNext: playNext)
+    func addToQueue(
+        _ version: SongVersion,
+        artistName: String = "",
+        eraName: String = "",
+        artUrl: String = "",
+        artistSlug: String = "",
+        playNext: Bool = false
+    ) {
+        logic.addToQueue(
+            version,
+            artistName: artistName,
+            eraName: eraName,
+            artUrl: artUrl,
+            artistSlug: artistSlug,
+            playNext: playNext
+        )
         syncQueue()
     }
 
@@ -402,7 +420,14 @@ final class AudioEngine {
     /// Atomic equivalent of `setEraSongs` followed by `playTrack`, kept as a
     /// single method so callers can't accidentally play a track without
     /// the era context that drives auto-advance.
-    func playInEra(_ version: SongVersion, eraName: String, artistName: String, artUrl: String, versions: [SongVersion], artistSlug: String? = nil) {
+    func playInEra(
+        _ version: SongVersion,
+        eraName: String,
+        artistName: String,
+        artUrl: String,
+        versions: [SongVersion],
+        artistSlug: String? = nil
+    ) {
         let context = EraSongContext(
             eraName: eraName,
             artistName: artistName,
@@ -505,7 +530,11 @@ final class AudioEngine {
         observations.append(item.observe(\.duration) { [weak self] item, _ in
             let dur = item.duration
             Task { @MainActor [weak self] in
-                guard let self, self.isCurrentItem(itemID), dur.isValid, !dur.isIndefinite, dur.seconds > 0 else { return }
+                guard let self,
+                      self.isCurrentItem(itemID),
+                      dur.isValid,
+                      !dur.isIndefinite,
+                      dur.seconds > 0 else { return }
                 self.duration = dur.seconds
             }
         })
@@ -518,7 +547,13 @@ final class AudioEngine {
             let errDesc = item.error?.localizedDescription
             Task { @MainActor [weak self] in
                 guard let self, self.isCurrentItem(itemID) else { return }
-                self.handleItemStatus(status, duration: dur, error: errDesc, restoreTime: restoreTime, autoPlay: autoPlay)
+                self.handleItemStatus(
+                    status,
+                    duration: dur,
+                    error: errDesc,
+                    restoreTime: restoreTime,
+                    autoPlay: autoPlay
+                )
             }
         })
 
@@ -550,7 +585,8 @@ final class AudioEngine {
     }
 
     private func handleItemStatus(
-        _ status: AVPlayerItem.Status, duration dur: CMTime, error errDesc: String?, restoreTime: TimeInterval, autoPlay: Bool
+        _ status: AVPlayerItem.Status, duration dur: CMTime, error errDesc: String?,
+        restoreTime: TimeInterval, autoPlay: Bool
     ) {
         switch status {
         case .readyToPlay:

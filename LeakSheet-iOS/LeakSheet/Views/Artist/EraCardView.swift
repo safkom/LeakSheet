@@ -52,7 +52,11 @@ struct EraCardView: View {
                 .buttonStyle(.plain)
                 // The alt names and subtitle are part of what the card says, and
                 // state belongs in the value: a hint can be turned off.
-                .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityLabel([
+                    era.name,
+                    era.altNames?.joined(separator: ", "),
+                    subtitle
+                ].compactMap { $0 }.joined(separator: ", "))
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityActions {
                     ForEach(actions) { action in Button(action.id, action: action.run) }
@@ -114,7 +118,9 @@ struct EraCardView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(descriptionExpanded ? "Show less of the era description" : "Show the full era description")
+                .accessibilityLabel(
+                    descriptionExpanded ? "Show less of the era description" : "Show the full era description"
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

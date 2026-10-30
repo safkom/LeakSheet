@@ -121,7 +121,10 @@ struct SettingsView: View {
                     ) {
                         Button("Clear History", role: .destructive) { ListeningHistory.shared.clear() }
                     } message: {
-                        Text("Removes every play count, the Recently Played shelf and the era listening totals. This cannot be undone.")
+                        Text("""
+                            Removes every play count, the Recently Played shelf and the era listening totals. \
+                            This cannot be undone.
+                            """)
                     }
                 } header: {
                     Text("Listening History")
@@ -165,7 +168,10 @@ struct SettingsView: View {
                     ) {
                         Button("Clear Cache", role: .destructive, action: clearCache)
                     } message: {
-                        Text("Frees \((cacheSizeBytes + imageCacheBytes).formatted(.byteCount(style: .file))). Trackers re-download the next time you open them.")
+                        Text("""
+                            Frees \((cacheSizeBytes + imageCacheBytes).formatted(.byteCount(style: .file))). \
+                            Trackers re-download the next time you open them.
+                            """)
                     }
                 } header: {
                     Text("Storage")
@@ -185,7 +191,10 @@ struct SettingsView: View {
                         Text("Invalid URL — the default server will be used.")
                             .foregroundStyle(Color.lsWarning)
                     } else {
-                        Text("Leave empty to use the default server. For a local backend, enter its full address — for example http://192.168.1.20:8000.")
+                        Text("""
+                            Leave empty to use the default server. For a local backend, enter its full address — \
+                            for example http://192.168.1.20:8000.
+                            """)
                     }
                 }
 

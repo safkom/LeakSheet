@@ -48,7 +48,10 @@ struct EraInfoSheet: View {
     private var content: some View {
         if let era {
             let insights = EraInsights.compute(era: era, artist: vm.artist)
-            let listening = ListeningHistory.eraListening(era, entries: ListeningHistory.shared.entries(for: vm.artist.slug))
+            let listening = ListeningHistory.eraListening(
+                era,
+                entries: ListeningHistory.shared.entries(for: vm.artist.slug)
+            )
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -107,7 +110,10 @@ struct EraInfoSheet: View {
                     .multilineTextAlignment(.center)
                     .accessibilityLabel("Also known as \(alts.joined(separator: ", "))")
             }
-            Text("\(insights.songCount.formatted()) songs · \(insights.versionCount.formatted()) tracks · \(insights.playableCount.formatted()) available")
+            Text("""
+                \(insights.songCount.formatted()) songs · \(insights.versionCount.formatted()) tracks · \
+                \(insights.playableCount.formatted()) available
+                """)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -129,7 +135,9 @@ struct EraInfoSheet: View {
             let fraction = Double(listening.heard) / Double(listening.versions)
             CardSection(title: "Your Listening") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Heard \(listening.heard) of \(listening.versions) tracks (\(Int((fraction * 100).rounded()))%)")
+                    Text("""
+                        Heard \(listening.heard) of \(listening.versions) tracks (\(Int((fraction * 100).rounded()))%)
+                        """)
                         .font(.subheadline)
                     ProgressView(value: fraction)
                         .tint(Color.lsAccent)
@@ -177,7 +185,10 @@ struct EraInfoSheet: View {
              StatGrid.Item(label: "Snippets", value: s.snippets ?? 0, tint: BadgeVariant.snippet.color),
              StatGrid.Item(label: "Stem Bounces", value: s.stemBounces ?? 0, tint: BadgeVariant.stem.color),
              StatGrid.Item(label: "Unavailable", value: s.unavailable ?? 0, tint: .secondary)]
-            + (s.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { StatGrid.Item(label: $0.key.capitalized, value: $0.value) }
+            + (s.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { StatGrid.Item(
+                label: $0.key.capitalized,
+                value: $0.value
+            ) }
         }?.filter { $0.value > 0 } ?? []
         if !items.isEmpty {
             CardSection(title: "Tracker Counts") { StatGrid(items: items) }
@@ -185,7 +196,11 @@ struct EraInfoSheet: View {
     }
 
     @ViewBuilder
-    private func creditSection(_ title: String, _ counts: [EraInsights.Count], role: ArtistViewModel.CreditRole) -> some View {
+    private func creditSection(
+        _ title: String,
+        _ counts: [EraInsights.Count],
+        role: ArtistViewModel.CreditRole
+    ) -> some View {
         if !counts.isEmpty {
             CardSection(title: title) {
                 FlowLayout(spacing: 6) {
@@ -207,7 +222,11 @@ struct EraInfoSheet: View {
     private func sectionBars(_ sections: [EraInsights.Count]) -> some View {
         if !sections.isEmpty {
             CardSection(title: "Sections") {
-                BarList(rows: sections.map { .init(label: $0.label, value: $0.value, unit: $0.value == 1 ? "song" : "songs") })
+                BarList(rows: sections.map { .init(
+                    label: $0.label,
+                    value: $0.value,
+                    unit: $0.value == 1 ? "song" : "songs"
+                ) })
             }
         }
     }

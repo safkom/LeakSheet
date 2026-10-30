@@ -89,7 +89,9 @@ final class TrackerLoader {
                 withAnimation { self.error = message }
                 // `error` holds only the user-facing message; telemetry gets what went wrong.
                 if let cause {
-                    Telemetry.report("Tracker load failed: \(cause)", category: "TrackerLoader", attributes: ["tracker": trimmed])
+                    Telemetry.report(
+                        "Tracker load failed: \(cause)", category: "TrackerLoader", attributes: ["tracker": trimmed]
+                    )
                 }
                 return nil
             }
@@ -136,8 +138,15 @@ final class TrackerLoader {
             // The server answered, but with data this build can't read. Not
             // an outage, so don't say "couldn't reach the server". Reported here, before
             // the fallback: a cached copy hides it from the user, not from us.
-            Telemetry.report("Tracker payload did not decode: \(decodingError)", category: "TrackerLoader", attributes: ["tracker": request.url])
-            if let cached = await cachedFallback(request.url, artistName: request.artistName, recents: request.recents) {
+            Telemetry.report(
+                "Tracker payload did not decode: \(decodingError)",
+                category: "TrackerLoader", attributes: ["tracker": request.url]
+            )
+            if let cached = await cachedFallback(
+                request.url,
+                artistName: request.artistName,
+                recents: request.recents
+            ) {
                 staleNotice = "Couldn't read the latest data — showing the last saved copy."
                 return .done(cached)
             }
@@ -162,7 +171,11 @@ final class TrackerLoader {
             // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403
             // refused); serving the cached copy would hide that forever.
             if status >= 500,
-               let cached = await offlineFallback(request.url, artistName: request.artistName, recents: request.recents) {
+               let cached = await offlineFallback(
+                   request.url,
+                   artistName: request.artistName,
+                   recents: request.recents
+               ) {
                 return .done(cached)
             }
             return .failed(Self.friendlyLoadError(status: status, fallback: msg), cause: apiError)
@@ -263,7 +276,8 @@ final class TrackerLoader {
         do {
             let result = try await APIClient.shared.parseSheet(url: trimmed, artistName: artistName)
             if let etag = result.etag {
-                // Overwrites in place; a failed reload keeps the old copy. See DECISIONS.md::TrackerLoader.swift::keep-cache-on-failed-reload.
+                // Overwrites in place; a failed reload keeps the old copy.
+                // See DECISIONS.md::TrackerLoader.swift::keep-cache-on-failed-reload.
                 await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
@@ -274,7 +288,9 @@ final class TrackerLoader {
         } catch let urlError as URLError where urlError.code == .cancelled {
             return nil
         } catch {
-            Telemetry.report("Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed])
+            Telemetry.report(
+                "Tracker refresh failed: \(error)", category: "TrackerLoader", attributes: ["tracker": trimmed]
+            )
             withAnimation { self.error = "Failed to load tracker" }
             return nil
         }
@@ -291,7 +307,8 @@ final class TrackerLoader {
         }
         // The server's 400 for an unsupported host names an ops variable.
         if status == 400, fallback.contains("host not allowed") {
-            return "That link isn't a supported tracker. Paste a Google Sheets tracker link, or pick one from Explore Trackers."
+            return "That link isn't a supported tracker. "
+                + "Paste a Google Sheets tracker link, or pick one from Explore Trackers."
         }
         switch status {
         case 502, 503, 504, 524:  // 524: Cloudflare's origin timeout

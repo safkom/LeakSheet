@@ -128,11 +128,36 @@ struct MacArtistView: View {
             // FlowLayout, not a horizontal scroller: a Mac shows no scroll affordance on an
             // indicator-less strip, so chips past the fold would be invisible.
             FlowLayout(spacing: 8) {
-                MacFilterChip(label: "Best Of", icon: "star.fill", isActive: vm.bestOf, tint: .filterBestOf) { vm.toggleBestOf() }
-                MacFilterChip(label: "Worst Of", icon: "hand.thumbsdown", isActive: vm.worstOf, tint: .filterWorstOf) { vm.toggleWorstOf() }
-                MacFilterChip(label: "Grails", icon: "trophy.fill", isActive: vm.grails, tint: .filterGrail) { vm.toggleGrails() }
-                MacFilterChip(label: "Recent", icon: "clock", isActive: vm.recents, tint: .filterRecent) { vm.toggleRecents() }
-                MacFilterChip(label: "No Snippets", icon: "waveform.slash", isActive: vm.noSnippets, tint: .filterNoSnippets) { vm.toggleNoSnippets() }
+                MacFilterChip(
+                    label: "Best Of",
+                    icon: "star.fill",
+                    isActive: vm.bestOf,
+                    tint: .filterBestOf
+                ) { vm.toggleBestOf() }
+                MacFilterChip(
+                    label: "Worst Of",
+                    icon: "hand.thumbsdown",
+                    isActive: vm.worstOf,
+                    tint: .filterWorstOf
+                ) { vm.toggleWorstOf() }
+                MacFilterChip(
+                    label: "Grails",
+                    icon: "trophy.fill",
+                    isActive: vm.grails,
+                    tint: .filterGrail
+                ) { vm.toggleGrails() }
+                MacFilterChip(
+                    label: "Recent",
+                    icon: "clock",
+                    isActive: vm.recents,
+                    tint: .filterRecent
+                ) { vm.toggleRecents() }
+                MacFilterChip(
+                    label: "No Snippets",
+                    icon: "waveform.slash",
+                    isActive: vm.noSnippets,
+                    tint: .filterNoSnippets
+                ) { vm.toggleNoSnippets() }
                 ForEach(vm.availableTabs) { tab in
                     MacFilterChip(
                         label: ContentTabsView.labelText(for: tab.name),
@@ -410,12 +435,24 @@ struct MacArtistView: View {
     private var visibleRows: [MacListRow] {
         if vm.isSearching {
             return vm.content.searchResults.map {
-                .song($0.song, version: $0.version, eraName: $0.era.name, eraArt: $0.era.artUrl, ordinal: $0.songOrdinal)
+                .song(
+                    $0.song,
+                    version: $0.version,
+                    eraName: $0.era.name,
+                    eraArt: $0.era.artUrl,
+                    ordinal: $0.songOrdinal
+                )
             }
         }
         if vm.recents {
             return vm.visibleRecents.map {
-                .song($0.song, version: $0.version, eraName: $0.era.name, eraArt: $0.era.artUrl, ordinal: $0.songOrdinal)
+                .song(
+                    $0.song,
+                    version: $0.version,
+                    eraName: $0.era.name,
+                    eraArt: $0.era.artUrl,
+                    ordinal: $0.songOrdinal
+                )
             }
         }
         if vm.isBadgeFilterActive {
@@ -516,10 +553,22 @@ struct MacArtistView: View {
             case .header: return nil
             case .song(let song, let v, let era, let art, _):
                 guard let picked = v ?? song.bestPlayableVersion, picked.isStreamable else { return nil }
-                return PlaybackListItem(version: picked, artistName: artist.name, eraName: era, artUrl: art ?? "", artistSlug: artist.slug)
+                return PlaybackListItem(
+                    version: picked,
+                    artistName: artist.name,
+                    eraName: era,
+                    artUrl: art ?? "",
+                    artistSlug: artist.slug
+                )
             case .version(let v, _, let era, let art, _, _):
                 guard v.isStreamable else { return nil }
-                return PlaybackListItem(version: v, artistName: artist.name, eraName: era, artUrl: art ?? "", artistSlug: artist.slug)
+                return PlaybackListItem(
+                    version: v,
+                    artistName: artist.name,
+                    eraName: era,
+                    artUrl: art ?? "",
+                    artistSlug: artist.slug
+                )
             }
         }
         if let idx = items.firstIndex(where: { $0.version.id == version.id }) {

@@ -153,7 +153,13 @@ struct SongDescriptionSheet: View {
                 return
             }
         }
-        player.playTrack(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+        player.playTrack(
+            active.version,
+            artistName: payload.artistName,
+            eraName: active.eraName,
+            artUrl: active.eraArt ?? "",
+            artistSlug: payload.artistSlug ?? ""
+        )
     }
 
     var body: some View {
@@ -183,7 +189,10 @@ struct SongDescriptionSheet: View {
                     VStack(alignment: .leading, spacing: 14) {
                         // Prominent album art with gradient
                         VStack(spacing: 12) {
-                            if let artUrl = active.eraArt, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 640) {
+                            if let artUrl = active.eraArt, let url = APIClient.shared.imageProxyURL(
+                                for: artUrl,
+                                width: 640
+                            ) {
                                 CachedImage(url: url, maxPixelSize: 640) {
                                     ArtworkPlaceholder(cornerRadius: 0)
                                         .font(.largeTitle)
@@ -195,7 +204,10 @@ struct SongDescriptionSheet: View {
                                 // different era swaps the art, so the extracted
                                 // accent has to be re-run, not just the image.
                                 .task(id: artUrl) {
-                                    accentColor = await EraColorExtractor.shared.extractColor(from: url, cacheKey: artUrl)
+                                    accentColor = await EraColorExtractor.shared.extractColor(
+                                        from: url,
+                                        cacheKey: artUrl
+                                    )
                                 }
                             }
 
@@ -204,7 +216,10 @@ struct SongDescriptionSheet: View {
                                 Text(active.eraName.uppercased())
                                     .font(.caption2.weight(.bold))
                                     .tracking(0.8)
-                                    .foregroundStyle((accentColor ?? .lsAccent).ensureReadable(against: .lsBackground, in: colorScheme))
+                                    .foregroundStyle((accentColor ?? .lsAccent).ensureReadable(
+                                        against: .lsBackground,
+                                        in: colorScheme
+                                    ))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 4)
                                     .background((accentColor ?? .lsAccent).opacity(0.15))
@@ -230,7 +245,10 @@ struct SongDescriptionSheet: View {
                                 .font(.title.weight(.bold))
                                 // .white, not .primary: a dynamic colour resolves to black in the
                                 // contrast maths, greying the title until the artwork task lands.
-                                .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
+                                .foregroundStyle((accentColor ?? .white).ensureReadable(
+                                    against: .lsBackground,
+                                    in: colorScheme
+                                ))
                             if let sub = subtitle {
                                 Text(sub)
                                     .font(.subheadline)
@@ -245,7 +263,8 @@ struct SongDescriptionSheet: View {
                         creditsSection
 
                         // Status badges (quality + availability + fan rating) — prominent
-                        if active.version.quality != nil || active.version.availableLength != nil || active.version.rating != nil {
+                        if active.version.quality != nil || active.version.availableLength != nil
+                            || active.version.rating != nil {
                             FlowLayout(spacing: 6) {
                                 // Same dedupe rules as the song rows (SPEC §12),
                                 // rendered at this sheet's larger pill size.
@@ -265,7 +284,11 @@ struct SongDescriptionSheet: View {
                                     quality: active.version.quality,
                                     availability: active.version.availableLength
                                 ) {
-                                    BadgePill(text: avail.text, variant: availabilityVariant(avail.text), prominent: true)
+                                    BadgePill(
+                                        text: avail.text,
+                                        variant: availabilityVariant(avail.text),
+                                        prominent: true
+                                    )
                                 }
                                 if let rating = active.version.rating {
                                     ratingPill(rating)
@@ -422,7 +445,11 @@ struct SongDescriptionSheet: View {
                         toggleFavourite()
                     } label: {
                         let slug = payload.artistSlug ?? payload.artistName.slugified
-                        let isFav = favourites.isFavouritedByVersion(active.version, artistSlug: slug, eraName: active.eraName)
+                        let isFav = favourites.isFavouritedByVersion(
+                            active.version,
+                            artistSlug: slug,
+                            eraName: active.eraName
+                        )
                         Image(systemName: isFav ? "heart.fill" : "heart")
                             .font(.headline)
                             .foregroundStyle(isFav ? Color.lsFavourite : .primary)
@@ -496,7 +523,13 @@ struct SongDescriptionSheet: View {
                 Label("Play", systemImage: "play.fill")
             }
             Button {
-                player.addToQueue(active.version, artistName: payload.artistName, eraName: active.eraName, artUrl: active.eraArt ?? "", artistSlug: payload.artistSlug ?? "")
+                player.addToQueue(
+                    active.version,
+                    artistName: payload.artistName,
+                    eraName: active.eraName,
+                    artUrl: active.eraArt ?? "",
+                    artistSlug: payload.artistSlug ?? ""
+                )
                 Haptics.light()
             } label: {
                 Label("Add to Queue", systemImage: "text.append")

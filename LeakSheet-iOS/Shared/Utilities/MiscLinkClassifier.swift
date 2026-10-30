@@ -121,7 +121,9 @@ nonisolated enum MiscLinkClassifier {
             return nil
         }
         if host == "soundcloud.com" || host == "m.soundcloud.com" || host == "on.soundcloud.com" {
-            guard let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+            guard let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
+                return nil
+            }
             return URL(string: "https://w.soundcloud.com/player/?url=\(encoded)&auto_play=false")
         }
         return nil

@@ -78,7 +78,10 @@ extension ArtistViewModel {
         for era in artist.eras {
             if Task.isCancelled { return nil }
             let allSongs = era.allSongs
-            guard !allSongs.isEmpty, allSongs.contains(where: { songPassesBadgeFilters($0, state: state) }) else { continue }
+            guard !allSongs.isEmpty, allSongs.contains(where: { songPassesBadgeFilters(
+                $0,
+                state: state
+            ) }) else { continue }
             let sections = (era.sections ?? []).compactMap { section -> Section? in
                 let songs = filterSongs(section.songs, state: state)
                 guard !songs.isEmpty else { return nil }
@@ -164,7 +167,13 @@ extension ArtistViewModel {
                     if state.worstOf && !isWorstOfVersion(version) { continue }
                     if state.grails && !isGrailOrWantedVersion(version) { continue }
                     if state.noSnippets && shouldFilterForNoSnippets(version) { continue }
-                    results.append(SearchResult(song: song, version: version, era: era, score: score, songOrdinal: songIdx))
+                    results.append(SearchResult(
+                        song: song,
+                        version: version,
+                        era: era,
+                        score: score,
+                        songOrdinal: songIdx
+                    ))
                 }
             }
         }
@@ -260,7 +269,11 @@ extension ArtistViewModel {
     /// entries, Recent sorts by date descending, search matches name /
     /// notes / era / type. Best Of, Worst Of and Grails keep only their badge-marked
     /// names, so a tab with none shows empty rather than the whole tab.
-    private nonisolated static func computeMiscResults(artist: Artist, tabKey: String, state: FilterState) -> [MiscEntry] {
+    private nonisolated static func computeMiscResults(
+        artist: Artist,
+        tabKey: String,
+        state: FilterState
+    ) -> [MiscEntry] {
         var entries = artist.tabs?.first(where: { $0.id == tabKey })?.entries ?? []
         if state.noSnippets {
             entries = entries.filter { !isSnippetLike(available: $0.available, quality: $0.quality) }
@@ -317,7 +330,12 @@ extension ArtistViewModel {
     nonisolated static func computeEraStats(_ era: Era) -> Stats {
         // .lazy: `allSongs` is itself a flatMap, so an eager one here would
         // materialise a second full-size array per era just to count it.
-        tally(era.allSongs.lazy.flatMap(\.versions), available: \.availableLength, quality: \.quality, streamable: \.isStreamable)
+        tally(
+            era.allSongs.lazy.flatMap(\.versions),
+            available: \.availableLength,
+            quality: \.quality,
+            streamable: \.isStreamable
+        )
     }
 
     private nonisolated static func tally<S: Sequence>(
@@ -513,7 +531,9 @@ extension ArtistViewModel {
         s = s.replacing(/\b([A-Za-z]{3})\.(?=\s)/) { String($0.output.1) }
         // "Sep 13 1996" → "Sep 13, 1996"; a full month name is shortened so one formatter fits.
         s = s.replacing(/^([A-Za-z]+) (\d{1,2}) (\d{4})$/) { "\($0.output.1) \($0.output.2), \($0.output.3)" }
-        s = s.replacing(/^(\d{1,2}) ([A-Za-z]{4,}) (\d{4})$/) { "\($0.output.1) \($0.output.2.prefix(3)) \($0.output.3)" }
+        s = s.replacing(/^(\d{1,2}) ([A-Za-z]{4,}) (\d{4})$/) {
+            "\($0.output.1) \($0.output.2.prefix(3)) \($0.output.3)"
+        }
         return s
     }
 

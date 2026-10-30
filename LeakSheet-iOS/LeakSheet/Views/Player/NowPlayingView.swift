@@ -131,7 +131,11 @@ struct NowPlayingView: View {
                     HStack {
                         PlaybackElapsedText()
                         Spacer()
-                        Text(player.duration > 0 ? Format.time(player.duration) : (player.currentTrack?.trackLength ?? "--:--"))
+                        Text(
+                            player.duration > 0
+                                ? Format.time(player.duration)
+                                : (player.currentTrack?.trackLength ?? "--:--")
+                        )
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -164,7 +168,10 @@ struct NowPlayingView: View {
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.title2.weight(.semibold))
-                                .foregroundStyle(Color.preferredText(on: accentColor ?? Color.lsAccent, in: colorScheme))
+                                .foregroundStyle(Color.preferredText(
+                                    on: accentColor ?? Color.lsAccent,
+                                    in: colorScheme
+                                ))
                                 .frame(width: 56, height: 56)
                                 .contentTransition(.symbolEffect(.replace))
                         }
@@ -208,7 +215,11 @@ struct NowPlayingView: View {
 
                     // Favourite
                     if let track = player.currentTrack {
-                        let isFav = favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName)
+                        let isFav = favourites.isFavouritedByVersion(
+                            track,
+                            artistSlug: player.artistSlug,
+                            eraName: player.eraName
+                        )
                         Button {
                             favourites.toggleFromVersion(
                                 version: track,
@@ -292,7 +303,13 @@ struct NowPlayingView: View {
                     Menu {
                         if let track = player.currentTrack {
                             Button {
-                                player.addToQueue(track, artistName: player.artistName, eraName: player.eraName, artUrl: player.artUrl, artistSlug: player.artistSlug)
+                                player.addToQueue(
+                                    track,
+                                    artistName: player.artistName,
+                                    eraName: player.eraName,
+                                    artUrl: player.artUrl,
+                                    artistSlug: player.artistSlug
+                                )
                                 Haptics.light()
                             } label: {
                                 Label("Add to Queue", systemImage: "text.append")
@@ -309,8 +326,16 @@ struct NowPlayingView: View {
                                 Haptics.light()
                             } label: {
                                 Label(
-                                    favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName) ? "Unfavourite" : "Favourite",
-                                    systemImage: favourites.isFavouritedByVersion(track, artistSlug: player.artistSlug, eraName: player.eraName) ? "heart.fill" : "heart"
+                                    favourites.isFavouritedByVersion(
+                                        track,
+                                        artistSlug: player.artistSlug,
+                                        eraName: player.eraName
+                                    ) ? "Unfavourite" : "Favourite",
+                                    systemImage: favourites.isFavouritedByVersion(
+                                        track,
+                                        artistSlug: player.artistSlug,
+                                        eraName: player.eraName
+                                    ) ? "heart.fill" : "heart"
                                 )
                             }
                         }

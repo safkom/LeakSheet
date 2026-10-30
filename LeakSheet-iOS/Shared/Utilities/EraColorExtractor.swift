@@ -75,7 +75,11 @@ actor EraColorExtractor {
     /// Matches what ColorThief's getPalette()[0] returns for the same image.
     /// Every second pixel each way, without transparent and pure-white ones.
     /// Sample filtering — see DECISIONS.md::EraColorExtractor.swift::sample-filtering
-    private nonisolated static func samplePixels(_ pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int) -> [Pixel] {
+    private nonisolated static func samplePixels(
+        _ pixels: UnsafeMutablePointer<UInt8>,
+        width: Int,
+        height: Int
+    ) -> [Pixel] {
         var samples: [Pixel] = []
         samples.reserveCapacity((width / 2 + 1) * (height / 2 + 1))
         for y in Swift.stride(from: 0, to: height, by: 2) {

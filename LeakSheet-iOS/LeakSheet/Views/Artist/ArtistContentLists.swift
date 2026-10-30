@@ -43,7 +43,11 @@ struct ContentTabsView: View {
                         vm.selectTab(nil)
                     }
                     ForEach(vm.availableTabs) { tab in
-                        TabButton(label: Self.labelText(for: tab.name), icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
+                        TabButton(
+                            label: Self.labelText(for: tab.name),
+                            icon: Self.tabIcon(for: tab.kind),
+                            isSelected: vm.selectedTabKey == tab.id
+                        ) {
                             vm.selectTab(tab.id)
                         }
                     }
@@ -105,12 +109,21 @@ struct FilterMenu: View {
             if onSongTree {
                 SwiftUI.Section("Show only") {
                     Toggle(isOn: binding(vm.bestOf, vm.toggleBestOf)) { Label("Best Of", systemImage: "star.fill") }
-                    Toggle(isOn: binding(vm.worstOf, vm.toggleWorstOf)) { Label("Worst Of", systemImage: "hand.thumbsdown") }
-                    Toggle(isOn: binding(vm.grails, vm.toggleGrails)) { Label("Grails & Wanted", systemImage: "trophy.fill") }
+                    Toggle(isOn: binding(vm.worstOf, vm.toggleWorstOf)) { Label(
+                        "Worst Of",
+                        systemImage: "hand.thumbsdown"
+                    ) }
+                    Toggle(isOn: binding(vm.grails, vm.toggleGrails)) { Label(
+                        "Grails & Wanted",
+                        systemImage: "trophy.fill"
+                    ) }
                 }
                 Toggle(isOn: binding(vm.recents, vm.toggleRecents)) { Label("Recently Leaked", systemImage: "clock") }
             }
-            Toggle(isOn: binding(vm.noSnippets, vm.toggleNoSnippets)) { Label("Hide Snippets", systemImage: "waveform.slash") }
+            Toggle(isOn: binding(vm.noSnippets, vm.toggleNoSnippets)) { Label(
+                "Hide Snippets",
+                systemImage: "waveform.slash"
+            ) }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: activeCount > 0
@@ -559,7 +572,8 @@ struct RecentsListView: View {
                 // Date label (only when it changes) sits inside the panel, so a group
                 // reads as one surface.
                 VStack(spacing: 0) {
-                    let prevDate = idx > 0 ? (visible[idx - 1].version.leakDate ?? visible[idx - 1].version.fileDate) : nil
+                    let previous = idx > 0 ? visible[idx - 1].version : nil
+                    let prevDate = previous.flatMap { $0.leakDate ?? $0.fileDate }
                     let thisDate = result.version.leakDate ?? result.version.fileDate
                     if let date = thisDate, !date.isEmpty, date != prevDate {
                         HStack(spacing: 4) {

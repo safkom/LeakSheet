@@ -87,7 +87,8 @@ nonisolated enum EraRow: Identifiable, Equatable, Sendable {
         case .card(let filtered, _): return "card::\(filtered.era.name)"
         case .divider(let era): return "div::\(era)"
         case .groupHeader(let text, let era, let nth): return "grp::\(era)::\(text)::\(nth)"
-        case .sectionHeader(let name, let era, let group, let nth, _): return "sec::\(era)::\(group ?? "")::\(name)::\(nth)"
+        case .sectionHeader(let name, let era, let group, let nth, _):
+            return "sec::\(era)::\(group ?? "")::\(name)::\(nth)"
         case .song(let song, let era, _, _, _, _, let ord): return "song::\(era)::\(ord)::\(song.baseName)"
         case .version(let version, let index, let song, let era, _, _, let songOrd):
             return "ver::\(era)::\(songOrd)::\(song.baseName)::\(version.id)::\(index)"
@@ -688,7 +689,12 @@ final class ArtistViewModel {
         filterTask = Task.detached(priority: .userInitiated) { [weak self] in
             await previousTask?.value
             guard !Task.isCancelled else { return }
-            let result = ArtistViewModel.computeContent(artist: artist, state: state, eraStats: eraStats, searchIndex: searchIndex)
+            let result = ArtistViewModel.computeContent(
+                artist: artist,
+                state: state,
+                eraStats: eraStats,
+                searchIndex: searchIndex
+            )
             let contexts = ArtistViewModel.filteredEraContexts(artist: artist, state: state, result: result)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
@@ -908,7 +914,13 @@ final class ArtistViewModel {
         eraRows = rows
     }
 
-    private func appendSongRows(_ rows: inout [EraRow], songs: [Song], eraName: String, eraArt: String?, ordinal: inout Int) {
+    private func appendSongRows(
+        _ rows: inout [EraRow],
+        songs: [Song],
+        eraName: String,
+        eraArt: String?,
+        ordinal: inout Int
+    ) {
         for song in songs {
             let hasMultiple = song.hasMultipleVersions
             let expanded = hasMultiple && isSongExpanded(eraName: eraName, ordinal: ordinal)

@@ -56,7 +56,7 @@ struct CacheServiceTests {
 
         // The schema version lives in the sidecar since v3 — the payload is
         // raw response bytes with nothing of ours in them.
-        var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: meta)) as! [String: Any]
+        var raw = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: meta)) as? [String: Any])
         raw["version"] = 2
         try JSONSerialization.data(withJSONObject: raw).write(to: meta)
 
@@ -232,7 +232,9 @@ struct CacheServiceTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         // Typed once as "yetracker.net", reopened from Recents as the
         // server's "https://yetracker.net/": one tracker, one cache entry.
-        await service.cacheTracker(url: "yetracker.net", data: Data(#"{"name": "Ye", "slug": "ye", "eras": []}"#.utf8), etag: "e1")
+        await service.cacheTracker(
+            url: "yetracker.net", data: Data(#"{"name": "Ye", "slug": "ye", "eras": []}"#.utf8), etag: "e1"
+        )
         #expect(await service.getCachedEtag(for: "https://yetracker.net/") == "e1")
     }
 

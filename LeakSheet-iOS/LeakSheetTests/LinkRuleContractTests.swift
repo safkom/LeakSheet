@@ -8,25 +8,25 @@ private struct TrackerURLVector: Decodable { let raw: String; let normalized: St
 private struct KnownLinkVector: Decodable { let link: String; let python: String?; let swift: String? }
 private struct KnownURLVector: Decodable { let raw: String; let python: String?; let swift: String }
 
+private struct Vectors: Decodable {
+    let streamLinks: [StreamLinkVector]
+    let trackerUrls: [TrackerURLVector]
+    let knownDifferences: [KnownLinkVector]
+    let knownUrlDifferences: [KnownURLVector]
+
+    enum CodingKeys: String, CodingKey {
+        case streamLinks = "stream_links"
+        case trackerUrls = "tracker_urls"
+        case knownDifferences = "known_differences"
+        case knownUrlDifferences = "known_url_differences"
+    }
+}
+
 /// Replays Fixtures/stream_links.json, which tests/parse/test_link_rule_contract.py builds from
 /// the backend's own resolver and normalizer: a rule the two sides read differently fails here.
 /// The known differences are pinned both ways, so closing one also fails until it is moved.
 struct LinkRuleContractTests {
     private final class BundleToken {}
-
-    private struct Vectors: Decodable {
-        let streamLinks: [StreamLinkVector]
-        let trackerUrls: [TrackerURLVector]
-        let knownDifferences: [KnownLinkVector]
-        let knownUrlDifferences: [KnownURLVector]
-
-        enum CodingKeys: String, CodingKey {
-            case streamLinks = "stream_links"
-            case trackerUrls = "tracker_urls"
-            case knownDifferences = "known_differences"
-            case knownUrlDifferences = "known_url_differences"
-        }
-    }
 
     private func vectors() throws -> Vectors {
         let url = try #require(Bundle(for: BundleToken.self).url(forResource: "stream_links", withExtension: "json"))
