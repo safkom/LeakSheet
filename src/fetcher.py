@@ -48,7 +48,7 @@ from src.config import (
     tracker_hosts_are_stale,
 )
 from src import sheets_api
-from src.models import Artist, Section, TabSection, TrackerEntry
+from src.models import Artist, Era, Section, Song, TabSection, TrackerEntry
 from src.streaming import PublicOnlyAsyncTransport
 from src.parser import (
     apply_badge_tabs,
@@ -882,6 +882,40 @@ def _get_cached(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> tuple[str, st
     return None
 
 
+def _is_sheet_entry_file(path: Path) -> bool:
+    """A sheet-cache entry file: img_* is the image cache (own cap), imgalias_*/imgsrc_* are
+    the pointers covers resolve through (evicting them brings back expired-token failures),
+    and host_health.json is shared state."""
+    return (
+        path.is_file()
+        and not path.name.startswith(("img_", "imgalias_", "imgsrc_"))
+        and not path.name.endswith(".lock")
+        and path.name != "host_health.json"
+    )
+
+
+def _scan_sheet_cache(orphan_cutoff: float) -> tuple[dict[str, list[tuple[float, int, Path]]], list[Path], int]:
+    """(entry files grouped by hash stem, meta locks, total bytes); ages out orphan temp files."""
+    groups: dict[str, list[tuple[float, int, Path]]] = {}
+    locks: list[Path] = []
+    total = 0
+    for path in CACHE_DIR.iterdir():
+        # Never group an atomic write (`abc.html.tmpQ7z1` would join entry "abc" and be
+        # unlinked mid-write); only age out the orphans, image-cache ones included.
+        if _TMP_SUFFIX_RE.search(path.name):
+            unlink_if_older(path, orphan_cutoff)
+        elif path.name.endswith(".meta.lock"):
+            locks.append(path)
+        elif _is_sheet_entry_file(path):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            groups.setdefault(path.name.split(".", 1)[0], []).append((stat.st_mtime, stat.st_size, path))
+            total += stat.st_size
+    return groups, locks, total
+
+
 def _evict_sheet_cache() -> None:
     """Drop the oldest sheet-cache entries once the cache exceeds the cap.
 
@@ -892,44 +926,12 @@ def _evict_sheet_cache() -> None:
     """
     if not CACHE_DIR.exists():
         return
-    groups: dict[str, list[tuple[float, int, Path]]] = {}
-    locks: list[Path] = []
-    total = 0
     orphan_cutoff = time.time() - _ORPHAN_TMP_AGE_S
-    for path in CACHE_DIR.iterdir():
-        # Never group an atomic write (`abc.html.tmpQ7z1` would join entry "abc" and be
-        # unlinked mid-write); only age out the orphans, image-cache ones included.
-        if _TMP_SUFFIX_RE.search(path.name):
-            unlink_if_older(path, orphan_cutoff)
-            continue
-        # img_* is the image cache (own cap); imgalias_*/imgsrc_* are the pointers covers
-        # resolve through, and evicting them brings back expired-token failures.
-        if path.name.endswith(".meta.lock"):
-            locks.append(path)
-            continue
-        # host_health.json is shared state, not a cache entry.
-        if (
-            not path.is_file()
-            or path.name.startswith(("img_", "imgalias_", "imgsrc_"))
-            or path.name.endswith(".lock")
-            or path.name == "host_health.json"
-        ):
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        stem = path.name.split(".", 1)[0]
-        groups.setdefault(stem, []).append((stat.st_mtime, stat.st_size, path))
-        total += stat.st_size
+    groups, locks, total = _scan_sheet_cache(orphan_cutoff)
     for lock in locks:
         if lock.name.split(".", 1)[0] not in groups:
             _remove_idle_lock(lock, orphan_cutoff)
-    if total <= _SHEET_CACHE_MAX_BYTES:
-        return
-    ranked = sorted(
-        groups.values(), key=lambda files: max(m for m, _, _ in files)
-    )
+    ranked = sorted(groups.values(), key=lambda files: max(m for m, _, _ in files))
     for files in ranked:
         if total <= _SHEET_CACHE_MAX_BYTES:
             break
@@ -1478,6 +1480,76 @@ async def _fetch_base_html(
     return html, title
 
 
+def _page_title(html: str) -> str:
+    title_match = TITLE_PATTERN.search(html)
+    return title_match.group(1) if title_match else ""
+
+
+async def _fetch_one_tab(
+    client: httpx.AsyncClient, url: str, gid: str, *, timeout: float, cache_ttl: float, use_cache: bool,
+) -> tuple[str, str]:
+    sheet_url = _build_sheet_html_url(url, gid)
+    # Read the SAME key the write below uses; a base-keyed entry may hold a different tab.
+    if use_cache and cache_ttl > 0:
+        cached = await _async_get_cached(sheet_url, cache_ttl)
+        if cached is not None:
+            return cached
+    r = await _get_capped(client, sheet_url, timeout=timeout)
+    _raise_if_signed_out(r, sheet_url)
+    r.raise_for_status()
+    if _TABLE_OPEN not in r.text.lower():
+        raise NoTablesError(f"No table in tab gid={gid} of {url}")
+    title = _page_title(r.text)
+    if use_cache:
+        # Key by the URL actually fetched (as _fetch_gid_page does), never the base `url`,
+        # or a later gid-less read would get this tab back as the whole sheet.
+        await _async_set_cache(sheet_url, r.text, title)
+    return r.text, title
+
+
+async def _first_tab_with_table(
+    client: httpx.AsyncClient, url: str, base_html: str, title: str, *, timeout: float, use_cache: bool,
+) -> tuple[str, str]:
+    """Discover the GIDs and return the first tab holding a table."""
+    page_paths = _page_path_map(base_html)
+    gids = _discover_gids(base_html) or list(page_paths) or ["0"]
+    last_error = None
+    for try_gid in gids:
+        try:
+            sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
+            r = await _get_capped(client, sheet_url, timeout=timeout)
+            if r.status_code == 200 and _TABLE_OPEN in r.text.lower():
+                if use_cache:
+                    await _async_set_cache(url, r.text, title)
+                return r.text, title
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            last_error = e
+    raise NoTablesError(
+        f"No valid sheet data found at {url}. "
+        f"Tried GIDs: {gids}. Last error: {last_error}"
+    )
+
+
+async def _fetch_base_sheet(
+    client: httpx.AsyncClient, url: str, *, timeout: float, cache_ttl: float, use_cache: bool,
+) -> tuple[str, str]:
+    # The base page is cached under the base URL, which this path both reads and writes.
+    if use_cache and cache_ttl > 0:
+        cached = await _async_get_cached(url, cache_ttl)
+        if cached is not None:
+            return cached
+    r = await _get_capped(client, url, timeout=timeout)
+    _raise_if_signed_out(r, url)
+    r.raise_for_status()
+    base_html = r.text
+    title = _page_title(base_html)
+    if _TABLE_OPEN not in base_html.lower():
+        return await _first_tab_with_table(client, url, base_html, title, timeout=timeout, use_cache=use_cache)
+    if use_cache:
+        await _async_set_cache(url, base_html, title)
+    return base_html, title
+
+
 async def async_fetch_sheet_html(
     url: str,
     *,
@@ -1488,78 +1560,14 @@ async def async_fetch_sheet_html(
 ) -> tuple[str, str]:
     """Fetch a sheet's HTML, with on-disk caching and gid fallback."""
     # Extract GID from original URL BEFORE normalization strips query/fragment
-    if not gid:
-        gid = _extract_gid_from_url(url)
-
+    gid = gid or _extract_gid_from_url(url)
     url = _normalize_url(url)
     await _assert_sheet_host_allowed(url)
-
     client = _get_sheets_client()
     try:
         if gid:
-            sheet_url = _build_sheet_html_url(url, gid)
-            # Read the SAME key the write below uses; a base-keyed entry may hold a
-            # different tab.
-            if use_cache and cache_ttl > 0:
-                cached = await _async_get_cached(sheet_url, cache_ttl)
-                if cached is not None:
-                    return cached
-            r = await _get_capped(client, sheet_url, timeout=timeout)
-            _raise_if_signed_out(r, sheet_url)
-            r.raise_for_status()
-            if _TABLE_OPEN not in r.text.lower():
-                raise NoTablesError(f"No table in tab gid={gid} of {url}")
-            title_match = TITLE_PATTERN.search(r.text)
-            title = title_match.group(1) if title_match else ""
-            if use_cache:
-                # Key by the URL actually fetched (as _fetch_gid_page does), never the base `url`,
-                # or a later gid-less read would get this tab back as the whole sheet.
-                await _async_set_cache(sheet_url, r.text, title)
-            return r.text, title
-
-        # Step 1: Fetch the base page (cached under the base URL, which is
-        # what this branch both reads and writes).
-        if use_cache and cache_ttl > 0:
-            cached = await _async_get_cached(url, cache_ttl)
-            if cached is not None:
-                return cached
-        r = await _get_capped(client, url, timeout=timeout)
-        _raise_if_signed_out(r, url)
-        r.raise_for_status()
-        base_html = r.text
-        title_match = TITLE_PATTERN.search(base_html)
-        title = title_match.group(1) if title_match else ""
-
-        if _TABLE_OPEN in base_html.lower():
-            if use_cache:
-                await _async_set_cache(url, base_html, title)
-            return base_html, title
-
-        # Step 2: Discover GIDs
-        page_paths = _page_path_map(base_html)
-        gids = _discover_gids(base_html) or list(page_paths)
-        if not gids:
-            gids = ["0"]
-
-        # Step 3: Try each GID
-        last_error = None
-        for try_gid in gids:
-            try:
-                sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
-                r = await _get_capped(client, sheet_url, timeout=timeout)
-                if r.status_code == 200 and _TABLE_OPEN in r.text.lower():
-                    if use_cache:
-                        await _async_set_cache(url, r.text, title)
-                    return r.text, title
-            except (httpx.HTTPError, ValueError, KeyError) as e:
-                last_error = e
-                continue
-
-        raise NoTablesError(
-            f"No valid sheet data found at {url}. "
-            f"Tried GIDs: {gids}. Last error: {last_error}"
-        )
-
+            return await _fetch_one_tab(client, url, gid, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache)
+        return await _fetch_base_sheet(client, url, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache)
     except httpx.HTTPError as e:
         _raise_fetch_error(e, url)
 
@@ -1869,6 +1877,16 @@ def _merge_parse_metadata(artist: Artist, extra: Artist) -> None:
             base.dropped_columns.append(col)
 
 
+def _add_tab_section(target: Era, tab_name: str, songs: list[Song]) -> None:
+    """Reuse a same-named section rather than adding a second one: the iOS row id is
+    era+group+name, so a duplicate name silently drops rows from the list."""
+    existing = next((s for s in target.sections if s.name == tab_name and not s.group), None)
+    if existing is not None:
+        existing.songs.extend(songs)
+    else:
+        target.sections.append(Section(name=tab_name, songs=songs))
+
+
 def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
     """Fold one sibling tab's eras into *artist*. Returns songs merged.
 
@@ -1879,24 +1897,12 @@ def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
     merged = 0
     for era in extra.eras:
         songs = [song for section in era.sections for song in section.songs]
-        if not songs:
-            continue
-        target = by_key.get(_era_match_key(era.name))
-        if target is None:
+        target = by_key.get(_era_match_key(era.name)) if songs else None
+        if songs and target is None:
             artist.eras.append(era)
             by_key[_era_match_key(era.name)] = era
-        else:
-            # Reuse a same-named section rather than adding a second one:
-            # the iOS row id is era+group+name, so a duplicate name silently
-            # drops rows from the list.
-            existing = next(
-                (s for s in target.sections if s.name == tab_name and not s.group),
-                None,
-            )
-            if existing is not None:
-                existing.songs.extend(songs)
-            else:
-                target.sections.append(Section(name=tab_name, songs=songs))
+        elif songs:
+            _add_tab_section(target, tab_name, songs)
         merged += len(songs)
     if merged:
         _merge_parse_metadata(artist, extra)
