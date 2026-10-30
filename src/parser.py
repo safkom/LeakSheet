@@ -113,27 +113,29 @@ class _TableExtractor(HTMLParser):
             self.in_tr = True
             self._current_row = []
         elif tag == "td" and self.in_tr:
-            self.in_td = True
-            self._cell_text = ""
-            self._cell_links = []
-            self._cell_link_lines = []
-            self._cell_images = []
-            try:
-                self._colspan = min(int(a.get("colspan", "1") or "1"), _MAX_COLSPAN)
-            except (ValueError, TypeError):
-                self._colspan = 1
-        elif tag == "a" and self.in_td:
+            self._start_cell(a)
+        elif self.in_td:
+            self._cell_tag(tag, a)
+
+    def _start_cell(self, a: dict) -> None:
+        self.in_td = True
+        self._cell_text = ""
+        self._cell_links = []
+        self._cell_link_lines = []
+        self._cell_images = []
+        self._colspan = _colspan(a.get("colspan", "1"))
+
+    def _cell_tag(self, tag: str, a: dict) -> None:
+        if tag == "a":
             self.in_a = True
             self._a_href = a.get("href", "")
-        elif tag == "img" and self.in_td:
+        elif tag == "img":
             src = a.get("src", "")
             if src:
                 self._cell_images.append(src)
             # Use alt text as cell text when present (handles image-based era names)
-            alt = a.get("alt", "")
-            if alt:
-                self._cell_text += alt
-        elif tag == "br" and self.in_td:
+            self._cell_text += a.get("alt", "") or ""
+        elif tag == "br":
             self._cell_text += "\n"
 
     def handle_endtag(self, tag: str) -> None:
@@ -256,6 +258,13 @@ def _cell_from_td(td) -> _Cell:
     return _Cell(text="".join(w.parts).strip(), links=w.links, link_lines=w.link_lines, images=w.images)
 
 
+def _colspan(raw: str | None) -> int:
+    try:
+        return min(int(raw or "1"), _MAX_COLSPAN)
+    except (ValueError, TypeError):
+        return 1
+
+
 def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     """Fast table extraction via lxml (≈10x quicker than html.parser)."""
     if not html_content.strip():
@@ -264,17 +273,9 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     rows: list[list[_Cell]] = []
     for tr in doc.iter("tr"):
         current: list[_Cell] = []
-        for td in tr:
-            if td.tag != "td":
-                continue
-            cell = _cell_from_td(td)
-            current.append(cell)
-            try:
-                colspan = min(int(td.get("colspan", "1") or "1"), _MAX_COLSPAN)
-            except (ValueError, TypeError):
-                colspan = 1
-            for _ in range(colspan - 1):
-                current.append(_Cell())
+        for td in (td for td in tr if td.tag == "td"):
+            current.append(_cell_from_td(td))
+            current.extend(_Cell() for _ in range(_colspan(td.get("colspan", "1")) - 1))
         if current:
             rows.append(current)
     return rows
@@ -1340,6 +1341,19 @@ def _song_match_key(name: str) -> str:
     return key
 
 
+def _best_word_overlap(key_words: set[str], era_by_key: dict[str, Era]) -> Era | None:
+    """The era sharing at least 2 significant words and >= 50% of the smaller word set."""
+    best_match: Era | None = None
+    best_score = 0.0
+    for era_key, era in era_by_key.items():
+        era_words = _significant_words(era_key)
+        overlap = len(key_words & era_words)
+        score = overlap / min(len(key_words), len(era_words)) if era_words else 0
+        if score > best_score and overlap >= 2:
+            best_score, best_match = score, era
+    return best_match if best_score >= 0.5 else None
+
+
 def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     """Fuzzy match a row's era key against known era keys.
 
@@ -1352,33 +1366,14 @@ def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     key_words = _significant_words(key)
     if not key_words:
         return None
-
-    best_match: Era | None = None
-    best_score = 0.0
-
-    for era_key, era in era_by_key.items():
-        era_words = _significant_words(era_key)
-        if not era_words:
-            continue
-        overlap = len(key_words & era_words)
-        min_size = min(len(key_words), len(era_words))
-        score = overlap / min_size if min_size > 0 else 0
-        if score > best_score and overlap >= 2:
-            best_score = score
-            best_match = era
-
-    if best_score >= 0.5 and best_match is not None:
-        return best_match
-
-    # Acronym matching: if key matches the acronym of a known era.
-    # e.g. "sftsaftm" → "Shoot For The Stars Aim For The Moon"
+    best = _best_word_overlap(key_words, era_by_key)
+    if best is not None:
+        return best
+    # Acronym matching: "sftsaftm" → "Shoot For The Stars Aim For The Moon"
     key_clean = key.replace(" ", "")
-    if len(key_clean) >= 3:
-        for era_key, era in era_by_key.items():
-            if _acronym(era_key) == key_clean:
-                return era
-
-    return None
+    if len(key_clean) < 3:
+        return None
+    return next((era for era_key, era in era_by_key.items() if _acronym(era_key) == key_clean), None)
 
 
 # Both helpers run once per era key PER UNMATCHED ROW (millions of calls on a
@@ -1859,6 +1854,22 @@ def _resolve_row_era(
     return _fuzzy_row_era(norm, stripped, current_era, era_by_key, era_by_key_fallback)
 
 
+def _lookahead_era_tag(rows: list[list[_Cell]], row_idx: int, era_col: int) -> str | None:
+    """The tag key of the first Era-column value below a heading row, or None when an era
+    header or a long row comes first."""
+    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
+        if _is_empty_row(row) or _is_section_separator(row):
+            continue
+        if _is_era_header(row):
+            return None
+        row_era = _get_cell_text(row, era_col)
+        if row_era:
+            return _era_tag_key(row_era)
+        if sum(1 for c in row if c.text.strip()) > 3:
+            return None
+    return None
+
+
 def _heads_tagged_era(
     label: str,
     rows: list[list[_Cell]],
@@ -1881,18 +1892,7 @@ def _heads_tagged_era(
         return False
     if not _era_tag_key(current_era.name) and _era_match_key(label) in own:
         return False
-    era_col = col_map.get("era", 0)
-    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
-        if _is_empty_row(row) or _is_section_separator(row):
-            continue
-        if _is_era_header(row):
-            return False
-        row_era = _get_cell_text(row, era_col)
-        if row_era:
-            return _era_tag_key(row_era) == tag_key
-        if sum(1 for c in row if c.text.strip()) > 3:
-            return False
-    return False
+    return _lookahead_era_tag(rows, row_idx, col_map.get("era", 0)) == tag_key
 
 
 def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
