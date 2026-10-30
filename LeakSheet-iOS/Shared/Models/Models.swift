@@ -12,7 +12,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     let totalSongs: Int?
     let totalVersions: Int?
     /// Entries from secondary Misc / Music Videos tabs; optional so older payloads decode.
-    let miscEntries: [MiscEntry]?
     /// All parsed secondary tabs (misc, music_videos, released, best_of,
     /// worst_of, stems, other) — the uniform switchable-mode surface.
     let tabs: [TabSection]?
@@ -33,7 +32,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
         case trackerStats = "tracker_stats"
         case totalSongs = "total_songs"
         case totalVersions = "total_versions"
-        case miscEntries = "misc_entries"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -180,10 +178,6 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     var computedBadge: Badge? {
         if let b = badge { return Badge(rawValue: b) }
         return Badge.mostSignificant(in: versions)
-    }
-
-    var isStreamable: Bool {
-        versions.contains { $0.isStreamable }
     }
 
     /// Whether the row shows more than one version — the *displayed* set, matching the
@@ -576,7 +570,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
     var mediaLinks: [MiscLink] {
         links.map { url in
             let kind = MiscLinkClassifier.classify(url)
-            return MiscLink(url: url, kind: kind, label: MiscLinkClassifier.label(for: url, kind: kind))
+            return MiscLink(url: url, kind: kind, label: MiscLinkClassifier.label(for: url))
         }
     }
 
@@ -615,8 +609,7 @@ nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
 // MARK: - TabSection
 
 /// One parsed secondary tab (Released / Best Of / Worst Of / Stems / Misc /
-/// Music Videos / other) — the uniform switchable-mode surface. Misc/MV
-/// entries also remain in the flat `Artist.miscEntries` for backward compat.
+/// Music Videos / other) — the uniform switchable-mode surface.
 nonisolated struct TabSection: Codable, Identifiable, Hashable, Sendable {
     let kind: String
     /// Original tab display name from the spreadsheet (may include emoji).

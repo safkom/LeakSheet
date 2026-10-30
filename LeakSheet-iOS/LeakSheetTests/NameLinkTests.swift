@@ -53,7 +53,7 @@ struct NameLinkTests {
                 ]),
                 era("Donda [V3]", [song("Hands Down")]),
             ],
-            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, miscEntries: nil, tabs: nil
+            trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, tabs: nil
         )
     }
 

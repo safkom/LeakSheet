@@ -84,7 +84,12 @@ final class LoadActivity {
         let request = BGContinuedProcessingTaskRequest(identifier: Self.identifier, title: title, subtitle: latest.subtitle)
         // A stale queued load is worse than none: fail instead of waiting for room.
         request.strategy = .fail
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            // A refused request means a backgrounded load just stops: worth knowing about.
+            Telemetry.report("Load activity submit failed: \(error)", category: "LoadActivity")
+        }
     }
 
     private func attach(_ task: BGContinuedProcessingTask) {

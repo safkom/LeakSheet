@@ -2,7 +2,6 @@
 
 > Reference spec for the maintained native clients.
 > Targets: SwiftUI, iOS 27 / macOS 27 / tvOS 27, Swift 6, Liquid Glass design language.
-> Last verified against source: 2026-07-25 (iOS sections), 2026-08-03 (platform matrix).
 
 ---
 
@@ -66,7 +65,7 @@ See [DECISIONS.md](DECISIONS.md).
 - **Filter pipeline:** `nonisolated static` and pure — `FilterPipeline.swift`
   takes an `Artist` + `FilterState` and returns computed content; the view
   model holds only MainActor state
-- **Dependencies:** Zero third-party
+- **Dependencies:** one, `sentry-cocoa`, for crash and error reports to a self-hosted GlitchTip (`Telemetry.swift`)
 
 ### File Structure (52 files)
 ```
@@ -437,7 +436,7 @@ streamable hosts.
 - MPRemoteCommandCenter: play, pause, nextTrack, previousTrack (restart if >3s),
   changePlaybackPosition. skipForward / skipBackward are explicitly DISABLED so
   the lock screen shows track-skip controls rather than 15s jump buttons.
-- UIBackgroundModes: `audio` only — the app schedules no background work
+- UIBackgroundModes: `audio`; a `BGContinuedProcessingTask` (`LoadActivity`) finishes a tracker load the user backgrounded
 
 ### Quality Switching
 - Original quality (default, Settings → Playback Quality): pillows and pixeldrain play the host's

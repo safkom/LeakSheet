@@ -32,12 +32,11 @@ final class RecentTrackersManager {
         let artUrl: String?
         let availableCount: Int
         let snippetCount: Int
-        let confirmedCount: Int
 
         init(
             name: String, slug: String, sourceUrl: String,
             totalSongs: Int, totalVersions: Int? = nil, artUrl: String?,
-            availableCount: Int, snippetCount: Int, confirmedCount: Int
+            availableCount: Int, snippetCount: Int
         ) {
             self.name = name
             self.slug = slug
@@ -49,7 +48,6 @@ final class RecentTrackersManager {
             self.artUrl = artUrl
             self.availableCount = availableCount
             self.snippetCount = snippetCount
-            self.confirmedCount = confirmedCount
         }
 
         // Backward-compatible decode — see DECISIONS.md::RecentTrackersManager.swift::totalVersions-decode
@@ -63,7 +61,6 @@ final class RecentTrackersManager {
             artUrl = try c.decodeIfPresent(String.self, forKey: .artUrl)
             availableCount = try c.decode(Int.self, forKey: .availableCount)
             snippetCount = try c.decode(Int.self, forKey: .snippetCount)
-            confirmedCount = try c.decode(Int.self, forKey: .confirmedCount)
         }
     }
 
@@ -85,8 +82,7 @@ final class RecentTrackersManager {
             totalVersions: artist.computedTotalVersions,
             artUrl: artUrl,
             availableCount: stats.available,
-            snippetCount: stats.snippets,
-            confirmedCount: stats.confirmed
+            snippetCount: stats.snippets
         )
 
         #if os(macOS)
@@ -164,16 +160,15 @@ final class RecentTrackersManager {
 
     // MARK: - Stats helper
 
-    private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int, confirmed: Int) {
+    private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int) {
         // Delegates to single source of truth — see DECISIONS.md::RecentTrackersManager.swift::stats-source
-        var available = 0, snippets = 0, confirmed = 0
+        var available = 0, snippets = 0
         for era in eras {
             let s = ArtistViewModel.computeEraStats(era)
             available += s.available
             snippets += s.snippets
-            confirmed += s.confirmed
         }
-        return (available, snippets, confirmed)
+        return (available, snippets)
     }
 
     // MARK: - Persistence

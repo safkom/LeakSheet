@@ -73,7 +73,7 @@ struct RecentTrackerDedupTests {
     private func entry(url: String, slug: String = "x", name: String = "X") -> RecentTrackersManager.RecentTracker {
         RecentTrackersManager.RecentTracker(
             name: name, slug: slug, sourceUrl: url, totalSongs: 0,
-            artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+            artUrl: nil, availableCount: 0, snippetCount: 0
         )
     }
 

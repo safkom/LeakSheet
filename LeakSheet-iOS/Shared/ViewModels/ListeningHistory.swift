@@ -28,7 +28,6 @@ final class ListeningHistory {
         let eraArt: String?
         /// Full snapshot, so Landing can play it without loading the tracker.
         let version: SongVersion
-        let last: Date
     }
 
     nonisolated struct Snapshot: Codable, Sendable {
@@ -101,7 +100,7 @@ final class ListeningHistory {
         recent.insert(
             RecentPlay(
                 id: id, artistSlug: artistSlug, artistName: artistName,
-                eraName: eraName, eraArt: eraArt, version: version, last: date
+                eraName: eraName, eraArt: eraArt, version: version
             ),
             at: 0
         )

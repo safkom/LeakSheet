@@ -13,7 +13,7 @@ One Xcode project, two app targets, one shared codebase.
 - **Observation framework** (`@Observable`) for state
 - **AVPlayer** + `MPNowPlayingInfoCenter` for playback
 - **Liquid Glass** design language — available on all three platforms
-- **Zero third-party dependencies**
+- **One third-party dependency:** `sentry-cocoa`, which sends crash and error reports to a self-hosted GlitchTip (`Telemetry.swift`)
 
 ## Targets
 

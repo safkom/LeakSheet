@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Background mode: audio only (the app runs no other background work). -->
+	<!-- Background: audio playback, plus a continued-processing task that finishes a tracker load (LoadActivity). -->
 	<!-- Black launch screen in both appearances, matching the app's default Dark:
 	     see DECISIONS.md::AppAppearance.swift. -->
 	<key>UILaunchScreen</key>
