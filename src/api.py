@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -687,6 +688,51 @@ class SheetRequest(BaseModel):
     force_refresh: bool = Field(False, description="Force a fresh fetch, ignoring cache")
 
 
+def _sheet_headers(etag: str, status: str, timer: PhaseTimer | None = None) -> dict[str, str]:
+    headers = {
+        "ETag": f'"{etag}"',
+        "X-Cache-Status": status,
+        "Cache-Control": _CC_SHEET,
+        "Vary": "Accept",
+    }
+    if timer is not None:
+        headers["Server-Timing"] = timer.server_timing_header()
+    return headers
+
+
+async def _validated_304(req: SheetRequest, request: Request, bg: BackgroundTasks) -> Response | None:
+    """The ETag-based 304 fast path."""
+    if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
+    server_etag = await async_get_cached_etag(req.url) if if_none_match else None
+    if not server_etag or _display_etag(server_etag, req.artist_name) != if_none_match:
+        return None
+    age = await async_get_cached_age(req.url)
+    if age is None or age >= SERVE_STALE_TTL:
+        return None
+    if age > DEFAULT_CACHE_TTL:
+        bg.add_task(_background_revalidate, req.url)
+    return Response(status_code=304, headers=_sheet_headers(if_none_match, "validated"))
+
+
+async def _cached_sheet(req: SheetRequest, bg: BackgroundTasks) -> Response | None:
+    """Stale-while-revalidate fast path — see docs/decisions.md::api.py::swr-fast-path"""
+    timer = PhaseTimer()
+    with timer.phase("cache_read"):
+        cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
+    if cached is None:
+        return None
+    raw, etag, age = cached
+    if req.artist_name:
+        with timer.phase("rename"):
+            raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
+    is_stale = age > DEFAULT_CACHE_TTL
+    if is_stale:
+        bg.add_task(_background_revalidate, req.url)
+    return Response(
+        content=raw, media_type=_MIME_JSON, headers=_sheet_headers(etag, "stale" if is_stale else "hit", timer),
+    )
+
+
 @app.post("/sheet", responses={
     400: {"description": "Bad Request"},
     404: {"description": "Not Found"},
@@ -712,79 +758,23 @@ async def parse_sheet(
         _normalize_url(req.url)
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL: {e}") from e
-
-    # --- ETag-based 304 fast path ---
     if use_cache:
-        if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
-        if if_none_match:
-            server_etag = await async_get_cached_etag(req.url)
-            if server_etag:
-                server_etag = _display_etag(server_etag, req.artist_name)
-            if server_etag and server_etag == if_none_match:
-                age = await async_get_cached_age(req.url)
-                if age is not None and age < SERVE_STALE_TTL:
-                    if age > DEFAULT_CACHE_TTL:
-                        bg.add_task(_background_revalidate, req.url)
-                    return Response(
-                        status_code=304,
-                        headers={
-                            "ETag": f'"{server_etag}"',
-                            "X-Cache-Status": "validated",
-                            "Cache-Control": _CC_SHEET,
-                            "Vary": "Accept",
-                        },
-                    )
-
-    # Stale-while-revalidate fast path — see docs/decisions.md::api.py::swr-fast-path
-    if use_cache:
-        timer = PhaseTimer()
-        with timer.phase("cache_read"):
-            cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
+        cached = await _validated_304(req, request, bg) or await _cached_sheet(req, bg)
         if cached is not None:
-            raw, etag, age = cached
-            if req.artist_name:
-                with timer.phase("rename"):
-                    raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
-            is_stale = age > DEFAULT_CACHE_TTL
-
-            if is_stale:
-                bg.add_task(_background_revalidate, req.url)
-
-            return Response(
-                content=raw,
-                media_type=_MIME_JSON,
-                headers={
-                    "ETag": f'"{etag}"',
-                    "X-Cache-Status": "stale" if is_stale else "hit",
-                    "Cache-Control": _CC_SHEET,
-                    "Vary": "Accept",
-                    "Server-Timing": timer.server_timing_header(),
-                },
-            )
+            return cached
 
     # --- Cache miss: full fetch + parse ---
     # Accept: application/x-ndjson streams progress events, then the artist. Hits,
     # stale hits and 304s stay plain JSON: they are instant.
     if _NDJSON in request.headers.get("accept", ""):
         return _stream_sheet(req)
-
     timer = PhaseTimer()
     try:
         body, etag = await _parse_for_response(req, timer)
     except Exception as e:
         raise _sheet_http_error(req, e) from e
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
-    return Response(
-        content=body,
-        media_type=_MIME_JSON,
-        headers={
-            "ETag": f'"{etag}"',
-            "X-Cache-Status": "miss",
-            "Cache-Control": _CC_SHEET,
-            "Vary": "Accept",
-            "Server-Timing": timer.server_timing_header(),
-        },
-    )
+    return Response(content=body, media_type=_MIME_JSON, headers=_sheet_headers(etag, "miss", timer))
 
 
 _NDJSON = "application/x-ndjson"
@@ -1197,6 +1187,39 @@ def _maybe_evict_image_cache() -> None:
     _evict_image_cache()
 
 
+def _image_meta_path(bin_path: Path) -> Path:
+    return bin_path.with_name(bin_path.name[:-4] + ".meta.json")
+
+
+def _image_entry_kind(bin_path: Path, expired_before: float) -> tuple[bool, bool]:
+    """(is an era original, has expired). Unreadable metadata counts as a live variant."""
+    try:
+        meta = json.loads(_image_meta_path(bin_path).read_text())
+        is_original = meta.get("original") is True
+        return is_original, is_original and meta["timestamp"] < expired_before
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return False, False
+
+
+def _unlink_unless_rewritten(bin_path: Path, mtime: float) -> None:
+    try:
+        if bin_path.stat().st_mtime == mtime:  # else a worker just rewrote it
+            bin_path.unlink(missing_ok=True)
+            _image_meta_path(bin_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _trim_image_entries(entries: list[tuple[float, int, Path]], cap: int) -> None:
+    """Drop the oldest entries until the rest fit *cap*."""
+    entries.sort()
+    total = sum(size for _, size, _ in entries)
+    while entries and total > cap:
+        mtime, size, victim = entries.pop(0)
+        total -= size
+        _unlink_unless_rewritten(victim, mtime)
+
+
 def _evict_image_cache() -> None:
     """Drop oldest resized images (by mtime) once they exceed the cap, era originals
     only against their own larger budget, and cover aliases no parse has re-written in _IMAGE_ALIAS_TTL."""
@@ -1213,35 +1236,13 @@ def _evict_image_cache() -> None:
             stat = bin_path.stat()
         except OSError:
             continue
-        meta_path = bin_path.with_name(bin_path.name[:-4] + ".meta.json")
-        try:
-            meta = json.loads(meta_path.read_text())
-            is_original = meta.get("original") is True
-            expired = is_original and meta["timestamp"] < expired_before
-        except (OSError, ValueError, AttributeError, KeyError, TypeError):
-            is_original = expired = False
+        is_original, expired = _image_entry_kind(bin_path, expired_before)
         if expired:  # _read_image_cache would miss it; it only holds budget
-            try:
-                if bin_path.stat().st_mtime == stat.st_mtime:  # else a worker just rewrote it
-                    bin_path.unlink(missing_ok=True)
-                    meta_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            continue
-        (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
-    for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
-        entries.sort()
-        total = sum(size for _, size, _ in entries)
-        while entries and total > cap:
-            mtime, size, victim = entries.pop(0)
-            total -= size
-            try:
-                if victim.stat().st_mtime != mtime:  # a worker just rewrote it
-                    continue
-            except OSError:
-                continue
-            for p in (victim, victim.with_name(victim.name[:-4] + ".meta.json")):
-                p.unlink(missing_ok=True)
+            _unlink_unless_rewritten(bin_path, stat.st_mtime)
+        else:
+            (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
+    _trim_image_entries(variants, _IMAGE_CACHE_MAX_BYTES)
+    _trim_image_entries(originals, _IMAGE_ORIGINALS_MAX_BYTES)
 
 
 async def _cap_original(data: bytes, content_type: str) -> tuple[bytes, str]:
@@ -1388,28 +1389,45 @@ def _spawn_detached(coro) -> asyncio.Task:
     return task
 
 
-async def _warm_era_art(artist, tracker_url: str) -> None:
-    """Download each era cover now, while its URL still works, and keep it.
-
-    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
-    the era's last good cover; an Art-tab image showing the same picture replaces it
-    (docs/decisions.md::fetcher.py::art-tab-identity).
-    """
-    # A parse carries its token URLs aside: its payload holds slot keys.
+def _warm_covers(artist) -> dict[str, str]:
+    """{era name: cover URL} worth downloading. A parse carries its token URLs aside: its
+    payload holds slot keys."""
     sources = artist._art_sources or {era.name: era.art_url or "" for era in artist.eras}
     covers: dict[str, str] = {}
     for name, url in sources.items():
-        if url.startswith("//"):
-            url = "https:" + url
+        url = "https:" + url if url.startswith("//") else url
         if url.startswith(("http://", "https://")) and _image_host_allowed(url):
             covers[name] = url
-    if not covers:
-        return
-    candidates = artist._art_candidates
-    slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+    return covers
 
-    async def download(url: str) -> tuple[bytes, str]:
-        async with slots:
+
+class _Fingerprints:
+    """Per-era memo of image fingerprints, computed off the event loop."""
+
+    def __init__(self) -> None:
+        self._fps: dict[bytes, tuple[int, int | None]] = {}
+
+    async def of(self, data: bytes) -> tuple[int, int | None]:
+        if data not in self._fps:
+            self._fps[data] = await asyncio.to_thread(_fingerprint, data)
+        return self._fps[data]
+
+    async def upgrades(self, current: bytes, other: bytes) -> bool:
+        """True when *other* is the same picture as *current* with more pixels."""
+        cur, oth = await self.of(current), await self.of(other)
+        return oth[0] > cur[0] and _same_fingerprint(cur, oth)
+
+
+class _EraArtWarm:
+    """One tracker's cover warm: download, compare against the stored copy, keep the best."""
+
+    def __init__(self, tracker_url: str, candidates: dict[str, str]):
+        self.tracker_url = tracker_url
+        self.candidates = candidates
+        self.slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+
+    async def _download(self, url: str) -> tuple[bytes, str]:
+        async with self.slots:
             try:
                 resp, data = await _get_image_capped(url, _image_request_headers(url))
                 return data, resp.headers.get("content-type", "")
@@ -1417,42 +1435,23 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 logger.debug("era art warm: %s failed: %s", url[:80], exc)
                 return b"", ""
 
-    async def download_full(url: str) -> tuple[bytes, str]:
+    async def _download_full(self, url: str) -> tuple[bytes, str]:
         full = _full_size_cover_url(url)
-        got = await download(full)
-        got = got if got[0] or full == url else await download(url)
+        got = await self._download(full)
+        got = got if got[0] or full == url else await self._download(url)
         # Capped before any comparison, so a re-warm of an unchanged picture is byte-equal.
         return await _cap_original(*got)
 
-    async def warm(era_name: str, url: str) -> None:
-        fps: dict[bytes, tuple[int, int | None]] = {}
-
-        async def fp(data: bytes) -> tuple[int, int | None]:
-            if data not in fps:
-                fps[data] = await asyncio.to_thread(_fingerprint, data)
-            return fps[data]
-
-        async def upgrades(current: bytes, other: bytes) -> bool:
-            """True when *other* is the same picture as *current* with more pixels."""
-            cur, oth = await fp(current), await fp(other)
-            return oth[0] > cur[0] and _same_fingerprint(cur, oth)
-
+    async def warm(self, era_name: str, url: str) -> None:
+        fps = _Fingerprints()
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
         # /image-proxy find it under whatever token URL a client's payload holds.
-        base = _era_art_base(tracker_url, era_name)
+        base = _era_art_base(self.tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        data, content_type = await download_full(url)
+        data, content_type = await self._download_full(url)
         stored = await asyncio.to_thread(_read_image_cache, key)
-        candidate = candidates.get(era_name)
-        if data and candidate:
-            better, better_type = await download_full(candidate)
-            if better and await upgrades(data, better):
-                data, content_type = better, better_type
-        if data and stored and await upgrades(data, stored[0]):
-            # A larger copy of the same picture is already stored (an Art-tab image, or
-            # a full-size download that failed this time): never downgrade it.
-            data, content_type = stored[0], stored[1]
+        data, content_type = await self._prefer_better(era_name, data, content_type, stored, fps)
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
@@ -1460,17 +1459,43 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 return
             data, content_type = stored[0], stored[1]
         elif stored and stored[0] != data:
-            # The sheet changed this era's cover: its thumbnails show the old one, and a
-            # new picture gets a new version so clients holding the old one refetch.
-            await asyncio.to_thread(_drop_image_thumbnails, base)
-            # A sharper copy is a new version too, or clients keep the thumbnail they hold.
-            if not _same_fingerprint(await fp(stored[0]), await fp(data)) or await upgrades(
-                stored[0], data
-            ):
-                await asyncio.to_thread(update_art_pointer, base, bump=True)
+            await self._replace_version(base, stored[0], data, fps)
         await asyncio.to_thread(_write_image_cache, key, data, content_type, original=True)
 
-    await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
+    async def _prefer_better(self, era_name: str, data: bytes, content_type: str, stored, fps: _Fingerprints) -> tuple[bytes, str]:
+        candidate = self.candidates.get(era_name)
+        if data and candidate:
+            better, better_type = await self._download_full(candidate)
+            if better and await fps.upgrades(data, better):
+                data, content_type = better, better_type
+        if data and stored and await fps.upgrades(data, stored[0]):
+            # A larger copy of the same picture is already stored (an Art-tab image, or
+            # a full-size download that failed this time): never downgrade it.
+            data, content_type = stored[0], stored[1]
+        return data, content_type
+
+    @staticmethod
+    async def _replace_version(base: str, old: bytes, new: bytes, fps: _Fingerprints) -> None:
+        """The sheet changed this era's cover: its thumbnails show the old one, and a new
+        picture gets a new version so clients holding the old one refetch."""
+        await asyncio.to_thread(_drop_image_thumbnails, base)
+        # A sharper copy is a new version too, or clients keep the thumbnail they hold.
+        if not _same_fingerprint(await fps.of(old), await fps.of(new)) or await fps.upgrades(old, new):
+            await asyncio.to_thread(update_art_pointer, base, bump=True)
+
+
+async def _warm_era_art(artist, tracker_url: str) -> None:
+    """Download each era cover now, while its URL still works, and keep it.
+
+    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
+    the era's last good cover; an Art-tab image showing the same picture replaces it
+    (docs/decisions.md::fetcher.py::art-tab-identity).
+    """
+    covers = _warm_covers(artist)
+    if not covers:
+        return
+    warm = _EraArtWarm(tracker_url, artist._art_candidates)
+    await asyncio.gather(*(warm.warm(name, url) for name, url in covers.items()))
 
 
 async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
@@ -1768,6 +1793,23 @@ def _derive_media_kind(container: str | None, codec: str | None) -> str:
     return "unknown"
 
 
+# pillows.su field → normalized key, in output order. LOSSLESS and channels convert below.
+_PILLOWS_FIELDS = (
+    ("CONTAINER", "container"), ("CODEC", "codec"), (_TAG_CODEC_PROFILE, "codec_profile"),
+    ("BITRATE", "bitrate"), (_TAG_SAMPLE_RATE, "sample_rate"), (_TAG_BITS, "bits_per_sample"),
+    ("LOSSLESS", "lossless"), (_TAG_CHANNELS, "channels"), ("DURATION", "duration"),
+    ("ARTIST", "artist"), ("TITLE", "title"),
+)
+
+
+def _pillows_value(key: str, val: str):
+    if key == "LOSSLESS":
+        return val.lower() == "true"
+    if key == _TAG_CHANNELS:
+        return int(val) if val.isdigit() else val
+    return val
+
+
 def _parse_pillows_metadata(text: str) -> dict:
     """Parse pillows.su metadata text format into normalized dict.
 
@@ -1779,34 +1821,12 @@ def _parse_pillows_metadata(text: str) -> dict:
     # parts is [preamble, KEY1, VAL1, KEY2, VAL2, ...]
     pairs: dict[str, str] = {}
     for i in range(1, len(parts) - 1, 2):
-        key = parts[i].strip().upper()
         val = parts[i + 1].strip()
         if val and val.lower() not in ("unknown", "null", "[object object]"):
-            pairs[key] = val
-
-    if "CONTAINER" in pairs:
-        result["container"] = pairs["CONTAINER"]
-    if "CODEC" in pairs:
-        result["codec"] = pairs["CODEC"]
-    if _TAG_CODEC_PROFILE in pairs:
-        result["codec_profile"] = pairs[_TAG_CODEC_PROFILE]
-    if "BITRATE" in pairs:
-        result["bitrate"] = pairs["BITRATE"]
-    if _TAG_SAMPLE_RATE in pairs:
-        result["sample_rate"] = pairs[_TAG_SAMPLE_RATE]
-    if _TAG_BITS in pairs:
-        result["bits_per_sample"] = pairs[_TAG_BITS]
-    if "LOSSLESS" in pairs:
-        result["lossless"] = pairs["LOSSLESS"].lower() == "true"
-    if _TAG_CHANNELS in pairs:
-        v = pairs[_TAG_CHANNELS]
-        result["channels"] = int(v) if v.isdigit() else v
-    if "DURATION" in pairs:
-        result["duration"] = pairs["DURATION"]
-    if "ARTIST" in pairs:
-        result["artist"] = pairs["ARTIST"]
-    if "TITLE" in pairs:
-        result["title"] = pairs["TITLE"]
+            pairs[parts[i].strip().upper()] = val
+    for key, name in _PILLOWS_FIELDS:
+        if key in pairs:
+            result[name] = _pillows_value(key, pairs[key])
     result["media_kind"] = _derive_media_kind(result.get("container"), result.get("codec"))
     return result
 
@@ -1888,6 +1908,57 @@ async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
         return None
 
 
+def _metadata_response(payload: str, status: str) -> Response:
+    return Response(
+        content=payload, media_type=_MIME_JSON,
+        headers={"Cache-Control": _CC_METADATA, "X-Cache-Status": status},
+    )
+
+
+def _metadata_request_headers(provider: str, meta_url: str) -> dict[str, str]:
+    headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
+    if provider == "pillows":
+        headers["Referer"] = "https://pillows.su/"
+    elif provider == "froste":
+        headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
+    return headers
+
+
+def _parse_metadata(provider: str, resp: httpx.Response, meta_url: str) -> dict:
+    parsers = {
+        "pillows": lambda: _parse_pillows_metadata(resp.text),
+        "froste": lambda: _parse_froste_metadata(resp.json()),
+        "imgur": lambda: _parse_imgur_metadata(resp.json()),
+        "pixeldrain": lambda: _parse_pixeldrain_metadata(resp.json()),
+    }
+    try:
+        parse = parsers.get(provider)
+        return parse() if parse else {"provider": provider}
+    # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
+    # provider's outage, not a bug of ours.
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
+        raise HTTPException(status_code=503, detail="Metadata fetch failed")
+
+
+async def _fetch_metadata(url: str, meta_url: str, provider: str) -> Response:
+    async with asyncio.timeout(_METADATA_DEADLINE_S):
+        client = _get_shared_client()
+        resp = await get_capped(client, meta_url, _metadata_request_headers(provider, meta_url), timeout=_METADATA_TIMEOUT)
+        if resp.status_code == 200:
+            result = _parse_metadata(provider, resp, meta_url)
+        else:
+            # pillows' metadata .txt endpoint 404s for some files — notably
+            # videos. The CDN's Content-Type on the stream URL is accurate,
+            # so fall back to a HEAD probe before giving up.
+            result = await _pillows_stream_head_fallback(url) if provider == "pillows" else None
+            if result is None:
+                raise HTTPException(status_code=503, detail=f"Provider returned {resp.status_code}")
+        payload = json.dumps(result)
+        _metadata_cache.set(meta_url, payload)
+        return _metadata_response(payload, "miss")
+
+
 @app.get("/metadata", responses={404: {"description": "Not Found"}, 503: {"description": "Service Unavailable"}})
 async def proxy_metadata(
     url: str = Query(..., description="Original file-sharing link"),
@@ -1896,80 +1967,12 @@ async def proxy_metadata(
     meta_info = resolve_metadata_url(url)
     if not meta_info:
         raise HTTPException(status_code=404, detail="No metadata API for this provider")
-
     meta_url = meta_info["url"]
-    provider = meta_info["provider"]
-
     cached = _metadata_cache.get(meta_url)
     if cached is not None:
-        return Response(
-            content=cached,
-            media_type=_MIME_JSON,
-            headers={
-                "Cache-Control": _CC_METADATA,
-                "X-Cache-Status": "hit",
-            },
-        )
-
-    headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
-    if provider == "pillows":
-        headers["Referer"] = "https://pillows.su/"
-    elif provider == "froste":
-        headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
-
+        return _metadata_response(cached, "hit")
     try:
-        async with asyncio.timeout(_METADATA_DEADLINE_S):
-            client = _get_shared_client()
-            resp = await get_capped(client, meta_url, headers, timeout=_METADATA_TIMEOUT)
-            if resp.status_code != 200:
-                # pillows' metadata .txt endpoint 404s for some files — notably
-                # videos. The CDN's Content-Type on the stream URL is accurate,
-                # so fall back to a HEAD probe before giving up.
-                if provider == "pillows":
-                    fallback = await _pillows_stream_head_fallback(url)
-                    if fallback is not None:
-                        payload = json.dumps(fallback)
-                        _metadata_cache.set(meta_url, payload)
-                        return Response(
-                            content=payload,
-                            media_type=_MIME_JSON,
-                            headers={
-                                "Cache-Control": _CC_METADATA,
-                                "X-Cache-Status": "miss",
-                            },
-                        )
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider returned {resp.status_code}",
-                )
-
-            try:
-                if provider == "pillows":
-                    result = _parse_pillows_metadata(resp.text)
-                elif provider == "froste":
-                    result = _parse_froste_metadata(resp.json())
-                elif provider == "imgur":
-                    result = _parse_imgur_metadata(resp.json())
-                elif provider == "pixeldrain":
-                    result = _parse_pixeldrain_metadata(resp.json())
-                else:
-                    result = {"provider": provider}
-            # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
-            # provider's outage, not a bug of ours.
-            except (ValueError, TypeError, KeyError, AttributeError) as e:
-                logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-                raise HTTPException(status_code=503, detail="Metadata fetch failed")
-
-            payload = json.dumps(result)
-            _metadata_cache.set(meta_url, payload)
-            return Response(
-                content=payload,
-                media_type=_MIME_JSON,
-                headers={
-                    "Cache-Control": _CC_METADATA,
-                    "X-Cache-Status": "miss",
-                },
-            )
+        return await _fetch_metadata(url, meta_url, meta_info["provider"])
     except HTTPException:
         raise
     except Exception as e:
