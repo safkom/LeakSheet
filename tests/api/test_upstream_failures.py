@@ -18,7 +18,7 @@ _ENDPOINTS = {
     "stream-kraken": ("/stream", {"url": "https://krakenfiles.com/view/WS7wzkrklJ/file.html"}),
     "image-proxy": ("/image-proxy", {"url": "https://lh3.googleusercontent.com/abc=w120", "w": 320}),
     "metadata-imgur": ("/metadata", {"url": "https://imgur.gg/f/kYj3fdI"}),
-    "metadata-froste": ("/metadata", {"url": "https://music.froste.lol/song/787da55acdae29149af5bef603e62ac5/play"}),
+    "metadata-froste": ("/metadata", {"url": "https://music.froste.lol/song/0123456789abcdef0123456789abcdef/play"}),
 }
 
 # upstream answer -> the status the client must see

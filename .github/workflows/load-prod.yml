@@ -24,6 +24,10 @@ concurrency:
   group: load-prod
   cancel-in-progress: false
 
+# Read-only token: no job writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   k6:
     name: k6 ${{ inputs.profile }} (${{ matrix.runner }})

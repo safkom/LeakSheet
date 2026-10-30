@@ -5,7 +5,7 @@ import Testing
 
 struct StreamResolverTests {
     @Test(arguments: [
-        "https://pillows.su/f/58876d9f36b768640439466088764e87",
+        "https://pillows.su/f/0123456789abcdef0123456789abcdef",
         "https://www.pillowcase.su/f/abc123",
         "https://plwcse.top/f/abc123",
         "https://www.plwcse.top/f/abc123",
@@ -132,11 +132,11 @@ struct StreamResolverTests {
     /// no `?` — so the id failed isID and 25 links in the live corpus showed no
     /// play affordance at all.
     @Test func `a pillows link with glued google tracking is still streamable`() {
-        let link = "https://pillows.su/f/274b47d9d17ae027929947fc28218bde"
-            + "&sa=D&source=editors&ust=1768409055962135&usg=AOvVaw0brfg"
-        #expect(StreamResolver.target(for: link) == .pillows(id: "274b47d9d17ae027929947fc28218bde"))
+        let link = "https://pillows.su/f/fedcba9876543210fedcba9876543210"
+            + "&sa=D&source=editors&ust=1700000000000000&usg=AOvVaw0000000000000000000000"
+        #expect(StreamResolver.target(for: link) == .pillows(id: "fedcba9876543210fedcba9876543210"))
         #expect(StreamResolver.originalQualityURL(for: link)?.absoluteString
-                == "https://api.pillows.su/api/download/274b47d9d17ae027929947fc28218bde")
+                == "https://api.pillows.su/api/download/fedcba9876543210fedcba9876543210")
     }
 
     @Test func `the wrapper is stripped before the link is proxied`() {
