@@ -128,46 +128,19 @@ final class AudioEngine {
             logic.clearContexts()
             syncQueue()
         }
-        currentTrack = version
-        self.artistName = artistName
-        self.artistSlug = artistSlug.isEmpty ? artistName.slugified : artistSlug
-        self.eraName = eraName
-        self.artUrl = artUrl
-        currentTime = 0
-        error = ""
-        streamFormat = nil
-        hasVideo = false
-        videoAspectRatio = nil
-        duration = Self.parseDuration(version?.trackLength)
-        listenedSeconds = 0
-        lastTickTime = nil
-        recordedThisLoad = false
-
-        // Both bailouts must silence the OLD item, or it keeps playing (and driving the
-        // time observer and lock screen) under the new track's metadata.
+        resetTrackState(version, artistName: artistName, eraName: eraName, artUrl: artUrl, artistSlug: artistSlug)
         guard let version, let link = version.streamableLink else {
-            player?.pause()
-            player?.replaceCurrentItem(with: nil)
-            streamUrl = ""
-            isPlaying = false
-            loading = false
-            updateNowPlayingInfo()
+            stopWithoutStream()
             return
         }
-
         guard let url = StreamResolver.streamURL(for: link) else {
-            player?.pause()
-            player?.replaceCurrentItem(with: nil)
-            streamUrl = ""
-            isPlaying = false
-            loading = false
             error = "Stream host not supported"
             Telemetry.report(
                 "Unsupported stream host",
                 category: "Playback",
                 attributes: ["host": URL(string: link)?.host ?? "-"]
             )
-            updateNowPlayingInfo()
+            stopWithoutStream()
             return
         }
 
@@ -379,4 +352,36 @@ final class AudioEngine {
         )
     }
 
+}
+
+extension AudioEngine {
+    private func resetTrackState(
+        _ version: SongVersion?, artistName: String, eraName: String, artUrl: String, artistSlug: String
+    ) {
+        currentTrack = version
+        self.artistName = artistName
+        self.artistSlug = artistSlug.isEmpty ? artistName.slugified : artistSlug
+        self.eraName = eraName
+        self.artUrl = artUrl
+        currentTime = 0
+        error = ""
+        streamFormat = nil
+        hasVideo = false
+        videoAspectRatio = nil
+        duration = Self.parseDuration(version?.trackLength)
+        listenedSeconds = 0
+        lastTickTime = nil
+        recordedThisLoad = false
+    }
+
+    /// A track with no playable stream must silence the OLD item, or it keeps playing (and
+    /// driving the time observer and lock screen) under the new track's metadata.
+    private func stopWithoutStream() {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        streamUrl = ""
+        isPlaying = false
+        loading = false
+        updateNowPlayingInfo()
+    }
 }

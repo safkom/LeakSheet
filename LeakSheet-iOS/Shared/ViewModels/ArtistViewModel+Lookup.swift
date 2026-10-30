@@ -37,6 +37,46 @@ extension ArtistViewModel {
 
     /// The heavy startup pass (era stats + the unfiltered content tree), computed
     /// off-main by `make(artist:)` so pushing a huge tracker doesn't hitch navigation.
+    /// The song and credit maps one pass over the tracker builds for `Precomputed`.
+    nonisolated struct TrackerIndex {
+        var creditIndex: [CreditRole: [String: [CreditHit]]] = [:]
+        var spellings: [String: [String: Int]] = [:]
+        var keyEras: [String: [CrossEraRef]] = [:]
+        var byBaseName: [String: [CrossEraRef]] = [:]
+        var byTitleKey: [String: [CrossEraRef]] = [:]
+        var byAltTitleKey: [String: [CrossEraRef]] = [:]
+
+        /// Same order as `era.allSongs`, which flattens the sections.
+        mutating func add(_ era: Era, at ei: Int) {
+            for (si, section) in (era.sections ?? []).enumerated() {
+                for (sj, song) in section.songs.enumerated() {
+                    for (vi, version) in song.versions.enumerated() {
+                        Precomputed.indexCredits(
+                            version, at: CreditHit(era: ei, section: si, song: sj, version: vi),
+                            into: &creditIndex, spellings: &spellings
+                        )
+                    }
+                    add(song, in: era)
+                }
+            }
+        }
+
+        private mutating func add(_ song: Song, in era: Era) {
+            // Before the placeholder guard: a "???" row's alt title is its only identity and
+            // still links to the named song (never BY the placeholder title).
+            let ref = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
+            for key in song.titleKeys { byTitleKey[key, default: []].append(ref) }
+            for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(ref) }
+            // A placeholder title identifies nothing: indexing it would group every
+            // unidentified track under one key. Mirrors the backend's empty songKey.
+            guard !song.isPlaceholder else { return }
+            byBaseName[song.baseName, default: []].append(ref)
+            // One ref per era per key (a song appears once per era)
+            guard let key = song.songKey, !key.isEmpty, keyEras[key]?.last?.eraName != era.name else { return }
+            keyEras[key, default: []].append(ref)
+        }
+    }
+
     nonisolated struct Precomputed: Sendable {
         let eraStatsByName: [String: Stats]
         let artistStats: Stats
@@ -69,7 +109,7 @@ extension ArtistViewModel {
         let creditDisplayNames: [String: String]
 
         /// Adds one version's producer and feature names to the credit index.
-        private static func indexCredits(
+        static func indexCredits(
             _ version: SongVersion, at hit: CreditHit,
             into index: inout [CreditRole: [String: [CreditHit]]],
             spellings: inout [String: [String: Int]]
@@ -96,54 +136,22 @@ extension ArtistViewModel {
         }
 
         init(artist: Artist) {
-            var creditIndex: [CreditRole: [String: [CreditHit]]] = [:]
-            var spellings: [String: [String: Int]] = [:]
+            var index = TrackerIndex()
             var statsByName: [String: Stats] = [:]
-            var total = 0, available = 0, snippets = 0, confirmed = 0, fullHQ = 0
-            var keyEras: [String: [CrossEraRef]] = [:]
-            var byBaseName: [String: [CrossEraRef]] = [:]
-            var byTitleKey: [String: [CrossEraRef]] = [:]
-            var byAltTitleKey: [String: [CrossEraRef]] = [:]
+            var eraStats: [Stats] = []
             for (ei, era) in artist.eras.enumerated() {
-                let s = ArtistViewModel.computeEraStats(era)
-                statsByName[era.name] = s
-                total += s.total
-                available += s.available
-                snippets += s.snippets
-                confirmed += s.confirmed
-                fullHQ += s.fullHQ
-                // Same order as `era.allSongs`, which flattens the sections.
-                for (si, section) in (era.sections ?? []).enumerated() {
-                    for (sj, song) in section.songs.enumerated() {
-                        for (vi, version) in song.versions.enumerated() {
-                            Self.indexCredits(
-                                version, at: CreditHit(era: ei, section: si, song: sj, version: vi),
-                                into: &creditIndex, spellings: &spellings
-                            )
-                        }
-                        // Before the placeholder guard: a "???" row's alt title is its only identity and
-                        // still links to the named song (never BY the placeholder title).
-                        let linkRef = CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
-                        for key in song.titleKeys { byTitleKey[key, default: []].append(linkRef) }
-                        for key in song.altTitleKeys { byAltTitleKey[key, default: []].append(linkRef) }
-                        // A placeholder title identifies nothing: indexing it would group every
-                        // unidentified track under one key. Mirrors the backend's empty songKey.
-                        guard !song.isPlaceholder else { continue }
-                        byBaseName[song.baseName, default: []].append(
-                            CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
-                        )
-                        guard let key = song.songKey, !key.isEmpty else { continue }
-                        // One ref per era per key (a song appears once per era)
-                        if keyEras[key]?.last?.eraName != era.name {
-                            keyEras[key, default: []].append(
-                                CrossEraRef(eraName: era.name, eraArt: era.artUrl, song: song)
-                            )
-                        }
-                    }
-                }
+                let stats = ArtistViewModel.computeEraStats(era)
+                statsByName[era.name] = stats
+                eraStats.append(stats)
+                index.add(era, at: ei)
             }
-            self.creditIndex = creditIndex
-            self.creditDisplayNames = spellings.mapValues { counts in
+            let total = eraStats.reduce(0) { $0 + $1.total }
+            let available = eraStats.reduce(0) { $0 + $1.available }
+            let snippets = eraStats.reduce(0) { $0 + $1.snippets }
+            let confirmed = eraStats.reduce(0) { $0 + $1.confirmed }
+            let fullHQ = eraStats.reduce(0) { $0 + $1.fullHQ }
+            self.creditIndex = index.creditIndex
+            self.creditDisplayNames = index.spellings.mapValues { counts in
                 // Most common spelling; the alphabetically first one wins a tie.
                 counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key ?? ""
             }
@@ -161,15 +169,20 @@ extension ArtistViewModel {
                 artist: artist, state: FilterState(), eraStats: statsByName
             )
             // Only keys that actually span content are worth keeping
-            self.songKeyEras = keyEras.filter { $0.value.count > 1 }
-            self.baseNameEras = byBaseName
-            self.titleKeySongs = byTitleKey
-            self.altTitleKeySongs = byAltTitleKey
+            self.songKeyEras = index.keyEras.filter { $0.value.count > 1 }
+            self.baseNameEras = index.byBaseName
+            self.titleKeySongs = index.byTitleKey
+            self.altTitleKeySongs = index.byAltTitleKey
             self.eraOrder = Dictionary(
                 artist.eras.enumerated().map { ($1.name, $0) }, uniquingKeysWith: { first, _ in first }
             )
             self.searchIndex = artist.eras.map { $0.allSongs.map(SongSearchFields.init(song:)) }
-            self.eraPlaybackContexts = artist.eras.map { era in
+            self.eraPlaybackContexts = Self.playbackContexts(artist)
+        }
+
+        /// One playback context per era: its streamable versions in list order.
+        static func playbackContexts(_ artist: Artist) -> [EraSongContext] {
+            artist.eras.map { era in
                 EraSongContext(
                     eraName: era.name,
                     artistName: artist.name,

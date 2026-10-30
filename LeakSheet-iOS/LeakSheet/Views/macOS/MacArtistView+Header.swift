@@ -88,38 +88,44 @@ extension MacArtistView {
         }
     }
 
+    private func eraCover(_ artUrl: String?) -> some View {
+        Group {
+            if let artUrl, let url = APIClient.shared.imageProxyURL(for: artUrl, width: 240) {
+                CachedImage(url: url, maxPixelSize: 240) { ArtworkPlaceholder(cornerRadius: 0) }
+            } else {
+                ArtworkPlaceholder(cornerRadius: 0)
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func eraTitles(_ name: String, _ filtered: FilteredEra?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(name)
+                .font(.title2.weight(.semibold))
+                .lineLimit(2)
+            if let alts = filtered?.era.altNames, !alts.isEmpty {
+                Text(alts.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if let stats = filtered?.stats {
+                Text("\(stats.total) tracks · \(stats.available) available · \(stats.snippets) snippets")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     /// Era-level chrome: cover, name, the era's own numbers, and a Play action.
     @ViewBuilder
     private func eraHeader(_ name: String) -> some View {
         let filtered = vm.filteredEra(named: name)
         HStack(alignment: .center, spacing: 14) {
-            Group {
-                if let artUrl = filtered?.era.artUrl,
-                   let url = APIClient.shared.imageProxyURL(for: artUrl, width: 240) {
-                    CachedImage(url: url, maxPixelSize: 240) { ArtworkPlaceholder(cornerRadius: 0) }
-                } else {
-                    ArtworkPlaceholder(cornerRadius: 0)
-                }
-            }
-            .frame(width: 72, height: 72)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(name)
-                    .font(.title2.weight(.semibold))
-                    .lineLimit(2)
-                if let alts = filtered?.era.altNames, !alts.isEmpty {
-                    Text(alts.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if let stats = filtered?.stats {
-                    Text("\(stats.total) tracks · \(stats.available) available · \(stats.snippets) snippets")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            eraCover(filtered?.era.artUrl)
+            eraTitles(name, filtered)
 
             Spacer(minLength: 8)
 

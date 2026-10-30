@@ -159,43 +159,47 @@ struct CreditPageView: View {
         }
     }
 
+    private func bestCardArt(_ c: CreditProfile.Credited, _ profile: CreditProfile, badge: Badge?) -> some View {
+    ZStack {
+        if let art = c.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 320) {
+            CachedImage(url: url, maxPixelSize: 320) { ArtworkPlaceholder(cornerRadius: 0) }
+        } else {
+            ArtworkPlaceholder(cornerRadius: 0)
+        }
+    }
+    .frame(width: 140, height: 140)
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(alignment: .topLeading) {
+        if let badge {
+            Text(badge.emoji)
+                .font(.title3)
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
+                .padding(6)
+                .accessibilityHidden(true)
+        }
+    }
+    .overlay(alignment: .bottomTrailing) {
+        if c.version.isStreamable {
+            Button { play(c.version, in: profile.streamable) } label: {
+                Image(systemName: "play.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.lsAccent, in: Circle())
+                    .shadow(radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel("Play \(c.song.baseName)")
+        }
+    }
+    }
+
     private func bestCard(_ c: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
         let badge = c.version.badge.flatMap(Badge.init(rawValue:))
         return VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                if let art = c.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 320) {
-                    CachedImage(url: url, maxPixelSize: 320) { ArtworkPlaceholder(cornerRadius: 0) }
-                } else {
-                    ArtworkPlaceholder(cornerRadius: 0)
-                }
-            }
-            .frame(width: 140, height: 140)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if let badge {
-                    Text(badge.emoji)
-                        .font(.title3)
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .padding(6)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if c.version.isStreamable {
-                    Button { play(c.version, in: profile.streamable) } label: {
-                        Image(systemName: "play.fill")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(Color.lsAccent, in: Circle())
-                            .shadow(radius: 4, y: 2)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(8)
-                    .accessibilityLabel("Play \(c.song.baseName)")
-                }
-            }
+            bestCardArt(c, profile, badge: badge)
             Text(c.song.baseName)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(2)

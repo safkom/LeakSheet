@@ -10,8 +10,23 @@ extension MacArtistView {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if isMiscMode {
-            ScrollView {
-                VStack(spacing: 0) {
+            miscContent
+        } else if openEra == nil && !isFlatMode {
+            eraGridContent
+        } else if rows.isEmpty {
+            VStack(spacing: 0) {
+                pageHeader
+                    .frame(maxWidth: Metrics.contentMaxWidth)
+                emptyState
+            }
+        } else {
+            songList(rows)
+        }
+    }
+
+    private var miscContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
                 pageHeader
                 MiscListView(
                     vm: vm,
@@ -23,53 +38,50 @@ extension MacArtistView {
                 )
                 .id(vm.selectedTabKey ?? "misc")
                 .padding(.bottom, 12)
-                }
-                .frame(maxWidth: Metrics.contentMaxWidth)
-                .frame(maxWidth: .infinity)
             }
-        } else if openEra == nil && !isFlatMode {
-            ScrollView {
-                VStack(spacing: 0) {
-                    pageHeader
-                    MacEraGrid(
-                        vm: vm,
-                        onSelect: { eraName in
-                            vm.openEra(eraName)
-                            ui.selectedSong = nil
-                        },
-                        onInfo: showEraInfo
-                    )
-                }
-                .frame(maxWidth: Metrics.contentMaxWidth)
-                .frame(maxWidth: .infinity)
-            }
-        } else if rows.isEmpty {
-            VStack(spacing: 0) {
-                pageHeader
-                    .frame(maxWidth: Metrics.contentMaxWidth)
-                emptyState
-            }
-        } else {
-            MacSongList(
-                rows: rows,
-                artistName: artist.name,
-                artistSlug: artist.slug,
-                sourceUrl: artist.sourceUrl,
-                onToggleExpansion: openEra == nil ? nil : { eraName, ordinal in
-                    vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
-                },
-                onPlay: { version, eraName in play(version, eraName: eraName, in: rows) },
-                onShowDescription: showDetails,
-                onSelect: { row in
-                    ui.selectedSong = row?.payload(artistName: artist.name, artistSlug: artist.slug)
-                },
-                header: { pageHeader }
-            )
-            // Fresh selection per mode/era — the list is a different list.
-            .id(openEra ?? "flat")
             .frame(maxWidth: Metrics.contentMaxWidth)
             .frame(maxWidth: .infinity)
         }
+    }
+
+    private var eraGridContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                pageHeader
+                MacEraGrid(
+                    vm: vm,
+                    onSelect: { eraName in
+                        vm.openEra(eraName)
+                        ui.selectedSong = nil
+                    },
+                    onInfo: showEraInfo
+                )
+            }
+            .frame(maxWidth: Metrics.contentMaxWidth)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func songList(_ rows: [MacListRow]) -> some View {
+        MacSongList(
+            rows: rows,
+            artistName: artist.name,
+            artistSlug: artist.slug,
+            sourceUrl: artist.sourceUrl,
+            onToggleExpansion: openEra == nil ? nil : { eraName, ordinal in
+                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
+            },
+            onPlay: { version, eraName in play(version, eraName: eraName, in: rows) },
+            onShowDescription: showDetails,
+            onSelect: { row in
+                ui.selectedSong = row?.payload(artistName: artist.name, artistSlug: artist.slug)
+            },
+            header: { pageHeader }
+        )
+        // Fresh selection per mode/era — the list is a different list.
+        .id(openEra ?? "flat")
+        .frame(maxWidth: Metrics.contentMaxWidth)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder

@@ -1,4 +1,6 @@
 #!/usr/bin/env swift
+// swiftlint:disable file_length
+// A script run as `xcrun swift Tools/make-icons.swift` must be one file.
 //
 // Regenerates every app icon for iOS, macOS and tvOS from one geometric source.
 // Run from the repo's LeakSheet-iOS directory:

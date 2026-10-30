@@ -85,6 +85,46 @@ actor APIClient {
         case preparing
     }
 
+    private static func sheetRequest(
+        url: String, artistName: String?, useCache: Bool, forceRefresh: Bool, cachedEtag: String?
+    ) throws -> URLRequest {
+        var request = URLRequest(url: sheetEndpoint)
+        request.httpMethod = "POST"
+        // A cold parse can take many seconds; ask the server to narrate it. Hits, 304s
+        // and older servers still answer with plain JSON.
+        request.setValue("application/x-ndjson, application/json", forHTTPHeaderField: "Accept")
+        if let etag = cachedEtag, !forceRefresh {
+            request.setValue("\"\(etag)\"", forHTTPHeaderField: "If-None-Match")
+        }
+        let body: [String: Any] = [
+            "url": url,
+            "artist_name": artistName as Any,
+            "use_cache": useCache,
+            "force_refresh": forceRefresh,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    /// The ETag a streamed cold parse ends with. It reports its outcome in the body, not
+    /// the status line: the 200 was sent before the parse had finished.
+    private static func streamedEtag(_ stream: StreamOutcome, received: Int) throws -> String? {
+        if let failure = stream.failure {
+            throw APIError.httpError(status: failure.status, message: failure.detail)
+        }
+        guard let streamedEtag = stream.etag else {
+            throw APIError.httpError(status: 0, message: "The server stopped before sending the tracker.")
+        }
+        // A proxy closing the connection cleanly mid-payload ends the task without an
+        // error; catch the truncation here rather than as a JSON decoding failure.
+        if let bytes = stream.bytes, Int64(received) != bytes {
+            throw APIError.httpError(
+                status: 0, message: "The download was cut off before the tracker finished. Try again."
+            )
+        }
+        return normalizeETag(streamedEtag)
+    }
+
     func parseSheet(
         url: String,
         artistName: String? = nil,
@@ -93,24 +133,9 @@ actor APIClient {
         cachedEtag: String? = nil,
         onProgress: (@Sendable (LoadPhase) -> Void)? = nil
     ) async throws -> ParseResult {
-        var request = URLRequest(url: Self.sheetEndpoint)
-        request.httpMethod = "POST"
-        // A cold parse can take many seconds; ask the server to narrate it. Hits, 304s
-        // and older servers still answer with plain JSON.
-        request.setValue("application/x-ndjson, application/json", forHTTPHeaderField: "Accept")
-
-        if let etag = cachedEtag, !forceRefresh {
-            request.setValue("\"\(etag)\"", forHTTPHeaderField: "If-None-Match")
-        }
-
-        let body: [String: Any] = [
-            "url": url,
-            "artist_name": artistName as Any,
-            "use_cache": useCache,
-            "force_refresh": forceRefresh,
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
+        let request = try Self.sheetRequest(
+            url: url, artistName: artistName, useCache: useCache, forceRefresh: forceRefresh, cachedEtag: cachedEtag
+        )
         onProgress?(.connecting)
         // Chunked delegate download — see DECISIONS.md::APIClient.swift::chunked-download
         let downloadTask = session.dataTask(with: request)
@@ -130,26 +155,8 @@ actor APIClient {
         }
 
         var etag = Self.normalizeETag(httpResponse.value(forHTTPHeaderField: "ETag"))
-
-        // A streamed cold parse reports its outcome in the body, not the
-        // status line: the 200 was sent before the parse had finished.
         if let stream {
-            if let failure = stream.failure {
-                throw APIError.httpError(status: failure.status, message: failure.detail)
-            }
-            guard let streamedEtag = stream.etag else {
-                throw APIError.httpError(
-                    status: 0, message: "The server stopped before sending the tracker."
-                )
-            }
-            etag = Self.normalizeETag(streamedEtag)
-            // A proxy closing the connection cleanly mid-payload ends the task without an
-            // error; catch the truncation here rather than as a JSON decoding failure.
-            if let bytes = stream.bytes, Int64(data.count) != bytes {
-                throw APIError.httpError(
-                    status: 0, message: "The download was cut off before the tracker finished. Try again."
-                )
-            }
+            etag = try Self.streamedEtag(stream, received: data.count)
         }
 
         if httpResponse.statusCode == 304 {
