@@ -13,7 +13,7 @@ import re
 from bisect import bisect_left
 from collections import Counter
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Callable, Iterable
 from html.parser import HTMLParser
 from pathlib import Path
@@ -371,61 +371,76 @@ def _grid_cell(value: dict) -> _Cell:
     )
 
 
+def _grid_hidden(meta: list, i: int) -> bool:
+    m = meta[i] if i < len(meta) else {}
+    return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
+
+
+def _grid_covered(merges: list, row_meta: list, n_rows: int, n_cols: int) -> set[tuple[int, int]]:
+    """Cells a merge covers (all but its top row), which htmlview renders no <td> for."""
+    covered: set[tuple[int, int]] = set()
+    for m in merges:
+        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
+        if _grid_hidden(row_meta, m.get("startRowIndex", 0)):
+            continue
+        rows = range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows))
+        columns = range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols))
+        covered.update((r, c) for r in rows for c in columns)
+    return covered
+
+
+def _grid_row(r: int, cols: list[int], covered: set[tuple[int, int]], frozen_cols: int, cell_of) -> list[_Cell]:
+    """One htmlview row: an empty freezebar <td> follows the frozen columns of every row."""
+    row: list[_Cell] = []
+    placed = not frozen_cols
+    for c in cols:
+        if not placed and c >= frozen_cols:
+            row.append(_Cell())
+            placed = True
+        if (r, c) not in covered:
+            row.append(cell_of(c))
+    if not placed:
+        row.append(_Cell())
+    return row
+
+
+def _grid_parts(sheet: dict) -> tuple[dict, list, list, list]:
+    """(gridProperties, rowData, rowMetadata, columnMetadata) of one API sheet."""
+    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
+    data = (sheet.get("data") or [{}])[0]
+    return grid, data.get("rowData") or [], data.get("rowMetadata") or [], data.get("columnMetadata") or []
+
+
+def _grid_cell_of(values: list):
+    return lambda c: _grid_cell(values[c]) if c < len(values) else _Cell()
+
+
 def extract_grid(sheet: dict) -> list[list[_Cell]]:
     """The rows `extract_table` gives for this sheet's htmlview, from Sheets API v4 JSON.
 
     In-cell images are not in the API, so no cell carries any. The htmlview quirks
     mirrored here: docs/decisions.md::parser.py::extract_grid.
     """
-    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
-    data = (sheet.get("data") or [{}])[0]
-    row_data = data.get("rowData") or []
-    row_meta = data.get("rowMetadata") or []
-    col_meta = data.get("columnMetadata") or []
-
-    def hidden(meta: list, i: int) -> bool:
-        m = meta[i] if i < len(meta) else {}
-        return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
-
+    grid, row_data, row_meta, col_meta = _grid_parts(sheet)
     n_rows = max(grid.get("rowCount", 0), len(row_data))
     n_cols = grid.get("columnCount", 0)
     # The body is trimmed but the grid size is not: an empty tab can declare millions of cells.
     if max(n_rows, 1) * n_cols > _MAX_GRID_CELLS:
         raise ValueError(f"grid of {n_rows} x {n_cols} cells is too large")
-    cols = [c for c in range(n_cols) if not hidden(col_meta, c)]
-    covered: set[tuple[int, int]] = set()
-    for m in sheet.get("merges") or []:
-        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
-        if hidden(row_meta, m.get("startRowIndex", 0)):
-            continue
-        for r in range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows)):
-            for c in range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols)):
-                covered.add((r, c))
+    place = partial(
+        _grid_row,
+        cols=[c for c in range(n_cols) if not _grid_hidden(col_meta, c)],
+        covered=_grid_covered(sheet.get("merges") or [], row_meta, n_rows, n_cols),
+        frozen_cols=grid.get("frozenColumnCount", 0),
+    )
     frozen = grid.get("frozenRowCount", 0)
-    frozen_cols = grid.get("frozenColumnCount", 0)
-
-    def build(r: int, cell_of) -> list[_Cell]:
-        # htmlview puts an empty freezebar <td> after the frozen columns of every row.
-        row: list[_Cell] = []
-        placed = not frozen_cols
-        for c in cols:
-            if not placed and c >= frozen_cols:
-                row.append(_Cell())
-                placed = True
-            if (r, c) not in covered:
-                row.append(cell_of(c))
-        if not placed:
-            row.append(_Cell())
-        return row
-
     rows: list[list[_Cell]] = []
     for r in range(n_rows):
         if frozen and r == frozen:
-            rows.append(build(-1, lambda _c: _Cell()))
-        if hidden(row_meta, r):
+            rows.append(place(-1, cell_of=_grid_cell_of([])))
+        if _grid_hidden(row_meta, r):
             continue
-        values = (row_data[r].get("values") or []) if r < len(row_data) else []
-        row = build(r, lambda c, values=values: _grid_cell(values[c]) if c < len(values) else _Cell())
+        row = place(r, cell_of=_grid_cell_of((row_data[r].get("values") or []) if r < len(row_data) else []))
         if row:
             rows.append(row)
     return rows
@@ -2463,6 +2478,32 @@ def _disambiguate_era_names(eras: list[Era]) -> list[Era]:
     return out
 
 
+# Which stat group a cell holds, by the labels it carries. Independent: one cell may
+# hold several stat lines.
+_GLOBAL_STAT_GROUPS = (
+    ("links", ("Total Link", "Missing Links")),
+    ("quality", ("Lossless", "CD Quality")),
+    ("availability", ("Total Full", "OG Files", "OG File")),
+    ("highlights", ("Best Of", "Special", "Grails")),
+)
+
+
+def _global_stats_of_row(row: list[_Cell]) -> TrackerStats | None:
+    """The tracker stats a footer row holds, or None when it is not the stats row."""
+    texts = dict.fromkeys(("links", "quality", "availability", "highlights"), "")
+    for cell in row:
+        for group, labels in _GLOBAL_STAT_GROUPS:
+            if any(label in cell.text for label in labels):
+                texts[group] = cell.text
+    stats = parse_tracker_stats(texts["links"], texts["quality"], texts["availability"], texts["highlights"])
+    # A footer may hold all its stats in one cell, so count parsed fields. An
+    # era header or a note that mentions a total yields at most one field.
+    parsed = sum(1 for v in stats.model_dump().values() if v)
+    if parsed < 2 or (parsed < 4 and _is_era_header(row)):
+        return None
+    return stats
+
+
 def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     """Scan rows for the global tracker stats row and parse it.
 
@@ -2477,36 +2518,10 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     colspan differences, so we extract by content matching.
     """
     for row in reversed(rows):
-        cell_texts = [c.text for c in row]
-        has_links = any("Total Link" in t for t in cell_texts)
-        has_avail = any("Total Full" in t for t in cell_texts)
-
-        if has_links or has_avail:
-            links_text = ""
-            quality_text = ""
-            availability_text = ""
-            highlights_text = ""
-
-            # Independent checks: one cell may hold several stat lines.
-            for cell in row:
-                t = cell.text
-                if "Total Link" in t or "Missing Links" in t:
-                    links_text = t
-                if "Lossless" in t or "CD Quality" in t:
-                    quality_text = t
-                if "Total Full" in t or "OG Files" in t or "OG File" in t:
-                    availability_text = t
-                if "Best Of" in t or "Special" in t or "Grails" in t:
-                    highlights_text = t
-
-            # A footer may hold all its stats in one cell, so count parsed fields. An
-            # era header or a note that mentions a total yields at most one field.
-            stats = parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
-            parsed = sum(1 for v in stats.model_dump().values() if v)
-            if parsed < 2 or (parsed < 4 and _is_era_header(row)):
-                continue
-            return stats
-
+        if any("Total Link" in c.text or "Total Full" in c.text for c in row):
+            stats = _global_stats_of_row(row)
+            if stats is not None:
+                return stats
     return None
 
 
@@ -3242,6 +3257,21 @@ class ArtMap(dict):
         self.synthetic: set[str] = set()
 
 
+def _art_header_columns(row: list[_Cell]) -> tuple[int | None, int | None]:
+    """(Era column, best-ranked Project Type column) of one candidate header row."""
+    era_idx = type_idx = None
+    type_rank = len(_ART_TYPE_HEADERS)
+    for c_idx, cell in enumerate(row):
+        key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
+        if era_idx is None and key in _ART_ERA_HEADERS:
+            era_idx = c_idx
+        # Best-ranked header wins, not the leftmost one.
+        rank = _ART_TYPE_HEADERS.index(key) if key in _ART_TYPE_HEADERS else type_rank
+        if rank < type_rank:
+            type_rank, type_idx = rank, c_idx
+    return era_idx, type_idx
+
+
 def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
     """Locate the Era and Project Type columns and the first data row.
 
@@ -3252,21 +3282,73 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
     for idx, row in enumerate(rows[:5]):
         if any(cell.images for cell in row):
             break  # already into the data; no header row above it
-        era_idx = type_idx = None
-        type_rank = len(_ART_TYPE_HEADERS)
-        for c_idx, cell in enumerate(row):
-            key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
-            if era_idx is None and key in _ART_ERA_HEADERS:
-                era_idx = c_idx
-            # Best-ranked header wins, not the leftmost one.
-            if key in _ART_TYPE_HEADERS:
-                rank = _ART_TYPE_HEADERS.index(key)
-                if rank < type_rank:
-                    type_rank, type_idx = rank, c_idx
+        era_idx, type_idx = _art_header_columns(row)
         if era_idx is not None or type_idx is not None:
             return era_idx, type_idx, idx + 1
     start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
     return None, None, start
+
+
+class _ArtCollector:
+    """Per-era images of an Art tab: the cover-labelled one and the first one seen."""
+
+    def __init__(self, era_idx: int | None, type_idx: int | None):
+        self.era_idx = era_idx
+        self.type_idx = type_idx
+        # {era_key: {"cover": url, "first": url}}
+        self.era_info: dict[str, dict[str, str | None]] = {}
+        # Version-stripped key → the FIRST versioned key filed under it, so an era
+        # the Art tab spells without a version tag still resolves.
+        self.base_keys: dict[str, str] = {}
+        # Art tabs leave the era cell blank on an era's continuation rows, so the last
+        # seen era carries forward (the first text cell is the artwork's own name).
+        self.last_era_name = ""
+
+    def _era_name(self, row: list[_Cell]) -> str:
+        if self.era_idx is not None:
+            return _get_cell_text(row, self.era_idx).strip() or self.last_era_name
+        # No Era header — fall back to the first non-empty text cell.
+        return next((cell.text.strip() for cell in row if cell.text.strip()), "")
+
+    def add(self, row: list[_Cell]) -> None:
+        # First image found in the row is the candidate
+        img_url = next((cell.images[0] for cell in row if cell.images), None)
+        era_name = self._era_name(row) if img_url else ""
+        if not era_name:
+            return
+        self.last_era_name = era_name
+        # Version-aware: the Art tab lists each version's own cover, so
+        # "Donda [V2]" must not collapse onto "Donda [V1]".
+        key = _era_match_key(era_name, keep_discriminators=True)
+        if not key:
+            return
+        self.base_keys.setdefault(_era_match_key(era_name), key)
+        info = self.era_info.setdefault(key, {"cover": None, "first": None})
+        if info["first"] is None:
+            info["first"] = img_url
+        if self.type_idx is not None:
+            cover_text = _get_cell_text(row, self.type_idx)
+        else:
+            cover_text = " ".join(c.text.strip() for c in row if c.text.strip())
+        if info["cover"] is None and _COVER_RE.search(cover_text):
+            info["cover"] = img_url
+
+    def result(self, source_url: str | None) -> "ArtMap":
+        # Prefer the cover-labelled image, fall back to the first image
+        result = ArtMap()
+        for key, info in self.era_info.items():
+            chosen = info["cover"] or info["first"]
+            if chosen and source_url and not urlparse(chosen).netloc:
+                chosen = urljoin(source_url, chosen)
+            if chosen:
+                result[key] = chosen
+        # Also file each entry under its version-stripped key (first versioned entry wins),
+        # marked synthetic: see docs/decisions.md::parser.py::art-version-keys.
+        for base, versioned in self.base_keys.items():
+            if base not in result and versioned in result:
+                result[base] = result[versioned]
+                result.synthetic.add(base)
+        return result
 
 
 def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
@@ -3282,75 +3364,12 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     rows = extract_table(html)
     if not rows:
         return {}
-
     era_idx, type_idx, start = _art_tab_columns(rows)
-
-    # First pass: collect all images per era key, noting which have cover descriptions.
-    # era_info: {era_key: {"cover": url, "first": url}}
-    era_info: dict[str, dict[str, str | None]] = {}
-    # Version-stripped key → the FIRST versioned key filed under it, so an era
-    # the Art tab spells without a version tag still resolves.
-    base_keys: dict[str, str] = {}
-    # Art tabs leave the era cell blank on an era's continuation rows, so the last
-    # seen era carries forward (the first text cell is the artwork's own name).
-    last_era_name = ""
-
+    collector = _ArtCollector(era_idx, type_idx)
     for row in rows[start:]:
-        if not row:
-            continue
-
-        # First image found in the row is the candidate
-        img_url = next((cell.images[0] for cell in row if cell.images), None)
-        if not img_url:
-            continue
-
-        if era_idx is not None:
-            era_name = _get_cell_text(row, era_idx).strip() or last_era_name
-        else:
-            # No Era header — fall back to the first non-empty text cell.
-            era_name = next((cell.text.strip() for cell in row if cell.text.strip()), "")
-        if not era_name:
-            continue
-        last_era_name = era_name
-
-        # Version-aware: the Art tab lists each version's own cover, so
-        # "Donda [V2]" must not collapse onto "Donda [V1]".
-        key = _era_match_key(era_name, keep_discriminators=True)
-        if not key:
-            continue
-        base_keys.setdefault(_era_match_key(era_name), key)
-
-        if key not in era_info:
-            era_info[key] = {"cover": None, "first": None}
-
-        # Record the first image seen for this era
-        if era_info[key]["first"] is None:
-            era_info[key]["first"] = img_url
-
-        if type_idx is not None:
-            cover_text = _get_cell_text(row, type_idx)
-        else:
-            cover_text = " ".join(c.text.strip() for c in row if c.text.strip())
-        if era_info[key]["cover"] is None and _COVER_RE.search(cover_text):
-            era_info[key]["cover"] = img_url
-
-    # Build final map: prefer cover-labelled image, fall back to first image
-    result = ArtMap()
-    for key, info in era_info.items():
-        chosen = info["cover"] or info["first"]
-        if chosen:
-            if source_url and not urlparse(chosen).netloc:
-                chosen = urljoin(source_url, chosen)
-            result[key] = chosen
-
-    # Also file each entry under its version-stripped key (first versioned entry wins),
-    # marked synthetic: see docs/decisions.md::parser.py::art-version-keys.
-    for base, versioned in base_keys.items():
-        if base not in result and versioned in result:
-            result[base] = result[versioned]
-            result.synthetic.add(base)
-
-    return result
+        if row:
+            collector.add(row)
+    return collector.result(source_url)
 
 
 def art_tab_candidates(artist: Artist, art_map: dict[str, str]) -> dict[str, str]:
