@@ -17,14 +17,14 @@ struct SongDescriptionSheet: View {
 
     /// The version the sheet shows: `payload.version` until a picker chip is chosen.
     /// Everything below reads `active`, never `payload`, so the whole sheet follows it.
-    private struct ActiveVersion {
+    struct ActiveVersion {
         var version: SongVersion
         var song: Song?
         var eraName: String
         var eraArt: String?
     }
 
-    @State private var active: ActiveVersion
+    @State var active: ActiveVersion
 
     init(payload: Payload, embedded: Bool = false) {
         self.payload = payload
@@ -35,27 +35,27 @@ struct SongDescriptionSheet: View {
         ))
     }
 
-    @Environment(\.dismiss) private var dismiss
-    @Environment(PlayerViewModel.self) private var player
-    @Environment(FavouritesManager.self) private var favourites
+    @Environment(\.dismiss) var dismiss
+    @Environment(PlayerViewModel.self) var player
+    @Environment(FavouritesManager.self) var favourites
     /// Contrast is judged against the Mac inspector's real system appearance: see
     /// DECISIONS.md::DesignTokens.swift::scheme-parameter.
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorScheme) var colorScheme
 
-    @State private var accentColor: Color?
+    @State var accentColor: Color?
     /// In-app Safari for version links + evidence — the sheet must never
     /// bounce the user out to system Safari.
-    @State private var safariItem: SafariItem?
+    @State var safariItem: SafariItem?
     /// The credit page the embedded (Mac inspector) form presents; it has no stack to push onto.
-    @State private var creditSheet: CreditRef?
+    @State var creditSheet: CreditRef?
     /// Present when the sheet is shown from the artist screen — powers the
     /// cross-era version picker. Nil from Now Playing / Favourites, where the
     /// picker falls back to just this song's own versions.
-    @Environment(ArtistViewModel.self) private var environmentVM: ArtistViewModel?
+    @Environment(ArtistViewModel.self) var environmentVM: ArtistViewModel?
 
     /// The environment's view model only when it describes this payload's artist
     /// (the Favourites sheet gets the *playing* artist's).
-    private var artistVM: ArtistViewModel? {
+    var artistVM: ArtistViewModel? {
         guard let vm = environmentVM, let slug = payload.artistSlug, vm.artist.slug == slug else { return nil }
         return vm
     }
@@ -64,7 +64,7 @@ struct SongDescriptionSheet: View {
     /// or every era sharing the same `songKey` when it isn't. Falls back to the
     /// current era's own versions when there's no `ArtistViewModel` to ask
     /// (Now Playing / Favourites) or the song has no cross-era duplicates.
-    private var pickerVersions: [ArtistViewModel.CrossEraVersion] {
+    var pickerVersions: [ArtistViewModel.CrossEraVersion] {
         if let vm = artistVM {
             let refs = vm.crossEraRefs(for: payload)
             if !refs.isEmpty {
@@ -93,7 +93,7 @@ struct SongDescriptionSheet: View {
     /// of a slash title, or another song naming this one (see
     /// ArtistViewModel.linkedRefs). Shown as their own row, apart from this
     /// song's versions, because a link is not a claim that they are one song.
-    private var linkedVersions: [ArtistViewModel.CrossEraVersion] {
+    var linkedVersions: [ArtistViewModel.CrossEraVersion] {
         guard let vm = artistVM else { return [] }
         return vm.linkedRefs(for: payload).flatMap { ref in
             ref.song.allVersions.map {
@@ -125,14 +125,14 @@ struct SongDescriptionSheet: View {
     }
 
     /// The active version's id without a chosen source, as song lists and picker chips carry it.
-    private var activeBaseID: String {
+    var activeBaseID: String {
         active.version.playing(nil).id
     }
 
     /// Play the sheet's version. When the full song is known, hand the player
     /// the song's streamable versions as a list so playback continues instead
     /// of stopping after this one track.
-    private func play() {
+    func play() {
         Haptics.light()
         if let song = active.song {
             // allVersions: a filtered copy would queue only the versions that
@@ -183,7 +183,7 @@ struct SongDescriptionSheet: View {
         }
     }
 
-    private var content: some View {
+    var content: some View {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -550,241 +550,4 @@ struct SongDescriptionSheet: View {
         }
     }
 
-    // MARK: - Version picker
-
-    /// Horizontal chip row of every version of this song, including other eras' (see
-    /// `pickerVersions`, read exactly once here: it is a cross-era lookup). A chip
-    /// re-points the whole sheet via `active`.
-    @ViewBuilder
-    private var versionPicker: some View {
-        let versions = pickerVersions
-        let linked = linkedVersions
-        if versions.count > 1 || !linked.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                if versions.count > 1 {
-                    chipRow(title: "Versions", entries: versions, showsTitle: false)
-                }
-                if !linked.isEmpty {
-                    chipRow(title: "Also Known As", entries: linked, showsTitle: true)
-                }
-            }
-        }
-    }
-
-    /// Opens scrolled to the version the sheet was opened for, so a deep version's
-    /// chip isn't off-screen.
-    private func chipRow(
-        title: String, entries: [ArtistViewModel.CrossEraVersion], showsTitle: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(entries) { entry in
-                            versionChip(entry, showsTitle: showsTitle)
-                                .id(entry.id)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .onAppear {
-                    guard let selected = entries.first(where: isActive) else { return }
-                    proxy.scrollTo(selected.id, anchor: .center)
-                }
-            }
-        }
-    }
-
-    private func isActive(_ entry: ArtistViewModel.CrossEraVersion) -> Bool {
-        entry.version.id == activeBaseID && entry.eraName == active.eraName
-    }
-
-    private func versionChip(_ entry: ArtistViewModel.CrossEraVersion, showsTitle: Bool) -> some View {
-        let isSelected = isActive(entry)
-        return Button {
-            Haptics.light()
-            active = ActiveVersion(
-                version: entry.version, song: entry.song,
-                eraName: entry.eraName, eraArt: entry.eraArt
-            )
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    // A linked song's chip leads with its own title — the tag
-                    // alone ("V2") would not say which song it is.
-                    Text(showsTitle ? entry.version.name : (entry.version.versionTag ?? entry.version.name))
-                        .font(.caption.weight(.bold))
-                        .lineLimit(1)
-                    // The chip's own badge, as in VersionRowView, so the ⭐ version stands out.
-                    if let b = entry.version.badge, let badge = Badge(rawValue: b) {
-                        Text(badge.emoji)
-                            .font(.caption2)
-                            .accessibilityLabel(badge.label)
-                    }
-                }
-                // Era name: the reason this picker reaches across eras at
-                // all, so every chip says where its version lives.
-                Text(entry.eraName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                BadgeRowView(version: entry.version)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(minWidth: 96, alignment: .leading)
-            .background(isSelected ? (accentColor ?? .lsAccent).opacity(0.22) : Color.lsCard)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? (accentColor ?? .lsAccent) : .clear, lineWidth: 1.5)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .rowHoverHighlight()
-    }
-
-    // MARK: - Credits section
-
-    @ViewBuilder
-    private var creditsSection: some View {
-        let credits: [(String, String)] = [
-            ("feat.", active.version.featuring),
-            ("prod.", active.version.producers),
-            ("with", active.version.collaboration),
-            ("ref.", active.version.refs),
-            ("eng.", active.version.engineer),
-            ("artist", active.version.creditedArtists),
-        ].compactMap { label, val in
-            guard let v = val, !v.isEmpty else { return nil }
-            return (label, v)
-        }
-
-        if !credits.isEmpty {
-            // One row per role, the label in a fixed column beside its names so it lines up
-            // with the first pill instead of floating among them.
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(credits, id: \.0) { label, value in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(label)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 44, alignment: .leading)
-                            .padding(.vertical, 4)
-                        FlowLayout(spacing: 6) {
-                            if let role = Self.creditRole(label) {
-                                ForEach(Array(CreditNames.split(value).enumerated()), id: \.offset) { _, name in
-                                    creditName(name, role: role)
-                                }
-                            } else {
-                                plainCredit(value)
-                            }
-                        }
-                    }
-                    .accessibilityElement(children: .contain)
-                }
-            }
-        }
-    }
-
-    private func plainCredit(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.lsCard)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    /// The page role a credit label names, or nil for labels that stay plain text.
-    private static func creditRole(_ label: String) -> ArtistViewModel.CreditRole? {
-        switch label {
-        // "with" is a collaboration; the credit index files it with features.
-        case "feat.", "with": return .feature
-        case "prod.": return .producer
-        default: return nil
-        }
-    }
-
-    /// One credited name: a link to its page when it has one, plain text otherwise.
-    @ViewBuilder
-    private func creditName(_ name: String, role: ArtistViewModel.CreditRole) -> some View {
-        let key = CreditNames.key(name)
-        if let vm = artistVM, CreditProfile.hasPage(key: key, role: role, artist: vm.artist, index: vm.creditIndex) {
-            CreditNameLink(
-                ref: CreditRef(key: key, role: role), text: name,
-                spokenLabel: "\(name), open page", pushes: !embedded,
-                onOpen: { creditSheet = $0 }
-            )
-        } else {
-            plainCredit(name)
-        }
-    }
-
-    // MARK: - Detail grid
-
-    private var detailGrid: some View {
-        // Date cells are shown verbatim, digits or not: trackers write "Spring" or
-        // "Late 2004 sessions", and hiding them loses information.
-        InfoGrid(items: [
-            ("Version", active.version.versionTag),
-            ("Duration", active.version.trackLength),
-            ("File Date", active.version.fileDate),
-            ("Leak Date", active.version.leakDate),
-            ("Preview Date", active.version.previewDate),
-            ("Type", active.version.type),
-            ("Recording", active.version.dateOfRecording),
-            ("Recorded At", active.version.recordingLocation),
-        ])
-    }
-
-    // MARK: - Helpers
-
-    /// Fan star rating (1-5) from the tracker's availability cell.
-    private func ratingPill(_ rating: Int) -> some View {
-        HStack(spacing: 2) {
-            ForEach(1...5, id: \.self) { star in
-                Image(systemName: star <= rating ? "star.fill" : "star")
-                    .font(.caption2)
-                    .foregroundStyle(star <= rating ? Color.lsStar : Color.secondary)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.lsCard)
-        .clipShape(Capsule())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Fan rating \(rating) of 5 stars")
-    }
-
-    /// Favourite the whole song when one's known, else just this version —
-    /// same branch the sticky bottom bar and the overflow menu both need.
-    private func toggleFavourite() {
-        if let song = active.song, let slug = payload.artistSlug {
-            favourites.toggle(
-                song: song,
-                artistSlug: slug,
-                artistName: payload.artistName,
-                sourceUrl: nil,
-                eraName: active.eraName,
-                eraArt: active.eraArt
-            )
-        } else {
-            let slug = payload.artistSlug ?? payload.artistName.slugified
-            favourites.toggleFromVersion(
-                version: active.version,
-                artistSlug: slug,
-                artistName: payload.artistName,
-                sourceUrl: nil,
-                eraName: active.eraName,
-                eraArt: active.eraArt
-            )
-        }
-    }
 }
