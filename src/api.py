@@ -1667,7 +1667,7 @@ async def proxy_image(
         raise
     except Exception as e:
         _log_upstream_failure("Image proxy error", url, e)
-        raise HTTPException(status_code=503, detail="Image proxy error")
+        raise HTTPException(status_code=503, detail="Image proxy error") from e
 
 
 def _parse_content_length(raw: str | None) -> int | None:
@@ -1938,7 +1938,7 @@ def _parse_metadata(provider: str, resp: httpx.Response, meta_url: str) -> dict:
     # provider's outage, not a bug of ours.
     except (ValueError, TypeError, KeyError, AttributeError) as e:
         logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-        raise HTTPException(status_code=503, detail="Metadata fetch failed")
+        raise HTTPException(status_code=503, detail="Metadata fetch failed") from e
 
 
 async def _fetch_metadata(url: str, meta_url: str, provider: str) -> Response:
@@ -1977,7 +1977,7 @@ async def proxy_metadata(
         raise
     except Exception as e:
         _log_upstream_failure("Metadata proxy error", meta_url, e)
-        raise HTTPException(status_code=503, detail="Metadata fetch failed")
+        raise HTTPException(status_code=503, detail="Metadata fetch failed") from e
 
 
 # ---------------------------------------------------------------------------
@@ -2297,25 +2297,25 @@ async def _open_stream(url: str, stream_url: str, provider: str | None, range_he
         # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
         logger.warning("gdrive interstitial for %s: %s", stream_url, e)
         await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
-        raise HTTPException(status_code=409, detail="gdrive_interstitial")
+        raise HTTPException(status_code=409, detail="gdrive_interstitial") from e
     except UpstreamStatusError as e:
         logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
         await _record_stream_outcome(provider, url, e)
-        raise _upstream_status_exception(e)
+        raise _upstream_status_exception(e) from e
     except NonMediaError as e:
         logger.warning("Stream non-media for %s: %s", stream_url, e)
         await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=415, detail="not_media")
+        raise HTTPException(status_code=415, detail="not_media") from e
     except ValueError as e:
         # The message can name internal hosts and SSRF-check internals: log it, return
         # something generic.
         logger.warning("Stream error for %s: %s", stream_url, e)
         await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR) from e
     except Exception as e:
         _log_upstream_failure("Stream error", stream_url, e)
         await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR) from e
     await _record_stream_outcome(provider, url, None)
     return resp
 

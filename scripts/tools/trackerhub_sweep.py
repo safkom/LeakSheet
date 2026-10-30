@@ -157,7 +157,7 @@ async def sweep_one(
             named_tabs = _discover_named_tabs(base.text)
             result["tabs"] = classify_tabs(named_tabs)
             result["tab_count"] = len(named_tabs)
-        except Exception as e:  # noqa: BLE001 — inventory is best-effort
+        except Exception as e:
             result["tabs_error"] = f"{type(e).__name__}: {str(e)[:120]}"
 
         # 2. Full pipeline parse.
@@ -169,7 +169,7 @@ async def sweep_one(
             result["status"] = "fetch_error"
             result["error"] = f"{type(e).__name__}: {str(e)[:200]}"
             return result
-        except Exception as e:  # noqa: BLE001 — a crash on one tracker is a finding
+        except Exception as e:
             result["status"] = "crash"
             result["error"] = f"{type(e).__name__}: {str(e)[:300]}"
             return result
@@ -234,7 +234,7 @@ async def harvest_parity(entry, api_artist) -> dict:
     for name in sorted(set(a) | set(h)):
         ea, eh = a.get(name, []), h.get(name, [])
         if ea != eh:
-            first = next((i for i, (x, y) in enumerate(zip(ea, eh)) if x != y), min(len(ea), len(eh)))
+            first = next((i for i, (x, y) in enumerate(zip(ea, eh, strict=False)) if x != y), min(len(ea), len(eh)))
             fields = sorted(k for k in (ea[first] if first < len(ea) else {}) if first < len(eh)
                             and ea[first].get(k) != eh[first].get(k))
             diffs[name] = {"api": len(ea), "htmlview": len(eh), "first_diff_row": first, "fields": fields}

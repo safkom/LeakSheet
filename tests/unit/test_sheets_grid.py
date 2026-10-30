@@ -156,9 +156,9 @@ class TestLinearCost:
     # The API hands one cell to the parser on the event-loop's thread pool, GIL held:
     # a quadratic cell stalls every request on the worker.
     def test_a_cell_with_thousands_of_runs_is_linear(self):
-        import time  # noqa: PLC0415
+        import time
 
-        from src.parser import _grid_cell  # noqa: PLC0415
+        from src.parser import _grid_cell
 
         text = "é" * 40_000
         runs = [{"startIndex": i * 8, "format": {}} for i in range(5_000)]

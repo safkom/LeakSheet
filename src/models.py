@@ -1154,7 +1154,7 @@ def extract_og_filenames(notes: str) -> list[str]:
     '&'-continued multi-line lists, and quoted filenames embedded in prose.
     """
     names: list[str] = []
-    for _, is_og, line_names in _walk_og_lines(notes):
+    for _, _is_og, line_names in _walk_og_lines(notes):
         names.extend(line_names)
     # Quoted filenames mentioned mid-sentence ("… the file included it's
     # OG Filename: "X.mp3" …") — extract the quoted token only.

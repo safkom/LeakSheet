@@ -55,7 +55,7 @@ def main() -> None:
                 continue
 
             cells_display = []
-            for j, cell in enumerate(row[:args.cols]):
+            for cell in row[:args.cols]:
                 text = cell.text[:60] + "..." if len(cell.text) > 60 else cell.text
                 if args.show_links and cell.links:
                     text += f" [+{len(cell.links)} links]"

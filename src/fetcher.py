@@ -1818,7 +1818,7 @@ MAX_DECODE_PIXELS = 20_000_000
 
 def _dhash(data: bytes, size: int = 16) -> int | None:
     """Difference hash of an image's grayscale gradient; None if it will not decode."""
-    from PIL import Image  # noqa: PLC0415 — Pillow only loads for trackers with an Art tab
+    from PIL import Image
 
     try:
         with Image.open(io.BytesIO(data)) as img:

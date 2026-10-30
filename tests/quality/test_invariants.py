@@ -104,7 +104,7 @@ def parsed_corpus() -> "list[tuple[str, object]]":
         for html, title, url in corpus_tabs():
             try:
                 out.append((title, parse_sheet(html, title, url or None)))
-            except Exception:  # noqa: BLE001 - test_parsing_never_raises reports these
+            except Exception:
                 continue
         _PARSED = out
     return _PARSED
@@ -161,7 +161,7 @@ class TestCorpusInvariants:
         for html, title, url in corpus_tabs():
             try:
                 parse_sheet(html, title, url or None)
-            except Exception as exc:  # noqa: BLE001 - the point of the test
+            except Exception as exc:
                 bad.append(f"{title}: {type(exc).__name__}: {exc}")
         assert bad == [], f"{len(bad)} trackers raised, e.g. {bad[:3]}"
 
