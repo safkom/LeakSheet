@@ -50,8 +50,9 @@ final class TrackerLoader {
         // multiple navigation pushes.
         // `waitForInFlight` (Mac sidebar, where a dropped selection leaves the pane spinning)
         // queues behind the running load; the default drops, so a double tap can't push twice.
-        while waitForInFlight && loading { try? await Task.sleep(for: .milliseconds(50)) }
-        guard !loading else { return nil }
+        while waitForInFlight && loading && !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
+        // A queued open cancelled while it waited must not start once the other load ends.
+        guard !loading, !Task.isCancelled else { return nil }
         withAnimation { error = nil }
         staleNotice = nil
         loading = true

@@ -101,18 +101,16 @@ struct MacSongList<Header: View>: View {
                 onShowDescription: onShowDescription
             )
             // A multi-version song opens on ONE click: its versions are the point of the
-            // row. The tap gesture takes the click from the List.
-            .onTapGesture(count: 1) {
-                // Selection is set FIRST and unconditionally, since this gesture takes the
-                // click from the List for every song row.
+            // row. The tap gesture takes the click from the List, so it sets the selection.
+            .onTapGesture {
                 selection = row.id
+                if Self.isDoubleClick {
+                    // On a multi-version row the first click already expanded it.
+                    if let v = version, v.isStreamable { onPlay(v, eraName) }
+                    return
+                }
                 guard song.hasMultipleVersions, let onToggleExpansion else { return }
                 onToggleExpansion(eraName, ordinal)
-            }
-            // Double-click plays; on a multi-version row the first click already expanded,
-            // so this only fires where "play" is unambiguous.
-            .onTapGesture(count: 2) {
-                if let v = version, v.isStreamable { onPlay(v, eraName) }
             }
 
         case .version(let version, let song, let eraName, let eraArt, _, _):
@@ -124,11 +122,16 @@ struct MacSongList<Header: View>: View {
                 onPlay: { onPlay($0, eraName) },
                 onShowDescription: onShowDescription
             )
-            .onTapGesture(count: 2) {
-                if version.isStreamable { onPlay(version, eraName) }
+            .onTapGesture {
+                selection = row.id
+                if Self.isDoubleClick, version.isStreamable { onPlay(version, eraName) }
             }
         }
     }
+
+    /// Read from the event: a second `count: 2` gesture delays every single click by the
+    /// double-click interval while it waits.
+    private static var isDoubleClick: Bool { (NSApp.currentEvent?.clickCount ?? 1) >= 2 }
 
     /// → expands the selected multi-version song; ← collapses it, also from one of its
     /// versions, and moves the selection up to the song.

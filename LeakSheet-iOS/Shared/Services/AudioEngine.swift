@@ -24,6 +24,11 @@ final class AudioEngine {
 
     // MARK: - State
 
+    /// 0…1, applied to every player this engine creates.
+    var volume: Float = 1 {
+        didSet { player?.volume = volume }
+    }
+
     var currentTrack: SongVersion?
     var artistName = ""
     /// Canonical artist slug from the API — the favourites key, so player hearts match

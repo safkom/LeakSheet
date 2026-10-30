@@ -33,6 +33,10 @@ final class PlayerViewModel {
     var isPlaying: Bool { engine.isPlaying }
     var currentTime: TimeInterval { engine.currentTime }
     var duration: TimeInterval { engine.duration }
+    var volume: Float {
+        get { engine.volume }
+        set { engine.volume = newValue }
+    }
     var loading: Bool { engine.loading }
     var error: String { engine.error }
     var queue: [QueueItem] { engine.queue }

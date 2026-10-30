@@ -5,6 +5,8 @@ import SwiftUI
 struct RecentPlaysShelfView: View {
     @AppStorage(ListeningHistory.enabledKey) private var historyEnabled = true
     @State private var showDescription: SongDetailPayload?
+    /// Where a tapped card's details go; nil presents them as a sheet.
+    var onShowDescription: ((SongDetailPayload) -> Void)?
 
     var body: some View {
         let entries = Self.oneTakePerSong(ListeningHistory.shared.recent)
@@ -68,9 +70,14 @@ struct RecentPlaysShelfView: View {
     }
 
     private func showDetails(_ entry: ListeningHistory.RecentPlay) {
-        showDescription = SongDetailPayload(
+        let payload = SongDetailPayload(
             song: nil, version: entry.version, artistName: entry.artistName,
             artistSlug: entry.artistSlug, eraName: entry.eraName, eraArt: entry.eraArt
         )
+        if let onShowDescription {
+            onShowDescription(payload)
+        } else {
+            showDescription = payload
+        }
     }
 }

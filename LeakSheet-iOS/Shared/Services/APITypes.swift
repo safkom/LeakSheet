@@ -45,8 +45,6 @@ nonisolated struct FileMetadata: Codable, Sendable {
     let lossless: Bool?
     let channels: Int?
     let duration: String?
-    let artist: String?
-    let title: String?
     // froste analyze-quality
     let estimatedBitrate: Int?
     let frequencyCutoff: Double?
@@ -61,7 +59,7 @@ nonisolated struct FileMetadata: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case provider, container, codec, bitrate, lossless, channels
-        case duration, artist, title, filename
+        case duration, filename
         case codecProfile = "codec_profile"
         case sampleRate = "sample_rate"
         case bitsPerSample = "bits_per_sample"
@@ -92,8 +90,6 @@ nonisolated struct FileMetadata: Codable, Sendable {
             channels = nil
         }
         duration = try c.decodeIfPresent(String.self, forKey: .duration)
-        artist = try c.decodeIfPresent(String.self, forKey: .artist)
-        title = try c.decodeIfPresent(String.self, forKey: .title)
         estimatedBitrate = try c.decodeIfPresent(Int.self, forKey: .estimatedBitrate)
         frequencyCutoff = try c.decodeIfPresent(Double.self, forKey: .frequencyCutoff)
         qualityMismatch = try c.decodeIfPresent(Bool.self, forKey: .qualityMismatch)

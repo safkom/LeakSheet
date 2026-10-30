@@ -141,6 +141,10 @@ struct MiniPlayerBar: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Next track")
                     }
+
+                    #if os(macOS)
+                    MacOutputControls()
+                    #endif
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)

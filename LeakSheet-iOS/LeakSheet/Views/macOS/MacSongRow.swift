@@ -194,6 +194,9 @@ struct MacSongRow: View {
         }
         .foregroundStyle(.secondary)
         // The heart is state, not a control — it stays visible.
+        // Invisible controls stay out of the key-view loop and VoiceOver; the row's
+        // context menu and Return/Space keep every action reachable.
+        .disabled(!hovering)
         .opacity(hovering || isFavourited ? 1 : 0)
     }
 

@@ -11,6 +11,8 @@ struct MacRootView: View {
     @State private var loader = TrackerLoader()
     /// Latest selecting open wins: a queued earlier open finishing late must not steal the selection.
     @State private var selectToken = 0
+    /// The sidebar-initiated load the loading pane shows, so its Cancel can stop it.
+    @State private var paneLoad: Task<Void, Never>?
 
     /// The view model for whatever is playing — lets the mini player resolve the
     /// full song behind the bare version the player holds.
@@ -75,7 +77,7 @@ struct MacRootView: View {
             guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })
             else { return }
-            Task { await open(entry.sourceUrl, artistName: entry.name, select: false) }
+            paneLoad = Task { await open(entry.sourceUrl, artistName: entry.name, select: false) }
         }
         // ⌘R re-fetches the selected tracker, bypassing the cache.
         .onChange(of: ui.refreshToken) { _, _ in
@@ -83,6 +85,8 @@ struct MacRootView: View {
                   let url = ui.tracker(slug)?.artist.sourceUrl
                     ?? recents.trackers.first(where: { $0.slug == slug })?.sourceUrl
             else { return }
+            // A second Refresh while this tracker is already re-parsing would queue another full parse.
+            guard !(loader.loading && loader.loadingURL == url) else { return }
             Task { await open(url, forceRefresh: true, select: false) }
         }
     }
@@ -143,6 +147,12 @@ struct MacRootView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                Button("Cancel") {
+                    paneLoad?.cancel()
+                    ui.selection = .browse
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -168,6 +178,17 @@ struct MacRootView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 8)
             }
+
+            // Details open in the inspector, as everywhere else on the Mac.
+            RecentPlaysShelfView { payload in
+                ui.selectedSong = payload
+                ui.inspectorTab = .details
+                ui.showInspector = true
+            }
+            // Its own height, not a share of the pane's: the lazy row would take the slack.
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 12)
+            .frame(maxWidth: Metrics.contentMaxWidth)
 
             Divider().overlay(Color.lsBorder)
 
