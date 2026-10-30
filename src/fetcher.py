@@ -1660,6 +1660,92 @@ async def _load_secondary_tabs(
             api_tabs.cancel()
 
 
+class _SecondaryTabs:
+    """Fetch + parse of the Art tab and the content tabs for one tracker, with progress."""
+
+    def __init__(self, artist: Artist, url_norm: str, title: str, total: int, api_tabs: asyncio.Task | None, fetch_kw: dict):
+        self.artist = artist
+        self.url_norm = url_norm
+        self.title = title
+        self.total = total
+        self.done = 0
+        self.api_tabs = api_tabs
+        self.fetch_kw = fetch_kw
+        self.t: PhaseTimer = fetch_kw["t"]
+        self.tab_results: dict[str, list] = {}
+
+    def _finished(self, name: str) -> None:
+        self.done += 1
+        self.t.report("tabs", f"Read {name}", done=self.done, total=self.total)
+
+    async def _fetch(self, gid_val: str) -> tuple[str, str] | None:
+        return await _fetch_gid_page(self.url_norm, gid_val, self.title, **self.fetch_kw)
+
+    async def load_art(self, art_gid: str) -> None:
+        try:
+            with self.t.phase("art_fetch"):
+                art_result = await self._fetch(art_gid)
+            if art_result:
+                with self.t.phase("art_parse"):
+                    art_map = await asyncio.to_thread(parse_art_tab, art_result[1], self.url_norm)
+                # Compared after the response, by the cover warm: see
+                # docs/decisions.md::fetcher.py::art-tab-identity.
+                self.artist._art_candidates = art_tab_candidates(self.artist, art_map) if art_map else {}
+        except Exception as e:
+            # Art tab optional — keep existing art_url on failure. WARNING so
+            # a systematically broken tab is visible at default log level.
+            logger.warning("Art tab load failed for %s: %s", self.url_norm[:80], e)
+        self._finished("Art")
+
+    async def _api_rows(self, gid_val: str) -> list | None:
+        if self.api_tabs is None:
+            return None
+        self.t.api_tabs_asked += 1
+        try:
+            rows = ((await self.api_tabs) or {}).get(gid_val)
+        except Exception as e:  # the API never costs a tab: htmlview can still read it
+            logger.warning("Sheets API tabs failed for %s: %s", self.url_norm[:80], e)
+            return None
+        if rows is not None:
+            self.t.api_tabs_served += 1
+            self.t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
+        return rows
+
+    async def load_tab(self, gid_val: str, kind: str, display_name: str) -> None:
+        try:
+            source = await self._api_rows(gid_val)
+            if source is None:
+                with self.t.phase("misc_fetch"):
+                    result = await self._fetch(gid_val)
+                source = result[1] if result else None
+            if source is not None:
+                with self.t.phase("misc_parse"):
+                    self.tab_results[gid_val] = await asyncio.to_thread(
+                        parse_misc_tab, source, kind, [era.name for era in self.artist.eras],
+                    )
+        except Exception as e:
+            # Content tabs optional; WARNING keeps systematic failures visible.
+            logger.warning("Content tab %s load failed: %s", gid_val, e)
+        self._finished(display_name)
+
+
+def _file_content_tabs(
+    artist: Artist, content_tabs: list[tuple[str, str, str]], tab_results: dict[str, list]
+) -> list[tuple[str, list]]:
+    """Content tabs land on *artist* in declared tab order (misc first) for stable output;
+    returns the highlight tabs, which annotate existing songs and are not pages."""
+    badge_tabs: list[tuple[str, list]] = []
+    for gid_val, kind, display_name in content_tabs:
+        entries = tab_results.get(gid_val, [])
+        if entries and kind in ("misc", "music_videos"):
+            artist.misc_entries.extend(entries)
+        if entries and kind in _BADGE_TAB_KINDS:
+            badge_tabs.append((kind, entries))
+        elif entries:
+            artist.tabs.append(TabSection(kind=kind, name=display_name, entries=entries))
+    return badge_tabs
+
+
 async def _load_secondary_tabs_with(
     artist: Artist,
     art_gid: str | None,
@@ -1683,92 +1769,15 @@ async def _load_secondary_tabs_with(
     come from ``api_tabs`` when it has them, else from htmlview.
     """
     total = len(content_tabs) + (1 if art_gid else 0)
-    done = 0
     t.report("tabs", f"Reading {total} extra tabs", done=0, total=total)
-
-    def _finished(name: str) -> None:
-        nonlocal done
-        done += 1
-        t.report("tabs", f"Read {name}", done=done, total=total)
-
-    async def _fetch(gid_val: str) -> tuple[str, str] | None:
-        return await _fetch_gid_page(
-            url_norm, gid_val, title,
-            client=client, timeout=timeout, cache_ttl=cache_ttl,
-            use_cache=use_cache, t=t, page_paths=page_paths,
-        )
-
-    async def _load_art() -> None:
-        try:
-            with t.phase("art_fetch"):
-                art_result = await _fetch(art_gid)
-            if art_result:
-                _, art_html = art_result
-                with t.phase("art_parse"):
-                    art_map = await asyncio.to_thread(parse_art_tab, art_html, url_norm)
-                # Compared after the response, by the cover warm: see
-                # docs/decisions.md::fetcher.py::art-tab-identity.
-                artist._art_candidates = art_tab_candidates(artist, art_map) if art_map else {}
-        except Exception as e:
-            # Art tab optional — keep existing art_url on failure. WARNING so
-            # a systematically broken tab is visible at default log level.
-            logger.warning("Art tab load failed for %s: %s", url_norm[:80], e)
-        _finished("Art")
-
-    tab_results: dict[str, list] = {}
-
-    async def _api_rows(gid_val: str) -> list | None:
-        if api_tabs is None:
-            return None
-        t.api_tabs_asked += 1
-        try:
-            rows = ((await api_tabs) or {}).get(gid_val)
-        except Exception as e:  # the API never costs a tab: htmlview can still read it
-            logger.warning("Sheets API tabs failed for %s: %s", url_norm[:80], e)
-            return None
-        if rows is not None:
-            t.api_tabs_served += 1
-            t.tab_loaded(gid_val, True)  # a tab htmlview then fetches is counted by that fetch
-        return rows
-
-    async def _load_tab(gid_val: str, kind: str, display_name: str) -> None:
-        try:
-            source = await _api_rows(gid_val)
-            if source is None:
-                with t.phase("misc_fetch"):
-                    result = await _fetch(gid_val)
-                source = result[1] if result else None
-            if source is not None:
-                with t.phase("misc_parse"):
-                    tab_results[gid_val] = await asyncio.to_thread(
-                        parse_misc_tab, source, kind,
-                        [era.name for era in artist.eras],
-                    )
-        except Exception as e:
-            # Content tabs optional; WARNING keeps systematic failures visible.
-            logger.warning("Content tab %s load failed: %s", gid_val, e)
-        _finished(display_name)
-
-    secondary = [_load_tab(g, k, n) for g, k, n in content_tabs]
+    fetch_kw = dict(client=client, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache, t=t, page_paths=page_paths)
+    loader = _SecondaryTabs(artist, url_norm, title, total, api_tabs, fetch_kw)
+    secondary = [loader.load_tab(g, k, n) for g, k, n in content_tabs]
     if art_gid:
-        secondary.append(_load_art())
+        secondary.append(loader.load_art(art_gid))
     if secondary:
         await asyncio.gather(*secondary)
-    # Extend in declared tab order (misc first) for stable output.
-    badge_tabs: list[tuple[str, list]] = []
-    for gid_val, kind, display_name in content_tabs:
-        entries = tab_results.get(gid_val, [])
-        if not entries:
-            continue
-        if kind in ("misc", "music_videos"):
-            artist.misc_entries.extend(entries)
-        if kind in _BADGE_TAB_KINDS:
-            # Highlight tabs annotate existing songs; they are not pages.
-            badge_tabs.append((kind, entries))
-            continue
-        artist.tabs.append(
-            TabSection(kind=kind, name=display_name, entries=entries)
-        )
+    badge_tabs = _file_content_tabs(artist, content_tabs, loader.tab_results)
     if badge_tabs:
         # One O(songs) index build for all badge tabs, off the event loop.
         with t.phase("badge_annotate"):
@@ -1894,6 +1903,44 @@ def _merge_aggregated_eras(artist: Artist, tab_name: str, extra: Artist) -> int:
     return merged
 
 
+def _hub_song_keys(a: Artist) -> set[tuple[str, str]]:
+    """(era key, song key) of every song. Placeholder tracks have an empty key and never match."""
+    return {
+        (_era_match_key(era.name), song.song_key)
+        for era in a.eras
+        for section in era.sections
+        for song in section.songs
+        if song.song_key
+    }
+
+
+def _drop_known_songs(extra: Artist, main_keys: set[tuple[str, str]]) -> None:
+    """Keep only the songs main lacks: a superset tab after a subset merges only those,
+    whatever the tab order."""
+    for era in extra.eras:
+        era_key = _era_match_key(era.name)
+        for section in era.sections:
+            section.songs = [s for s in section.songs if not s.song_key or (era_key, s.song_key) not in main_keys]
+        era.sections = [sec for sec in era.sections if sec.songs]
+    extra.eras = [era for era in extra.eras if era.sections]
+
+
+async def _load_hub_tab(
+    sem: asyncio.Semaphore, artist: Artist, gid_val: str, display: str, url_norm: str, title: str, fetch_kw: dict,
+) -> tuple[str, Artist] | None:
+    async with sem:
+        try:
+            result = await _fetch_gid_page(url_norm, gid_val, title, **fetch_kw)
+            if result is None:
+                return None
+            with fetch_kw["t"].phase("hub_parse"):
+                parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name, url_norm)
+            return display, parsed
+        except Exception as e:
+            logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
+            return None
+
+
 async def _aggregate_hub_workbook(
     artist: Artist,
     candidates: list[tuple[str, str]],
@@ -1916,60 +1963,22 @@ async def _aggregate_hub_workbook(
     if not candidates:
         return 0
     t.report("tabs", f"Merging {len(candidates)} catalogue tabs")
-
     # A second, smaller bound around fetch+parse together (the gid-fetch semaphore is
     # released once the body is in hand). Always acquired outside it: no deadlock.
     sem = asyncio.Semaphore(_HUB_LOAD_CONCURRENCY)
-
-    async def _load(gid_val: str, display: str) -> tuple[str, Artist] | None:
-        async with sem:
-          try:
-              result = await _fetch_gid_page(
-                  url_norm, gid_val, title, client=client, timeout=timeout,
-                  cache_ttl=cache_ttl, use_cache=use_cache, t=t,
-                  page_paths=page_paths,
-              )
-              if result is None:
-                  return None
-              with t.phase("hub_parse"):
-                  parsed = await asyncio.to_thread(parse_sheet, result[1], artist.name, url_norm)
-              return display, parsed
-          except Exception as e:
-              logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
-              return None
-
-    loaded = await asyncio.gather(*[_load(g, n) for g, n in candidates])
-
+    fetch_kw = dict(client=client, timeout=timeout, cache_ttl=cache_ttl, use_cache=use_cache, t=t, page_paths=page_paths)
+    loaded = await asyncio.gather(*[
+        _load_hub_tab(sem, artist, g, n, url_norm, title, fetch_kw) for g, n in candidates
+    ])
     # Duplicate-tab filtering — see docs/decisions.md::fetcher.py::duplicate-tab-keys
-    # Keyed per era on song_key: placeholder tracks have an empty key and never match.
-    def _keys(a: Artist) -> set[tuple[str, str]]:
-        return {
-            (_era_match_key(era.name), song.song_key)
-            for era in a.eras
-            for section in era.sections
-            for song in section.songs
-            if song.song_key
-        }
-
-    main_keys = _keys(artist)
+    main_keys = _hub_song_keys(artist)
     total = 0
-    for entry in loaded:
-        if entry is None:
-            continue
-        display, extra = entry
-        keys = _keys(extra)
+    for display, extra in (entry for entry in loaded if entry is not None):
+        keys = _hub_song_keys(extra)
         if keys and keys <= main_keys:
             logger.debug("Hub tab %r adds nothing new — skipped", display)
             continue
-        # A superset tab after a subset merges only what main lacks, whatever the tab order.
-        for era in extra.eras:
-            for section in era.sections:
-                section.songs = [
-                    song for song in section.songs
-                    if not song.song_key or (_era_match_key(era.name), song.song_key) not in main_keys
-                ]
-            era.sections = [sec for sec in era.sections if sec.songs]
-        extra.eras = [era for era in extra.eras if era.sections]
+        _drop_known_songs(extra, main_keys)
         merged = _merge_aggregated_eras(artist, _display_tab_name(display), extra)
         main_keys |= keys
         total += merged
