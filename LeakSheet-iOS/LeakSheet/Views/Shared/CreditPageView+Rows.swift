@@ -24,23 +24,7 @@ extension CreditPageView {
                 play: { play(credited.version, in: profile.streamable) }
             )
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(credited.song.baseName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isCurrent ? Color.lsAccent : .primary)
-                        .lineLimit(1)
-                    if heard {
-                        HeardDot()
-                    }
-                    if let tag = credited.version.versionTag {
-                        Text(tag)
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    if let badge = credited.version.badge.flatMap(Badge.init(rawValue:)) {
-                        Text(badge.emoji).font(.caption)
-                    }
-                }
+                trackTitle(credited, isCurrent: isCurrent, heard: heard)
                 BadgeRowView(version: credited.version, trailing: detail.isEmpty ? nil : detail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,6 +43,26 @@ extension CreditPageView {
         .accessibilityValue(heard ? "played" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows details")
+    }
+
+    func trackTitle(_ credited: CreditProfile.Credited, isCurrent: Bool, heard: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(credited.song.baseName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isCurrent ? Color.lsAccent : .primary)
+                .lineLimit(1)
+            if heard {
+                HeardDot()
+            }
+            if let tag = credited.version.versionTag {
+                Text(tag)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if let badge = credited.version.badge.flatMap(Badge.init(rawValue:)) {
+                Text(badge.emoji).font(.caption)
+            }
+        }
     }
 
     func payload(_ credited: CreditProfile.Credited) -> DescriptionSheet.Payload {
