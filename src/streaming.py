@@ -194,7 +194,7 @@ async def _get_text_capped(
     headers: dict[str, str],
     *,
     cap: int = _SCRAPER_READ_CAP,
-    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
+    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483)
 ) -> tuple[int, str]:
     """GET *url*, decoding at most *cap* decompressed bytes. Returns
     (status_code, text). Stops consuming the body once the cap is reached."""
@@ -233,7 +233,7 @@ async def get_capped(
     url: str,
     headers: dict[str, str],
     *,
-    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483): httpx timeout, not an asyncio wait
+    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483)
 ) -> CappedResponse:
     """A small provider API answer, read with the scraper byte cap."""
     return CappedResponse(*await _get_text_capped(client, url, headers, timeout=timeout))

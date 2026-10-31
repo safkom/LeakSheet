@@ -159,11 +159,14 @@ KNOWN_TRACKERS: dict[str, str] = {
 }
 
 
+_SHEET_FILE = "sheet.html"
+
+
 def _unknown_tracker_dirs(directory: Path) -> list[tuple[str, Path]]:
     """Tracker directories not in KNOWN_TRACKERS, named after the directory."""
     results = []
     for child in sorted(directory.iterdir()) if directory.exists() else ():
-        sheet_path = child / "sheet.html"
+        sheet_path = child / _SHEET_FILE
         base_name = child.name.removesuffix("_files")
         if child.is_dir() and child.name.endswith("_files") and base_name not in KNOWN_TRACKERS and sheet_path.exists():
             results.append((base_name.replace(" - Google Drive", "").strip(), sheet_path))
@@ -177,9 +180,9 @@ def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]
     """
     directory = trackers_dir or TRACKERS_DIR
     results = [
-        (artist_name, directory / f"{tracker_name}_files" / "sheet.html")
+        (artist_name, directory / f"{tracker_name}_files" / _SHEET_FILE)
         for tracker_name, artist_name in KNOWN_TRACKERS.items()
-        if (directory / f"{tracker_name}_files" / "sheet.html").exists()
+        if (directory / f"{tracker_name}_files" / _SHEET_FILE).exists()
     ]
     return results + _unknown_tracker_dirs(directory)
 

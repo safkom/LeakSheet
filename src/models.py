@@ -600,13 +600,13 @@ def slugify(text: str) -> str:
 # Decorative emoji hung off stat labels ("🔗 616 Total Links"). Shared with the
 # parser, which must recognise the same cells to tell era headers from the footer.
 EMOJI_RUN_RE = re.compile(
-    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"
+    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"  # NOSONAR(S5869)
 )
 
 # "N Label" pairs, concatenated ("1 OG File(s)45 Full") or newline-separated,
 # optionally emoji-prefixed ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
-    r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",
+    r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",  # NOSONAR(S6019)
 )
 
 

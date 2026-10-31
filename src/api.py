@@ -155,23 +155,23 @@ def _sentry_options(dsn: str) -> dict:
     from sentry_sdk.integrations.starlette import StarletteIntegration
     from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
-    return dict(
-        dsn=dsn,
-        release=f"leaksheet-api@{VERSION}",
-        enable_logs=True,
-        traces_sample_rate=0.0,
-        send_default_pii=False,
+    return {
+        "dsn": dsn,
+        "release": f"leaksheet-api@{VERSION}",
+        "enable_logs": True,
+        "traces_sample_rate": 0.0,
+        "send_default_pii": False,
         # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
-        event_scrubber=EventScrubber(
+        "event_scrubber": EventScrubber(
             denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token", "x-goog-api-key"]
         ),
-        before_send=_scrub_secrets,
-        before_send_log=_scrub_secrets,
-        integrations=[
+        "before_send": _scrub_secrets,
+        "before_send_log": _scrub_secrets,
+        "integrations": [
             StarletteIntegration(failed_request_status_codes=set()),
             FastApiIntegration(failed_request_status_codes=set()),
         ],
-    )
+    }
 
 
 if _sentry_dsn := os.environ.get("SENTRY_DSN"):

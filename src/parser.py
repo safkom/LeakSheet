@@ -343,6 +343,19 @@ def _grid_cell(value: dict) -> _Cell:
     if hyperlink := value.get("hyperlink"):
         # htmlview renders a cell with a hyperlink as one anchor around all of it.
         return _Cell(text=text, links=[_grid_link(hyperlink)], link_lines=[_grid_text(raw).count("\n")])
+    spans = _grid_link_spans(value, raw)
+    if not spans:
+        return _Cell(text=text)
+    breaks = _line_breaks_before(raw)
+    return _Cell(
+        text=text,
+        links=[_grid_link(uri) for _start, _end, uri in spans],
+        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
+    )
+
+
+def _grid_link_spans(value: dict, raw: str) -> list[tuple[int, int, str]]:
+    """(start, end, uri) of each linked text run and smart chip, in text order."""
     runs = value.get("textFormatRuns") or []
     chips = value.get("chipRuns") or []
     link_runs = [(i, uri) for i, run in enumerate(runs)
@@ -350,9 +363,9 @@ def _grid_cell(value: dict) -> _Cell:
     link_chips = [(chip.get("startIndex", 0), uri) for chip in chips
                   if (uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"))]
     if not link_runs and not link_chips:
-        return _Cell(text=text)
+        return []
     # Linear in the cell, not per run: a cell can hold thousands of runs.
-    offsets, breaks = _utf16_offsets(raw), _line_breaks_before(raw)
+    offsets = _utf16_offsets(raw)
 
     def index(units: int) -> int:
         return min(bisect_left(offsets, units), len(raw))
@@ -365,11 +378,7 @@ def _grid_cell(value: dict) -> _Cell:
         start = index(units)
         spans.append((start, start + 1, uri))
     spans.sort()
-    return _Cell(
-        text=text,
-        links=[_grid_link(uri) for _start, _end, uri in spans],
-        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
-    )
+    return spans
 
 
 def _grid_hidden(meta: list, i: int) -> bool:
@@ -895,7 +904,7 @@ _NON_ERA_PREFIXES = (
 _NON_ERA_SUBSTRINGS = (
     "tracker",  # a header/label, not an era
     "click to view", "click here",  # navigation rows
-    "discord.gg/", "discord.com/", "http://", "https://", ".gg/",  # links
+    "discord.gg/", "discord.com/", "http://", "https://", ".gg/",  # NOSONAR(S5332)
     "playlist", "spotify",  # streaming/playlist references
     "sent all", "onlyfiles",  # changelog phrasing
 )

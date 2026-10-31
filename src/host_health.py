@@ -199,7 +199,7 @@ async def _answers(link: str) -> bool:
         return e.status_code < 500  # a missing or forbidden file is not an outage
     except (NonMediaError, GdriveInterstitialError):
         return True  # the host served a file, just not media
-    except (httpx.HTTPError, ValueError, TimeoutError, OSError) as e:
+    except (httpx.HTTPError, ValueError, OSError) as e:
         logger.debug("stream host probe of %s failed: %r", link[:80], e)
         return False
 

@@ -76,7 +76,8 @@ def test_the_payload_keeps_the_ios_hard_decode_contract():
 
 
 def test_the_shared_fixture_matches_the_serializer():
-    assert FIXTURE.exists() and json.loads(FIXTURE.read_text()) == contract_payload(), (
+    assert FIXTURE.exists()
+    assert json.loads(FIXTURE.read_text()) == contract_payload(), (
         "The /sheet wire format changed. Regenerate the Swift fixture: "
         "uv run python -m tests.parse.test_wire_contract"
     )
@@ -96,7 +97,8 @@ def test_edge_payload_is_what_swift_can_decode():
 
 
 def test_the_edge_fixture_matches_the_serializer():
-    assert EDGE_FIXTURE.exists() and json.loads(EDGE_FIXTURE.read_text()) == edge_payload(), (
+    assert EDGE_FIXTURE.exists()
+    assert json.loads(EDGE_FIXTURE.read_text()) == edge_payload(), (
         "Regenerate the Swift fixtures: uv run python -m tests.parse.test_wire_contract"
     )
 
