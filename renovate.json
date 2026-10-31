@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Ljubljana",
+  "labels": ["dependencies"],
+  "lockFileMaintenance": { "enabled": true },
+  "docker-compose": {
+    "managerFilePatterns": ["/(^|/)docker-compose\\.ya?ml$/", "/^ops/casaos/[^/]+\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The uv image held in a .gitlab-ci.yml variable",
+      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
+      "matchStrings": ["UV_IMAGE: (?<depName>[^:\\s]+):(?<currentValue>\\S+)"],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    { "matchManagers": ["github-actions"], "groupName": "GitHub Actions" }
+  ]
+}
