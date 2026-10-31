@@ -111,8 +111,8 @@ final class PlayerViewModel {
         engine.clearQueue()
     }
 
-    func moveInQueue(from: IndexSet, to: Int) {
-        engine.moveInQueue(from: from, to: to)
+    func moveInQueue(from source: IndexSet, to destination: Int) {
+        engine.moveInQueue(from: source, to: destination)
     }
 
     func playFromQueue(at index: Int) {

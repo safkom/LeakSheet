@@ -21,40 +21,40 @@ extension MacArtistView {
                 MacFilterChip(
                     label: "Best Of",
                     icon: "star.fill",
-                    isActive: vm.bestOf,
+                    isActive: viewModel.bestOf,
                     tint: .filterBestOf
-                ) { vm.toggleBestOf() }
+                ) { viewModel.toggleBestOf() }
                 MacFilterChip(
                     label: "Worst Of",
                     icon: "hand.thumbsdown",
-                    isActive: vm.worstOf,
+                    isActive: viewModel.worstOf,
                     tint: .filterWorstOf
-                ) { vm.toggleWorstOf() }
+                ) { viewModel.toggleWorstOf() }
                 MacFilterChip(
                     label: "Grails",
                     icon: "trophy.fill",
-                    isActive: vm.grails,
+                    isActive: viewModel.grails,
                     tint: .filterGrail
-                ) { vm.toggleGrails() }
+                ) { viewModel.toggleGrails() }
                 MacFilterChip(
                     label: "Recent",
                     icon: "clock",
-                    isActive: vm.recents,
+                    isActive: viewModel.recents,
                     tint: .filterRecent
-                ) { vm.toggleRecents() }
+                ) { viewModel.toggleRecents() }
                 MacFilterChip(
                     label: "No Snippets",
                     icon: "waveform.slash",
-                    isActive: vm.noSnippets,
+                    isActive: viewModel.noSnippets,
                     tint: .filterNoSnippets
-                ) { vm.toggleNoSnippets() }
-                ForEach(vm.availableTabs) { tab in
+                ) { viewModel.toggleNoSnippets() }
+                ForEach(viewModel.availableTabs) { tab in
                     MacFilterChip(
                         label: ContentTabsView.labelText(for: tab.name),
                         icon: ContentTabsView.tabIcon(for: tab.kind),
-                        isActive: vm.selectedTabKey == tab.id,
+                        isActive: viewModel.selectedTabKey == tab.id,
                         tint: .filterMisc
-                    ) { vm.selectTab(tab.id) }
+                    ) { viewModel.selectTab(tab.id) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -74,8 +74,8 @@ extension MacArtistView {
                 }
             }
         }
-        statRow(vm.artistStats)
-        if let notice = vm.loadNotice {
+        statRow(viewModel.artistStats)
+        if let notice = viewModel.loadNotice {
             Text(notice)
                 .font(.caption2)
                 .foregroundStyle(Color.lsError)
@@ -122,7 +122,7 @@ extension MacArtistView {
     /// Era-level chrome: cover, name, the era's own numbers, and a Play action.
     @ViewBuilder
     private func eraHeader(_ name: String) -> some View {
-        let filtered = vm.filteredEra(named: name)
+        let filtered = viewModel.filteredEra(named: name)
         HStack(alignment: .center, spacing: 14) {
             eraCover(filtered?.era.artUrl)
             eraTitles(name, filtered)
@@ -197,8 +197,8 @@ extension MacArtistView {
         ToolbarItemGroup {
             if openEra != nil {
                 Button {
-                    vm.openEra(nil)
-                    ui.selectedSong = nil
+                    viewModel.openEra(nil)
+                    uiState.selectedSong = nil
                 } label: {
                     Label("All Eras", systemImage: "chevron.backward")
                 }
@@ -214,7 +214,7 @@ extension MacArtistView {
                     Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
                 }
                 Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
-                Button { player.playNewestLeaks(vm.artist) } label: {
+                Button { player.playNewestLeaks(viewModel.artist) } label: {
                     Label("Newest Leaks", systemImage: "clock.arrow.circlepath")
                 }
             } label: {
@@ -222,8 +222,8 @@ extension MacArtistView {
             }
 
             Button {
-                ui.inspectorTab = .queue
-                ui.showInspector = true
+                uiState.inspectorTab = .queue
+                uiState.showInspector = true
             } label: {
                 Label("Queue", systemImage: "list.bullet")
             }

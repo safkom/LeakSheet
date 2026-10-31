@@ -4,7 +4,7 @@ import SwiftUI
 /// Era browser: a grid of covers, using the width a desktop window has. Picking a
 /// tile drills into that era's song list (`MacArtistView` swaps the pane).
 struct MacEraGrid: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let onSelect: (String) -> Void
     let onInfo: (String) -> Void
 
@@ -13,7 +13,7 @@ struct MacEraGrid: View {
     private static let columns = [GridItem(.adaptive(minimum: 168, maximum: 240), spacing: 16)]
 
     var body: some View {
-        if vm.content.eras.isEmpty {
+        if viewModel.content.eras.isEmpty {
             ContentUnavailableView {
                 Label(
                     hasActiveFilters ? "No Matches" : "No Songs",
@@ -28,17 +28,17 @@ struct MacEraGrid: View {
             .padding(.top, 48)
         } else {
             LazyVGrid(columns: Self.columns, spacing: 16) {
-                ForEach(vm.content.eras) { filtered in
+                ForEach(viewModel.content.eras) { filtered in
                     MacEraTile(
                         era: filtered.era,
                         songCount: filtered.allSongs.count,
-                        displayColors: vm.eraDisplay[filtered.era.name],
+                        displayColors: viewModel.eraDisplay[filtered.era.name],
                         actions: EraAction.all(
-                            for: filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug,
+                            for: filtered, artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug,
                             player: player, onInfo: { onInfo(filtered.era.name) }
                         ),
                         onSelect: { onSelect(filtered.era.name) },
-                        onColorExtracted: { vm.setEraColor(eraName: filtered.era.name, dominant: $0) }
+                        onColorExtracted: { viewModel.setEraColor(eraName: filtered.era.name, dominant: $0) }
                     )
                 }
             }
@@ -50,7 +50,7 @@ struct MacEraGrid: View {
     /// Must list EVERY chip that can empty the list, or the empty state claims
     /// "No Songs" (tracker is empty) when the truth is "No Matches".
     private var hasActiveFilters: Bool {
-        vm.bestOf || vm.worstOf || vm.grails || vm.noSnippets
+        viewModel.bestOf || viewModel.worstOf || viewModel.grails || viewModel.noSnippets
     }
 }
 

@@ -72,30 +72,30 @@ nonisolated struct FileMetadata: Codable, Sendable {
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try c.decodeIfPresent(String.self, forKey: .provider)
-        container = try c.decodeIfPresent(String.self, forKey: .container)
-        codec = try c.decodeIfPresent(String.self, forKey: .codec)
-        codecProfile = try c.decodeIfPresent(String.self, forKey: .codecProfile)
-        bitrate = try c.decodeIfPresent(String.self, forKey: .bitrate)
-        sampleRate = try c.decodeIfPresent(String.self, forKey: .sampleRate)
-        bitsPerSample = try c.decodeIfPresent(String.self, forKey: .bitsPerSample)
-        lossless = try c.decodeIfPresent(Bool.self, forKey: .lossless)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        container = try values.decodeIfPresent(String.self, forKey: .container)
+        codec = try values.decodeIfPresent(String.self, forKey: .codec)
+        codecProfile = try values.decodeIfPresent(String.self, forKey: .codecProfile)
+        bitrate = try values.decodeIfPresent(String.self, forKey: .bitrate)
+        sampleRate = try values.decodeIfPresent(String.self, forKey: .sampleRate)
+        bitsPerSample = try values.decodeIfPresent(String.self, forKey: .bitsPerSample)
+        lossless = try values.decodeIfPresent(Bool.self, forKey: .lossless)
         // Backend emits channels as Int when numeric, String otherwise.
-        if let numeric = try? c.decodeIfPresent(Int.self, forKey: .channels) {
+        if let numeric = try? values.decodeIfPresent(Int.self, forKey: .channels) {
             channels = numeric
-        } else if let text = try? c.decodeIfPresent(String.self, forKey: .channels) {
+        } else if let text = try? values.decodeIfPresent(String.self, forKey: .channels) {
             channels = Int(text)
         } else {
             channels = nil
         }
-        duration = try c.decodeIfPresent(String.self, forKey: .duration)
-        estimatedBitrate = try c.decodeIfPresent(Int.self, forKey: .estimatedBitrate)
-        frequencyCutoff = try c.decodeIfPresent(Double.self, forKey: .frequencyCutoff)
-        qualityMismatch = try c.decodeIfPresent(Bool.self, forKey: .qualityMismatch)
-        fileSize = try c.decodeIfPresent(Int.self, forKey: .fileSize)
-        mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
-        filename = try c.decodeIfPresent(String.self, forKey: .filename)
-        mediaKind = try c.decodeIfPresent(String.self, forKey: .mediaKind)
+        duration = try values.decodeIfPresent(String.self, forKey: .duration)
+        estimatedBitrate = try values.decodeIfPresent(Int.self, forKey: .estimatedBitrate)
+        frequencyCutoff = try values.decodeIfPresent(Double.self, forKey: .frequencyCutoff)
+        qualityMismatch = try values.decodeIfPresent(Bool.self, forKey: .qualityMismatch)
+        fileSize = try values.decodeIfPresent(Int.self, forKey: .fileSize)
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+        filename = try values.decodeIfPresent(String.self, forKey: .filename)
+        mediaKind = try values.decodeIfPresent(String.self, forKey: .mediaKind)
     }
 }

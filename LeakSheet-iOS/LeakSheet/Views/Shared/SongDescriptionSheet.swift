@@ -56,8 +56,10 @@ struct SongDescriptionSheet: View {
     /// The environment's view model only when it describes this payload's artist
     /// (the Favourites sheet gets the *playing* artist's).
     var artistVM: ArtistViewModel? {
-        guard let vm = environmentVM, let slug = payload.artistSlug, vm.artist.slug == slug else { return nil }
-        return vm
+        guard let viewModel = environmentVM,
+              let slug = payload.artistSlug,
+              viewModel.artist.slug == slug else { return nil }
+        return viewModel
     }
 
     /// One version, wherever it lives — its own era if the song is era-unique,
@@ -65,8 +67,8 @@ struct SongDescriptionSheet: View {
     /// current era's own versions when there's no `ArtistViewModel` to ask
     /// (Now Playing / Favourites) or the song has no cross-era duplicates.
     var pickerVersions: [ArtistViewModel.CrossEraVersion] {
-        if let vm = artistVM {
-            let refs = vm.crossEraRefs(for: payload)
+        if let viewModel = artistVM {
+            let refs = viewModel.crossEraRefs(for: payload)
             if !refs.isEmpty {
                 return refs.flatMap { ref in
                     ref.song.allVersions.map {
@@ -77,7 +79,7 @@ struct SongDescriptionSheet: View {
             // Era-unique song: songKeyEras drops single-era keys, so recover
             // the unfiltered song by base name rather than trusting the
             // payload's copy, which a badge filter may have truncated.
-            if let resolved = vm.resolvedSong(for: payload) {
+            if let resolved = viewModel.resolvedSong(for: payload) {
                 return resolved.allVersions.map {
                     .init(version: $0, song: resolved, eraName: payload.eraName, eraArt: payload.eraArt)
                 }
@@ -94,8 +96,8 @@ struct SongDescriptionSheet: View {
     /// ArtistViewModel.linkedRefs). Shown as their own row, apart from this
     /// song's versions, because a link is not a claim that they are one song.
     var linkedVersions: [ArtistViewModel.CrossEraVersion] {
-        guard let vm = artistVM else { return [] }
-        return vm.linkedRefs(for: payload).flatMap { ref in
+        guard let viewModel = artistVM else { return [] }
+        return viewModel.linkedRefs(for: payload).flatMap { ref in
             ref.song.allVersions.map {
                 .init(version: $0, song: ref.song, eraName: ref.eraName, eraArt: ref.eraArt)
             }
@@ -103,17 +105,17 @@ struct SongDescriptionSheet: View {
     }
 
     var badgeInfo: (emoji: String, label: String)? {
-        guard let b = active.version.badge, let badge = Badge(rawValue: b) else { return nil }
+        guard let rawBadge = active.version.badge, let badge = Badge(rawValue: rawBadge) else { return nil }
         return (badge.emoji, badge.label)
     }
 
     var displayName: String {
-        let n = active.version.name
+        let name = active.version.name
         // Strip version tag suffix like " [V1]" for cleaner display
-        if let tag = active.version.versionTag, n.hasSuffix(" [\(tag)]") {
-            return String(n.dropLast(tag.count + 3))
+        if let tag = active.version.versionTag, name.hasSuffix(" [\(tag)]") {
+            return String(name.dropLast(tag.count + 3))
         }
-        return n
+        return name
     }
 
     var subtitle: String? {
@@ -139,10 +141,10 @@ struct SongDescriptionSheet: View {
             // matched the badge filter, so playback stopped after one track.
             let streamable = song.allVersions.filter(\.isStreamable)
             if let idx = streamable.firstIndex(where: { $0.id == activeBaseID }) {
-                let items = streamable.enumerated().map { i, version in
+                let items = streamable.enumerated().map { index, version in
                     PlaybackListItem(
                         // The sheet's version keeps its chosen source.
-                        version: i == idx ? active.version : version,
+                        version: index == idx ? active.version : version,
                         artistName: payload.artistName,
                         eraName: active.eraName,
                         artUrl: active.eraArt ?? "",

@@ -132,7 +132,8 @@ extension Color {
 // MARK: - Badge Variant Mapping
 
 enum BadgeVariant: String {
-    case og, lossless, hq, cd, lq, rec, beatonly, na
+    case original = "og", lossless, highQuality = "hq", cdQuality = "cd", lowQuality = "lq", rec, beatonly
+    case notAvailable = "na"
     case ogfile, full, tagged, stem, partial, snippet, confirmed, unavailable
     case rumored, conflicting
     /// Not a quality/availability value — the content-tab entry type
@@ -141,14 +142,14 @@ enum BadgeVariant: String {
 
     var color: Color {
         switch self {
-        case .og: .badgeOG
+        case .original: .badgeOG
         case .lossless: .badgeLossless
-        case .hq: .badgeHQ
-        case .cd: .badgeCD
-        case .lq: .badgeLQ
+        case .highQuality: .badgeHQ
+        case .cdQuality: .badgeCD
+        case .lowQuality: .badgeLQ
         case .rec: .badgeRec
         case .beatonly: .badgeBeatOnly
-        case .na: .badgeNA
+        case .notAvailable: .badgeNA
         case .ogfile: .badgeOGFile
         case .full: .badgeFull
         case .tagged: .badgeTagged
@@ -169,18 +170,18 @@ enum BadgeVariant: String {
 }
 
 func qualityVariant(_ quality: String?) -> BadgeVariant {
-    guard let q = quality?.lowercased() else { return .na }
-    if q.contains("lossless") || q.contains("flac") || q.contains("wav") { return .lossless }
-    if q.contains("og") { return .og }
-    if q.contains("cd") { return .cd }
-    if q.contains("high") { return .hq }
-    if q.contains("low") { return .lq }
-    if q.contains("recording") { return .rec }
-    if q.contains("beat") { return .beatonly }
+    guard let qual = quality?.lowercased() else { return .notAvailable }
+    if qual.contains("lossless") || qual.contains("flac") || qual.contains("wav") { return .lossless }
+    if qual.contains("og") { return .original }
+    if qual.contains("cd") { return .cdQuality }
+    if qual.contains("high") { return .highQuality }
+    if qual.contains("low") { return .lowQuality }
+    if qual.contains("recording") { return .rec }
+    if qual.contains("beat") { return .beatonly }
     // Short forms are whole words only; Russian-language trackers name the tiers too.
-    if q.contains(/\bhq\b/) || q.contains("высок") { return .hq }
-    if q.contains(/\blq\b/) || q.contains("низк") { return .lq }
-    return .na
+    if qual.contains(/\bhq\b/) || qual.contains("высок") { return .highQuality }
+    if qual.contains(/\blq\b/) || qual.contains("низк") { return .lowQuality }
+    return .notAvailable
 }
 
 /// Availability wording → variant, first match wins.
@@ -203,8 +204,8 @@ private nonisolated let availabilityRules: [(matches: @Sendable (String) -> Bool
 ]
 
 func availabilityVariant(_ avail: String?) -> BadgeVariant {
-    guard let a = avail?.lowercased() else { return .na }
-    return availabilityRules.first { $0.matches(a) }?.variant ?? .na
+    guard let lowered = avail?.lowercased() else { return .notAvailable }
+    return availabilityRules.first { $0.matches(lowered) }?.variant ?? .notAvailable
 }
 
 // MARK: - Color Utilities
@@ -217,31 +218,31 @@ extension Color {
     func rgbComponents(in scheme: ColorScheme = .dark) -> (red: Double, green: Double, blue: Double) {
         var env = EnvironmentValues()
         env.colorScheme = scheme
-        let c = resolve(in: env)
-        return (Double(c.red), Double(c.green), Double(c.blue))
+        let resolved = resolve(in: env)
+        return (Double(resolved.red), Double(resolved.green), Double(resolved.blue))
     }
 
     /// Shift every channel by `amount`, clamped to 0…1. Negative darkens.
     func brightened(by amount: Double, in scheme: ColorScheme = .dark) -> Color {
-        let (r, g, b) = rgbComponents(in: scheme)
-        func clamp(_ v: Double) -> Double { min(max(v + amount, 0), 1) }
-        return Color(red: clamp(r), green: clamp(g), blue: clamp(b))
+        let (redValue, greenValue, blueValue) = rgbComponents(in: scheme)
+        func clamp(_ component: Double) -> Double { min(max(component + amount, 0), 1) }
+        return Color(red: clamp(redValue), green: clamp(greenValue), blue: clamp(blueValue))
     }
 
     /// WCAG relative luminance (0 = black, 1 = white).
     func relativeLuminance(in scheme: ColorScheme = .dark) -> Double {
-        let (r, g, b) = rgbComponents(in: scheme)
-        func linearize(_ c: Double) -> Double {
-            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        let (red, green, blue) = rgbComponents(in: scheme)
+        func linearize(_ channel: Double) -> Double {
+            channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
         }
-        return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
+        return 0.2126 * linearize(red) + 0.7152 * linearize(green) + 0.0722 * linearize(blue)
     }
 
     /// WCAG contrast ratio (1:1 = identical, 21:1 = max).
     func contrastRatio(against other: Color, in scheme: ColorScheme = .dark) -> Double {
-        let l1 = max(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
-        let l2 = min(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
-        return (l1 + 0.05) / (l2 + 0.05)
+        let lighter = max(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
+        let darker = min(relativeLuminance(in: scheme), other.relativeLuminance(in: scheme))
+        return (lighter + 0.05) / (darker + 0.05)
     }
 
     /// Step away from `background` until WCAG AA contrast is met: brighten on a dark
@@ -272,48 +273,51 @@ extension Color {
     /// Linear blend toward `other` (0 = self, 1 = other). Used to approximate
     /// the effective backdrop where a gradient sits between two colors.
     func blended(with other: Color, fraction: Double, in scheme: ColorScheme = .dark) -> Color {
-        let f = min(max(fraction, 0), 1)
-        let (r1, g1, b1) = rgbComponents(in: scheme)
-        let (r2, g2, b2) = other.rgbComponents(in: scheme)
+        let amount = min(max(fraction, 0), 1)
+        let (red1, green1, blue1) = rgbComponents(in: scheme)
+        let (red2, green2, blue2) = other.rgbComponents(in: scheme)
         return Color(
-            red: r1 + (r2 - r1) * f,
-            green: g1 + (g2 - g1) * f,
-            blue: b1 + (b2 - b1) * f
+            red: red1 + (red2 - red1) * amount,
+            green: green1 + (green2 - green1) * amount,
+            blue: blue1 + (blue2 - blue1) * amount
         )
     }
 
     /// OKLab (Björn Ottosson) of the resolved sRGB colour.
     private func oklab(in scheme: ColorScheme) -> (L: Double, a: Double, b: Double) {
-        let (r, g, b) = rgbComponents(in: scheme)
-        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-        let (lr, lg, lb) = (linear(r), linear(g), linear(b))
-        let l = cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb)
-        let m = cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb)
-        let s = cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb)
-        return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
-                1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
-                0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+        let (red, green, blue) = rgbComponents(in: scheme)
+        func linear(_ channel: Double) -> Double { channel <= 0.04045 ? channel / 12.92 : pow(
+            (channel + 0.055) / 1.055,
+            2.4
+        ) }
+        let (linRed, linGreen, linBlue) = (linear(red), linear(green), linear(blue))
+        let lCone = cbrt(0.4122214708 * linRed + 0.5363325363 * linGreen + 0.0514459929 * linBlue)
+        let mCone = cbrt(0.2119034982 * linRed + 0.6806995451 * linGreen + 0.1073969566 * linBlue)
+        let sCone = cbrt(0.0883024619 * linRed + 0.2817188376 * linGreen + 0.6299787005 * linBlue)
+        return (0.2104542553 * lCone + 0.7936177850 * mCone - 0.0040720468 * sCone,
+                1.9779984951 * lCone - 2.4285922050 * mCone + 0.4505937099 * sCone,
+                0.0259040371 * lCone + 0.7827717662 * mCone - 0.8086757660 * sCone)
     }
 
     /// This colour's hue at `reference`'s perceptual lightness, chroma capped at
     /// `maxChroma`: a black cover tints as visibly as a white one.
     func tint(lightnessOf reference: Color, maxChroma: Double, in scheme: ColorScheme = .dark) -> Color {
         let lightness = reference.oklab(in: scheme).L
-        let (_, a0, b0) = oklab(in: scheme)
-        let chroma = (a0 * a0 + b0 * b0).squareRoot()
-        let k = chroma > 0 ? min(1, maxChroma / chroma) : 0
-        let (a, b) = (a0 * k, b0 * k)
-        func cube(_ x: Double) -> Double { x * x * x }
-        let l = cube(lightness + 0.3963377774 * a + 0.2158037573 * b)
-        let m = cube(lightness - 0.1055613458 * a - 0.0638541728 * b)
-        let s = cube(lightness - 0.0894841775 * a - 1.2914855480 * b)
-        func encode(_ c: Double) -> Double {
-            let c = min(max(c, 0), 1)
-            return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1 / 2.4) - 0.055
+        let (_, baseA, baseB) = oklab(in: scheme)
+        let chroma = (baseA * baseA + baseB * baseB).squareRoot()
+        let scale = chroma > 0 ? min(1, maxChroma / chroma) : 0
+        let (aAxis, bAxis) = (baseA * scale, baseB * scale)
+        func cube(_ value: Double) -> Double { value * value * value }
+        let lCone = cube(lightness + 0.3963377774 * aAxis + 0.2158037573 * bAxis)
+        let mCone = cube(lightness - 0.1055613458 * aAxis - 0.0638541728 * bAxis)
+        let sCone = cube(lightness - 0.0894841775 * aAxis - 1.2914855480 * bAxis)
+        func encode(_ channel: Double) -> Double {
+            let clamped = min(max(channel, 0), 1)
+            return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * pow(clamped, 1 / 2.4) - 0.055
         }
-        return Color(red: encode(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
-                     green: encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-                     blue: encode(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
+        return Color(red: encode(4.0767416621 * lCone - 3.3077115913 * mCone + 0.2309699292 * sCone),
+                     green: encode(-1.2684380046 * lCone + 2.6097574011 * mCone - 0.3413193965 * sCone),
+                     blue: encode(-0.0041960863 * lCone - 0.7034186147 * mCone + 1.7076147010 * sCone))
     }
 
     // MARK: - Filter-specific accent colors

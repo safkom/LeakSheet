@@ -15,19 +15,19 @@ struct TVStatsView: View {
             ("Confirmed", stats.confirmed),
             ("Full HQ", stats.fullHQ)
         ]
-        if let t = artist.trackerStats {
+        if let stats = artist.trackerStats {
             // Every TrackerStats field is optional — a tracker that doesn't
             // publish a given count should show no row rather than a zero.
             let optional: [(String, Int?)] = [
-                ("OG files", t.ogFiles),
-                ("Stem bounces", t.stemBounces),
-                ("Tagged", t.tagged),
-                ("Partial", t.partial),
-                ("Unavailable", t.unavailable),
-                ("Grails", t.grails),
-                ("Wanted", t.wanted),
-                ("Best of", t.bestOf),
-                ("Worst of", t.worstOf)
+                ("OG files", stats.ogFiles),
+                ("Stem bounces", stats.stemBounces),
+                ("Tagged", stats.tagged),
+                ("Partial", stats.partial),
+                ("Unavailable", stats.unavailable),
+                ("Grails", stats.grails),
+                ("Wanted", stats.wanted),
+                ("Best of", stats.bestOf),
+                ("Worst of", stats.worstOf)
             ]
             out += optional.compactMap { label, value in
                 value.map { (label, $0) }

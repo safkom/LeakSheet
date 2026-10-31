@@ -71,7 +71,7 @@ struct VersionRowView: View {
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(isPlaying ? Color.lsAccent : .secondary)
                     }
-                    if let b = version.badge, let badge = Badge(rawValue: b) {
+                    if let rawBadge = version.badge, let badge = Badge(rawValue: rawBadge) {
                         Text(badge.emoji)
                             .font(.caption)
                     }
@@ -148,7 +148,7 @@ struct VersionRowView: View {
 
     private var accessibilitySummary: String {
         var parts = ["Version \(versionLabel ?? "")"]
-        if let b = version.badge, let badge = Badge(rawValue: b) { parts.append(badge.label) }
+        if let rawBadge = version.badge, let badge = Badge(rawValue: rawBadge) { parts.append(badge.label) }
         if let quality = version.quality, !quality.isEmpty { parts.append(quality) }
         if let availability = version.availableLength, !availability.isEmpty { parts.append(availability) }
         if let detail { parts.append(detail) }

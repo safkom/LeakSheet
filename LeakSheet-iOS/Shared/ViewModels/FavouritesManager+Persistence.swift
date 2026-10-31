@@ -16,9 +16,9 @@ extension FavouritesManager {
         // Read `entries` before the cache check: the cache is @ObservationIgnored, so a hit
         // that never touched `entries` would leave the reading view subscribed to nothing.
         let current = entries
-        if let cached = _groupedCache { return cached }
+        if let cached = groupedCache { return cached }
         let result = Self.grouped(from: current)
-        _groupedCache = result
+        groupedCache = result
         return result
     }
 

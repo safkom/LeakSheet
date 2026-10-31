@@ -95,7 +95,7 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
     case worst
     case grail
     case wanted
-    case ai
+    case aiGenerated = "ai"
 
     var emoji: String {
         switch self {
@@ -104,7 +104,7 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
         case .worst: "🗑️"
         case .grail: "🏆"
         case .wanted: "🏅"
-        case .ai: "🤖"
+        case .aiGenerated: "🤖"
         }
     }
 
@@ -121,7 +121,7 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
         case .special: 2
         case .wanted: 3
         case .worst: 4
-        case .ai: 5
+        case .aiGenerated: 5
         }
     }
 
@@ -141,7 +141,7 @@ nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
         case .worst: "Worst Of"
         case .grail: "Grail"
         case .wanted: "Wanted"
-        case .ai: "AI"
+        case .aiGenerated: "AI"
         }
     }
 }

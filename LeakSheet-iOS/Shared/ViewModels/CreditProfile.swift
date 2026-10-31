@@ -99,11 +99,11 @@ struct CreditProfile {
 
     private static func groupedByEra(_ credited: [Credited]) -> [(eraName: String, versions: [Credited])] {
         var eras: [(eraName: String, versions: [Credited])] = []
-        for c in credited {
-            if eras.last?.eraName == c.eraName {
-                eras[eras.count - 1].versions.append(c)
+        for entry in credited {
+            if eras.last?.eraName == entry.eraName {
+                eras[eras.count - 1].versions.append(entry)
             } else {
-                eras.append((eraName: c.eraName, versions: [c]))
+                eras.append((eraName: entry.eraName, versions: [entry]))
             }
         }
         return eras
@@ -118,8 +118,8 @@ struct CreditProfile {
 
     private static func qualityTiers(_ credited: [Credited]) -> [(variant: BadgeVariant, count: Int)] {
         var tiers: [BadgeVariant: Int] = [:]
-        for c in credited { tiers[qualityVariant(c.version.quality), default: 0] += 1 }
-        return EraInsights.qualityOrder.compactMap { v in tiers[v].map { (variant: v, count: $0) } }
+        for entry in credited { tiers[qualityVariant(entry.version.quality), default: 0] += 1 }
+        return EraInsights.qualityOrder.compactMap { tier in tiers[tier].map { (variant: tier, count: $0) } }
     }
 
     /// Grail first, then best, then special; ties keep tracker order.
@@ -128,8 +128,8 @@ struct CreditProfile {
         return credited.enumerated()
             .compactMap { item -> (rank: Int, position: Int, credited: Credited)? in
                 guard let badge = item.element.version.badge.flatMap(Badge.init(rawValue:)),
-                      let r = rank.firstIndex(of: badge) else { return nil }
-                return (rank: r, position: item.offset, credited: item.element)
+                      let rankIndex = rank.firstIndex(of: badge) else { return nil }
+                return (rank: rankIndex, position: item.offset, credited: item.element)
             }
             .sorted { ($0.rank, $0.position) < ($1.rank, $1.position) }
             .map { $0.credited }
@@ -139,10 +139,13 @@ struct CreditProfile {
         _ credited: [Credited], excluding excluded: Set<String>, displayNames: [String: String], index: Index
     ) -> [Collaborator] {
         var shared: [String: (name: String, count: Int)] = [:]
-        for c in credited {
+        for entry in credited {
             var seen = Set<String>()
-            for (k, raw) in creditNames(on: c.version) where !excluded.contains(k) && seen.insert(k).inserted {
-                shared[k, default: (displayNames[k] ?? raw, 0)].count += 1
+            for (
+                key,
+                raw
+            ) in creditNames(on: entry.version) where !excluded.contains(key) && seen.insert(key).inserted {
+                shared[key, default: (displayNames[key] ?? raw, 0)].count += 1
             }
         }
         let collaborators = shared.map { entry in

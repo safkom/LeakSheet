@@ -176,7 +176,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     var computedBadge: Badge? {
-        if let b = badge { return Badge(rawValue: b) }
+        if let rawBadge = badge { return Badge(rawValue: rawBadge) }
         return Badge.mostSignificant(in: versions)
     }
 
@@ -211,13 +211,13 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     private static func best(of candidates: [SongVersion]) -> SongVersion? {
-        candidates.max { a, b in
-            let qa = Self.qualityRank[a.quality ?? ""] ?? 1
-            let qb = Self.qualityRank[b.quality ?? ""] ?? 1
-            if qa != qb { return qa < qb }
-            let aa = Self.availabilityRank[a.availableLength ?? ""] ?? 0
-            let ab = Self.availabilityRank[b.availableLength ?? ""] ?? 0
-            return aa < ab
+        candidates.max { lhs, rhs in
+            let lhsQuality = Self.qualityRank[lhs.quality ?? ""] ?? 1
+            let rhsQuality = Self.qualityRank[rhs.quality ?? ""] ?? 1
+            if lhsQuality != rhsQuality { return lhsQuality < rhsQuality }
+            let lhsAvailability = Self.availabilityRank[lhs.availableLength ?? ""] ?? 0
+            let rhsAvailability = Self.availabilityRank[rhs.availableLength ?? ""] ?? 0
+            return lhsAvailability < rhsAvailability
         }
     }
 

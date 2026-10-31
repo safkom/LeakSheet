@@ -17,9 +17,9 @@ extension ArtistViewModel {
         let precomputed = await Task.detached(priority: .userInitiated) {
             Precomputed(artist: artist)
         }.value
-        let vm = ArtistViewModel(artist: artist, precomputed: precomputed)
-        await vm.warmEraArt(limit: coldStartArtCount)
-        return vm
+        let viewModel = ArtistViewModel(artist: artist, precomputed: precomputed)
+        await viewModel.warmEraArt(limit: coldStartArtCount)
+        return viewModel
     }
 
     /// Load era covers into the image cache and derive their display colours (bytes
@@ -116,20 +116,20 @@ extension ArtistViewModel {
 
     func scheduleDebounce() {
         debounceTask?.cancel()
-        let q = searchQuery.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty {
+        let query = searchQuery.trimmingCharacters(in: .whitespaces)
+        if query.isEmpty {
             debouncedQuery = ""
             applyFilters()
             return
         }
         // Honest filtering indicator — see DECISIONS.md::ArtistViewModel.swift::filtering-indicator
-        if q != debouncedQuery {
+        if query != debouncedQuery {
             isFiltering = true
         }
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
-            self?.debouncedQuery = q
+            self?.debouncedQuery = query
             self?.applyFilters()
         }
     }

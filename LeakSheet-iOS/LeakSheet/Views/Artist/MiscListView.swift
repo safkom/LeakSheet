@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MiscListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     /// era name (lowercased) → art URL, precomputed once by the parent so
@@ -20,18 +20,18 @@ struct MiscListView: View {
     @State private var expandedEras: Set<String> = []
 
     private func isExpanded(_ eraName: String, groupCount: Int) -> Bool {
-        vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
+        viewModel.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
     }
 
     /// The badge filter that can empty a content tab, named as the Filters menu labels it.
-    static func emptyFilterName(_ vm: ArtistViewModel) -> String? {
-        if vm.grails { return "Grails" }
-        if vm.bestOf { return "Best Of" }
-        if vm.worstOf { return "Worst Of" }
+    static func emptyFilterName(_ viewModel: ArtistViewModel) -> String? {
+        if viewModel.grails { return "Grails" }
+        if viewModel.bestOf { return "Best Of" }
+        if viewModel.worstOf { return "Worst Of" }
         return nil
     }
 
-    /// Normalised key for `vm.eraDisplay`, used for reads and writes alike (the card
+    /// Normalised key for `viewModel.eraDisplay`, used for reads and writes alike (the card
     /// shows "Other" for an empty name and matches art case-insensitively).
     private func colorKey(_ eraName: String) -> String {
         eraName.isEmpty ? "Other" : eraName
@@ -53,23 +53,24 @@ struct MiscListView: View {
     }
 
     var body: some View {
-        let entries = vm.content.miscResults
+        let entries = viewModel.content.miscResults
 
         if entries.isEmpty {
-            if vm.isFiltering {
+            if viewModel.isFiltering {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
             } else {
                 // Name the page the user is on: this branch renders every content tab.
                 ContentUnavailableView(
-                    "No \(vm.selectedTabName ?? "Misc") Entries",
+                    "No \(viewModel.selectedTabName ?? "Misc") Entries",
                     systemImage: "film.stack",
                     // Say which filter is responsible, not "the current filters".
                     description: Text(
-                        vm.noSnippets ? "Hide Snippets is on. Turn it off in Filters to see snippet entries."
-                        : !vm.content.state.query.isEmpty ? "Nothing on this page matches your search."
-                        : Self.emptyFilterName(vm).map { "No \($0) on this page." } ?? "This page has no entries."
+                        viewModel.noSnippets ? "Hide Snippets is on. Turn it off in Filters to see snippet entries."
+                        : !viewModel.content.state.query.isEmpty ? "Nothing on this page matches your search."
+                        : Self.emptyFilterName(viewModel).map { "No \($0) on this page." }
+                            ?? "This page has no entries."
                     )
                 )
                 .padding(.top, 40)
@@ -78,7 +79,7 @@ struct MiscListView: View {
             // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
             // One flat row per card, section label and entry, each a direct LazyVStack
             // child, so an expanded group doesn't build every row at once.
-            let groups = vm.content.miscEraGroups
+            let groups = viewModel.content.miscEraGroups
             let playOrder = groups.flatMap(\.entries)
             ForEach(rows(for: groups)) { row in
                 switch row {
@@ -86,7 +87,7 @@ struct MiscListView: View {
                     EraCardView(
                         era: eraForGroup(group),
                         expanded: expanded,
-                        displayColors: vm.eraDisplay[colorKey(group.eraName)],
+                        displayColors: viewModel.eraDisplay[colorKey(group.eraName)],
                         subtitle: "\(group.entries.count.formatted()) entr\(group.entries.count == 1 ? "y" : "ies")",
                         onTap: {
                             withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
@@ -98,13 +99,13 @@ struct MiscListView: View {
                             }
                         },
                         onColorExtracted: { color in
-                            vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
+                            viewModel.setEraColor(eraName: colorKey(group.eraName), dominant: color)
                         }
                     )
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                 case .section(let name, let eraName, _):
-                    MiscSectionHeader(name: name, displayColors: vm.eraDisplay[colorKey(eraName)])
+                    MiscSectionHeader(name: name, displayColors: viewModel.eraDisplay[colorKey(eraName)])
                 case .entry(let entry, let eraName, let isLast):
                     MiscEntryRowView(
                         entry: entry,
@@ -119,7 +120,7 @@ struct MiscListView: View {
                     .contentShape(Rectangle())
                     .accessibilityAddTraits(.isButton)
                     .onTapGesture { handleRowTap(entry) }
-                    .songPanel(vm.eraDisplay[colorKey(eraName)], isLast: isLast)
+                    .songPanel(viewModel.eraDisplay[colorKey(eraName)], isLast: isLast)
                 }
             }
         }
@@ -146,12 +147,12 @@ struct MiscListView: View {
             rows.append(.card(group, expanded: expanded))
             guard expanded else { continue }
             var currentSection = ""
-            for (i, entry) in group.entries.enumerated() {
+            for (index, entry) in group.entries.enumerated() {
                 if let section = entry.section, !section.isEmpty, section != currentSection {
                     rows.append(.section(section, eraName: group.eraName, ordinal: rows.count))
                 }
                 currentSection = entry.section ?? ""
-                rows.append(.entry(entry, eraName: group.eraName, isLast: i == group.entries.count - 1))
+                rows.append(.entry(entry, eraName: group.eraName, isLast: index == group.entries.count - 1))
             }
         }
         return rows

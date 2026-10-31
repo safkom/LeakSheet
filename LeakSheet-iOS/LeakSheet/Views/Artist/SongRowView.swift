@@ -53,8 +53,8 @@ struct SongRowView: View {
     /// own version leads, so a collapsed row never advertises another take's alias.
     private var akaTitle: String? {
         let ordered = version.map { [$0] + song.versions } ?? song.versions
-        for v in ordered {
-            if let alt = v.altTitles?.first(where: {
+        for version in ordered {
+            if let alt = version.altTitles?.first(where: {
                 !$0.isEmpty && $0.caseInsensitiveCompare(song.baseName) != .orderedSame
             }) {
                 return alt

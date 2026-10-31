@@ -54,7 +54,7 @@ struct EraInsightsTests {
         let insights = EraInsights.compute(era: a.eras[0], artist: a)
         #expect(insights.versionCount == 3)
         #expect(insights.playableCount == 1)
-        #expect(insights.quality.map(\.variant) == [.lossless, .cd])
+        #expect(insights.quality.map(\.variant) == [.lossless, .cdQuality])
         #expect(insights.quality.map(\.count) == [1, 2])
         // Case-folded: "Maker" and "maker" are one producer, counted three times.
         #expect(insights.topProducers.first == .init(label: "Maker", value: 3))

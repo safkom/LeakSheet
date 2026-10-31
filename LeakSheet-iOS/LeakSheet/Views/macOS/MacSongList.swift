@@ -13,8 +13,9 @@ enum MacListRow: Identifiable {
         case .header(_, let id): "h:\(id)"
         // Version id included: two versions of one song can both match a search
         // (as in FilterPipeline.SearchResult.id).
-        case .song(let s, let v, let era, _, let ordinal): "s:\(era)::\(ordinal)::\(s.baseName)::\(v?.id ?? "")"
-        case .version(let v, _, let era, _, let idx, let ordinal): "v:\(era)::\(ordinal)::\(idx)::\(v.id)"
+        case .song(let song, let version, let era, _, let ordinal):
+            "s:\(era)::\(ordinal)::\(song.baseName)::\(version?.id ?? "")"
+        case .version(let version, _, let era, _, let idx, let ordinal): "v:\(era)::\(ordinal)::\(idx)::\(version.id)"
         }
     }
 }
@@ -106,7 +107,7 @@ struct MacSongList<Header: View>: View {
                 selection = row.id
                 if Self.isDoubleClick {
                     // On a multi-version row the first click already expanded it.
-                    if let v = version, v.isStreamable { onPlay(v, eraName) }
+                    if let picked = version, picked.isStreamable { onPlay(picked, eraName) }
                     return
                 }
                 guard song.hasMultipleVersions, let onToggleExpansion else { return }
@@ -141,18 +142,18 @@ struct MacSongList<Header: View>: View {
     /// versions, and moves the selection up to the song.
     private func setSelectionExpanded(_ expand: Bool) -> KeyPress.Result {
         guard let onToggleExpansion, let selection,
-              let i = rows.firstIndex(where: { $0.id == selection }) else { return .ignored }
-        switch rows[i] {
+              let index = rows.firstIndex(where: { $0.id == selection }) else { return .ignored }
+        switch rows[index] {
         case .song(let song, _, let eraName, _, let ordinal) where song.hasMultipleVersions:
             var expanded = false
-            if i + 1 < rows.count, case .version(_, _, let e, _, _, let o) = rows[i + 1] {
-                expanded = e == eraName && o == ordinal
+            if index + 1 < rows.count, case .version(_, _, let versionEra, _, _, let versionOrdinal) = rows[index + 1] {
+                expanded = versionEra == eraName && versionOrdinal == ordinal
             }
             guard expand != expanded else { return .ignored }
             onToggleExpansion(eraName, ordinal)
             return .handled
         case .version(_, _, let eraName, _, _, let ordinal) where !expand:
-            if let parent = rows[..<i].lastIndex(where: { if case .song = $0 { true } else { false } }) {
+            if let parent = rows[..<index].lastIndex(where: { if case .song = $0 { true } else { false } }) {
                 self.selection = rows[parent].id
             }
             onToggleExpansion(eraName, ordinal)
@@ -171,8 +172,8 @@ struct MacSongList<Header: View>: View {
         case .header:
             return false
         case .song(let song, let version, let eraName, _, _):
-            guard let v = version ?? song.bestPlayableVersion, v.isStreamable else { return false }
-            onPlay(v, eraName)
+            guard let picked = version ?? song.bestPlayableVersion, picked.isStreamable else { return false }
+            onPlay(picked, eraName)
             return true
         case .version(let version, _, let eraName, _, _, _):
             guard version.isStreamable else { return false }

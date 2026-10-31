@@ -70,7 +70,7 @@ struct CreditProfileTests {
         #expect(maker.playableCount == 2)
         #expect(maker.firstEra == "First")
         #expect(maker.lastEra == "First")
-        #expect(maker.quality.map(\.variant) == [.lossless, .cd, .hq])
+        #expect(maker.quality.map(\.variant) == [.lossless, .cdQuality, .highQuality])
         #expect(maker.quality.map(\.count) == [1, 1, 1])
     }
 

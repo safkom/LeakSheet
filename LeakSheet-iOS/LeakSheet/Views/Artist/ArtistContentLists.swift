@@ -9,7 +9,7 @@ import SwiftUI
 /// The tracker's pages — the song tree plus one tab per parsed content tab — with
 /// the page's filters in one menu at the end, so pages and filters look different.
 struct ContentTabsView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 
     /// Icon for a content tab. Badge-annotation kinds never reach here —
     /// `availableTabs` filters them out because they are not pages.
@@ -39,16 +39,16 @@ struct ContentTabsView: View {
         HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    TabButton(label: "Unreleased", icon: "waveform", isSelected: vm.selectedTabKey == nil) {
-                        vm.selectTab(nil)
+                    TabButton(label: "Unreleased", icon: "waveform", isSelected: viewModel.selectedTabKey == nil) {
+                        viewModel.selectTab(nil)
                     }
-                    ForEach(vm.availableTabs) { tab in
+                    ForEach(viewModel.availableTabs) { tab in
                         TabButton(
                             label: Self.labelText(for: tab.name),
                             icon: Self.tabIcon(for: tab.kind),
-                            isSelected: vm.selectedTabKey == tab.id
+                            isSelected: viewModel.selectedTabKey == tab.id
                         ) {
-                            vm.selectTab(tab.id)
+                            viewModel.selectTab(tab.id)
                         }
                     }
                 }
@@ -57,7 +57,7 @@ struct ContentTabsView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Tracker sections")
 
-            FilterMenu(vm: vm)
+            FilterMenu(viewModel: viewModel)
                 .padding(.trailing, 12)
         }
     }
@@ -94,33 +94,45 @@ private struct TabButton: View {
 /// Every filter for the current page, behind one button that shows how many
 /// are on. On a content tab only No Snippets applies.
 struct FilterMenu: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 
-    private var onSongTree: Bool { vm.selectedTabKey == nil }
+    private var onSongTree: Bool { viewModel.selectedTabKey == nil }
 
     private var activeCount: Int {
         onSongTree
-            ? [vm.bestOf, vm.worstOf, vm.grails, vm.recents, vm.noSnippets].filter { $0 }.count
-            : (vm.noSnippets ? 1 : 0)
+            ? [
+                viewModel.bestOf,
+                viewModel.worstOf,
+                viewModel.grails,
+                viewModel.recents,
+                viewModel.noSnippets
+            ].filter { $0 }.count
+            : (viewModel.noSnippets ? 1 : 0)
     }
 
     var body: some View {
         Menu {
             if onSongTree {
                 SwiftUI.Section("Show only") {
-                    Toggle(isOn: binding(vm.bestOf, vm.toggleBestOf)) { Label("Best Of", systemImage: "star.fill") }
-                    Toggle(isOn: binding(vm.worstOf, vm.toggleWorstOf)) { Label(
+                    Toggle(isOn: binding(
+                        viewModel.bestOf,
+                        viewModel.toggleBestOf
+                    )) { Label("Best Of", systemImage: "star.fill") }
+                    Toggle(isOn: binding(viewModel.worstOf, viewModel.toggleWorstOf)) { Label(
                         "Worst Of",
                         systemImage: "hand.thumbsdown"
                     ) }
-                    Toggle(isOn: binding(vm.grails, vm.toggleGrails)) { Label(
+                    Toggle(isOn: binding(viewModel.grails, viewModel.toggleGrails)) { Label(
                         "Grails & Wanted",
                         systemImage: "trophy.fill"
                     ) }
                 }
-                Toggle(isOn: binding(vm.recents, vm.toggleRecents)) { Label("Recently Leaked", systemImage: "clock") }
+                Toggle(isOn: binding(
+                    viewModel.recents,
+                    viewModel.toggleRecents
+                )) { Label("Recently Leaked", systemImage: "clock") }
             }
-            Toggle(isOn: binding(vm.noSnippets, vm.toggleNoSnippets)) { Label(
+            Toggle(isOn: binding(viewModel.noSnippets, viewModel.toggleNoSnippets)) { Label(
                 "Hide Snippets",
                 systemImage: "waveform.slash"
             ) }
@@ -153,7 +165,7 @@ struct FilterMenu: View {
 // MARK: - Search results
 
 struct SearchResultsListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -162,9 +174,9 @@ struct SearchResultsListView: View {
     @Environment(PlayerViewModel.self) private var player
 
     var body: some View {
-        let results = vm.content.searchResults
+        let results = viewModel.content.searchResults
         if results.isEmpty {
-            ContentUnavailableView.search(text: vm.content.state.query)
+            ContentUnavailableView.search(text: viewModel.content.state.query)
                 .padding(.top, 40)
         } else {
             Text("\(results.count) result\(results.count == 1 ? "" : "s")")
@@ -206,7 +218,7 @@ struct SearchResultsListView: View {
                 }
                 // Same panel the eras branch uses; each era's run rounds at both ends.
                 .songPanel(
-                    vm.eraDisplay[result.era.name],
+                    viewModel.eraDisplay[result.era.name],
                     isFirst: idx == 0 || results[idx - 1].era.name != result.era.name,
                     isLast: idx == results.count - 1
                         || results[idx + 1].era.name != result.era.name
@@ -236,7 +248,7 @@ struct SearchResultsListView: View {
 // MARK: - Eras list (flattened lazy rows)
 
 struct ErasListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -250,11 +262,11 @@ struct ErasListView: View {
     private var hasActiveFilters: Bool {
         // Must list EVERY chip that can empty the list, or the empty state claims
         // "No Songs" when the truth is "No Matches".
-        vm.bestOf || vm.worstOf || vm.grails || vm.noSnippets
+        viewModel.bestOf || viewModel.worstOf || viewModel.grails || viewModel.noSnippets
     }
 
     var body: some View {
-        if vm.eraRows.isEmpty {
+        if viewModel.eraRows.isEmpty {
             // An empty state when a filter removed every era, like the other branches.
             ContentUnavailableView {
                 Label(
@@ -269,20 +281,20 @@ struct ErasListView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 48)
         } else {
-            ForEach(vm.eraRows) { row in
+            ForEach(viewModel.eraRows) { row in
                 EraRowView(
                     row: row,
-                    displayColors: vm.eraDisplay[row.eraName],
+                    displayColors: viewModel.eraDisplay[row.eraName],
                     artistName: artistName,
                     artistSlug: artistSlug,
                     sourceUrl: sourceUrl,
                     onCardTap: { eraName in
                         withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                            vm.toggleEra(eraName)
+                            viewModel.toggleEra(eraName)
                         }
                     },
                     onColorExtracted: { eraName, color in
-                        vm.setEraColor(eraName: eraName, dominant: color)
+                        viewModel.setEraColor(eraName: eraName, dominant: color)
                         onColorExtracted(color)
                     },
                     onSongTap: handleSongTap,
@@ -299,11 +311,11 @@ struct ErasListView: View {
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
+                viewModel.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
-        } else if let v = song.versions.first {
+        } else if let first = song.versions.first {
             onShowDescription(DescriptionSheet.Payload(
-                song: song, version: v,
+                song: song, version: first,
                 artistName: artistName, artistSlug: artistSlug,
                 eraName: eraName, eraArt: eraArt
             ))
@@ -313,7 +325,7 @@ struct ErasListView: View {
     /// Era-scoped playback: the filtered era's streamable versions are the
     /// auto-advance context.
     private func playWithEraContext(_ version: SongVersion, eraName: String) {
-        guard let filtered = vm.filteredEra(named: eraName) else { return }
+        guard let filtered = viewModel.filteredEra(named: eraName) else { return }
         player.playInEra(
             version,
             eraName: eraName,

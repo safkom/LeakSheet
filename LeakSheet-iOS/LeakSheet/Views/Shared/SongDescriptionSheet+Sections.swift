@@ -70,7 +70,7 @@ extension SongDescriptionSheet {
                         .font(.caption.weight(.bold))
                         .lineLimit(1)
                     // The chip's own badge, as in VersionRowView, so the ⭐ version stands out.
-                    if let b = entry.version.badge, let badge = Badge(rawValue: b) {
+                    if let rawBadge = entry.version.badge, let badge = Badge(rawValue: rawBadge) {
                         Text(badge.emoji)
                             .font(.caption2)
                             .accessibilityLabel(badge.label)
@@ -111,8 +111,8 @@ extension SongDescriptionSheet {
             ("eng.", active.version.engineer),
             ("artist", active.version.creditedArtists)
         ].compactMap { label, val in
-            guard let v = val, !v.isEmpty else { return nil }
-            return (label, v)
+            guard let value = val, !value.isEmpty else { return nil }
+            return (label, value)
         }
 
         if !credits.isEmpty {
@@ -167,7 +167,12 @@ extension SongDescriptionSheet {
     @ViewBuilder
     private func creditName(_ name: String, role: ArtistViewModel.CreditRole) -> some View {
         let key = CreditNames.key(name)
-        if let vm = artistVM, CreditProfile.hasPage(key: key, role: role, artist: vm.artist, index: vm.creditIndex) {
+        if let viewModel = artistVM, CreditProfile.hasPage(
+            key: key,
+            role: role,
+            artist: viewModel.artist,
+            index: viewModel.creditIndex
+        ) {
             CreditNameLink(
                 ref: CreditRef(key: key, role: role), text: name,
                 spokenLabel: "\(name), open page", pushes: !embedded,

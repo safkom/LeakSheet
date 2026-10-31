@@ -54,8 +54,8 @@ struct FlowLayout: Layout {
         let maxWidth = proposal.width ?? .infinity
         var offsets: [CGPoint] = []
         var sizes: [CGSize] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
+        var xPos: CGFloat = 0
+        var yPos: CGFloat = 0
         var rowHeight: CGFloat = 0
         var maxX: CGFloat = 0
 
@@ -65,21 +65,21 @@ struct FlowLayout: Layout {
             size.width = min(size.width, maxWidth)
             // The reported width is the row's own width; placement can hand back a hair less
             // after pixel rounding, which must not wrap the last item onto an unmeasured row.
-            if x + size.width > maxWidth + 1 && x > 0 {
-                x = 0
-                y += rowHeight + spacing
+            if xPos + size.width > maxWidth + 1 && xPos > 0 {
+                xPos = 0
+                yPos += rowHeight + spacing
                 rowHeight = 0
             }
-            offsets.append(CGPoint(x: x, y: y))
+            offsets.append(CGPoint(x: xPos, y: yPos))
             sizes.append(size)
             rowHeight = max(rowHeight, size.height)
-            x += size.width + spacing
-            maxX = max(maxX, x - spacing)
+            xPos += size.width + spacing
+            maxX = max(maxX, xPos - spacing)
         }
 
         // Clamp reported width to the available space so parents (especially LazyVStack)
         // don't get an inflated size from one over-wide child.
         let clampedWidth = maxWidth < .infinity ? min(maxX, maxWidth) : maxX
-        return (offsets, sizes, CGSize(width: clampedWidth, height: y + rowHeight))
+        return (offsets, sizes, CGSize(width: clampedWidth, height: yPos + rowHeight))
     }
 }

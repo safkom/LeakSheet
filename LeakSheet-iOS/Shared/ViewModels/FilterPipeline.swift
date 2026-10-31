@@ -149,7 +149,7 @@ extension ArtistViewModel {
         // Punctuation-insensitive, like the fields it is compared with:
         // "stay on em" finds "Stay On 'Em".
         guard !state.query.isEmpty else { return [] }
-        let q = Song.nameKey(state.query)
+        let needle = Song.nameKey(state.query)
         // Use the prebuilt haystack when its shape matches; otherwise fall back
         // to inline scoring so correctness never depends on the index.
         let useIndex = searchIndex.count == artist.eras.count
@@ -159,8 +159,8 @@ extension ArtistViewModel {
             let songs = era.allSongs
             let eraFields = (useIndex && searchIndex[eraIdx].count == songs.count) ? searchIndex[eraIdx] : nil
             for (songIdx, song) in songs.enumerated() {
-                let score = eraFields.map { scoreSong(fields: $0[songIdx], query: q) }
-                    ?? scoreSong(song, query: q)
+                let score = eraFields.map { scoreSong(fields: $0[songIdx], query: needle) }
+                    ?? scoreSong(song, query: needle)
                 guard score > 0 else { continue }
                 for version in song.versions {
                     if state.bestOf && !isBestOfVersion(version) { continue }
@@ -242,14 +242,14 @@ extension ArtistViewModel {
         // Case/whitespace-insensitive: a tab's Era column is typed by hand and
         // does not always match the era header's capitalisation exactly.
         var rank: [String: Int] = [:]
-        for (i, name) in eraOrder.enumerated() {
-            rank[Self.eraMatchKey(name)] = i
+        for (index, name) in eraOrder.enumerated() {
+            rank[Self.eraMatchKey(name)] = index
         }
         let sorted = order.enumerated().sorted { lhs, rhs in
-            let l = rank[Self.eraMatchKey(lhs.element)]
-            let r = rank[Self.eraMatchKey(rhs.element)]
-            switch (l, r) {
-            case let (l?, r?): return l == r ? lhs.offset < rhs.offset : l < r
+            let lhsRank = rank[Self.eraMatchKey(lhs.element)]
+            let rhsRank = rank[Self.eraMatchKey(rhs.element)]
+            switch (lhsRank, rhsRank) {
+            case let (lhsRank?, rhsRank?): return lhsRank == rhsRank ? lhs.offset < rhs.offset : lhsRank < rhsRank
             case (nil, nil):   return lhs.offset < rhs.offset
             case (nil, _):     return false   // unmatched sorts after matched
             case (_, nil):     return true
@@ -280,8 +280,8 @@ extension ArtistViewModel {
         }
         if state.bestOf {
             // Match only best/special emojis, the same set as isBestOfVersion (not 🗑️ or 🤖).
-            entries = entries.filter { e in
-                Badge.allCases.contains { $0.isBestOf && e.name.contains($0.emoji) }
+            entries = entries.filter { entry in
+                Badge.allCases.contains { $0.isBestOf && entry.name.contains($0.emoji) }
             }
         }
         if state.worstOf {
@@ -289,17 +289,17 @@ extension ArtistViewModel {
         }
         if state.grails {
             // Grail + wanted, matching the eras branch's combined chip.
-            entries = entries.filter { e in
-                e.name.contains(Badge.grail.emoji) || e.name.contains(Badge.wanted.emoji)
+            entries = entries.filter { entry in
+                entry.name.contains(Badge.grail.emoji) || entry.name.contains(Badge.wanted.emoji)
             }
         }
         if !state.query.isEmpty {
-            let q = state.query
-            entries = entries.filter { e in
-                e.name.lowercased().contains(q)
-                    || (e.notes ?? "").lowercased().contains(q)
-                    || e.eraName.lowercased().contains(q)
-                    || (e.entryType ?? "").lowercased().contains(q)
+            let query = state.query
+            entries = entries.filter { entry in
+                entry.name.lowercased().contains(query)
+                    || (entry.notes ?? "").lowercased().contains(query)
+                    || entry.eraName.lowercased().contains(query)
+                    || (entry.entryType ?? "").lowercased().contains(query)
             }
         }
         if state.recents {

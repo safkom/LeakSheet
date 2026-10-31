@@ -5,19 +5,19 @@ import Testing
 /// Spellings the 471-tracker sweep found that used to fall to Unknown.
 struct BadgeVocabularyTests {
     @Test func `short and format quality spellings map to their tier`() {
-        #expect(qualityVariant("HQ") == .hq)
-        #expect(qualityVariant("LQ") == .lq)
+        #expect(qualityVariant("HQ") == .highQuality)
+        #expect(qualityVariant("LQ") == .lowQuality)
         #expect(qualityVariant("FLAC") == .lossless)
         #expect(qualityVariant("WAV") == .lossless)
-        #expect(qualityVariant("High Quality\n(320kbps)") == .hq)
-        #expect(qualityVariant("Низкое Качество") == .lq)
-        #expect(qualityVariant("Высокое Качество") == .hq)
+        #expect(qualityVariant("High Quality\n(320kbps)") == .highQuality)
+        #expect(qualityVariant("Низкое Качество") == .lowQuality)
+        #expect(qualityVariant("Высокое Качество") == .highQuality)
     }
 
     @Test func `short tokens match whole words only`() {
         // "HQ" inside a word is not the quality tier.
-        #expect(qualityVariant("Not Available") == .na)
-        #expect(qualityVariant("Performance") == .na)
+        #expect(qualityVariant("Not Available") == .notAvailable)
+        #expect(qualityVariant("Performance") == .notAvailable)
     }
 
     @Test func `availability spellings`() {

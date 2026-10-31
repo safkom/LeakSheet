@@ -52,10 +52,10 @@ nonisolated struct PlaybackQueueLogic {
     /// registered list is not. See
     /// DECISIONS.md::PlaybackQueueLogic.swift::era-identity.
     private static func indexOfEra(_ context: EraSongContext, in eras: [EraSongContext]) -> Int? {
-        let matches = eras.indices.filter { i in
-            eras[i].eraName == context.eraName
-                && eras[i].artistName == context.artistName
-                && eras[i].artUrl == context.artUrl
+        let matches = eras.indices.filter { index in
+            eras[index].eraName == context.eraName
+                && eras[index].artistName == context.artistName
+                && eras[index].artUrl == context.artUrl
         }
         guard matches.count > 1 else { return matches.first }
         return matches.first { eras[$0].versions.count == context.versions.count } ?? matches.first

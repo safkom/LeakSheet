@@ -16,26 +16,26 @@ enum StreamResolver {
     }
 
     /// Characters a provider id may contain; pixeldrain ids are alphanumeric only.
-    private nonisolated static func isIDChar(_ ch: Character, allowsSeparators: Bool) -> Bool {
-        ch.isASCII && (ch.isLetter || ch.isNumber || (allowsSeparators && (ch == "_" || ch == "-")))
+    private nonisolated static func isIDChar(_ char: Character, allowsSeparators: Bool) -> Bool {
+        char.isASCII && (char.isLetter || char.isNumber || (allowsSeparators && (char == "_" || char == "-")))
     }
 
-    private nonisolated static func isID(_ s: String, allowsSeparators: Bool = true) -> Bool {
-        !s.isEmpty && s.allSatisfy { isIDChar($0, allowsSeparators: allowsSeparators) }
+    private nonisolated static func isID(_ text: String, allowsSeparators: Bool = true) -> Bool {
+        !text.isEmpty && text.allSatisfy { isIDChar($0, allowsSeparators: allowsSeparators) }
     }
 
     /// The id a path segment starts with, as the backend's patterns take it: what follows
     /// (`.mp3`, `)`, a second link) never changes the file. Empty when the segment doesn't start with one.
-    private nonisolated static func idPrefix(_ s: String, allowsSeparators: Bool = true) -> Substring {
-        s.prefix { isIDChar($0, allowsSeparators: allowsSeparators) }
+    private nonisolated static func idPrefix(_ text: String, allowsSeparators: Bool = true) -> Substring {
+        text.prefix { isIDChar($0, allowsSeparators: allowsSeparators) }
     }
 
-    private nonisolated static func hasLineBreakOrTab(_ s: String) -> Bool {
-        s.unicodeScalars.contains { $0 == "\t" || $0 == "\r" || $0 == "\n" }
+    private nonisolated static func hasLineBreakOrTab(_ text: String) -> Bool {
+        text.unicodeScalars.contains { $0 == "\t" || $0 == "\r" || $0 == "\n" }
     }
 
-    private nonisolated static func isHex(_ s: String) -> Bool {
-        !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isHexDigit }
+    private nonisolated static func isHex(_ text: String) -> Bool {
+        !text.isEmpty && text.allSatisfy { $0.isASCII && $0.isHexDigit }
     }
 
     /// The backend reads the authority literally: no userinfo or port, and Foundation's folding of

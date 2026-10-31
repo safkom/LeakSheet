@@ -16,22 +16,22 @@ nonisolated enum BadgeLogic {
         "unavailable"
     ]
 
-    private static func norm(_ s: String?) -> String {
-        (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    private static func norm(_ text: String?) -> String {
+        (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    private static func trimmed(_ s: String?) -> String {
-        (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func trimmed(_ text: String?) -> String {
+        (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The primary pill: quality — unless quality is empty / "Not Available" /
     /// "N/A", in which case availability stands in (styled as availability).
     /// Nil when neither carries information.
     static func primaryPill(quality: String?, availability: String?) -> Pill? {
-        let q = norm(quality)
-        let a = norm(availability)
-        if q.isEmpty || q == "not available" || q == "n/a" {
-            guard !a.isEmpty, a != "n/a" else { return nil }
+        let qual = norm(quality)
+        let avail = norm(availability)
+        if qual.isEmpty || qual == "not available" || qual == "n/a" {
+            guard !avail.isEmpty, avail != "n/a" else { return nil }
             return Pill(text: trimmed(availability), isQuality: false)
         }
         return Pill(text: trimmed(quality), isQuality: true)
@@ -41,11 +41,11 @@ nonisolated enum BadgeLogic {
     /// availability differs from it, and the value is in the informative
     /// whitelist. Nil suppresses the pill.
     static func availabilityPill(quality: String?, availability: String?) -> Pill? {
-        let a = norm(availability)
-        guard !a.isEmpty, a != "n/a", a != "not available" else { return nil }
-        let q = norm(quality)
-        guard !q.isEmpty, q != "not available", q != "n/a" else { return nil }
-        guard a != q, informativeAvailability.contains(a) else { return nil }
+        let avail = norm(availability)
+        guard !avail.isEmpty, avail != "n/a", avail != "not available" else { return nil }
+        let qual = norm(quality)
+        guard !qual.isEmpty, qual != "not available", qual != "n/a" else { return nil }
+        guard avail != qual, informativeAvailability.contains(avail) else { return nil }
         return Pill(text: trimmed(availability), isQuality: false)
     }
 }
@@ -100,6 +100,6 @@ extension BadgeLogic {
         .init(badge: .grail, detail: "A highly sought-after holy grail."),
         .init(badge: .wanted, detail: "Actively wanted by the community."),
         .init(badge: .worst, detail: "Widely disliked."),
-        .init(badge: .ai, detail: "AI-generated — not an authentic leak.")
+        .init(badge: .aiGenerated, detail: "AI-generated — not an authentic leak.")
     ]
 }

@@ -104,7 +104,7 @@ struct QueueSheet: View {
     private func queueRowText(_ item: QueueItem) -> some View {
     VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 5) {
-            if let b = item.version.badge, let badge = Badge(rawValue: b) {
+            if let rawBadge = item.version.badge, let badge = Badge(rawValue: rawBadge) {
                 Text(badge.emoji)
                     .font(.caption)
                     .accessibilityLabel(badge.label)
