@@ -179,7 +179,9 @@ class TestEraStatsParsing:
         from src.models import parse_era_stats
         raw = "1 OG File(s)45 Full1 Tagged3 Partial4 Snippet(s)0 Stem Bounce(s)70 Unavailable"
         stats = parse_era_stats(raw)
-        assert stats.og_files == 1 and stats.full == 45 and stats.total == 124
+        assert stats.og_files == 1
+        assert stats.full == 45
+        assert stats.total == 124
 
     def test_parse_era_stats_carti_format(self):
         from src.models import parse_era_stats
@@ -187,8 +189,10 @@ class TestEraStatsParsing:
         stats = parse_era_stats(raw)
         # "Total Full" lands in its own field, not aliased onto `full` — the
         # two wordings don't mean the same thing (see below).
-        assert stats.total_full == 1 and stats.full == 0
-        assert stats.unavailable == 3 and stats.total == 4
+        assert stats.total_full == 1
+        assert stats.full == 0
+        assert stats.unavailable == 3
+        assert stats.total == 4
 
     def test_total_full_already_counts_the_og_files(self):
         """The Carti wording is an aggregate; the plain wording is a peer.
@@ -206,7 +210,8 @@ class TestEraStatsParsing:
 
         # Plain "Full" is a separate category and still sums with OG File.
         plain = parse_era_stats("3 OG File(s)\n10 Full\n2 Tagged\n1 Snippet(s)")
-        assert plain.full == 10 and plain.total_full == 0
+        assert plain.full == 10
+        assert plain.total_full == 0
         assert plain.total == 3 + 10 + 2 + 1
 
 
@@ -220,9 +225,12 @@ class TestTrackerStatsParsing:
         avail = "4146 Total Full\n2973 OG Files\n232 Stem Bounces\n880 Full\n61 Tagged\n332 Partial\n889 Snippets\n2756 Unavailable"
         highlights = "⭐ 139 Best Of\n✨ 291 Special\n\U0001f3c6 29 Grails\n\U0001f396 45 Wanted\n\U0001f5d1️ 69 Worst Of"
         stats = parse_tracker_stats(links, quality, avail, highlights)
-        assert stats.total_links == 6243 and stats.missing_links == 28
-        assert stats.lossless == 1150 and stats.cd_quality == 2714
-        assert stats.total_full == 4146 and stats.og_files == 2973
+        assert stats.total_links == 6243
+        assert stats.missing_links == 28
+        assert stats.lossless == 1150
+        assert stats.cd_quality == 2714
+        assert stats.total_full == 4146
+        assert stats.og_files == 2973
         assert (stats.best_of, stats.special, stats.grails, stats.wanted, stats.worst_of) == (139, 291, 29, 45, 69)
 
     def test_parse_tracker_stats_emoji_prefix(self):
@@ -232,9 +240,12 @@ class TestTrackerStatsParsing:
         avail = "\U0001f4c1 282 Total Full\n\U0001f9fe 154 OG Files\n\U0001f3bc 119 Full\n\U0001f3f7️ 9 Tagged\n\U0001f539 39 Partial\n✂️ 124 Snippets"
         highlights = "⭐ 61 Best Of\n✨ 97 Special\n\U0001f3c6 51 Grails\n\U0001f5d1️ 9 Worst Of"
         stats = parse_tracker_stats(links, quality, avail, highlights)
-        assert stats.total_links == 616 and stats.lossless == 53
-        assert stats.cd_quality == 195 and stats.total_full == 282
-        assert stats.best_of == 61 and stats.grails == 51
+        assert stats.total_links == 616
+        assert stats.lossless == 53
+        assert stats.cd_quality == 195
+        assert stats.total_full == 282
+        assert stats.best_of == 61
+        assert stats.grails == 51
 
 
 class TestStatPairExtraction:
@@ -277,22 +288,30 @@ class TestSongCreditParsing:
         from src.models import parse_song_credits
         c = parse_song_credits("3 Minutes of Watts\n(feat. J-Rock) (prod. Don-P)")
         assert c.title == "3 Minutes of Watts"
-        assert c.featuring == "J-Rock" and c.producers == "Don-P" and c.collaboration is None and c.alt_titles == []
+        assert c.featuring == "J-Rock"
+        assert c.producers == "Don-P"
+        assert c.collaboration is None
+        assert c.alt_titles == []
 
     def test_prod_on_separate_line(self):
         from src.models import parse_song_credits
         title, feat, prod, *_ = parse_song_credits("Living Reckless [V1]\n(prod. Ski Beatz)")
-        assert title == "Living Reckless [V1]" and prod == "Ski Beatz" and feat is None
+        assert title == "Living Reckless [V1]"
+        assert prod == "Ski Beatz"
+        assert feat is None
 
     def test_prod_glued_to_version_tag(self):
         from src.models import parse_song_credits
         title, feat, prod, *_ = parse_song_credits("After You [V2](prod. Dom $olo)")
-        assert title == "After You [V2]" and prod == "Dom $olo"
+        assert title == "After You [V2]"
+        assert prod == "Dom $olo"
 
     def test_version_tag_is_not_mistaken_for_a_credit(self):
         from src.models import parse_song_credits
         title, feat, prod, *_ = parse_song_credits("Living Reckless [V1]")
-        assert title == "Living Reckless [V1]" and prod is None and feat is None
+        assert title == "Living Reckless [V1]"
+        assert prod is None
+        assert feat is None
 
     @pytest.mark.parametrize("tail", [
         "prod. Ann Producer, Bob Beat & Cy",
@@ -303,38 +322,45 @@ class TestSongCreditParsing:
         from src.models import parse_song_credits
         c = parse_song_credits(f"Sample Song [V9]\n(???. Eli Example) {tail}")
         assert c.alt_titles == ["???. Eli Example"]
-        assert (c.producers or c.featuring) and ")" not in (c.producers or c.featuring)
+        assert c.producers or c.featuring
+        assert ")" not in (c.producers or c.featuring)
 
     def test_credit_tail_splits_into_fields(self):
         from src.models import parse_song_credits
         c = parse_song_credits("Sample Song\n(Alias) ft. Dee Singer, prod. Ann Producer)")
         assert c.alt_titles == ["Alias"]
-        assert c.featuring == "Dee Singer" and c.producers == "Ann Producer"
+        assert c.featuring == "Dee Singer"
+        assert c.producers == "Ann Producer"
         c = parse_song_credits("Sample Song\n(Alias) feat. Dee Singer (Remix)")
-        assert c.alt_titles == ["Alias"] and c.featuring == "Dee Singer (Remix)"
+        assert c.alt_titles == ["Alias"]
+        assert c.featuring == "Dee Singer (Remix)"
 
     @pytest.mark.parametrize("line", ["(???)", "(????)", "(??? Freestyle)"])
     def test_unknown_placeholder_groups_stay_alt_titles(self, line):
         from src.models import parse_song_credits
         c = parse_song_credits(f"Sample Song\n{line}")
-        assert c.alt_titles == [line[1:-1]] and c.refs is None
+        assert c.alt_titles == [line[1:-1]]
+        assert c.refs is None
 
     def test_two_unknown_ref_groups_stay_alt_titles(self):
         from src.models import parse_song_credits
         c = parse_song_credits("Sample Song\n(???. Eli Example) (???. Fay Sample)")
-        assert c.refs is None and c.alt_titles == ["???. Eli Example) (???. Fay Sample"]
+        assert c.refs is None
+        assert c.alt_titles == ["???. Eli Example) (???. Fay Sample"]
 
     @pytest.mark.parametrize("tail", ["Production Of Love", "Produced Tonight", "Prodigy Of Love"])
     def test_word_starting_with_a_credit_keyword_is_not_a_credit(self, tail):
         from src.models import parse_song_credits
         c = parse_song_credits(f"Sample Song\n(Alias) {tail}")
-        assert c.producers is None and c.featuring is None
+        assert c.producers is None
+        assert c.featuring is None
         assert c.alt_titles == [f"(Alias) {tail}"]
 
     def test_real_alias_with_comma_before_credit_tail_is_kept(self):
         from src.models import parse_song_credits
         c = parse_song_credits("Sample Song\n(Alias One, Alias Two) prod. Ann Producer")
-        assert c.alt_titles == ["Alias One", "Alias Two"] and c.producers == "Ann Producer"
+        assert c.alt_titles == ["Alias One", "Alias Two"]
+        assert c.producers == "Ann Producer"
 
 
 class TestSongBadgePrecedence:
@@ -370,19 +396,23 @@ class TestSongBadgePrecedence:
     def test_ref_credits(self):
         from src.models import parse_song_credits
         c = parse_song_credits("RATHER LIE [Clean](ref. Keith Lawson)")
-        assert c.title == "RATHER LIE [Clean]" and c.refs == "Keith Lawson"
+        assert c.title == "RATHER LIE [Clean]"
+        assert c.refs == "Keith Lawson"
 
     def test_alt_title_only(self):
         from src.models import parse_song_credits
         title, *_, alts = parse_song_credits("On My Own\n(My Own)")
-        assert title == "On My Own" and alts == ["My Own"]
+        assert title == "On My Own"
+        assert alts == ["My Own"]
 
     def test_multiple_alt_titles(self):
         from src.models import parse_song_credits
         c = parse_song_credits("I'm Him\n(prod. Hykeem Carter)\n(I'm The Man, Thank God)")
         # 2026-07-17 (PR #10): comma-separated parenthetical aliases split into
         # individual alt titles — see TestCommaAltTitles for the stay-whole guards.
-        assert c.title == "I'm Him" and c.producers == "Hykeem Carter" and c.alt_titles == ["I'm The Man", "Thank God"]
+        assert c.title == "I'm Him"
+        assert c.producers == "Hykeem Carter"
+        assert c.alt_titles == ["I'm The Man", "Thank God"]
 
     def test_no_credits(self):
         from src.models import parse_song_credits
@@ -393,25 +423,33 @@ class TestSongBadgePrecedence:
     def test_remix_stays_in_title(self):
         from src.models import parse_song_credits
         title, feat, *_ = parse_song_credits("Black Skinhead (Remix) [V3]")
-        assert title == "Black Skinhead (Remix) [V3]" and feat is None
+        assert title == "Black Skinhead (Remix) [V3]"
+        assert feat is None
 
     def test_complex_featuring(self):
         from src.models import parse_song_credits
         raw = "All I Need \n(with Go Getters) (feat. Kanye West, Mikkey Halsted, Taji & Miss Criss) (prod. AllDay & Kanye West) \n(All I Have)"
         c = parse_song_credits(raw)
         assert c.title == "All I Need"
-        assert "Kanye West" in c.featuring and "Mikkey Halsted" in c.featuring
-        assert c.collaboration == "Go Getters" and "AllDay" in c.producers and c.alt_titles == ["All I Have"]
+        assert "Kanye West" in c.featuring
+        assert "Mikkey Halsted" in c.featuring
+        assert c.collaboration == "Go Getters"
+        assert "AllDay" in c.producers
+        assert c.alt_titles == ["All I Have"]
 
     def test_artist_prefix_stays_in_title(self):
         from src.models import parse_song_credits
         title, feat, prod, *_ = parse_song_credits("Jay Rock - To The Top\n(feat. K-Dot) (prod. DJ Mano)")
-        assert title == "Jay Rock - To The Top" and feat == "K-Dot" and prod == "DJ Mano"
+        assert title == "Jay Rock - To The Top"
+        assert feat == "K-Dot"
+        assert prod == "DJ Mano"
 
     def test_carti_format(self):
         from src.models import parse_song_credits
         c = parse_song_credits("36 Villainz\n(prod. Cold Hart & DJ Anuedy)\n(36IllVillianz)")
-        assert c.title == "36 Villainz" and c.producers == "Cold Hart & DJ Anuedy" and c.alt_titles == ["36IllVillianz"]
+        assert c.title == "36 Villainz"
+        assert c.producers == "Cold Hart & DJ Anuedy"
+        assert c.alt_titles == ["36IllVillianz"]
 
 
 class TestBracketStyleCredits:
@@ -440,7 +478,8 @@ class TestBracketStyleCredits:
     def test_bracket_director(self):
         from src.models import parse_song_credits
         c = parse_song_credits("silent film [Music Video]\n[dir. Ovrkast.]")
-        assert c.director == "Ovrkast." and c.alt_titles == []
+        assert c.director == "Ovrkast."
+        assert c.alt_titles == []
 
     def test_paren_director(self):
         from src.models import parse_song_credits
@@ -457,7 +496,8 @@ class TestBracketStyleCredits:
         from src.models import parse_song_credits
         # Bracket support must not touch [V1] / [Demo 8] / [Clean] tags.
         c = parse_song_credits("Dis Side [Demo]\n[prod. Ging]")
-        assert c.title == "Dis Side [Demo]" and c.producers == "Ging"
+        assert c.title == "Dis Side [Demo]"
+        assert c.producers == "Ging"
 
     def test_mismatched_delimiters_still_parse(self):
         from src.models import parse_song_credits
@@ -491,7 +531,8 @@ class TestBracketStyleCredits:
         )
         # …but one before another keyword separates two credits.
         c = parse_song_credits("X\n(prod. A & B, ref. C)")
-        assert c.producers == "A & B" and c.refs == "C"
+        assert c.producers == "A & B"
+        assert c.refs == "C"
 
     def test_keyword_must_open_the_group(self):
         from src.models import parse_song_credits
@@ -544,7 +585,8 @@ class TestBracketStyleCredits:
         for title in ("Prodigy", "Prodigy Returns", "With Or Without You", "A Real Alt Title"):
             c = parse_song_credits(f"Song\n{title}")
             assert c.alt_titles == [title], title
-            assert c.producers is None and c.refs is None
+            assert c.producers is None
+            assert c.refs is None
 
     def test_unclosed_credit_still_does_not_swallow_alt_titles(self):
         from src.models import parse_song_credits
@@ -556,7 +598,8 @@ class TestBracketStyleCredits:
     def test_genuine_alt_title_still_survives(self):
         from src.models import parse_song_credits
         c = parse_song_credits("???\n[prod. Ging]\n(Flavors)")
-        assert c.producers == "Ging" and c.alt_titles == ["Flavors"]
+        assert c.producers == "Ging"
+        assert c.alt_titles == ["Flavors"]
 
 
 class TestUnclosedCreditBrackets:
@@ -697,7 +740,8 @@ class TestGluedFeatureKeyword:
     @pytest.mark.parametrize("raw", ["Feature Song", "Ftw Anthem", "Fte Records"])
     def test_a_word_merely_starting_with_the_keyword_is_not_a_credit(self, raw):
         c = self._c(raw)
-        assert c.title == raw and c.featuring is None
+        assert c.title == raw
+        assert c.featuring is None
 
     def test_spelled_out_featuring_still_works(self):
         assert self._c("Song (featuring Drake)").featuring == "Drake"
@@ -747,7 +791,8 @@ class TestAdditionalAndCoProduction:
 
     def test_a_non_production_add_group_is_left_alone(self):
         c = self._c("Song (Add. Vocals by X)")
-        assert c.producers is None and c.title == "Song (Add. Vocals by X)"
+        assert c.producers is None
+        assert c.title == "Song (Add. Vocals by X)"
 
 
 class TestAliasLabelStripping:
@@ -796,18 +841,22 @@ class TestTimelineParsing:
         from src.models import parse_timeline
         events = parse_timeline("(06/08/1977) (Ye is born in Atlanta)\n(08/18/2002) (Kanye announces he signed to Roc-A-Fella)")
         assert len(events) == 2
-        assert events[0].date == "06/08/1977" and events[0].event == "Ye is born in Atlanta"
+        assert events[0].date == "06/08/1977"
+        assert events[0].event == "Ye is born in Atlanta"
         assert "Roc-A-Fella" in events[1].event
 
     def test_keem_format(self):
         from src.models import parse_timeline
         events = parse_timeline('(2016) Baby Keem releases "Come Thru" to soundcloud.\n(August 16, 2018) Hearts & Darts on streaming.')
-        assert len(events) == 2 and events[0].date == "2016" and "Come Thru" in events[0].event
+        assert len(events) == 2
+        assert events[0].date == "2016"
+        assert "Come Thru" in events[0].event
 
     def test_carti_format(self):
         from src.models import parse_timeline
         events = parse_timeline("(Sept 13th, 1996) Jordan Terrell Carter is born\n(2009) JCee starts making music")
-        assert len(events) == 2 and events[0].date == "Sept 13th, 1996"
+        assert len(events) == 2
+        assert events[0].date == "Sept 13th, 1996"
 
     def test_empty_text(self):
         from src.models import parse_timeline
@@ -816,7 +865,9 @@ class TestTimelineParsing:
     def test_single_event(self):
         from src.models import parse_timeline
         events = parse_timeline("(2024) Album drops")
-        assert len(events) == 1 and events[0].date == "2024" and events[0].event == "Album drops"
+        assert len(events) == 1
+        assert events[0].date == "2024"
+        assert events[0].event == "Album drops"
 
 
 class TestSampleExtraction:
@@ -847,7 +898,9 @@ class TestSampleExtraction:
     def test_no_stray_quote_characters(self):
         from src.models import extract_samples
         for s in extract_samples('Samples "Got Money" by Lil Wayne. Also samples “Flashing Lights”.'):
-            assert '"' not in s and '“' not in s and '”' not in s
+            assert '"' not in s
+            assert '“' not in s
+            assert '”' not in s
 
     def test_compound_artist_preserved(self):
         from src.models import extract_samples
@@ -882,7 +935,8 @@ class TestOgFilenameExtraction:
         from src.models import strip_og_filename_lines
         notes = "OG Filename: Version A\nTrack 12 off the demo tape.\nOG Filename: Version B"
         cleaned = strip_og_filename_lines(notes)
-        assert "OG Filename" not in cleaned and cleaned == "Track 12 off the demo tape."
+        assert "OG Filename" not in cleaned
+        assert cleaned == "Track 12 off the demo tape."
 
     def test_strip_preserves_notes_without_og(self):
         from src.models import strip_og_filename_lines
@@ -1098,8 +1152,10 @@ class TestSlashEraRegistration:
         primary, fallback = {}, {}
         slash = self._register("38 Baby / Ay Ay", primary, fallback)
         assert primary.get("38 baby / ay ay") is slash
-        assert "38 baby" in fallback and primary.get("38 baby") is None
-        assert "ay ay" in fallback and primary.get("ay ay") is None
+        assert "38 baby" in fallback
+        assert primary.get("38 baby") is None
+        assert "ay ay" in fallback
+        assert primary.get("ay ay") is None
 
     def test_genuine_era_wins_over_slash_part_registered_first(self):
         primary, fallback = {}, {}
@@ -1112,7 +1168,8 @@ class TestSlashEraRegistration:
         primary, fallback = {}, {}
         slash = self._register("38 Baby / Ay Ay", primary, fallback)
         assert primary.get("ay ay") is None
-        assert fallback.get("ay ay") is slash and fallback.get("38 baby") is slash
+        assert fallback.get("ay ay") is slash
+        assert fallback.get("38 baby") is slash
 
     def test_legacy_call_without_fallback_dict_keeps_old_behaviour(self):
         from src.models import Era, Section
@@ -1120,7 +1177,8 @@ class TestSlashEraRegistration:
         primary = {}
         era = Era(name="A / B", sections=[Section()])
         _register_era_keys(era, era.name, primary)
-        assert primary.get("a") is era and primary.get("b") is era
+        assert primary.get("a") is era
+        assert primary.get("b") is era
 
 
 class TestCommaAltNameRegistration:
@@ -1751,7 +1809,8 @@ class TestFuzzyEraMatch:
         from src.parser import _fuzzy_era_match
         eras = self._eras("Collaboration with Digital Nas")
         match = _fuzzy_era_match("digital nas collab", eras)
-        assert match is not None and match.name == "Collaboration with Digital Nas"
+        assert match is not None
+        assert match.name == "Collaboration with Digital Nas"
 
     def test_single_shared_word_does_not_match(self):
         from src.parser import _fuzzy_era_match
@@ -1798,7 +1857,8 @@ class TestExtractTable:
     def test_colspan_pads_cells(self):
         rows = extract_table("<table><tr><td colspan='3'>wide</td><td>end</td></tr></table>")
         assert len(rows[0]) == 4
-        assert rows[0][0].text == "wide" and rows[0][3].text == "end"
+        assert rows[0][0].text == "wide"
+        assert rows[0][3].text == "end"
 
     def test_br_becomes_newline_and_link_lines_tracked(self):
         rows = extract_table(
@@ -2051,7 +2111,9 @@ class TestDroppedColumns:
         header = [_Cell(text="Era"), _Cell(text="Name"), _Cell(text="Bit Rate"), _Cell(text="Quality")]
         col_map = detect_columns(header)
         unknown, duplicate = detect_dropped_columns(header, col_map)
-        assert "Bit Rate" in unknown and "Era" not in unknown and "Quality" not in unknown
+        assert "Bit Rate" in unknown
+        assert "Era" not in unknown
+        assert "Quality" not in unknown
         assert duplicate == []
 
     def test_fully_mapped_header_drops_nothing(self):
@@ -2141,7 +2203,8 @@ class TestPlaceholderGrouping:
         for i in range(3):
             self._add(era, index, name="???", notes=f"unknown song {i}")
         songs = self._songs(era)
-        assert len(songs) == 3 and all(len(s.versions) == 1 for s in songs)
+        assert len(songs) == 3
+        assert all(len(s.versions) == 1 for s in songs)
 
     def test_placeholder_with_tag_not_grouped(self):
         era, index = self._era()
@@ -2154,14 +2217,16 @@ class TestPlaceholderGrouping:
         self._add(era, index, name="Song [V1]", version_tag="V1")
         self._add(era, index, name="Song [V2]", version_tag="V2")
         songs = self._songs(era)
-        assert len(songs) == 1 and len(songs[0].versions) == 2
+        assert len(songs) == 1
+        assert len(songs[0].versions) == 2
 
     def test_placeholder_with_shared_alt_title_groups(self):
         era, index = self._era()
         self._add(era, index, name="???", alt_titles=["TIME2TIME"], notes="v1")
         self._add(era, index, name="???", alt_titles=["Time2Time"], notes="v2")
         songs = self._songs(era)
-        assert len(songs) == 1 and len(songs[0].versions) == 2
+        assert len(songs) == 1
+        assert len(songs[0].versions) == 2
 
     def test_placeholder_with_different_alt_titles_not_grouped(self):
         era, index = self._era()
@@ -2181,7 +2246,8 @@ class TestPlaceholderGrouping:
         self._add(era, index, name="???", alt_titles=["???. Bon Iver"])
         self._add(era, index, name="??? [V2]", version_tag="V2", alt_titles=["Time2Time"])
         songs = self._songs(era)
-        assert len(songs) == 1 and len(songs[0].versions) == 3
+        assert len(songs) == 1
+        assert len(songs[0].versions) == 3
 
 
 class TestContentTabStructuralRows:
@@ -2221,13 +2287,15 @@ class TestContentTabStructuralRows:
 
     def test_bare_section_labels_dropped(self):
         names = [e.name for e in self._entries()]
-        assert "Projects" not in names and "Features" not in names
+        assert "Projects" not in names
+        assert "Features" not in names
 
     def test_song_titled_like_its_own_era_is_kept(self):
         # _era_match_key drops the parenthetical, collapsing this title onto
         # its era name. It has a length and a date, so it is a song.
         e = next(x for x in self._entries() if x.name.startswith("Second Era ("))
-        assert e.era_name == "Second Era" and e.length == "5:06"
+        assert e.era_name == "Second Era"
+        assert e.length == "5:06"
 
     def test_row_whose_only_field_is_type_is_kept(self):
         e = next(x for x in self._entries() if x.name == "Type Only")

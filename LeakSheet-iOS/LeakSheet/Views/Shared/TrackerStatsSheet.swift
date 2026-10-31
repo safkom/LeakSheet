@@ -21,7 +21,7 @@ struct TrackerStatsSheet: View {
             Row(label: "High Quality", value: stats.highQuality ?? 0, color: .badgeHQ),
             Row(label: "Recording", value: stats.recordings ?? 0, color: .badgeRec),
             Row(label: "Low Quality", value: stats.lowQuality ?? 0, color: .badgeLQ),
-            Row(label: "Not Available", value: stats.notAvailableQuality ?? 0, color: .badgeNA),
+            Row(label: "Not Available", value: stats.notAvailableQuality ?? 0, color: .badgeNA)
         ].filter { $0.value > 0 }
     }
 
@@ -35,7 +35,7 @@ struct TrackerStatsSheet: View {
             Row(label: "Partial", value: stats.partial ?? 0, color: .badgePartial),
             Row(label: "Snippets", value: stats.snippets ?? 0, color: .badgeSnippet),
             Row(label: "Stem Bounces", value: stats.stemBounces ?? 0, color: .badgeStem),
-            Row(label: "Unavailable", value: stats.unavailable ?? 0, color: .badgeUnavailable),
+            Row(label: "Unavailable", value: stats.unavailable ?? 0, color: .badgeUnavailable)
         ].filter { $0.value > 0 }
     }
 
@@ -52,7 +52,7 @@ struct TrackerStatsSheet: View {
             BadgeRow(badge: .special, label: Badge.special.label, value: stats.special ?? 0),
             BadgeRow(badge: .grail, label: "Grails", value: stats.grails ?? 0),
             BadgeRow(badge: .wanted, label: Badge.wanted.label, value: stats.wanted ?? 0),
-            BadgeRow(badge: .worst, label: Badge.worst.label, value: stats.worstOf ?? 0),
+            BadgeRow(badge: .worst, label: Badge.worst.label, value: stats.worstOf ?? 0)
         ].filter { $0.value > 0 }
     }
 
@@ -90,13 +90,13 @@ struct TrackerStatsSheet: View {
                 }
                 if !badgeRows.isEmpty {
                     SwiftUI.Section("Badges") {
-                        ForEach(badgeRows) { r in
+                        ForEach(badgeRows) { row in
                             HStack(spacing: 12) {
-                                Text(r.badge.emoji).font(.body).frame(width: 24)
+                                Text(row.badge.emoji).font(.body).frame(width: 24)
                                     .accessibilityHidden(true)
-                                Text(r.label).font(.subheadline)
+                                Text(row.label).font(.subheadline)
                                 Spacer()
-                                Text("\(r.value)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                                Text("\(row.value)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                             }
                             .listRowBackground(Color.lsCard)
                         }
@@ -104,7 +104,11 @@ struct TrackerStatsSheet: View {
                 }
                 if !topEras.isEmpty {
                     SwiftUI.Section {
-                        BarList(rows: topEras.map { .init(label: $0.name, value: $0.plays, unit: $0.plays == 1 ? "play" : "plays") })
+                        BarList(rows: topEras.map { .init(
+                            label: $0.name,
+                            value: $0.plays,
+                            unit: $0.plays == 1 ? "play" : "plays"
+                        ) })
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                     } header: {
@@ -181,11 +185,11 @@ struct QualityBar: View {
         let total = max(segments.reduce(0) { $0 + $1.value }, 1)
         GeometryReader { geo in
             HStack(spacing: 1) {
-                ForEach(segments.indices, id: \.self) { i in
-                    if segments[i].value > 0 {
+                ForEach(segments.indices, id: \.self) { index in
+                    if segments[index].value > 0 {
                         Rectangle()
-                            .fill(segments[i].color)
-                            .frame(width: max(2, geo.size.width * CGFloat(segments[i].value) / CGFloat(total)))
+                            .fill(segments[index].color)
+                            .frame(width: max(2, geo.size.width * CGFloat(segments[index].value) / CGFloat(total)))
                     }
                 }
             }

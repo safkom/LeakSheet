@@ -26,7 +26,7 @@ struct LibraryMatcherTests {
         let hits = LibraryMatcher.recommend(
             library: [
                 LibraryArtist(name: "Kanye West", plays: 10),
-                LibraryArtist(name: "Travis Scott & Playboi Carti", plays: 99),
+                LibraryArtist(name: "Travis Scott & Playboi Carti", plays: 99)
             ],
             trackers: [tracker("Kanye West"), tracker("Playboi Carti"), tracker("Nobody")]
         )
@@ -45,14 +45,18 @@ struct AliasMatchingTests {
 
     @Test func aliasMatchesTracker() {
         let library = [LibraryArtist(name: "Kanye West", plays: 40)]
-        let hits = LibraryMatcher.recommend(library: library, trackers: [tracker("Ye")], aliases: ["Kanye West": ["Ye"]])
+        let hits = LibraryMatcher.recommend(
+            library: library,
+            trackers: [tracker("Ye")],
+            aliases: ["Kanye West": ["Ye"]]
+        )
         #expect(hits.map(\.name) == ["Ye"])
     }
 
     @Test func unmatchedSkipsMatchedAndUnplayed() {
         let library = [
             LibraryArtist(name: "Ye", plays: 5), LibraryArtist(name: "Kanye West", plays: 40),
-            LibraryArtist(name: "Never Played", plays: 0),
+            LibraryArtist(name: "Never Played", plays: 0)
         ]
         let missing = LibraryMatcher.unmatched(library: library, trackers: [tracker("Ye")], limit: 10)
         #expect(missing.map(\.name) == ["Kanye West"])

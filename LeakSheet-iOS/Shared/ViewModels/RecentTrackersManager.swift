@@ -32,12 +32,11 @@ final class RecentTrackersManager {
         let artUrl: String?
         let availableCount: Int
         let snippetCount: Int
-        let confirmedCount: Int
 
         init(
             name: String, slug: String, sourceUrl: String,
             totalSongs: Int, totalVersions: Int? = nil, artUrl: String?,
-            availableCount: Int, snippetCount: Int, confirmedCount: Int
+            availableCount: Int, snippetCount: Int
         ) {
             self.name = name
             self.slug = slug
@@ -49,21 +48,19 @@ final class RecentTrackersManager {
             self.artUrl = artUrl
             self.availableCount = availableCount
             self.snippetCount = snippetCount
-            self.confirmedCount = confirmedCount
         }
 
         // Backward-compatible decode — see DECISIONS.md::RecentTrackersManager.swift::totalVersions-decode
         init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            name = try c.decode(String.self, forKey: .name)
-            slug = try c.decode(String.self, forKey: .slug)
-            sourceUrl = try c.decode(String.self, forKey: .sourceUrl)
-            totalSongs = try c.decode(Int.self, forKey: .totalSongs)
-            totalVersions = try c.decodeIfPresent(Int.self, forKey: .totalVersions) ?? totalSongs
-            artUrl = try c.decodeIfPresent(String.self, forKey: .artUrl)
-            availableCount = try c.decode(Int.self, forKey: .availableCount)
-            snippetCount = try c.decode(Int.self, forKey: .snippetCount)
-            confirmedCount = try c.decode(Int.self, forKey: .confirmedCount)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            slug = try container.decode(String.self, forKey: .slug)
+            sourceUrl = try container.decode(String.self, forKey: .sourceUrl)
+            totalSongs = try container.decode(Int.self, forKey: .totalSongs)
+            totalVersions = try container.decodeIfPresent(Int.self, forKey: .totalVersions) ?? totalSongs
+            artUrl = try container.decodeIfPresent(String.self, forKey: .artUrl)
+            availableCount = try container.decode(Int.self, forKey: .availableCount)
+            snippetCount = try container.decode(Int.self, forKey: .snippetCount)
         }
     }
 
@@ -85,8 +82,7 @@ final class RecentTrackersManager {
             totalVersions: artist.computedTotalVersions,
             artUrl: artUrl,
             availableCount: stats.available,
-            snippetCount: stats.snippets,
-            confirmedCount: stats.confirmed
+            snippetCount: stats.snippets
         )
 
         #if os(macOS)
@@ -148,8 +144,8 @@ final class RecentTrackersManager {
         cap: Int = RecentTrackersManager.maxEntries
     ) -> [RecentTracker] {
         var result = entries
-        if keepPosition, let i = result.firstIndex(where: { $0.id == entry.id }) {
-            result[i] = entry
+        if keepPosition, let index = result.firstIndex(where: { $0.id == entry.id }) {
+            result[index] = entry
             return result
         }
         result.removeAll { $0.id == entry.id }
@@ -164,16 +160,15 @@ final class RecentTrackersManager {
 
     // MARK: - Stats helper
 
-    private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int, confirmed: Int) {
+    private static func computeStats(eras: [Era]) -> (available: Int, snippets: Int) {
         // Delegates to single source of truth — see DECISIONS.md::RecentTrackersManager.swift::stats-source
-        var available = 0, snippets = 0, confirmed = 0
+        var available = 0, snippets = 0
         for era in eras {
-            let s = ArtistViewModel.computeEraStats(era)
-            available += s.available
-            snippets += s.snippets
-            confirmed += s.confirmed
+            let stats = ArtistViewModel.computeEraStats(era)
+            available += stats.available
+            snippets += stats.snippets
         }
-        return (available, snippets, confirmed)
+        return (available, snippets)
     }
 
     // MARK: - Persistence

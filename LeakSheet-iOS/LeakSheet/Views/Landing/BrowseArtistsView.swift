@@ -22,9 +22,9 @@ struct BrowseArtistsView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var filtered: [DiscoveryArtist] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return artists }
-        return artists.filter { $0.name.lowercased().contains(q) }
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return artists }
+        return artists.filter { $0.name.lowercased().contains(query) }
     }
 
     var body: some View {
@@ -121,6 +121,44 @@ struct BrowseArtistsView: View {
             .onAppear { loadingUrl = "" }
     }
 
+    private func rowText(_ artist: DiscoveryArtist) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(artist.name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if artist.best == true {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsStar)
+                        .accessibilityLabel("Best of")
+                }
+            }
+            HStack(spacing: 6) {
+                if let credit = artist.credit, !credit.isEmpty {
+                    // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
+                    Text("by \(credit)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if artist.upToDate == false {
+                    Text("outdated")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsWarning)
+                }
+                // Link health is tri-state upstream: only a definite false is worth a warning,
+                // shown BEFORE the user opens a tracker whose files are gone.
+                if artist.workingLinks == false {
+                    Text("dead links")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsError)
+                }
+            }
+        }
+    }
+
     private func row(_ artist: DiscoveryArtist) -> some View {
         Button {
             loadingUrl = artist.url
@@ -135,41 +173,7 @@ struct BrowseArtistsView: View {
                     .background(Color.lsCard)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(artist.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if artist.best == true {
-                            Image(systemName: "star.fill")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsStar)
-                                .accessibilityLabel("Best of")
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        if let credit = artist.credit, !credit.isEmpty {
-                            // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
-                            Text("by \(credit)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        if artist.upToDate == false {
-                            Text("outdated")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsWarning)
-                        }
-                        // Link health is tri-state upstream: only a definite false is worth a warning,
-                        // shown BEFORE the user opens a tracker whose files are gone.
-                        if artist.workingLinks == false {
-                            Text("dead links")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsError)
-                        }
-                    }
-                }
+                rowText(artist)
 
                 Spacer()
 
@@ -200,10 +204,10 @@ struct BrowseArtistsView: View {
             // Server sorts best-first then by name; re-sort locally so the
             // order survives a backend that doesn't.
             artists = try await APIClient.shared.fetchTrackers()
-                .sorted { a, b in
-                    if a.best == true && b.best != true { return true }
-                    if a.best != true && b.best == true { return false }
-                    return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                .sorted { lhs, rhs in
+                    if lhs.best == true && rhs.best != true { return true }
+                    if lhs.best != true && rhs.best == true { return false }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
                 }
             // Not awaited: alias lookups take seconds and would hold the refresh spinner.
             recommendTask?.cancel()

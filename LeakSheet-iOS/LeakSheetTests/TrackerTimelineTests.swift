@@ -9,7 +9,10 @@ struct TrackerTimelineTests {
         let json: [String: Any] = ["eras": [
             ["name": "A", "timeline": [["date": "2010", "event": "Born"], ["date": "2012", "event": "A releases"]]],
             ["name": "B", "timeline": [["date": "2012", "event": "A releases"]]],
-            ["name": "C", "timeline": [["date": "2012", "event": "A releases"], ["date": "2014", "event": "C releases"]]],
+            [
+                "name": "C",
+                "timeline": [["date": "2012", "event": "A releases"], ["date": "2014", "event": "C releases"]]
+            ]
         ]]
         struct Eras: Decodable { let eras: [Era] }
         let eras = try JSONDecoder().decode(Eras.self, from: JSONSerialization.data(withJSONObject: json)).eras

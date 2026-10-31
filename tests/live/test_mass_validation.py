@@ -55,7 +55,7 @@ async def _sweep() -> tuple[list[str], list[str], int]:
             except FetchError as e:
                 skips.append(f"{entry.name}: fetch failed: {str(e)[:120]}")
                 return
-            except Exception as e:  # noqa: BLE001 — a crash on ONE tracker is a finding
+            except Exception as e:
                 violations.append(f"{entry.name} ({entry.url}): parser crashed: {type(e).__name__}: {e}")
                 return
         found = live_violations(artist)

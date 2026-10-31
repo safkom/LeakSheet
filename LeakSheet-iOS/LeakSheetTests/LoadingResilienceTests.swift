@@ -62,7 +62,7 @@ struct LoadingResilienceTests {
             .connecting,
             .server(message: "Parsing Unreleased (11.8 MB)", done: nil, total: nil),
             .downloading(receivedBytes: 0, expectedBytes: nil),
-            .preparing,
+            .preparing
         ]
         let ranks = ordered.map(TrackerLoader.rank)
         #expect(ranks == ranks.sorted())
@@ -111,7 +111,8 @@ struct LoadingResilienceTests {
     }
 
     @Test func `an unsupported host reads as plain advice, not the server's ops detail`() {
-        let detail = "Invalid URL: host not allowed for tracker fetching: hel. Add others via LEAKSHEET_EXTRA_SHEET_HOSTS."
+        let detail = "Invalid URL: host not allowed for tracker fetching: hel. "
+            + "Add others via LEAKSHEET_EXTRA_SHEET_HOSTS."
         let shown = TrackerLoader.friendlyLoadError(status: 400, fallback: detail)
         #expect(!shown.contains("LEAKSHEET"))
         #expect(shown.contains("Google Sheets"))

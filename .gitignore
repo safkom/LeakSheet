@@ -26,6 +26,8 @@ docs/superpowers/
 
 # SonarQube credentials (local only)
 sonarqube-setup.txt
+# Local Google API key (see AGENTS.md: LEAKSHEET_GOOGLE_API_KEY); never committed.
+google-key.txt
 .scannerwork/
 coverage.xml
 .coverage

@@ -33,9 +33,9 @@ struct ContentView: View {
                 onArtistLoaded: { artist, notice in
                     // Still inside the landing spinner: build the view model
                     // (off-main filter/stats pass) before navigating.
-                    let vm = await ArtistViewModel.make(artist: artist)
-                    vm.loadNotice = notice
-                    prepared = (artist.slug, vm)
+                    let viewModel = await ArtistViewModel.make(artist: artist)
+                    viewModel.loadNotice = notice
+                    prepared = (artist.slug, viewModel)
                     withAnimation { path.append(artist) }
                 },
                 onBrowseTapped: { showBrowse = true },

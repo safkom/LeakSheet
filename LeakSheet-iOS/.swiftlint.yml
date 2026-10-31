@@ -1,0 +1,4 @@
+# Lint the app, its tests and its tools; never build output or package checkouts.
+excluded:
+  - build
+  - LeakSheet.xcodeproj

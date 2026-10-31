@@ -12,7 +12,7 @@ enum MacSelection: Hashable {
 /// A parsed tracker held open across sidebar navigation.
 struct LoadedTracker {
     let artist: Artist
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 }
 
 /// Mac window + library state. One main window, so a singleton read by the menu
@@ -63,7 +63,9 @@ final class MacUIState {
     /// plus its view model is tens of MB.
     private(set) var trackers: [String: LoadedTracker] = [:]
     private var order: [String] = []
-    private static let limit = 3
+    /// A big tracker plus its view model is tens of MB: a Mac with 16 GB or more keeps eight
+    /// open, so returning to one doesn't re-run its load; smaller Macs keep three.
+    private static let limit = ProcessInfo.processInfo.physicalMemory >= 16 << 30 ? 8 : 3
 
     private init() {}
 

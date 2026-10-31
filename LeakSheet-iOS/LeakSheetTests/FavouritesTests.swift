@@ -8,7 +8,8 @@ private func version(_ name: String, tag: String? = nil, link: String? = nil) ->
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
-        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] }, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] },
+        dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
@@ -33,7 +34,7 @@ struct DerivedBaseNameTests {
         ("Time Moves Slow [V1-V3]", "V1-V3", "Time Moves Slow"),
         ("Runaway [v2]", "V2", "Runaway"),          // tag case difference
         ("Flashing Lights [V2] ", "V2", "Flashing Lights"),  // trailing space
-        ("No Tag Here", "V9", "No Tag Here"),        // tag not in the name
+        ("No Tag Here", "V9", "No Tag Here")        // tag not in the name
     ] as [(String, String?, String)])
     func `strips the version tag like the parser's base_name`(
         name: String, tag: String?, expected: String
@@ -49,7 +50,7 @@ struct FavouritesGroupingTests {
         let entries = [
             entry(artist: "ye", era: "Donda", song: "Jail", addedAt: t0 + 30),
             entry(artist: "carti", era: "WLR", song: "Cancun", addedAt: t0 + 20),
-            entry(artist: "ye", era: "Yeezus", song: "Bound", addedAt: t0 + 10),
+            entry(artist: "ye", era: "Yeezus", song: "Bound", addedAt: t0 + 10)
         ]
         let grouped = FavouritesManager.grouped(from: entries)
 
@@ -70,7 +71,7 @@ struct FavouritesGroupingTests {
     @Test func `entries stay in stored order within an era`() {
         let entries = [
             entry(artist: "ye", era: "Donda", song: "Newest", addedAt: t0 + 2),
-            entry(artist: "ye", era: "Donda", song: "Older", addedAt: t0 + 1),
+            entry(artist: "ye", era: "Donda", song: "Older", addedAt: t0 + 1)
         ]
         let grouped = FavouritesManager.grouped(from: entries)
         #expect(grouped[0].eras[0].entries.map(\.songBaseName) == ["Newest", "Older"])
@@ -83,7 +84,11 @@ struct FavouritesGroupingTests {
 /// and the heart silently went cold.
 @Suite("Favourite version-tag migration")
 struct FavouriteTagMigrationTests {
-    private func stored(_ song: String, era: String = "Era", artist: String = "ye") -> FavouritesManager.FavouriteEntry {
+    private func stored(
+        _ song: String,
+        era: String = "Era",
+        artist: String = "ye"
+    ) -> FavouritesManager.FavouriteEntry {
         entry(artist: artist, era: era, song: song, addedAt: Date(timeIntervalSince1970: 0))
     }
 
@@ -94,7 +99,7 @@ struct FavouriteTagMigrationTests {
         ("Track [Instrumental]", "Track"),
         ("Track [Final Mix 2]", "Track"),
         ("Track [Mix A]", "Track"),
-        ("Track [Live]", "Track"),
+        ("Track [Live]", "Track")
     ])
     func `an orphaned tag is stripped from the key`(oldName: String, newName: String) {
         let migrated = FavouritesManager.migratingVersionTags([stored(oldName)])
@@ -114,7 +119,7 @@ struct FavouriteTagMigrationTests {
     @Test func `a collision leaves the later entry untouched`() {
         let migrated = FavouritesManager.migratingVersionTags([
             stored("90210 [Demo 8]"),
-            stored("90210 [Demo 9]"),
+            stored("90210 [Demo 9]")
         ])
         #expect(migrated[0].songBaseName == "90210")
         #expect(migrated[1].songBaseName == "90210 [Demo 9]")
@@ -129,7 +134,7 @@ struct FavouriteTagMigrationTests {
     @Test func `entries in different eras migrate independently`() {
         let migrated = FavouritesManager.migratingVersionTags([
             stored("90210 [Demo 8]", era: "Era A"),
-            stored("90210 [Demo 8]", era: "Era B"),
+            stored("90210 [Demo 8]", era: "Era B")
         ])
         #expect(migrated.allSatisfy { $0.songBaseName == "90210" })
         #expect(Set(migrated.map(\.key)).count == 2)
@@ -177,7 +182,6 @@ struct FavouriteBadgeSourceTests {
         #expect((entry.primaryVersion?.quality ?? entry.quality) == "CD Quality")
     }
 }
-
 
 /// Placeholder favourites (2026-08-26).
 ///
@@ -314,7 +318,6 @@ struct NowPlayingIdentityTests {
     }
 }
 
-
 struct FavouriteKeyCaseTests {
     private func entry(_ key: String) -> FavouritesManager.FavouriteEntry {
         FavouritesManager.FavouriteEntry(
@@ -340,11 +343,11 @@ struct FavouriteKeyCaseTests {
         let migrated = FavouritesManager.migratingKeyCase([
             entry("ye::Graduation::Touch The Sky"),
             entry("ye::Graduation::Touch the Sky"),
-            entry("ye::Graduation::???::https://imgur.gg/f/AbC"),
+            entry("ye::Graduation::???::https://imgur.gg/f/AbC")
         ])
         #expect(migrated.map(\.key) == [
             "ye::graduation::touch the sky",
-            "ye::graduation::???::https://imgur.gg/f/AbC",
+            "ye::graduation::???::https://imgur.gg/f/AbC"
         ])
     }
 }
@@ -352,20 +355,24 @@ struct FavouriteKeyCaseTests {
 struct FavouriteSourceUrlTests {
     private let recent = RecentTrackersManager.RecentTracker(
         name: "Ye", slug: "ye", sourceUrl: "https://docs.google.com/spreadsheets/d/AAA/htmlview", totalSongs: 0,
-        artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+        artUrl: nil, availableCount: 0, snippetCount: 0
     )
 
     @Test func `a favourite made without a url takes it from recents by slug`() {
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent]) == recent.sourceUrl)
         #expect(FavouritesManager.resolvedSourceUrl("", artistSlug: "ye", recents: [recent]) == recent.sourceUrl)
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "joji", recents: [recent]) == nil)
-        #expect(FavouritesManager.resolvedSourceUrl("https://x.example/", artistSlug: "ye", recents: [recent]) == "https://x.example/")
+        #expect(FavouritesManager.resolvedSourceUrl(
+            "https://x.example/",
+            artistSlug: "ye",
+            recents: [recent]
+        ) == "https://x.example/")
     }
 
     @Test func `two trackers sharing a slug leave the url unset`() {
         let alt = RecentTrackersManager.RecentTracker(
             name: "Ye", slug: "ye", sourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", totalSongs: 0,
-            artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+            artUrl: nil, availableCount: 0, snippetCount: 0
         )
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent, alt]) == nil)
     }

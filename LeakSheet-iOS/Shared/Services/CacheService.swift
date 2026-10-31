@@ -14,8 +14,6 @@ actor CacheService {
     struct CachedEntry: Codable, Sendable {
         let data: Data
         let etag: String
-        let timestamp: Date
-        var version: Int = CacheService.currentVersion
     }
 
     private static let currentVersion = 3
@@ -81,7 +79,7 @@ actor CacheService {
             return nil
         }
         guard let data = try? Data(contentsOf: cacheFile(for: url)) else { return nil }
-        return CachedEntry(data: data, etag: meta.etag, timestamp: meta.timestamp, version: meta.version)
+        return CachedEntry(data: data, etag: meta.etag)
     }
 
     func getCachedArtist(for url: String) -> Artist? {

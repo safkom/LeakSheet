@@ -8,15 +8,15 @@ struct TVArtistView: View {
 
     @Environment(RecentTrackersManager.self) private var recents
 
-    @State private var vm: ArtistViewModel?
+    @State private var viewModel: ArtistViewModel?
     @State private var refresher = TrackerLoader()
     @State private var showStats = false
     @State private var showLegend = false
 
     var body: some View {
         Group {
-            if let vm {
-                content(vm)
+            if let viewModel {
+                content(viewModel)
             } else {
                 ProgressView("Preparing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -24,49 +24,49 @@ struct TVArtistView: View {
         }
         .background(Color.lsBackground)
         .navigationTitle(artist.name)
-        .onChange(of: vm?.eraPlaybackRevision) {
-            if let vm { PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts) }
+        .onChange(of: viewModel?.eraPlaybackRevision) {
+            if let viewModel { PlayerViewModel.shared.setArtistEras(viewModel.eraPlaybackContexts) }
         }
         // Keyed on the view model, as on iOS: a refresh swaps in a new one, which must
         // re-register its eras instead of leaving the old song lists.
-        .task(id: vm.map { ObjectIdentifier($0) }) {
-            if let vm {
+        .task(id: viewModel.map { ObjectIdentifier($0) }) {
+            if let viewModel {
                 // Era rollover needs the artist's era list, as on iOS and macOS.
-                PlayerViewModel.shared.setArtistEras(vm.eraPlaybackContexts)
+                PlayerViewModel.shared.setArtistEras(viewModel.eraPlaybackContexts)
             } else {
-                // Setting vm changes the id, so this task runs again to register it.
+                // Setting viewModel changes the id, so this task runs again to register it.
                 let made = await ArtistViewModel.make(artist: artist)
                 made.loadNotice = notice
-                vm = made
+                viewModel = made
             }
         }
     }
 
     @ViewBuilder
-    private func content(_ vm: ArtistViewModel) -> some View {
-        @Bindable var vm = vm
+    private func content(_ viewModel: ArtistViewModel) -> some View {
+        @Bindable var viewModel = viewModel
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                statsBar(vm)
-                if let notice = vm.loadNotice {
+                statsBar(viewModel)
+                if let notice = viewModel.loadNotice {
                     Text(notice)
                         .font(.caption)
                         .foregroundStyle(Color.lsError)
                         .frame(maxWidth: .infinity)
                 }
-                filterChips(vm)
+                filterChips(viewModel)
 
-                if vm.isSearching {
-                    searchResults(vm)
+                if viewModel.isSearching {
+                    searchResults(viewModel)
                 } else {
-                    ForEach(vm.content.eras) { filtered in
-                        eraSection(filtered, vm: vm)
+                    ForEach(viewModel.content.eras) { filtered in
+                        eraSection(filtered, viewModel: viewModel)
                     }
                 }
             }
             .padding(.vertical, 32)
         }
-        .searchable(text: $vm.searchQuery, prompt: "Search songs…")
+        .searchable(text: $viewModel.searchQuery, prompt: "Search songs…")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Stats") { showStats = true }
@@ -84,20 +84,20 @@ struct TVArtistView: View {
                 .disabled(refresher.loading)
             }
         }
-        .sheet(isPresented: $showStats) { TVStatsView(artist: vm.artist, stats: vm.artistStats) }
+        .sheet(isPresented: $showStats) { TVStatsView(artist: viewModel.artist, stats: viewModel.artistStats) }
         .sheet(isPresented: $showLegend) { TVBadgeLegendView() }
     }
 
     // MARK: - Header
 
-    private func statsBar(_ vm: ArtistViewModel) -> some View {
+    private func statsBar(_ viewModel: ArtistViewModel) -> some View {
         HStack(spacing: 56) {
             // .formatted(): `stat` takes a String, which skips the locale
             // grouping Text applies to a bare Int.
-            stat(vm.artistStats.total.formatted(), "Total", .primary)
-            stat(vm.artistStats.available.formatted(), "Available", .green)
-            stat(vm.artistStats.snippets.formatted(), "Snippets", .orange)
-            stat(vm.artistStats.fullHQ.formatted(), "Full HQ", Color.lsPrimary)
+            stat(viewModel.artistStats.total.formatted(), "Total", .primary)
+            stat(viewModel.artistStats.available.formatted(), "Available", .green)
+            stat(viewModel.artistStats.snippets.formatted(), "Snippets", .orange)
+            stat(viewModel.artistStats.fullHQ.formatted(), "Full HQ", Color.lsPrimary)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 60)
@@ -114,15 +114,15 @@ struct TVArtistView: View {
         }
     }
 
-    private func filterChips(_ vm: ArtistViewModel) -> some View {
+    private func filterChips(_ viewModel: ArtistViewModel) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 16) {
                 // Through the toggle methods, which re-run the filter and keep the badge filters
                 // exclusive. No "Recent" chip: this screen has no recents list.
-                chip("Best Of", "star", isOn: vm.bestOf, action: vm.toggleBestOf)
-                chip("Worst Of", "hand.thumbsdown", isOn: vm.worstOf, action: vm.toggleWorstOf)
-                chip("Grails", "trophy", isOn: vm.grails, action: vm.toggleGrails)
-                chip("No Snippets", "scissors", isOn: vm.noSnippets, action: vm.toggleNoSnippets)
+                chip("Best Of", "star", isOn: viewModel.bestOf, action: viewModel.toggleBestOf)
+                chip("Worst Of", "hand.thumbsdown", isOn: viewModel.worstOf, action: viewModel.toggleWorstOf)
+                chip("Grails", "trophy", isOn: viewModel.grails, action: viewModel.toggleGrails)
+                chip("No Snippets", "scissors", isOn: viewModel.noSnippets, action: viewModel.toggleNoSnippets)
             }
             .padding(.horizontal, 60)
             .padding(.vertical, 8)
@@ -148,16 +148,16 @@ struct TVArtistView: View {
     // MARK: - Content branches
 
     @ViewBuilder
-    private func eraSection(_ filtered: FilteredEra, vm: ArtistViewModel) -> some View {
+    private func eraSection(_ filtered: FilteredEra, viewModel: ArtistViewModel) -> some View {
         let era = filtered.era
-        let isExpanded = vm.expandedEra == era.name
+        let isExpanded = viewModel.expandedEra == era.name
         let songs = filtered.sections.isEmpty
             ? filtered.songs
             : filtered.sections.flatMap(\.songs)
 
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                vm.expandedEra = isExpanded ? nil : era.name
+                viewModel.expandedEra = isExpanded ? nil : era.name
             } label: {
                 HStack(spacing: 20) {
                     eraArt(era)
@@ -185,7 +185,13 @@ struct TVArtistView: View {
                 // collide in ForEach (the same reason EraRow.id carries an ordinal).
                 LazyVStack(spacing: 10) {
                     ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
-                        TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraSongs: songs)
+                        TVSongRowView(
+                            song: song,
+                            eraName: era.name,
+                            eraArt: era.artUrl,
+                            artist: viewModel.artist,
+                            eraSongs: songs
+                        )
                     }
                 }
             }
@@ -210,19 +216,19 @@ struct TVArtistView: View {
     }
 
     @ViewBuilder
-    private func searchResults(_ vm: ArtistViewModel) -> some View {
-        if vm.content.searchResults.isEmpty {
-            ContentUnavailableView.search(text: vm.searchQuery)
+    private func searchResults(_ viewModel: ArtistViewModel) -> some View {
+        if viewModel.content.searchResults.isEmpty {
+            ContentUnavailableView.search(text: viewModel.searchQuery)
                 .padding(.top, 60)
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(vm.content.searchResults) { result in
+                ForEach(viewModel.content.searchResults) { result in
                     TVVersionRowView(
                         version: result.version,
                         song: result.song,
                         eraName: result.era.name,
                         eraArt: result.era.artUrl,
-                        artist: vm.artist
+                        artist: viewModel.artist
                     )
                 }
             }
@@ -237,9 +243,9 @@ struct TVArtistView: View {
         guard let url = artist.sourceUrl else { return }
         let fresh = await refresher.load(url, artistName: artist.name, forceRefresh: true, recents: recents)
         guard let fresh, refresher.staleNotice == nil else {
-            if let notice = refresher.error ?? refresher.staleNotice { vm?.loadNotice = notice }
+            if let notice = refresher.error ?? refresher.staleNotice { viewModel?.loadNotice = notice }
             return
         }
-        vm = await ArtistViewModel.make(artist: fresh)
+        viewModel = await ArtistViewModel.make(artist: fresh)
     }
 }

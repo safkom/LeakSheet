@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The two self-contained sections of the song description sheet, each its own
-/// SwiftUI invalidation boundary.
+// The two self-contained sections of the song description sheet, each its own
+// SwiftUI invalidation boundary.
 
 // MARK: - Sources section
 
@@ -89,7 +89,7 @@ private struct SourceRow: View {
         let parts = [
             meta.container,
             FileInfoRows.roundedNumeric(meta.bitrate),
-            meta.duration.map(FileInfoRows.formatDuration),
+            meta.duration.map(FileInfoRows.formatDuration)
         ].compactMap { $0 }.filter { !$0.isEmpty }
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         return meta.filename
@@ -361,4 +361,3 @@ struct EvidenceSection: View {
     }
 
 }
-

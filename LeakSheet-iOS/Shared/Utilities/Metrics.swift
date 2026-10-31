@@ -8,8 +8,6 @@ nonisolated enum Metrics {
     static let hitTarget: CGFloat = 24
     /// Vertical padding inside a list row.
     static let rowVerticalPadding: CGFloat = 5
-    /// Horizontal padding inside a list row.
-    static let rowHorizontalPadding: CGFloat = 10
     /// Minimum height of a filter chip.
     static let chipHeight: CGFloat = 24
     /// Widest the reading column gets before it stops growing and centres, so a
@@ -18,7 +16,6 @@ nonisolated enum Metrics {
     #else
     static let hitTarget: CGFloat = 44
     static let rowVerticalPadding: CGFloat = 8
-    static let rowHorizontalPadding: CGFloat = 12
     static let chipHeight: CGFloat = 44
     static let contentMaxWidth: CGFloat = .infinity
     #endif

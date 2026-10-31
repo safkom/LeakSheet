@@ -12,7 +12,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
     let totalSongs: Int?
     let totalVersions: Int?
     /// Entries from secondary Misc / Music Videos tabs; optional so older payloads decode.
-    let miscEntries: [MiscEntry]?
     /// All parsed secondary tabs (misc, music_videos, released, best_of,
     /// worst_of, stems, other) — the uniform switchable-mode surface.
     let tabs: [TabSection]?
@@ -33,7 +32,6 @@ nonisolated struct Artist: Codable, Identifiable, Hashable, Sendable {
         case trackerStats = "tracker_stats"
         case totalSongs = "total_songs"
         case totalVersions = "total_versions"
-        case miscEntries = "misc_entries"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -163,7 +161,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     /// Names the fanbase uses for an unidentified track. Mirrors the backend's
     /// `_PLACEHOLDER_BASE_NAMES`: such rows are distinct tracks, sent with an empty `songKey`.
     static let placeholderBaseNames: Set<String> = [
-        "???", "??", "?", "unknown", "untitled", "tba", "n/a",
+        "???", "??", "?", "unknown", "untitled", "tba", "n/a"
     ]
 
     /// True when this song's title identifies nothing — see above.
@@ -178,12 +176,8 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     var computedBadge: Badge? {
-        if let b = badge { return Badge(rawValue: b) }
+        if let rawBadge = badge { return Badge(rawValue: rawBadge) }
         return Badge.mostSignificant(in: versions)
-    }
-
-    var isStreamable: Bool {
-        versions.contains { $0.isStreamable }
     }
 
     /// Whether the row shows more than one version — the *displayed* set, matching the
@@ -196,11 +190,11 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     /// multi-version row (highest quality wins, availability breaks ties).
     private static let qualityRank: [String: Int] = [
         "Lossless": 6, "CD Quality": 5, "High Quality": 4,
-        "Recording": 3, "Low Quality": 2, "Not Available": 0,
+        "Recording": 3, "Low Quality": 2, "Not Available": 0
     ]
     private static let availabilityRank: [String: Int] = [
         "OG File": 8, "Full": 7, "Tagged": 6, "Partial": 5,
-        "Snippet": 4, "Stem Bounce": 3, "Beat Only": 2, "Confirmed": 1,
+        "Snippet": 4, "Stem Bounce": 3, "Beat Only": 2, "Confirmed": 1
     ]
 
     /// The version with the best quality (availability breaks ties) — what a
@@ -217,13 +211,13 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     }
 
     private static func best(of candidates: [SongVersion]) -> SongVersion? {
-        candidates.max { a, b in
-            let qa = Self.qualityRank[a.quality ?? ""] ?? 1
-            let qb = Self.qualityRank[b.quality ?? ""] ?? 1
-            if qa != qb { return qa < qb }
-            let aa = Self.availabilityRank[a.availableLength ?? ""] ?? 0
-            let ab = Self.availabilityRank[b.availableLength ?? ""] ?? 0
-            return aa < ab
+        candidates.max { lhs, rhs in
+            let lhsQuality = Self.qualityRank[lhs.quality ?? ""] ?? 1
+            let rhsQuality = Self.qualityRank[rhs.quality ?? ""] ?? 1
+            if lhsQuality != rhsQuality { return lhsQuality < rhsQuality }
+            let lhsAvailability = Self.availabilityRank[lhs.availableLength ?? ""] ?? 0
+            let rhsAvailability = Self.availabilityRank[rhs.availableLength ?? ""] ?? 0
+            return lhsAvailability < rhsAvailability
         }
     }
 
@@ -317,469 +311,16 @@ extension Song {
 
 // MARK: - SongVersion
 
-/// A labeled evidence link from a tracker's Sources column — provenance for
-/// how a leak is known ("First Mention (Screenshot)"), distinct from listen links.
-nonisolated struct SourceRef: Codable, Hashable, Sendable {
-    let label: String
-    let url: String
-}
-
-nonisolated struct SongVersion: Codable, Identifiable, Hashable, Sendable {
-    let name: String
-    let versionTag: String?
-    let badge: String?
-    let featuring: String?
-    let producers: String?
-    let collaboration: String?
-    let refs: String?
-    /// Director credit, from "[dir. Name]" on music-video and visual rows.
-    let director: String?
-    let engineer: String?
-    /// Performer from a dedicated Artist / Credited Artist column (collab-style
-    /// trackers), distinct from `featuring`.
-    let creditedArtists: String?
-    let altTitles: [String]?
-    let notes: String?
-    let ogFilename: String?
-    let ogFilenames: [String]?
-    let samples: [String]?
-    let trackLength: String?
-    let fileDate: String?
-    let leakDate: String?
-    /// When a snippet/preview first surfaced; the only date a preview-only version has.
-    let previewDate: String?
-    let availableLength: String?
-    let quality: String?
-    /// Streaming Yes/No from a main-tab Streaming column.
-    let streaming: Bool?
-    let links: [String]?
-    let dateOfRecording: String?
-    let recordingLocation: String?
-    let type: String?
-    /// Labeled evidence links (Sources column, Travis-style trackers).
-    /// Optional so payloads persisted before the field existed still decode.
-    let sources: [SourceRef]?
-    /// Fan star rating 1-5 extracted from the availability cell.
-    let rating: Int?
-    /// The source the user (or the recents list) picked to play; nil plays the
-    /// first playable link. Local only: not in CodingKeys.
-    private(set) var chosenLink: String? = nil
-
-    /// Memberwise init with every field but `name` defaulted to nil — most
-    /// callers (favourites, misc entries) only ever populate a handful.
-    init(
-        name: String,
-        versionTag: String? = nil,
-        badge: String? = nil,
-        featuring: String? = nil,
-        producers: String? = nil,
-        collaboration: String? = nil,
-        refs: String? = nil,
-        director: String? = nil,
-        engineer: String? = nil,
-        creditedArtists: String? = nil,
-        altTitles: [String]? = nil,
-        notes: String? = nil,
-        ogFilename: String? = nil,
-        ogFilenames: [String]? = nil,
-        samples: [String]? = nil,
-        trackLength: String? = nil,
-        fileDate: String? = nil,
-        leakDate: String? = nil,
-        previewDate: String? = nil,
-        availableLength: String? = nil,
-        quality: String? = nil,
-        streaming: Bool? = nil,
-        links: [String]? = nil,
-        dateOfRecording: String? = nil,
-        recordingLocation: String? = nil,
-        type: String? = nil,
-        sources: [SourceRef]? = nil,
-        rating: Int? = nil
-    ) {
-        self.name = name
-        self.versionTag = versionTag
-        self.badge = badge
-        self.featuring = featuring
-        self.producers = producers
-        self.collaboration = collaboration
-        self.refs = refs
-        self.director = director
-        self.engineer = engineer
-        self.creditedArtists = creditedArtists
-        self.altTitles = altTitles
-        self.notes = notes
-        self.ogFilename = ogFilename
-        self.ogFilenames = ogFilenames
-        self.samples = samples
-        self.trackLength = trackLength
-        self.fileDate = fileDate
-        self.leakDate = leakDate
-        self.previewDate = previewDate
-        self.availableLength = availableLength
-        self.quality = quality
-        self.streaming = streaming
-        self.links = links
-        self.dateOfRecording = dateOfRecording
-        self.recordingLocation = recordingLocation
-        self.type = type
-        self.sources = sources
-        self.rating = rating
-    }
-
-    /// Name + tag alone is not unique (untagged same-name versions are common);
-    /// the file link tells them apart. A chosen source is a different track to the player.
-    var id: String { "\(name)::\(versionTag ?? "")::\(chosenLink ?? links?.first ?? "")" }
-
-    /// This version set to play `link` (nil: its first playable link).
-    func playing(_ link: String?) -> SongVersion {
-        var copy = self
-        copy.chosenLink = link
-        return copy
-    }
-
-    /// Every playable link, in sheet order.
-    var streamableLinks: [String] {
-        var seen = Set<String>()
-        return (links ?? []).filter { link in
-            StreamResolver.isStreamableURL(link)
-                && !(URL(string: link).map { Self.pathHasNonAudioExtension($0.path) } ?? false)
-                && seen.insert(link).inserted
-        }
-    }
-
-    /// The link a recent leak most likely refers to. Snippet-type rows append each new
-    /// leak after the older ones; a full file's row leads with the file itself
-    /// (DECISIONS.md::Models.swift::recent-leak-link).
-    var recentLeakLink: String? {
-        guard (links?.count ?? 0) > 1 else { return nil }
-        let links = streamableLinks
-        guard links.count > 1 else { return nil }
-        let availability = availableLength?.lowercased() ?? ""
-        let appendsLeaks = ["snippet", "partial", "stem"].contains { availability.contains($0) }
-        return appendsLeaks ? links.last : nil
-    }
-
-    /// File extensions that identify the linked file as NOT playable audio: such a
-    /// version hides Play actions and opens the description sheet instead.
-    static let nonAudioExtensions: [String] = [
-        ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz",
-        ".pdf", ".txt", ".doc", ".docx", ".rtf",
-        ".exe", ".dmg", ".iso", ".pkg",
-        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
-        ".mp4", ".mov", ".mkv", ".avi", ".webm"
-    ]
-
-    private static func pathHasNonAudioExtension(_ path: String) -> Bool {
-        let lower = path.lowercased()
-        return SongVersion.nonAudioExtensions.contains(where: lower.hasSuffix)
-    }
-
-    var isStreamable: Bool {
-        if allOgFilenames.contains(where: Self.pathHasNonAudioExtension) { return false }
-        guard let link = streamableLink else { return false }
-        if let urlPath = URL(string: link)?.path, Self.pathHasNonAudioExtension(urlPath) {
-            return false
-        }
-        return true
-    }
-
-    var streamableLink: String? {
-        if let chosenLink { return chosenLink }
-        guard let links else { return nil }
-        return links.first { StreamResolver.isStreamableURL($0) }
-    }
-
-    /// Base song name with the version tag stripped — matches the parser's
-    /// `Song.base_name` so favourites keyed from a bare version (player,
-    /// description sheet) agree with keys written from song rows. Tolerates
-    /// trailing whitespace and tag-case differences.
-    var derivedBaseName: String {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard let tag = versionTag else { return trimmed }
-        let suffix = " [\(tag)]"
-        if trimmed.hasSuffix(suffix) {
-            return String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        if trimmed.lowercased().hasSuffix(suffix.lowercased()) {
-            return String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
-        }
-        return trimmed
-    }
-
-    /// All OG filenames — prefers the plural field, falls back to the legacy
-    /// singular one for responses from older backends.
-    var allOgFilenames: [String] {
-        if let list = ogFilenames, !list.isEmpty { return list }
-        if let single = ogFilename, !single.isEmpty { return [single] }
-        return []
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case name, badge, featuring, producers, collaboration, refs, director, engineer, notes, samples, quality, streaming, links, type, sources, rating
-        case creditedArtists = "credited_artists"
-        case versionTag = "version_tag"
-        case altTitles = "alt_titles"
-        case ogFilename = "og_filename"
-        case ogFilenames = "og_filenames"
-        case trackLength = "track_length"
-        case fileDate = "file_date"
-        case leakDate = "leak_date"
-        case previewDate = "preview_date"
-        case availableLength = "available_length"
-        case dateOfRecording = "date_of_recording"
-        case recordingLocation = "recording_location"
-    }
-}
-
 // MARK: - MiscEntry
-
-/// One entry from a secondary tracker tab (Misc / Music Videos) — kept fully
-/// separate from the era/song tree.
-nonisolated struct MiscEntry: Codable, Identifiable, Hashable, Sendable {
-    let eraName: String
-    /// Position within its tab, from the backend. Optional so payloads cached
-    /// before the field existed still decode — see `id`.
-    let rowIndex: Int?
-    let name: String
-    let notes: String?
-    let entryType: String?
-    let date: String?
-    let length: String?
-    let available: String?
-    let quality: String?
-    let streaming: Bool?
-    let links: [String]
-    let sourceTab: String
-    /// The tab's sub-section ("Instrumentals", "Music Videos"), if any.
-    var section: String? = nil
-
-    /// Row identity. `rowIndex` makes it unique: these tabs repeat content constantly,
-    /// and ForEach keeps only the first row per duplicate id. Payloads cached before
-    /// the backend sent an index fall back to the content-derived shape.
-    var id: String {
-        guard let rowIndex else {
-            return "\(sourceTab)::\(eraName)::\(name)::\(date ?? "")"
-        }
-        return "\(sourceTab)::\(rowIndex)::\(eraName)::\(name)"
-    }
-
-    var streamableLink: String? {
-        links.first { StreamResolver.isStreamableURL($0) }
-    }
-
-    var isStreamable: Bool { streamableLink != nil }
-
-    /// Every link, classified by content kind — lets a row show the right
-    /// affordance per link and, when there's more than one, let the user
-    /// choose explicitly instead of guessing which one to open.
-    var mediaLinks: [MiscLink] {
-        links.map { url in
-            let kind = MiscLinkClassifier.classify(url)
-            return MiscLink(url: url, kind: kind, label: MiscLinkClassifier.label(for: url, kind: kind))
-        }
-    }
-
-    /// Best available preview image across this entry's links — a direct
-    /// image file, or a derivable video thumbnail (YouTube). Nil when
-    /// nothing can be previewed without fetching the linked page.
-    var previewImageURL: String? {
-        mediaLinks.lazy.compactMap { MiscLinkClassifier.thumbnailURL(for: $0.url, kind: $0.kind) }.first
-    }
-
-    /// Minimal SongVersion so misc entries flow through the existing playback
-    /// and description-sheet machinery unchanged.
-    var asSongVersion: SongVersion {
-        SongVersion(
-            name: name,
-            notes: notes,
-            trackLength: length,
-            leakDate: date,
-            availableLength: available,
-            quality: quality,
-            streaming: streaming,
-            links: links,
-            type: entryType
-        )
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case name, notes, date, length, available, quality, streaming, links, section
-        case eraName = "era_name"
-        case rowIndex = "row_index"
-        case entryType = "entry_type"
-        case sourceTab = "source_tab"
-    }
-}
 
 // MARK: - TabSection
 
-/// One parsed secondary tab (Released / Best Of / Worst Of / Stems / Misc /
-/// Music Videos / other) — the uniform switchable-mode surface. Misc/MV
-/// entries also remain in the flat `Artist.miscEntries` for backward compat.
-nonisolated struct TabSection: Codable, Identifiable, Hashable, Sendable {
-    let kind: String
-    /// Original tab display name from the spreadsheet (may include emoji).
-    let name: String
-    let entries: [MiscEntry]
-
-    var id: String { "\(kind)::\(name)" }
-}
-
 // MARK: - Badge
-
-nonisolated enum Badge: String, Codable, CaseIterable, Sendable {
-    case best
-    case special
-    case worst
-    case grail
-    case wanted
-    case ai
-
-    var emoji: String {
-        switch self {
-        case .best: "⭐"
-        case .special: "✨"
-        case .worst: "🗑️"
-        case .grail: "🏆"
-        case .wanted: "🏅"
-        case .ai: "🤖"
-        }
-    }
-
-    var isBestOf: Bool {
-        self == .best || self == .special
-    }
-
-    /// Display precedence when one song carries several differently-badged versions:
-    /// positive badges outrank negative ones. Mirrors the backend's `Song.badge` ordering.
-    var displayPriority: Int {
-        switch self {
-        case .grail: 0
-        case .best: 1
-        case .special: 2
-        case .wanted: 3
-        case .worst: 4
-        case .ai: 5
-        }
-    }
-
-    /// Highest-precedence badge across *versions*, or nil when none carry one.
-    static func mostSignificant(in versions: [SongVersion]) -> Badge? {
-        versions
-            .compactMap { $0.badge.flatMap(Badge.init(rawValue:)) }
-            .min { $0.displayPriority < $1.displayPriority }
-    }
-
-    /// Canonical display label — the single source for every sheet that
-    /// lists badges (description, legend, tracker stats).
-    var label: String {
-        switch self {
-        case .best: "Best Of"
-        case .special: "Special"
-        case .worst: "Worst Of"
-        case .grail: "Grail"
-        case .wanted: "Wanted"
-        case .ai: "AI"
-        }
-    }
-}
 
 // MARK: - TrackerStats
 
-nonisolated struct TrackerStats: Codable, Hashable, Sendable {
-    // Links
-    /// Every link the tracker counted, working or not — the denominator that
-    /// turns "42 missing" into "42 of 1,203 missing".
-    let totalLinks: Int?
-    let missingLinks: Int?
-    let sourcesNeeded: Int?
-    let notAvailableLinks: Int?
-    // Quality
-    let lossless: Int?
-    let cdQuality: Int?
-    let highQuality: Int?
-    let lowQuality: Int?
-    let recordings: Int?
-    let notAvailableQuality: Int?
-    // Availability
-    let ogFiles: Int?
-    let stemBounces: Int?
-    let full: Int?
-    /// The "Total Full" wording, which already counts the OG files. Trackers use this
-    /// or `full`, so a Carti-style sheet reports `full: 0` with everything in here.
-    let totalFull: Int?
-    let tagged: Int?
-    let partial: Int?
-    let snippets: Int?
-    let unavailable: Int?
-    // Badges
-    let bestOf: Int?
-    let special: Int?
-    let grails: Int?
-    let wanted: Int?
-    let worstOf: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case lossless, full, tagged, partial, snippets, unavailable, recordings, special, wanted, grails
-        case totalLinks = "total_links"
-        case missingLinks = "missing_links"
-        case sourcesNeeded = "sources_needed"
-        case notAvailableLinks = "not_available_links"
-        case cdQuality = "cd_quality"
-        case highQuality = "high_quality"
-        case lowQuality = "low_quality"
-        case notAvailableQuality = "not_available_quality"
-        case ogFiles = "og_files"
-        case stemBounces = "stem_bounces"
-        case totalFull = "total_full"
-        case bestOf = "best_of"
-        case worstOf = "worst_of"
-    }
-}
-
 // MARK: - Notice
-
-nonisolated struct Notice: Codable, Identifiable, Hashable, Sendable {
-    let text: String
-    let link: String?
-    let kind: String?
-
-    /// Composite identity: two notices with the same text but different kind
-    /// or link must not collide in a ForEach (SwiftUI silently drops
-    /// duplicate IDs, losing the second banner).
-    var id: String { "\(kind ?? "info")::\(text)::\(link ?? "")" }
-
-    var isAlert: Bool { kind == "alert" }
-}
 
 // MARK: - TimelineEvent
 
-nonisolated struct TimelineEvent: Codable, Identifiable, Hashable, Sendable {
-    let date: String
-    let event: String
-
-    var id: String { "\(date):\(event)" }
-}
-
 // MARK: - DiscoveryArtist
-
-/// One entry of the backend /trackers discovery feed (ArtistGrid registry).
-nonisolated struct DiscoveryArtist: Codable, Identifiable, Sendable {
-    let name: String
-    let url: String
-    let credit: String?
-    let best: Bool?
-    let upToDate: Bool?
-    /// The registry's link-health flag. Tri-state: "partially working" is neither true
-    /// nor false, and known-dead links are worth flagging before the user opens it.
-    let workingLinks: Bool?
-
-    var id: String { url }
-
-    enum CodingKeys: String, CodingKey {
-        case name, url, credit, best
-        case upToDate = "up_to_date"
-        case workingLinks = "working_links"
-    }
-}

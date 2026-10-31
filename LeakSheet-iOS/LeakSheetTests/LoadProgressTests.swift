@@ -11,7 +11,7 @@ struct LoadProgressTests {
             .server(message: "Reading tabs", done: 3, total: 6),
             .downloading(receivedBytes: 0, expectedBytes: nil),
             .downloading(receivedBytes: 50, expectedBytes: 100),
-            .preparing,
+            .preparing
         ]
         let units = phases.map { LoadProgress.of($0).units }
         #expect(units == units.sorted())

@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.parser import parse_sheet  # noqa: E402
+from src.parser import parse_sheet
 
 LABELS_DIR = Path(__file__).parent / "labels"
 CORPUS_DIR = os.environ.get("LEAKSHEET_CORPUS", ".cache")
@@ -71,7 +71,7 @@ def _candidates(needle: str):
         raw = open(path, "rb").read()
         try:
             artist = parse_sheet(raw.decode("utf-8", errors="replace"), title, url)
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         found.append(((1 if artist.total_songs else 0, artist.total_songs,
                        len(artist.eras)), raw, title, url, artist))

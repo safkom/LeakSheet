@@ -37,7 +37,8 @@ struct VideoSurfaceView: UIViewRepresentable {
 
     final class PlayerLayerView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        // `layerClass` makes `layer` an AVPlayerLayer, so the cast cannot fail.
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }  // swiftlint:disable:this force_cast
     }
 
     func makeUIView(context: Context) -> PlayerLayerView {

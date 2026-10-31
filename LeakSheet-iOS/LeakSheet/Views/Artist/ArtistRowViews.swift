@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Leaf views for the artist screen: the flattened era/song/version
-/// row, the filter chip, and the notice banner.
+// Leaf views for the artist screen: the flattened era/song/version
+// row, the filter chip, and the notice banner.
 
 // MARK: - Era row (flattened list)
 

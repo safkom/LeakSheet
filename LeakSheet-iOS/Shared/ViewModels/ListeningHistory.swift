@@ -28,7 +28,6 @@ final class ListeningHistory {
         let eraArt: String?
         /// Full snapshot, so Landing can play it without loading the tracker.
         let version: SongVersion
-        let last: Date
     }
 
     nonisolated struct Snapshot: Codable, Sendable {
@@ -101,7 +100,7 @@ final class ListeningHistory {
         recent.insert(
             RecentPlay(
                 id: id, artistSlug: artistSlug, artistName: artistName,
-                eraName: eraName, eraArt: eraArt, version: version, last: date
+                eraName: eraName, eraArt: eraArt, version: version
             ),
             at: 0
         )
@@ -133,7 +132,10 @@ final class ListeningHistory {
             plays = snapshot.plays
             recent = Array(snapshot.recent.prefix(Self.recentLimit))
         } catch {
-            Self.log.error("Failed to decode listening history (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
+            Self.log.error("""
+                Failed to decode listening history (\(data.count, privacy: .public) bytes): \
+                \(error.localizedDescription, privacy: .public)
+                """)
             // Keep the unreadable file, as favourites do: the next save would replace it.
             let aside = fileURL.deletingPathExtension().appendingPathExtension("unreadable.json")
             try? FileManager.default.removeItem(at: aside)

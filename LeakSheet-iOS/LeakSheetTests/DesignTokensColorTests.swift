@@ -56,7 +56,7 @@ struct DesignTokensColorTests {
             (Color.lsBackground, "lsBackground"),
             (Color.lsCard, "lsCard"),
             (Color.badgeOG, "badgeOG"),
-            (Color.lsAccent, "lsAccent"),
+            (Color.lsAccent, "lsAccent")
         ] {
             let dark = color.rgbComponents(in: .dark)
             let light = color.rgbComponents(in: .light)
@@ -132,8 +132,11 @@ struct DesignTokensColorTests {
     @Test("Body tones clear AA on the app background", arguments: [ColorScheme.dark, .light])
     func onBackgroundContrast(scheme: ColorScheme) {
         for (color, label) in [
-            (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (.lsFavourite, "lsFavourite"), (.lsWarning, "lsWarning"),
-            (.lsSuccess, "lsSuccess"),
+            (Color.lsError, "lsError"), (.lsAccent, "lsAccent"), (
+                .lsFavourite,
+                "lsFavourite"
+            ), (.lsWarning, "lsWarning"),
+            (.lsSuccess, "lsSuccess")
         ] {
             expectAA(color, on: .lsBackground, label, scheme)
         }
@@ -165,7 +168,7 @@ struct DesignTokensColorTests {
         (.badgeStem, "badgeStem"), (.badgeUnavailable, "badgeUnavailable"),
         (.badgeRumored, "badgeRumored"), (.badgeConflicting, "badgeConflicting"),
         (.badgeEntryType, "badgeEntryType"),
-        (.lsAccent, "lsAccent"),
+        (.lsAccent, "lsAccent")
     ]
 
     private static let creditTones: [(Color, String)] = [
@@ -174,7 +177,7 @@ struct DesignTokensColorTests {
         (CreditType.collaboration.color, "credit.collaboration"),
         (CreditType.refs.color, "credit.refs"),
         (CreditType.director.color, "credit.director"),
-        (CreditType.creditedArtists.color, "credit.creditedArtists"),
+        (CreditType.creditedArtists.color, "credit.creditedArtists")
     ]
 }
 
@@ -201,7 +204,7 @@ struct EraDisplayColorsContrastTests {
         (Color(hex: 0xFFFFFF), "white"),
         (Color(hex: 0x1227B7), "royal blue"),
         (Color(hex: 0x7E5797), "purple"),
-        (Color(hex: 0x9E3A25), "brick"),
+        (Color(hex: 0x9E3A25), "brick")
     ]
 
     @Test("Card title clears AA on both gradient stops", arguments: [ColorScheme.dark, .light])
@@ -210,7 +213,10 @@ struct EraDisplayColorsContrastTests {
             let colors = EraDisplayColors.derive(from: dominant, in: scheme)
             for (stop, which) in [(colors.gradientTop, "top"), (colors.gradientBottom, "bottom")] {
                 let ratio = colors.title.contrastRatio(against: stop, in: scheme)
-                #expect(ratio >= 4.5, "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)")
+                #expect(
+                    ratio >= 4.5,
+                    "\(label) title on \(which) stop: \(String(format: "%.2f", ratio)):1 in \(scheme)"
+                )
             }
         }
     }
@@ -223,7 +229,10 @@ struct EraDisplayColorsContrastTests {
         for (dominant, label) in Self.dominants {
             let panel = EraDisplayColors.derive(from: dominant, in: scheme).panel
             let ratio = panel.relativeLuminance(in: scheme) / card
-            #expect(abs(ratio - 1) < 0.1, "\(label) panel luminance is \(String(format: "%.2f", ratio))x lsCard in \(scheme)")
+            #expect(
+                abs(ratio - 1) < 0.1,
+                "\(label) panel luminance is \(String(format: "%.2f", ratio))x lsCard in \(scheme)"
+            )
         }
     }
 

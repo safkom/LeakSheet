@@ -5,7 +5,7 @@ import Testing
 
 struct StreamResolverTests {
     @Test(arguments: [
-        "https://pillows.su/f/58876d9f36b768640439466088764e87",
+        "https://pillows.su/f/0123456789abcdef0123456789abcdef",
         "https://www.pillowcase.su/f/abc123",
         "https://plwcse.top/f/abc123",
         "https://www.plwcse.top/f/abc123",
@@ -25,7 +25,7 @@ struct StreamResolverTests {
         // streaming._extract_gdrive_id resolves all three forms).
         "https://drive.google.com/open?id=1AbC-x_9",
         "https://drive.google.com/uc?id=1AbC-x_9&export=download",
-        "https://drive.google.com/uc?export=download&id=1AbC-x_9",
+        "https://drive.google.com/uc?export=download&id=1AbC-x_9"
     ])
     func `known hosts are streamable`(url: String) {
         #expect(StreamResolver.isStreamableURL(url))
@@ -42,7 +42,7 @@ struct StreamResolverTests {
         "https://music.froste.lol/song/XYZ",     // non-hex hash
         "https://pixeldrain.com/l/abc123",       // pixeldrain LIST, not a file
         "https://drive.google.com/drive/folders/1AbCdEf",  // gdrive folder (no file id)
-        "",
+        ""
     ])
     func `unknown hosts and malformed links are not streamable`(url: String) {
         #expect(!StreamResolver.isStreamableURL(url))
@@ -109,7 +109,7 @@ struct StreamResolverTests {
             "https://imgur.gg/f/002XdG5",
             "https://krakenfiles.com/view/FJmpAhYHMp/file.html",
             "https://pixeldrain.com/u/aBc123",
-            "https://drive.google.com/file/d/1AbC/view",
+            "https://drive.google.com/file/d/1AbC/view"
         ]
         for link in links {
             guard let url = StreamResolver.originalQualityURL(for: link)?.absoluteString else {
@@ -132,11 +132,11 @@ struct StreamResolverTests {
     /// no `?` — so the id failed isID and 25 links in the live corpus showed no
     /// play affordance at all.
     @Test func `a pillows link with glued google tracking is still streamable`() {
-        let link = "https://pillows.su/f/274b47d9d17ae027929947fc28218bde"
-            + "&sa=D&source=editors&ust=1768409055962135&usg=AOvVaw0brfg"
-        #expect(StreamResolver.target(for: link) == .pillows(id: "274b47d9d17ae027929947fc28218bde"))
+        let link = "https://pillows.su/f/fedcba9876543210fedcba9876543210"
+            + "&sa=D&source=editors&ust=1700000000000000&usg=AOvVaw0000000000000000000000"
+        #expect(StreamResolver.target(for: link) == .pillows(id: "fedcba9876543210fedcba9876543210"))
         #expect(StreamResolver.originalQualityURL(for: link)?.absoluteString
-                == "https://api.pillows.su/api/download/274b47d9d17ae027929947fc28218bde")
+                == "https://api.pillows.su/api/download/fedcba9876543210fedcba9876543210")
     }
 
     @Test func `the wrapper is stripped before the link is proxied`() {
@@ -180,7 +180,7 @@ struct VersionSourceTests {
         "https://pillows.su/f/old-lq",
         "https://www.youtube.com/watch?v=sampled-song",
         "https://pillows.su/f/old-lq",
-        "https://imgur.gg/f/new-lossless",
+        "https://imgur.gg/f/new-lossless"
     ]
 
     @Test func `sources are the playable links, deduplicated, in sheet order`() {
@@ -192,7 +192,11 @@ struct VersionSourceTests {
         #expect(SongVersion(name: "S", availableLength: "Snippet", links: Self.snippets).recentLeakLink
                 == "https://imgur.gg/f/new-lossless")
         #expect(SongVersion(name: "S", availableLength: "Full", links: Self.snippets).recentLeakLink == nil)
-        #expect(SongVersion(name: "S", availableLength: "Snippet", links: ["https://pillows.su/f/one"]).recentLeakLink == nil)
+        #expect(SongVersion(
+            name: "S",
+            availableLength: "Snippet",
+            links: ["https://pillows.su/f/one"]
+        ).recentLeakLink == nil)
     }
 
     @Test func `a chosen source plays and is its own track, without changing the row's links`() {
@@ -213,7 +217,7 @@ struct VersionSourceTests {
         ("https://music.froste.lol/song/0a1b2c3d", "froste"),
         ("https://www.krakenfiles.com/view/FJmpAhYHMp/file.html", "kraken"),
         ("https://pixeldrain.com/u/aBc123", "pixeldrain"),
-        ("https://drive.google.com/file/d/1AbC-x_9/view", "gdrive"),
+        ("https://drive.google.com/file/d/1AbC-x_9/view", "gdrive")
     ])
     func `each host maps to its backend provider key`(link: String, provider: String) {
         #expect(StreamResolver.provider(for: link) == provider)

@@ -52,10 +52,10 @@ nonisolated struct PlaybackQueueLogic {
     /// registered list is not. See
     /// DECISIONS.md::PlaybackQueueLogic.swift::era-identity.
     private static func indexOfEra(_ context: EraSongContext, in eras: [EraSongContext]) -> Int? {
-        let matches = eras.indices.filter { i in
-            eras[i].eraName == context.eraName
-                && eras[i].artistName == context.artistName
-                && eras[i].artUrl == context.artUrl
+        let matches = eras.indices.filter { index in
+            eras[index].eraName == context.eraName
+                && eras[index].artistName == context.artistName
+                && eras[index].artUrl == context.artUrl
         }
         guard matches.count > 1 else { return matches.first }
         return matches.first { eras[$0].versions.count == context.versions.count } ?? matches.first
@@ -111,7 +111,7 @@ nonisolated struct PlaybackQueueLogic {
         return context.versions.dropFirst(idx + 1).prefix(limit).map {
             PlaybackListItem(
                 version: $0, artistName: context.artistName, eraName: context.eraName,
-                artUrl: context.artUrl, artistSlug: context.artistSlug, isInserted: context.isInserted
+                artUrl: context.artUrl, artistSlug: context.artistSlug
             )
         }
     }
@@ -157,7 +157,14 @@ nonisolated struct PlaybackQueueLogic {
     // MARK: - Queue
 
     /// `playNext` puts the item at the front, ahead of anything already queued.
-    mutating func addToQueue(_ version: SongVersion, artistName: String, eraName: String, artUrl: String, artistSlug: String = "", playNext: Bool = false) {
+    mutating func addToQueue(
+        _ version: SongVersion,
+        artistName: String,
+        eraName: String,
+        artUrl: String,
+        artistSlug: String = "",
+        playNext: Bool = false
+    ) {
         guard queue.count < 200 else { return }
         queueIdCounter += 1
         let item = QueueItem(

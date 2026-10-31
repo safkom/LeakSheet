@@ -52,7 +52,11 @@ struct EraCardView: View {
                 .buttonStyle(.plain)
                 // The alt names and subtitle are part of what the card says, and
                 // state belongs in the value: a hint can be turned off.
-                .accessibilityLabel([era.name, era.altNames?.joined(separator: ", "), subtitle].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityLabel([
+                    era.name,
+                    era.altNames?.joined(separator: ", "),
+                    subtitle
+                ].compactMap { $0 }.joined(separator: ", "))
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityActions {
                     ForEach(actions) { action in Button(action.id, action: action.run) }
@@ -114,7 +118,9 @@ struct EraCardView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(descriptionExpanded ? "Show less of the era description" : "Show the full era description")
+                .accessibilityLabel(
+                    descriptionExpanded ? "Show less of the era description" : "Show the full era description"
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,24 +234,24 @@ private struct EraCardBorder: Shape {
 
     nonisolated func path(in rect: CGRect) -> Path {
         var path = Path()
-        let r = cornerRadius
+        let corner = cornerRadius
 
         if expanded {
             // Top-left corner
             path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + corner))
             path.addArc(
-                center: CGPoint(x: rect.minX + r, y: rect.minY + r),
-                radius: r,
+                center: CGPoint(x: rect.minX + corner, y: rect.minY + corner),
+                radius: corner,
                 startAngle: .degrees(180),
                 endAngle: .degrees(270),
                 clockwise: false
             )
             // Top edge → top-right corner
-            path.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX - corner, y: rect.minY))
             path.addArc(
-                center: CGPoint(x: rect.maxX - r, y: rect.minY + r),
-                radius: r,
+                center: CGPoint(x: rect.maxX - corner, y: rect.minY + corner),
+                radius: corner,
                 startAngle: .degrees(270),
                 endAngle: .degrees(0),
                 clockwise: false
@@ -253,7 +259,7 @@ private struct EraCardBorder: Shape {
             // Right edge down to bottom (bottom edge intentionally omitted)
             path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         } else {
-            path.addRoundedRect(in: rect, cornerSize: CGSize(width: r, height: r))
+            path.addRoundedRect(in: rect, cornerSize: CGSize(width: corner, height: corner))
         }
 
         return path

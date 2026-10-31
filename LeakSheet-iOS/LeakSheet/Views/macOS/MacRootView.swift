@@ -7,27 +7,29 @@ import SwiftUI
 struct MacRootView: View {
     @Environment(RecentTrackersManager.self) private var recents
 
-    @State private var ui = MacUIState.shared
+    @State private var uiState = MacUIState.shared
     @State private var loader = TrackerLoader()
     /// Latest selecting open wins: a queued earlier open finishing late must not steal the selection.
     @State private var selectToken = 0
+    /// The sidebar-initiated load the loading pane shows, so its Cancel can stop it.
+    @State private var paneLoad: Task<Void, Never>?
 
     /// The view model for whatever is playing — lets the mini player resolve the
     /// full song behind the bare version the player holds.
     private var vmForCurrentPlayback: ArtistViewModel? {
-        ui.trackers[PlayerViewModel.shared.artistSlug]?.vm
+        uiState.trackers[PlayerViewModel.shared.artistSlug]?.viewModel
     }
 
     /// The view model the Details panel resolves against: the tracker being BROWSED,
     /// falling back to the one playing (a favourite of a tracker that isn't open).
     private var vmForInspector: ArtistViewModel? {
-        if let slug = ui.selectedSlug, let vm = ui.tracker(slug)?.vm { return vm }
+        if let slug = uiState.selectedSlug, let viewModel = uiState.tracker(slug)?.viewModel { return viewModel }
         return vmForCurrentPlayback
     }
 
     var body: some View {
         NavigationSplitView {
-            MacSidebar(selection: $ui.selection)
+            MacSidebar(selection: $uiState.selection)
         } detail: {
             // GeometryReader clamps the detail column to its offered size: see
             // DECISIONS.md::MacRootView.swift::geometry-clamp
@@ -44,7 +46,7 @@ struct MacRootView: View {
             .background(Color.lsBackground)
         }
         .frame(minWidth: 900, minHeight: 620)
-        .inspector(isPresented: $ui.showInspector) {
+        .inspector(isPresented: $uiState.showInspector) {
             MacInspector()
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
@@ -52,10 +54,10 @@ struct MacRootView: View {
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 460)
         }
         // ⇧⌘V routes a pasted URL into the Browse pane and loads it.
-        .onChange(of: ui.pastedURL) { _, pasted in
+        .onChange(of: uiState.pastedURL) { _, pasted in
             guard let pasted else { return }
-            ui.pastedURL = nil
-            ui.selection = .browse
+            uiState.pastedURL = nil
+            uiState.selection = .browse
             loader.url = pasted
             Task { await open(pasted) }
         }
@@ -64,25 +66,28 @@ struct MacRootView: View {
         .onAppear { consumeDeepLink() }
         // Selecting a tracker that isn't parsed yet (a sidebar row from a
         // previous launch) loads it on demand.
-        .onChange(of: ui.selection) { _, selection in
+        .onChange(of: uiState.selection) { _, selection in
             // The Details panel is scoped to what you are looking at, so a stale song
             // can't resolve against another tracker's era tree.
-            ui.selectedSong = nil
-            ui.selectedEra = nil
+            uiState.selectedSong = nil
+            uiState.selectedEra = nil
             // Browse has nothing to inspect; the queue stays, it is not about the pane.
-            if selection == .browse || selection == nil, ui.inspectorTab != .queue { ui.showInspector = false }
-            if case .tracker(let slug) = selection { ui.touch(slug) }
-            guard case .tracker(let slug) = selection, ui.tracker(slug) == nil,
+            if selection == .browse || selection == nil,
+               uiState.inspectorTab != .queue { uiState.showInspector = false }
+            if case .tracker(let slug) = selection { uiState.touch(slug) }
+            guard case .tracker(let slug) = selection, uiState.tracker(slug) == nil,
                   let entry = recents.trackers.first(where: { $0.slug == slug })
             else { return }
-            Task { await open(entry.sourceUrl, artistName: entry.name, select: false) }
+            paneLoad = Task { await open(entry.sourceUrl, artistName: entry.name, select: false) }
         }
         // ⌘R re-fetches the selected tracker, bypassing the cache.
-        .onChange(of: ui.refreshToken) { _, _ in
-            guard let slug = ui.selectedSlug,
-                  let url = ui.tracker(slug)?.artist.sourceUrl
+        .onChange(of: uiState.refreshToken) { _, _ in
+            guard let slug = uiState.selectedSlug,
+                  let url = uiState.tracker(slug)?.artist.sourceUrl
                     ?? recents.trackers.first(where: { $0.slug == slug })?.sourceUrl
             else { return }
+            // A second Refresh while this tracker is already re-parsing would queue another full parse.
+            guard !(loader.loading && loader.loadingURL == url) else { return }
             Task { await open(url, forceRefresh: true, select: false) }
         }
     }
@@ -90,7 +95,7 @@ struct MacRootView: View {
     private func consumeDeepLink() {
         guard let pending = DeepLinkRouter.shared.pending else { return }
         DeepLinkRouter.shared.pending = nil
-        ui.selection = .browse
+        uiState.selection = .browse
         Task { await open(pending.url, artistName: pending.name) }
     }
 
@@ -98,7 +103,7 @@ struct MacRootView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch ui.selection {
+        switch uiState.selection {
         case .browse, nil:
             browsePane
         case .favourites:
@@ -106,16 +111,16 @@ struct MacRootView: View {
             FavouritesView(
                 embedded: true,
                 onShowDescription: { payload in
-                    ui.selectedSong = payload
-                    ui.inspectorTab = .details
-                    ui.showInspector = true
+                    uiState.selectedSong = payload
+                    uiState.inspectorTab = .details
+                    uiState.showInspector = true
                 }
             )
             .environment(FavouritesManager.shared)
             .environment(vmForCurrentPlayback)
         case .tracker(let slug):
-            if let loaded = ui.tracker(slug) {
-                MacArtistView(artist: loaded.artist, vm: loaded.vm)
+            if let loaded = uiState.tracker(slug) {
+                MacArtistView(artist: loaded.artist, viewModel: loaded.viewModel)
                     .id(slug)
             } else {
                 loadingPane
@@ -133,7 +138,7 @@ struct MacRootView: View {
                     .padding(.horizontal, 24)
             } else {
                 // A queued open waits behind another tracker's load: that progress isn't this pane's.
-                if let phase = loader.loadPhase, let slug = ui.selectedSlug,
+                if let phase = loader.loadPhase, let slug = uiState.selectedSlug,
                    loader.loadingURL == recents.trackers.first(where: { $0.slug == slug })?.sourceUrl {
                     LoadPhaseRow(phase: phase)
                         .fixedSize()
@@ -143,6 +148,12 @@ struct MacRootView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                Button("Cancel") {
+                    paneLoad?.cancel()
+                    uiState.selection = .browse
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -169,6 +180,17 @@ struct MacRootView: View {
                     .padding(.bottom, 8)
             }
 
+            // Details open in the inspector, as everywhere else on the Mac.
+            RecentPlaysShelfView { payload in
+                uiState.selectedSong = payload
+                uiState.inspectorTab = .details
+                uiState.showInspector = true
+            }
+            // Its own height, not a share of the pane's: the lazy row would take the slack.
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 12)
+            .frame(maxWidth: Metrics.contentMaxWidth)
+
             Divider().overlay(Color.lsBorder)
 
             // embedded: the split view already supplies the title and toolbar.
@@ -193,7 +215,7 @@ struct MacRootView: View {
         forceRefresh: Bool = false,
         select: Bool = true
     ) async {
-        let shown = ui.selectedSlug.flatMap { ui.tracker($0) }
+        let shown = uiState.selectedSlug.flatMap { uiState.tracker($0) }
         if select { selectToken += 1 }
         let token = selectToken
         guard let artist = await loader.load(
@@ -202,16 +224,16 @@ struct MacRootView: View {
             // A failed ⌘R keeps the loaded copy: say why there, not only on the other panes.
             // No error means the load was cancelled, which says nothing.
             if let shown, shown.artist.sourceUrl == url, let error = loader.error {
-                shown.vm.loadNotice = error
+                shown.viewModel.loadNotice = error
             }
             return
         }
         let notice = loader.staleNotice
-        let vm = await loader.preparing { await ArtistViewModel.make(artist: artist) }
-        vm.loadNotice = notice
-        ui.store(LoadedTracker(artist: artist, vm: vm))
+        let viewModel = await loader.preparing { await ArtistViewModel.make(artist: artist) }
+        viewModel.loadNotice = notice
+        uiState.store(LoadedTracker(artist: artist, viewModel: viewModel))
         if select && token == selectToken {
-            ui.selection = .tracker(slug: artist.slug)
+            uiState.selection = .tracker(slug: artist.slug)
         }
     }
 }

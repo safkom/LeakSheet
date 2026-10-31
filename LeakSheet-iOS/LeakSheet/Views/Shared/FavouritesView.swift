@@ -12,6 +12,7 @@ struct FavouritesView: View {
 
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var showClearConfirm = false
+    @State private var selectedKey: String?
 
     /// Set when hosted as a sidebar destination rather than presented as a
     /// sheet — the host supplies the navigation chrome.
@@ -38,6 +39,18 @@ struct FavouritesView: View {
         }
     }
 
+    private func entry(forKey key: String?) -> FavouritesManager.FavouriteEntry? {
+        key.flatMap { key in favourites.entries.first { $0.key == key } }
+    }
+
+    private func play(_ entry: FavouritesManager.FavouriteEntry) {
+        guard let version = entry.primaryVersion, version.isStreamable else { return }
+        player.playTrack(
+            version, artistName: entry.artistName, eraName: entry.eraName,
+            artUrl: entry.eraArt ?? "", artistSlug: entry.artistSlug
+        )
+    }
+
     private var content: some View {
             Group {
                 if favourites.entries.isEmpty {
@@ -47,13 +60,16 @@ struct FavouritesView: View {
                         description: Text(Self.emptyHint)
                     )
                 } else {
-                    List {
+                    List(selection: $selectedKey) {
                         let grouped = favourites.groupedByArtist
                         ForEach(grouped, id: \.artistSlug) { artistGroup in
                             SwiftUI.Section {
                                 ForEach(artistGroup.eras, id: \.eraName) { eraGroup in
                                     ForEach(eraGroup.entries) { entry in
                                         Button {
+                                            #if os(macOS)
+                                            selectedKey = entry.key  // the button eats the click List selects on
+                                            #endif
                                             if let payload = entry.toDescriptionPayload {
                                                 if let onShowDescription {
                                                     onShowDescription(payload)
@@ -65,7 +81,10 @@ struct FavouritesView: View {
                                             HStack(spacing: 10) {
                                                 // Era art thumbnail
                                                 if let artStr = entry.eraArt, !artStr.isEmpty {
-                                                    CachedImage(url: APIClient.shared.imageProxyURL(for: artStr, width: 128), maxPixelSize: 128) {
+                                                    CachedImage(
+                                                        url: APIClient.shared.imageProxyURL(for: artStr, width: 128),
+                                                        maxPixelSize: 128
+                                                    ) {
                                                         favArtPlaceholder
                                                     }
                                                     .frame(width: 40, height: 40)
@@ -94,7 +113,8 @@ struct FavouritesView: View {
                                                     // legacy flat fields nil.
                                                     DedupedBadgePills(
                                                         quality: entry.primaryVersion?.quality ?? entry.quality,
-                                                        availability: entry.primaryVersion?.availableLength ?? entry.availableLength
+                                                        availability: entry.primaryVersion?.availableLength
+                                                            ?? entry.availableLength
                                                     )
                                                 }
                                                 Spacer()
@@ -119,10 +139,17 @@ struct FavouritesView: View {
                                         // macOS ignores swipeActions; the context menu is its
                                         // only way to un-favourite.
                                         .contextMenu {
-                                            Button("Remove from Favourites", systemImage: "heart.slash", role: .destructive) {
+                                            Button("Play", systemImage: "play.fill") { play(entry) }
+                                                .disabled(entry.primaryVersion?.isStreamable != true)
+                                            Button(
+                                                "Remove from Favourites",
+                                                systemImage: "heart.slash",
+                                                role: .destructive
+                                            ) {
                                                 favourites.remove(key: entry.key)
                                             }
                                         }
+                                        .tag(entry.key)
                                     }
                                 }
                             } header: {
@@ -131,6 +158,19 @@ struct FavouritesView: View {
                             }
                         }
                     }
+                    #if os(macOS)
+                    // Arrowing through favourites drives the Details inspector, as the song list does,
+                    // and Return plays the selection.
+                    .onChange(of: selectedKey) { _, key in
+                        guard let payload = entry(forKey: key)?.toDescriptionPayload else { return }
+                        onShowDescription?(payload)
+                    }
+                    .onKeyPress(.return) {
+                        guard let entry = entry(forKey: selectedKey) else { return .ignored }
+                        play(entry)
+                        return .handled
+                    }
+                    #endif
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                 }

@@ -8,7 +8,8 @@ import MusicKit
 nonisolated enum AppleMusicMatch {
     static func isMatch(artist: String, title: String, songArtist: String, songTitle: String) -> Bool {
         let want = LibraryMatcher.normalize(LibraryMatcher.searchTitle(title))
-        guard !want.isEmpty, LibraryMatcher.normalize(LibraryMatcher.searchTitle(songTitle)) == want else { return false }
+        guard !want.isEmpty,
+              LibraryMatcher.normalize(LibraryMatcher.searchTitle(songTitle)) == want else { return false }
         return LibraryMatcher.candidates(songArtist).contains(LibraryMatcher.normalize(artist))
     }
 }
@@ -24,7 +25,9 @@ actor AppleMusicCatalog {
         #else
         let key = LibraryMatcher.normalize(artist) + "|" + LibraryMatcher.normalize(title)
         if let cached = cache[key] { return cached }
-        var request = MusicCatalogSearchRequest(term: "\(artist) \(LibraryMatcher.searchTitle(title))", types: [MusicKit.Song.self])
+        var request = MusicCatalogSearchRequest(
+            term: "\(artist) \(LibraryMatcher.searchTitle(title))", types: [MusicKit.Song.self]
+        )
         request.limit = 10
         guard let songs = try? await request.response().songs else { return nil }
         let url = songs.first {

@@ -42,17 +42,17 @@ nonisolated enum MiscLinkClassifier {
     /// Hosts whose content plays through their official embed widget.
     private static let embedHosts: Set<String> = [
         "youtube.com", "m.youtube.com", "youtu.be", "vimeo.com",
-        "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com",
+        "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com"
     ]
     /// drive.google.com stays here as a fallback for folder and uc?id=
     /// links; single-file /file/d/ links classify as .stream first via
     /// StreamResolver.
     private static let archiveHosts: Set<String> = [
-        "mega.nz", "mediafire.com", "drive.google.com",
+        "mega.nz", "mediafire.com", "drive.google.com"
     ]
     /// File hosts only: ibb.co and postimg.cc pages are HTML, so they stay links.
     private static let imageHosts: Set<String> = [
-        "i.imgur.com", "i.ibb.co", "i.postimg.cc",
+        "i.imgur.com", "i.ibb.co", "i.postimg.cc"
     ]
 
     /// Classifies a raw link URL. A video file extension wins over the streamable-host
@@ -72,21 +72,22 @@ nonisolated enum MiscLinkClassifier {
 
     /// Short, human-friendly label derived from the host — falls back to the
     /// bare host for anything not specifically named.
-    static func label(for urlString: String, kind: MiscLinkKind) -> String {
+    static func label(for urlString: String) -> String {
         guard let url = URL(string: urlString), let host = normalizedHost(url) else { return "Link" }
-        switch host {
-        case "youtube.com", "m.youtube.com", "youtu.be": return "YouTube"
-        case "vimeo.com": return "Vimeo"
-        case "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com": return "SoundCloud"
-        case "drive.google.com": return "Google Drive"
-        case "mega.nz": return "Mega"
-        case "mediafire.com": return "MediaFire"
-        case "archive.org", "web.archive.org": return "Archive"
-        case "instagram.com": return "Instagram"
-        case "twitter.com", "x.com": return "Twitter/X"
-        default: return host
-        }
+        return hostLabels[host] ?? host
     }
+
+    private static let hostLabels: [String: String] = [
+        "youtube.com": "YouTube", "m.youtube.com": "YouTube", "youtu.be": "YouTube",
+        "vimeo.com": "Vimeo",
+        "soundcloud.com": "SoundCloud", "m.soundcloud.com": "SoundCloud", "on.soundcloud.com": "SoundCloud",
+        "drive.google.com": "Google Drive",
+        "mega.nz": "Mega",
+        "mediafire.com": "MediaFire",
+        "archive.org": "Archive", "web.archive.org": "Archive",
+        "instagram.com": "Instagram",
+        "twitter.com": "Twitter/X", "x.com": "Twitter/X"
+    ]
 
     /// Best-effort preview image URL for a link, derivable without fetching
     /// the linked page — a direct image file is its own thumbnail, and
@@ -120,7 +121,9 @@ nonisolated enum MiscLinkClassifier {
             return nil
         }
         if host == "soundcloud.com" || host == "m.soundcloud.com" || host == "on.soundcloud.com" {
-            guard let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
+            guard let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
+                return nil
+            }
             return URL(string: "https://w.soundcloud.com/player/?url=\(encoded)&auto_play=false")
         }
         return nil
@@ -142,7 +145,7 @@ nonisolated enum MiscLinkClassifier {
             return components.path.split(separator: "/").first.map(String.init)
         }
         if host == "youtube.com" || host == "m.youtube.com" {
-            if let v = components.queryItems?.first(where: { $0.name == "v" })?.value { return v }
+            if let videoID = components.queryItems?.first(where: { $0.name == "v" })?.value { return videoID }
             let parts = components.path.split(separator: "/")
             if parts.count >= 2, ["embed", "shorts"].contains(parts[0]) {
                 return String(parts[1])

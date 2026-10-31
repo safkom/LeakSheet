@@ -17,7 +17,7 @@ struct TrackerURLNormalizerTests {
         "http://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
         "docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
         "  https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit  ",
-        "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit",
+        "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit"
     ])
     func `google sheet URL variants collapse to the htmlview form`(url: String) {
         #expect(TrackerURLNormalizer.normalize(url) == Self.canonical)
@@ -28,7 +28,7 @@ struct TrackerURLNormalizerTests {
         "https://yetracker.net",
         "https://yetracker.net/",
         "yetracker.net/#top",
-        "HTTPS://YETRACKER.NET/",
+        "HTTPS://YETRACKER.NET/"
     ])
     func `bare host variants collapse to the trailing-slash form`(url: String) {
         #expect(TrackerURLNormalizer.normalize(url) == "https://yetracker.net/")
@@ -62,9 +62,11 @@ struct TrackerURLNormalizerTests {
 struct RecentTrackerDedupTests {
     @Test func `one undecodable entry keeps the rest`() {
         let json = #"""
-        [{"name":"A","slug":"a","sourceUrl":"https://a.example/","totalSongs":1,"availableCount":0,"snippetCount":0,"confirmedCount":0},
+        [{"name":"A","slug":"a","sourceUrl":"https://a.example/","totalSongs":1,
+          "availableCount":0,"snippetCount":0,"confirmedCount":0},
          {"name":"broken"},
-         {"name":"C","slug":"c","sourceUrl":"https://c.example/","totalSongs":2,"availableCount":0,"snippetCount":0,"confirmedCount":0}]
+          {"name":"C","slug":"c","sourceUrl":"https://c.example/","totalSongs":2,
+           "availableCount":0,"snippetCount":0,"confirmedCount":0}]
         """#
         let decoded = RecentTrackersManager.decodeEntries(Data(json.utf8))
         #expect(decoded.map(\.slug) == ["a", "c"])
@@ -73,7 +75,7 @@ struct RecentTrackerDedupTests {
     private func entry(url: String, slug: String = "x", name: String = "X") -> RecentTrackersManager.RecentTracker {
         RecentTrackersManager.RecentTracker(
             name: name, slug: slug, sourceUrl: url, totalSongs: 0,
-            artUrl: nil, availableCount: 0, snippetCount: 0, confirmedCount: 0
+            artUrl: nil, availableCount: 0, snippetCount: 0
         )
     }
 
@@ -88,7 +90,10 @@ struct RecentTrackerDedupTests {
         let variant = "https://docs.google.com/spreadsheets/d/AAA/edit?usp=sharing"
 
         #expect(RecentTrackersManager.savedName(forSourceUrl: variant, in: [saved]) == "Billie Eilish [Alt #3]")
-        #expect(RecentTrackersManager.savedName(forSourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", in: [saved]) == nil)
+        #expect(RecentTrackersManager.savedName(
+            forSourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview",
+            in: [saved]
+        ) == nil)
         #expect(RecentTrackersManager.savedName(forSourceUrl: "  ", in: [saved]) == nil)
     }
 

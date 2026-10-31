@@ -110,7 +110,7 @@ struct FileInfoRowsTests {
         (kAudioFormatMPEGLayer3, "MP3"),
         (kAudioFormatMPEG4AAC, "AAC"),
         (kAudioFormatFLAC, "FLAC"),
-        (kAudioFormatAppleLossless, "ALAC"),
+        (kAudioFormatAppleLossless, "ALAC")
     ])
     func `codec four-cc mapping`(fourCC: AudioFormatID, expected: String) {
         #expect(AudioEngine.codecName(fourCC) == expected)

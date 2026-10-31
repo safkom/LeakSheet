@@ -199,7 +199,7 @@ async def _answers(link: str) -> bool:
         return e.status_code < 500  # a missing or forbidden file is not an outage
     except (NonMediaError, GdriveInterstitialError):
         return True  # the host served a file, just not media
-    except (httpx.HTTPError, ValueError, TimeoutError, OSError) as e:
+    except (httpx.HTTPError, ValueError, OSError) as e:
         logger.debug("stream host probe of %s failed: %r", link[:80], e)
         return False
 
@@ -220,7 +220,8 @@ def _touch_checked(provider: str) -> None:
 async def probe_once() -> None:
     """Re-probe every down provider, in the one worker holding the probe lock."""
     fetcher.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    with open(fetcher.CACHE_DIR / "host_health.probe.lock", "a") as lock:
+    lock = await asyncio.to_thread(open, fetcher.CACHE_DIR / "host_health.probe.lock", "a")
+    with lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:

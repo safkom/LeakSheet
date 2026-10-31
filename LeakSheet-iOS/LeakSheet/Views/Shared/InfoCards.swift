@@ -7,8 +7,8 @@ struct InfoGrid: View {
 
     private var shown: [(String, String)] {
         items.compactMap { label, val in
-            guard let v = val?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
-            return (label, v)
+            guard let value = val?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+            return (label, value)
         }
     }
 

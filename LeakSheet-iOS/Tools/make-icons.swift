@@ -1,4 +1,6 @@
 #!/usr/bin/env swift
+// swiftlint:disable file_length
+// A script run as `xcrun swift Tools/make-icons.swift` must be one file.
 //
 // Regenerates every app icon for iOS, macOS and tvOS from one geometric source.
 // Run from the repo's LeakSheet-iOS directory:
@@ -400,7 +402,7 @@ func renderTopShelf(width: Int, height: Int) -> CGImage {
     let font = CTFontCreateWithName("SFProDisplay-Semibold" as CFString, fontSize, nil)
     let attrs: CFDictionary = [
         kCTFontAttributeName as String: font,
-        kCTForegroundColorAttributeName as String: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.95),
+        kCTForegroundColorAttributeName as String: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.95)
     ] as CFDictionary
     let line = CTLineCreateWithAttributedString(
         CFAttributedStringCreate(nil, "LeakSheet" as CFString, attrs)!
@@ -465,7 +467,7 @@ var appIconImages: [[String: Any]] = []
 for (variant, name, appearances) in [
     (Variant.light, "AppIcon-light", [] as [[String: String]]),
     (.dark, "AppIcon-dark", [["appearance": "luminosity", "value": "dark"]]),
-    (.tinted, "AppIcon-tinted", [["appearance": "luminosity", "value": "tinted"]]),
+    (.tinted, "AppIcon-tinted", [["appearance": "luminosity", "value": "tinted"]])
 ] {
     write(renderSquare(size: 1024, variant: variant), to: "\(appIconSet)/\(name).png")
     // No "scale" key: its absence is what marks this as the modern single-size
@@ -475,7 +477,7 @@ for (variant, name, appearances) in [
         "filename": "\(name).png",
         "idiom": "universal",
         "platform": "ios",
-        "size": "1024x1024",
+        "size": "1024x1024"
     ]
     if !appearances.isEmpty { entry["appearances"] = appearances }
     appIconImages.append(entry)
@@ -490,7 +492,7 @@ for (points, scales) in [(16, [1, 2]), (32, [1, 2]), (128, [1, 2]), (256, [1, 2]
             "filename": name,
             "idiom": "mac",
             "scale": "\(scale)x",
-            "size": "\(points)x\(points)",
+            "size": "\(points)x\(points)"
         ])
     }
 }
@@ -553,9 +555,14 @@ writeJSON([
         ["filename": "App Icon.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "400x240"],
         ["filename": "App Icon - App Store.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "1280x768"],
         ["filename": "Top Shelf Image.imageset", "idiom": "tv", "role": "top-shelf-image", "size": "1920x720"],
-        ["filename": "Top Shelf Image Wide.imageset", "idiom": "tv", "role": "top-shelf-image-wide", "size": "2320x720"],
+        [
+            "filename": "Top Shelf Image Wide.imageset",
+            "idiom": "tv",
+            "role": "top-shelf-image-wide",
+            "size": "2320x720"
+        ]
     ],
-    "info": info,
+    "info": info
 ], to: "\(brand)/Contents.json")
 
 // tvOS needs its own accent colour; it does not share the iOS catalog.
@@ -563,11 +570,11 @@ writeJSON([
     "colors": [[
         "color": [
             "color-space": "srgb",
-            "components": ["alpha": "1.000", "blue": "0xF5", "green": "0x94", "red": "0x58"],
+            "components": ["alpha": "1.000", "blue": "0xF5", "green": "0x94", "red": "0x58"]
         ],
-        "idiom": "universal",
+        "idiom": "universal"
     ]],
-    "info": info,
+    "info": info
 ], to: "LeakSheetTV/Assets.xcassets/AccentColor.colorset/Contents.json")
 writeJSON(["info": info], to: "LeakSheetTV/Assets.xcassets/Contents.json")
 

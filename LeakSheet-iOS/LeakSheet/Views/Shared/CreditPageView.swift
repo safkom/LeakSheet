@@ -42,15 +42,15 @@ struct CreditNameLink: View {
 struct CreditPageView: View {
     let ref: CreditRef
 
-    @Environment(ArtistViewModel.self) private var vm
-    @Environment(PlayerViewModel.self) private var player
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(ArtistViewModel.self) var viewModel
+    @Environment(PlayerViewModel.self) var player
+    @Environment(\.colorScheme) var colorScheme
 
-    @State private var role: ArtistViewModel.CreditRole
-    @State private var profile: CreditProfile?
+    @State var role: ArtistViewModel.CreditRole
+    @State var profile: CreditProfile?
     /// Set after the first compute, so a name with no page shows a message, not a spinner.
-    @State private var resolved = false
-    @State private var description: DescriptionSheet.Payload?
+    @State var resolved = false
+    @State var description: DescriptionSheet.Payload?
 
     init(ref: CreditRef) {
         self.ref = ref
@@ -86,8 +86,8 @@ struct CreditPageView: View {
         #endif
         .task(id: role) {
             profile = CreditProfile.compute(
-                key: ref.key, role: role, artist: vm.artist,
-                index: vm.creditIndex, displayNames: vm.creditDisplayNames
+                key: ref.key, role: role, artist: viewModel.artist,
+                index: viewModel.creditIndex, displayNames: viewModel.creditDisplayNames
             )
             resolved = true
         }
@@ -120,7 +120,7 @@ struct CreditPageView: View {
             StatGrid(items: [
                 .init(label: profile.songCount == 1 ? "Song" : "Songs", value: profile.songCount),
                 .init(label: profile.versionCount == 1 ? "Track" : "Tracks", value: profile.versionCount),
-                .init(label: "Available", value: profile.playableCount, tint: BadgeVariant.full.color),
+                .init(label: "Available", value: profile.playableCount, tint: BadgeVariant.full.color)
             ], minWidth: 90)
         }
         .frame(maxWidth: .infinity)
@@ -150,7 +150,7 @@ struct CreditPageView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(profile.bestOf) { c in bestCard(c, profile) }
+                        ForEach(profile.bestOf) { credited in bestCard(credited, profile) }
                     }
                     .padding(.horizontal, 20)
                 }
@@ -159,56 +159,60 @@ struct CreditPageView: View {
         }
     }
 
-    private func bestCard(_ c: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
-        let badge = c.version.badge.flatMap(Badge.init(rawValue:))
+    private func bestCardArt(_ credited: CreditProfile.Credited, _ profile: CreditProfile, badge: Badge?) -> some View {
+    ZStack {
+        if let art = credited.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 320) {
+            CachedImage(url: url, maxPixelSize: 320) { ArtworkPlaceholder(cornerRadius: 0) }
+        } else {
+            ArtworkPlaceholder(cornerRadius: 0)
+        }
+    }
+    .frame(width: 140, height: 140)
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(alignment: .topLeading) {
+        if let badge {
+            Text(badge.emoji)
+                .font(.title3)
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
+                .padding(6)
+                .accessibilityHidden(true)
+        }
+    }
+    .overlay(alignment: .bottomTrailing) {
+        if credited.version.isStreamable {
+            Button { play(credited.version, in: profile.streamable) } label: {
+                Image(systemName: "play.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.lsAccent, in: Circle())
+                    .shadow(radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel("Play \(credited.song.baseName)")
+        }
+    }
+    }
+
+    private func bestCard(_ credited: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
+        let badge = credited.version.badge.flatMap(Badge.init(rawValue:))
         return VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                if let art = c.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 320) {
-                    CachedImage(url: url, maxPixelSize: 320) { ArtworkPlaceholder(cornerRadius: 0) }
-                } else {
-                    ArtworkPlaceholder(cornerRadius: 0)
-                }
-            }
-            .frame(width: 140, height: 140)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .topLeading) {
-                if let badge {
-                    Text(badge.emoji)
-                        .font(.title3)
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .padding(6)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if c.version.isStreamable {
-                    Button { play(c.version, in: profile.streamable) } label: {
-                        Image(systemName: "play.fill")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(Color.lsAccent, in: Circle())
-                            .shadow(radius: 4, y: 2)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(8)
-                    .accessibilityLabel("Play \(c.song.baseName)")
-                }
-            }
-            Text(c.song.baseName)
+            bestCardArt(credited, profile, badge: badge)
+            Text(credited.song.baseName)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(2)
-            Text([c.version.versionTag, c.eraName].compactMap { $0 }.joined(separator: " · "))
+            Text([credited.version.versionTag, credited.eraName].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .frame(width: 140, alignment: .leading)
         .contentShape(Rectangle())
-        .onTapGesture { description = payload(c) }
+        .onTapGesture { description = payload(credited) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(c.song.baseName), \(badge.map { "\($0.rawValue), " } ?? "")\(c.eraName)")
+        .accessibilityLabel("\(credited.song.baseName), \(badge.map { "\($0.rawValue), " } ?? "")\(credited.eraName)")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows details")
     }
@@ -217,7 +221,11 @@ struct CreditPageView: View {
     private func erasSection(_ profile: CreditProfile) -> some View {
         if !profile.topEras.isEmpty {
             CardSection(title: "Most Active Eras") {
-                BarList(rows: profile.topEras.map { .init(label: $0.label, value: $0.value, unit: $0.value == 1 ? "track" : "tracks") })
+                BarList(rows: profile.topEras.map { .init(
+                    label: $0.label,
+                    value: $0.value,
+                    unit: $0.value == 1 ? "track" : "tracks"
+                ) })
             }
         }
     }
@@ -245,10 +253,11 @@ struct CreditPageView: View {
         if !profile.collaborators.isEmpty {
             CardSection(title: "Frequent Collaborators") {
                 FlowLayout(spacing: 6) {
-                    ForEach(profile.collaborators) { c in
+                    ForEach(profile.collaborators) { collaborator in
                         CreditNameLink(
-                            ref: c.ref, text: "\(c.name) · \(c.sharedVersions)",
-                            spokenLabel: "\(c.name), \(c.sharedVersions) shared tracks", pushes: true
+                            ref: collaborator.ref, text: "\(collaborator.name) · \(collaborator.sharedVersions)",
+                            spokenLabel: "\(collaborator.name), \(collaborator.sharedVersions) shared tracks",
+                            pushes: true
                         )
                     }
                 }
@@ -263,7 +272,10 @@ struct CreditPageView: View {
             ForEach(Array(profile.eras.enumerated()), id: \.offset) { _, era in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        if let art = era.versions.first?.eraArt, let url = APIClient.shared.imageProxyURL(for: art, width: 96) {
+                        if let art = era.versions.first?.eraArt, let url = APIClient.shared.imageProxyURL(
+                            for: art,
+                            width: 96
+                        ) {
                             CachedImage(url: url, maxPixelSize: 96) { ArtworkPlaceholder(cornerRadius: 0) }
                                 .frame(width: 28, height: 28)
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -279,9 +291,9 @@ struct CreditPageView: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
                     VStack(spacing: 0) {
-                        ForEach(era.versions) { c in
-                            trackRow(c, profile)
-                            if c.id != era.versions.last?.id { Divider().padding(.leading, 44) }
+                        ForEach(era.versions) { credited in
+                            trackRow(credited, profile)
+                            if credited.id != era.versions.last?.id { Divider().padding(.leading, 44) }
                         }
                     }
                     .padding(.horizontal, 10)
@@ -292,154 +304,12 @@ struct CreditPageView: View {
         }
     }
 
-    // MARK: - Rows and chrome
-
-    /// Title, tag and badge on one line over the quality pills, with the play control
-    /// centred beside both: the era list's nested version row assumes a song header above it.
-    private func trackRow(_ c: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
-        let isCurrent = player.isNowPlaying(c.version, inEra: c.eraName)
-        let heard = ListeningHistory.shared.isHeard(c.version, artistSlug: vm.artist.slug, eraName: c.eraName)
-        let detail = [c.version.trackLength, c.version.leakDate]
-            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && $0 != "?:??" }
-            .joined(separator: " · ")
-        return HStack(spacing: 10) {
-            SongPlayControl(
-                isCurrent: isCurrent, isLoading: player.loading, isPlaying: player.isPlaying,
-                canStream: c.version.isStreamable, title: c.version.name, link: c.version.streamableLink,
-                play: { play(c.version, in: profile.streamable) }
-            )
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(c.song.baseName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isCurrent ? Color.lsAccent : .primary)
-                        .lineLimit(1)
-                    if heard {
-                        HeardDot()
-                    }
-                    if let tag = c.version.versionTag {
-                        Text(tag)
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    if let badge = c.version.badge.flatMap(Badge.init(rawValue:)) {
-                        Text(badge.emoji).font(.caption)
-                    }
-                }
-                BadgeRowView(version: c.version, trailing: detail.isEmpty ? nil : detail)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            ThreeDotMenu(
-                version: c.version, song: c.song,
-                artistName: vm.artist.name, artistSlug: vm.artist.slug, sourceUrl: vm.artist.sourceUrl,
-                eraName: c.eraName, eraArt: c.eraArt,
-                onPlay: { play($0, in: profile.streamable) }, onShowDescription: { description = $0 }
-            )
-        }
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture { description = payload(c) }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(heard ? "played" : "")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Shows details")
-    }
-
-    private func payload(_ c: CreditProfile.Credited) -> DescriptionSheet.Payload {
-        DescriptionSheet.Payload(
-            song: c.song, version: c.version, artistName: vm.artist.name, artistSlug: vm.artist.slug,
-            eraName: c.eraName, eraArt: c.eraArt
-        )
-    }
-
-    static func count(_ n: Int, _ noun: String) -> String {
-        "\(n.formatted()) \(n == 1 ? noun : noun + "s")"
-    }
-
-    private func countRow(_ label: String, _ value: String, dot: Color? = nil) -> some View {
-        HStack(spacing: 8) {
-            if let dot {
-                Circle().fill(dot).frame(width: 8, height: 8).accessibilityHidden(true)
-            }
-            Text(label).font(.subheadline)
-            Spacer(minLength: 8)
-            Text(value).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private func playBar(_ profile: CreditProfile) -> some View {
-        let list = profile.streamable
-        if !list.isEmpty {
-            HStack(spacing: 12) {
-                Button {
-                    Haptics.light()
-                    player.playInList(items(list), startAt: 0)
-                } label: {
-                    Label("Play All", systemImage: "play.fill")
-                        .font(.headline)
-                        .foregroundStyle(Color.preferredText(on: .lsAccent, in: colorScheme))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.lsAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    Haptics.light()
-                    player.playInList(items(list.shuffled()), startAt: 0)
-                } label: {
-                    Image(systemName: "shuffle")
-                        .font(.headline)
-                        .frame(width: 52, height: 52)
-                        .background(Color.lsCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Shuffle all tracks")
-                Button {
-                    Haptics.light()
-                    player.playCreditRadio(list, artistName: vm.artist.name, artistSlug: vm.artist.slug)
-                } label: {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.headline)
-                        .frame(width: 52, height: 52)
-                        .background(Color.lsCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Radio")
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-        }
-    }
-
-    // MARK: - Playback
-
-    private func items(_ list: [CreditProfile.Credited]) -> [PlaybackListItem] {
-        list.map {
-            PlaybackListItem(
-                version: $0.version, artistName: vm.artist.name, eraName: $0.eraName,
-                artUrl: $0.eraArt ?? "", artistSlug: vm.artist.slug
-            )
-        }
-    }
-
-    /// Starts the streamable list at the tapped version, so auto-advance continues down it.
-    private func play(_ version: SongVersion, in list: [CreditProfile.Credited]) {
-        guard let idx = list.firstIndex(where: { $0.version == version }) else { return }
-        Haptics.light()
-        player.playInList(items(list), startAt: idx)
-    }
 }
 
 /// Hosts a credit page in its own stack with a Done button, for hosts without one.
 struct CreditPageSheet: View {
     let ref: CreditRef
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) var dismiss
 
     var body: some View {
         NavigationStack {

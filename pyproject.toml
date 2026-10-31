@@ -41,9 +41,10 @@ target-version = "py314"
 extend-exclude = [".cache", "Trackers", "web", "LeakSheet-iOS"]
 
 [tool.ruff.lint]
-# Correctness only: pyflakes plus the pycodestyle error classes that are bugs.
-# Explicit, because ruff's defaults include style rules and CI gates on this.
-select = ["E4", "E7", "E9", "F"]
+# Correctness only: pyflakes, the pycodestyle error classes that are bugs, bugbear's
+# likely-bug checks and stale noqa comments. Explicit, because ruff's defaults include
+# style rules and CI gates on this.
+select = ["E4", "E7", "E9", "F", "B", "RUF100"]
 # E741 ("l" as a name) is taste, not a bug.
 ignore = ["E741"]
 

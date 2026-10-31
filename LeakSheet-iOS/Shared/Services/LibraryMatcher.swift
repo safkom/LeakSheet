@@ -21,11 +21,11 @@ nonisolated enum LibraryMatcher {
     static func searchTitle(_ name: String) -> String {
         var out = ""
         var depth = 0
-        for c in name {
-            switch c {
+        for char in name {
+            switch char {
             case "(", "[": depth += 1
             case ")", "]": depth = max(0, depth - 1)
-            default: if depth == 0 { out.append(c) }
+            default: if depth == 0 { out.append(char) }
             }
         }
         let title = out.trimmingCharacters(in: .whitespaces)

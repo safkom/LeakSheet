@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// The artist screen's content branches — one `View` type per mode (filters,
-/// search, eras, content tabs, recents), each with narrow inputs so toggling one
-/// mode doesn't share an invalidation boundary with the others.
+// The artist screen's content branches — one `View` type per mode (filters,
+// search, eras, content tabs, recents), each with narrow inputs so toggling one
+// mode doesn't share an invalidation boundary with the others.
 
 // MARK: - Content tabs
 
 /// The tracker's pages — the song tree plus one tab per parsed content tab — with
 /// the page's filters in one menu at the end, so pages and filters look different.
 struct ContentTabsView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 
     /// Icon for a content tab. Badge-annotation kinds never reach here —
     /// `availableTabs` filters them out because they are not pages.
@@ -39,12 +39,16 @@ struct ContentTabsView: View {
         HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    TabButton(label: "Unreleased", icon: "waveform", isSelected: vm.selectedTabKey == nil) {
-                        vm.selectTab(nil)
+                    TabButton(label: "Unreleased", icon: "waveform", isSelected: viewModel.selectedTabKey == nil) {
+                        viewModel.selectTab(nil)
                     }
-                    ForEach(vm.availableTabs) { tab in
-                        TabButton(label: Self.labelText(for: tab.name), icon: Self.tabIcon(for: tab.kind), isSelected: vm.selectedTabKey == tab.id) {
-                            vm.selectTab(tab.id)
+                    ForEach(viewModel.availableTabs) { tab in
+                        TabButton(
+                            label: Self.labelText(for: tab.name),
+                            icon: Self.tabIcon(for: tab.kind),
+                            isSelected: viewModel.selectedTabKey == tab.id
+                        ) {
+                            viewModel.selectTab(tab.id)
                         }
                     }
                 }
@@ -53,7 +57,7 @@ struct ContentTabsView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Tracker sections")
 
-            FilterMenu(vm: vm)
+            FilterMenu(viewModel: viewModel)
                 .padding(.trailing, 12)
         }
     }
@@ -90,27 +94,48 @@ private struct TabButton: View {
 /// Every filter for the current page, behind one button that shows how many
 /// are on. On a content tab only No Snippets applies.
 struct FilterMenu: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 
-    private var onSongTree: Bool { vm.selectedTabKey == nil }
+    private var onSongTree: Bool { viewModel.selectedTabKey == nil }
 
     private var activeCount: Int {
         onSongTree
-            ? [vm.bestOf, vm.worstOf, vm.grails, vm.recents, vm.noSnippets].filter { $0 }.count
-            : (vm.noSnippets ? 1 : 0)
+            ? [
+                viewModel.bestOf,
+                viewModel.worstOf,
+                viewModel.grails,
+                viewModel.recents,
+                viewModel.noSnippets
+            ].filter { $0 }.count
+            : (viewModel.noSnippets ? 1 : 0)
     }
 
     var body: some View {
         Menu {
             if onSongTree {
                 SwiftUI.Section("Show only") {
-                    Toggle(isOn: binding(vm.bestOf, vm.toggleBestOf)) { Label("Best Of", systemImage: "star.fill") }
-                    Toggle(isOn: binding(vm.worstOf, vm.toggleWorstOf)) { Label("Worst Of", systemImage: "hand.thumbsdown") }
-                    Toggle(isOn: binding(vm.grails, vm.toggleGrails)) { Label("Grails & Wanted", systemImage: "trophy.fill") }
+                    Toggle(isOn: binding(
+                        viewModel.bestOf,
+                        viewModel.toggleBestOf
+                    )) { Label("Best Of", systemImage: "star.fill") }
+                    Toggle(isOn: binding(viewModel.worstOf, viewModel.toggleWorstOf)) { Label(
+                        "Worst Of",
+                        systemImage: "hand.thumbsdown"
+                    ) }
+                    Toggle(isOn: binding(viewModel.grails, viewModel.toggleGrails)) { Label(
+                        "Grails & Wanted",
+                        systemImage: "trophy.fill"
+                    ) }
                 }
-                Toggle(isOn: binding(vm.recents, vm.toggleRecents)) { Label("Recently Leaked", systemImage: "clock") }
+                Toggle(isOn: binding(
+                    viewModel.recents,
+                    viewModel.toggleRecents
+                )) { Label("Recently Leaked", systemImage: "clock") }
             }
-            Toggle(isOn: binding(vm.noSnippets, vm.toggleNoSnippets)) { Label("Hide Snippets", systemImage: "waveform.slash") }
+            Toggle(isOn: binding(viewModel.noSnippets, viewModel.toggleNoSnippets)) { Label(
+                "Hide Snippets",
+                systemImage: "waveform.slash"
+            ) }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: activeCount > 0
@@ -140,7 +165,7 @@ struct FilterMenu: View {
 // MARK: - Search results
 
 struct SearchResultsListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -149,9 +174,9 @@ struct SearchResultsListView: View {
     @Environment(PlayerViewModel.self) private var player
 
     var body: some View {
-        let results = vm.content.searchResults
+        let results = viewModel.content.searchResults
         if results.isEmpty {
-            ContentUnavailableView.search(text: vm.content.state.query)
+            ContentUnavailableView.search(text: viewModel.content.state.query)
                 .padding(.top, 40)
         } else {
             Text("\(results.count) result\(results.count == 1 ? "" : "s")")
@@ -193,7 +218,7 @@ struct SearchResultsListView: View {
                 }
                 // Same panel the eras branch uses; each era's run rounds at both ends.
                 .songPanel(
-                    vm.eraDisplay[result.era.name],
+                    viewModel.eraDisplay[result.era.name],
                     isFirst: idx == 0 || results[idx - 1].era.name != result.era.name,
                     isLast: idx == results.count - 1
                         || results[idx + 1].era.name != result.era.name
@@ -223,7 +248,7 @@ struct SearchResultsListView: View {
 // MARK: - Eras list (flattened lazy rows)
 
 struct ErasListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -237,11 +262,11 @@ struct ErasListView: View {
     private var hasActiveFilters: Bool {
         // Must list EVERY chip that can empty the list, or the empty state claims
         // "No Songs" when the truth is "No Matches".
-        vm.bestOf || vm.worstOf || vm.grails || vm.noSnippets
+        viewModel.bestOf || viewModel.worstOf || viewModel.grails || viewModel.noSnippets
     }
 
     var body: some View {
-        if vm.eraRows.isEmpty {
+        if viewModel.eraRows.isEmpty {
             // An empty state when a filter removed every era, like the other branches.
             ContentUnavailableView {
                 Label(
@@ -256,20 +281,20 @@ struct ErasListView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 48)
         } else {
-            ForEach(vm.eraRows) { row in
+            ForEach(viewModel.eraRows) { row in
                 EraRowView(
                     row: row,
-                    displayColors: vm.eraDisplay[row.eraName],
+                    displayColors: viewModel.eraDisplay[row.eraName],
                     artistName: artistName,
                     artistSlug: artistSlug,
                     sourceUrl: sourceUrl,
                     onCardTap: { eraName in
                         withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                            vm.toggleEra(eraName)
+                            viewModel.toggleEra(eraName)
                         }
                     },
                     onColorExtracted: { eraName, color in
-                        vm.setEraColor(eraName: eraName, dominant: color)
+                        viewModel.setEraColor(eraName: eraName, dominant: color)
                         onColorExtracted(color)
                     },
                     onSongTap: handleSongTap,
@@ -286,11 +311,11 @@ struct ErasListView: View {
     private func handleSongTap(_ song: Song, eraName: String, eraArt: String?, ordinal: Int) {
         if song.hasMultipleVersions {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
+                viewModel.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             }
-        } else if let v = song.versions.first {
+        } else if let first = song.versions.first {
             onShowDescription(DescriptionSheet.Payload(
-                song: song, version: v,
+                song: song, version: first,
                 artistName: artistName, artistSlug: artistSlug,
                 eraName: eraName, eraArt: eraArt
             ))
@@ -300,7 +325,7 @@ struct ErasListView: View {
     /// Era-scoped playback: the filtered era's streamable versions are the
     /// auto-advance context.
     private func playWithEraContext(_ version: SongVersion, eraName: String) {
-        guard let filtered = vm.filteredEra(named: eraName) else { return }
+        guard let filtered = viewModel.filteredEra(named: eraName) else { return }
         player.playInEra(
             version,
             eraName: eraName,
@@ -314,333 +339,4 @@ struct ErasListView: View {
 
 // MARK: - Misc entries
 
-struct MiscListView: View {
-    let vm: ArtistViewModel
-    let artistName: String
-    let artistSlug: String
-    /// era name (lowercased) → art URL, precomputed once by the parent so
-    /// this view doesn't need the artist's whole (potentially large) era tree.
-    let eraArtByLowercasedName: [String: String?]
-    let onShowDescription: (DescriptionSheet.Payload) -> Void
-    /// Non-stream link taps route up to the parent, which owns the Safari
-    /// and embed-player sheets.
-    let onOpenLink: (MiscLink) -> Void
-
-    @Environment(PlayerViewModel.self) private var player
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Expanded era groups — presentation-only, keyed on eraName. A live
-    /// search expands everything so results are never hidden, and a page
-    /// with a single group starts open.
-    @State private var expandedEras: Set<String> = []
-
-    private func isExpanded(_ eraName: String, groupCount: Int) -> Bool {
-        vm.isSearching || groupCount <= 1 || expandedEras.contains(eraName)
-    }
-
-    /// The badge filter that can empty a content tab, named as the Filters menu labels it.
-    static func emptyFilterName(_ vm: ArtistViewModel) -> String? {
-        if vm.grails { return "Grails" }
-        if vm.bestOf { return "Best Of" }
-        if vm.worstOf { return "Worst Of" }
-        return nil
-    }
-
-    /// Normalised key for `vm.eraDisplay`, used for reads and writes alike (the card
-    /// shows "Other" for an empty name and matches art case-insensitively).
-    private func colorKey(_ eraName: String) -> String {
-        eraName.isEmpty ? "Other" : eraName
-    }
-
-    /// A minimal `Era` so a content-tab group renders through the same `EraCardView`
-    /// as the main list; the card reads only name and art.
-    private func eraForGroup(_ group: MiscEraGroup) -> Era {
-        Era(
-            name: group.eraName.isEmpty ? "Other" : group.eraName,
-            altNames: nil,
-            description: nil,
-            timeline: nil,
-            artUrl: eraArtByLowercasedName[group.eraName.lowercased()] ?? nil,
-            sections: nil,
-            songCount: nil,
-            versionCount: nil
-        )
-    }
-
-    var body: some View {
-        let entries = vm.content.miscResults
-
-        if entries.isEmpty {
-            if vm.isFiltering {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 32)
-            } else {
-                // Name the page the user is on: this branch renders every content tab.
-                ContentUnavailableView(
-                    "No \(vm.selectedTabName ?? "Misc") Entries",
-                    systemImage: "film.stack",
-                    // Say which filter is responsible, not "the current filters".
-                    description: Text(
-                        vm.noSnippets ? "Hide Snippets is on. Turn it off in Filters to see snippet entries."
-                        : !vm.content.state.query.isEmpty ? "Nothing on this page matches your search."
-                        : Self.emptyFilterName(vm).map { "No \($0) on this page." } ?? "This page has no entries."
-                    )
-                )
-                .padding(.top, 40)
-            }
-        } else {
-            // Shared EraCardView — see DECISIONS.md::ArtistContentLists.swift::era-card-reuse
-            // One flat row per card, section label and entry, each a direct LazyVStack
-            // child, so an expanded group doesn't build every row at once.
-            let groups = vm.content.miscEraGroups
-            let playOrder = groups.flatMap(\.entries)
-            ForEach(rows(for: groups)) { row in
-                switch row {
-                case .card(let group, let expanded):
-                    EraCardView(
-                        era: eraForGroup(group),
-                        expanded: expanded,
-                        displayColors: vm.eraDisplay[colorKey(group.eraName)],
-                        subtitle: "\(group.entries.count.formatted()) entr\(group.entries.count == 1 ? "y" : "ies")",
-                        onTap: {
-                            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.1)) {
-                                if expandedEras.contains(group.eraName) {
-                                    expandedEras.remove(group.eraName)
-                                } else {
-                                    expandedEras.insert(group.eraName)
-                                }
-                            }
-                        },
-                        onColorExtracted: { color in
-                            vm.setEraColor(eraName: colorKey(group.eraName), dominant: color)
-                        }
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                case .section(let name, let eraName, _):
-                    MiscSectionHeader(name: name, displayColors: vm.eraDisplay[colorKey(eraName)])
-                case .entry(let entry, let eraName, let isLast):
-                    MiscEntryRowView(
-                        entry: entry,
-                        artistName: artistName,
-                        artistSlug: artistSlug,
-                        eraArt: eraArtUrl(for: entry.eraName),
-                        // Auto-advance follows the order on screen (grouped by era).
-                        onPlay: { _ in playEntry(entry, in: playOrder) },
-                        onShowDescription: onShowDescription,
-                        onSelectLink: onOpenLink
-                    )
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    .onTapGesture { handleRowTap(entry) }
-                    .songPanel(vm.eraDisplay[colorKey(eraName)], isLast: isLast)
-                }
-            }
-        }
-    }
-
-    private enum MiscRow: Identifiable {
-        case card(MiscEraGroup, expanded: Bool)
-        case section(String, eraName: String, ordinal: Int)
-        case entry(MiscEntry, eraName: String, isLast: Bool)
-
-        var id: String {
-            switch self {
-            case .card(let group, _): "card::\(group.eraName)"
-            case .section(let name, let era, let ordinal): "sec::\(era)::\(ordinal)::\(name)"
-            case .entry(let entry, _, _): "entry::\(entry.id)"
-            }
-        }
-    }
-
-    private func rows(for groups: [MiscEraGroup]) -> [MiscRow] {
-        var rows: [MiscRow] = []
-        for group in groups {
-            let expanded = isExpanded(group.eraName, groupCount: groups.count)
-            rows.append(.card(group, expanded: expanded))
-            guard expanded else { continue }
-            var currentSection = ""
-            for (i, entry) in group.entries.enumerated() {
-                if let section = entry.section, !section.isEmpty, section != currentSection {
-                    rows.append(.section(section, eraName: group.eraName, ordinal: rows.count))
-                }
-                currentSection = entry.section ?? ""
-                rows.append(.entry(entry, eraName: group.eraName, isLast: i == group.entries.count - 1))
-            }
-        }
-        return rows
-    }
-
-    /// Tap always opens Details, whatever the link count; the row's own affordances
-    /// still reach every link explicitly.
-    private func handleRowTap(_ entry: MiscEntry) {
-        onShowDescription(DescriptionSheet.Payload(
-            song: nil, version: entry.asSongVersion,
-            artistName: artistName, artistSlug: artistSlug,
-            eraName: entry.eraName, eraArt: eraArtUrl(for: entry.eraName)
-        ))
-    }
-
-    /// Play an entry with continuation across every other streamable entry in the
-    /// visible list. Non-audio links go straight to `onOpenLink`, which the row hands
-    /// to the shared context menu.
-    private func playEntry(_ entry: MiscEntry, in entries: [MiscEntry]) {
-        Haptics.light()
-        let streamable = entries.filter(\.isStreamable)
-        guard let idx = streamable.firstIndex(where: { $0.id == entry.id }) else { return }
-        let items = streamable.map {
-            PlaybackListItem(
-                version: $0.asSongVersion,
-                artistName: artistName,
-                eraName: $0.eraName,
-                artUrl: eraArtUrl(for: $0.eraName) ?? "",
-                artistSlug: artistSlug
-            )
-        }
-        player.playInList(items, startAt: idx)
-    }
-
-    /// Era art for a misc entry — matched against the main-tab eras by name.
-    private func eraArtUrl(for eraName: String) -> String? {
-        eraArtByLowercasedName[eraName.lowercased()] ?? nil
-    }
-}
-
 // MARK: - Recents
-
-struct RecentsListView: View {
-    let vm: ArtistViewModel
-    let artistName: String
-    let artistSlug: String
-    let sourceUrl: String?
-    let onShowDescription: (DescriptionSheet.Payload) -> Void
-
-    @Environment(PlayerViewModel.self) private var player
-
-    var body: some View {
-        let visible = vm.visibleRecents
-
-        if visible.isEmpty {
-            if vm.isFiltering {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 32)
-            } else {
-                ContentUnavailableView(
-                    "No Recent Leaks",
-                    systemImage: "clock",
-                    description: Text("No versions carry a leak or file date.")
-                )
-                .padding(.top, 40)
-            }
-        } else {
-            ForEach(visible.enumerated(), id: \.element.id) { idx, result in
-              // Single root: LazyVStack can only template row identity from the ForEach ids
-              // when the body is unary (see ArtistRowViews.swift).
-              let startsGroup = idx == 0 || visible[idx - 1].era.name != result.era.name
-              VStack(spacing: 0) {
-                // Era group header — show when era changes
-                if startsGroup {
-                    HStack(spacing: 8) {
-                        Text(result.era.name.uppercased())
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(vm.eraDisplay[result.era.name]?.readableHeader ?? .secondary)
-                            // The name wins the row; the rule takes what is left.
-                            .layoutPriority(1)
-                        Rectangle()
-                            .fill(Color.lsBorder)
-                            .frame(height: 1)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, idx == 0 ? 4 : 12)
-                    .padding(.bottom, 2)
-                }
-
-                // Date label (only when it changes) sits inside the panel, so a group
-                // reads as one surface.
-                VStack(spacing: 0) {
-                    let prevDate = idx > 0 ? (visible[idx - 1].version.leakDate ?? visible[idx - 1].version.fileDate) : nil
-                    let thisDate = result.version.leakDate ?? result.version.fileDate
-                    if let date = thisDate, !date.isEmpty, date != prevDate {
-                        HStack(spacing: 4) {
-                            Image(systemName: "calendar")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text(date)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 8)
-                    }
-
-                    SongRowView(
-                        song: result.song,
-                        version: result.version,
-                        artistName: artistName,
-                        artistSlug: artistSlug,
-                        sourceUrl: sourceUrl,
-                        eraName: result.era.name,
-                        eraArt: result.era.artUrl,
-                        showVersionBadge: true,
-                        // Swipe-to-play continues down the recents list like tap.
-                        onPlay: { _ in
-                            if let (items, idx) = vm.recentPlayback(for: result.id) {
-                                player.playInList(items, startAt: idx)
-                            }
-                        },
-                        onShowDescription: onShowDescription
-                    )
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    // Tap opens Details, never plays — see handleSongTap.
-                    .onTapGesture {
-                        onShowDescription(DescriptionSheet.Payload(
-                            song: result.song, version: result.version,
-                            artistName: artistName, artistSlug: artistSlug,
-                            eraName: result.era.name, eraArt: result.era.artUrl
-                        ))
-                    }
-                }
-                // Same panel as the eras branch; no card above it, so the group rounds
-                // at both ends.
-                .songPanel(
-                    vm.eraDisplay[result.era.name],
-                    isFirst: startsGroup,
-                    isLast: idx == visible.count - 1
-                        || visible[idx + 1].era.name != result.era.name
-                )
-                .onAppear {
-                    // Against the LIVE count, not the `visible` snapshot a fast scroll would append
-                    // from repeatedly. Eight rows early so the next page lands in time.
-                    if idx >= vm.visibleRecents.count - 8 {
-                        vm.loadMoreRecents()
-                    }
-                }
-              }
-            }
-        }
-    }
-}
-
-
-/// A content tab's sub-section label ("Instrumentals", "Music Videos").
-private struct MiscSectionHeader: View {
-    let name: String
-    let displayColors: EraDisplayColors?
-
-    var body: some View {
-        Text(name)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(displayColors?.readableHeader ?? .secondary)
-            .textCase(.uppercase)
-            .tracking(0.5)
-            .padding(.horizontal, 12)
-            .padding(.top, 14)
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
-            .songPanel(displayColors, isLast: false)
-    }
-}
