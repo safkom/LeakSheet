@@ -1333,3 +1333,14 @@ keep failing them and the host would stay down.
 the tunnel arrives on). If Docker's 172 pool runs out and the network lands in 192.168.x,
 every tunnel request gets a one-entry chain and the API buckets them under the nginx peer:
 pin the network's subnet in ops/casaos/leaksheet.yml before that happens.
+
+## Sonar suppressions — `# NOSONAR(rule)` in src/
+
+- **S7483** on `timeout` parameters: they are httpx request timeouts passed through to
+  the client, not asyncio waits a `timeout()` context manager could replace.
+- **S5869** on emoji classes: the analyzer splits astral ranges (`\U0001f300-\U0001f9ff`)
+  into surrogate halves and reports the halves as duplicates.
+- **S6019** on `models.py` sample-count pattern: the reluctant group grows whenever the
+  lookahead fails, so it does match more than zero repetitions.
+- **S5332** on `"http://"` literals: they match link text and normalise URLs; no request
+  is made over plain HTTP.

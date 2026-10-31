@@ -38,7 +38,8 @@ def test_provider_of_each_supported_link():
 def test_a_connect_failure_marks_the_provider_down_at_once(clock):
     host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
     down = host_health.down("pillows")
-    assert down is not None and down["host"] == "pillows.su"
+    assert down is not None
+    assert down["host"] == "pillows.su"
 
 
 def test_soft_failures_need_three_across_two_links(clock):
@@ -63,9 +64,9 @@ def test_a_success_marks_it_up(clock):
     assert host_health.down("pillows") is None
 
 
-def test_state_is_shared_through_the_file(clock):
+def test_state_is_shared_through_the_file(clock, monkeypatch):
     host_health.record_failure("froste", "https://music.froste.lol/song/ab", hard=True, error="ConnectTimeout")
-    host_health._cache = None  # what another worker sees: only the file
+    monkeypatch.setattr(host_health, "_cache", None)  # what another worker sees: only the file
     assert host_health.down("froste") is not None
     assert (fetcher.CACHE_DIR / "host_health.json").exists()
 
@@ -74,7 +75,8 @@ def test_snapshot_lists_every_provider(clock):
     host_health.record_failure("froste", "https://music.froste.lol/song/ab", hard=True, error="ConnectTimeout")
     hosts = {h["provider"]: h for h in host_health.snapshot()}
     assert set(hosts) == set(host_health.PROVIDERS)
-    assert hosts["froste"]["status"] == "down" and hosts["froste"]["host"] == "music.froste.lol"
+    assert hosts["froste"]["status"] == "down"
+    assert hosts["froste"]["host"] == "music.froste.lol"
     assert hosts["pillows"]["status"] == "up"
 
 
@@ -199,7 +201,8 @@ async def test_the_prober_uses_its_own_connection_pool(clock, monkeypatch):
     monkeypatch.setattr(host_health, "stream_audio", answer)
     shared = streaming._get_shared_client()
     await host_health.probe_once()
-    assert seen and seen[0] is not shared
+    assert seen
+    assert seen[0] is not shared
 
 
 async def test_a_resolver_failure_is_a_soft_host_failure_not_a_success(clock):

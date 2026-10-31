@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 from enum import Enum
+from functools import partial
 from typing import NamedTuple
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
+
+
+# Stat labels that appear in several vocabulary tables.
+_OG_FILES = "og files"
+_OG_FILE = "og file"
+_TOTAL_FULL = "total full"
+_STEM_BOUNCE = "stem bounce"
+_STEM_BOUNCES = "stem bounces"
 
 
 class Badge(str, Enum):
@@ -590,13 +600,13 @@ def slugify(text: str) -> str:
 # Decorative emoji hung off stat labels ("🔗 616 Total Links"). Shared with the
 # parser, which must recognise the same cells to tell era headers from the footer.
 EMOJI_RUN_RE = re.compile(
-    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"
+    r"[\U0001f300-\U0001f9ff\u2600-\u27bf\u2b50\ufe0f\u200d]+"  # NOSONAR(S5869)
 )
 
 # "N Label" pairs, concatenated ("1 OG File(s)45 Full") or newline-separated,
 # optionally emoji-prefixed ("🔗 616 Total Links").
 _STAT_LINE_PATTERN = re.compile(
-    r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",
+    r"(?<!\d)(\d++)\s++([A-Za-z][A-Za-z /()]*?)(?=\s*+\d|[^A-Za-z /()]|\Z)",  # NOSONAR(S6019)
 )
 
 
@@ -631,9 +641,9 @@ def _extract_stat_pairs(raw: str) -> dict[str, int]:
 # Labels consumed by the typed leak-status fields. Anything else is a release-type
 # count, kept verbatim in EraStats.release_types so new wording isn't dropped.
 _LEAK_STATUS_LABELS = frozenset({
-    "og file", "og files", "full", "total full", "tagged",
+    _OG_FILE, _OG_FILES, "full", _TOTAL_FULL, "tagged",
     "partial", "partial / cut", "snippet", "snippets",
-    "stem bounce", "stem bounces", "unavailable", "total",
+    _STEM_BOUNCE, _STEM_BOUNCES, "unavailable", "total",
 })
 
 
@@ -642,14 +652,14 @@ def parse_era_stats(raw: str) -> EraStats:
     pairs = _extract_stat_pairs(raw)
 
     return EraStats(
-        og_files=pairs.get("og file", pairs.get("og files", 0)),
+        og_files=pairs.get(_OG_FILE, pairs.get(_OG_FILES, 0)),
         # Kept apart, not aliased — see EraStats.total.
         full=pairs.get("full", 0),
-        total_full=pairs.get("total full", 0),
+        total_full=pairs.get(_TOTAL_FULL, 0),
         tagged=pairs.get("tagged", 0),
         partial=_match_stat(pairs, ["partial", "partial / cut"]),
         snippets=pairs.get("snippet", pairs.get("snippets", 0)),
-        stem_bounces=pairs.get("stem bounce", pairs.get("stem bounces", 0)),
+        stem_bounces=pairs.get(_STEM_BOUNCE, pairs.get(_STEM_BOUNCES, 0)),
         unavailable=pairs.get("unavailable", 0),
         stated_total=pairs.get("total", 0),
         release_types={
@@ -699,9 +709,9 @@ def parse_tracker_stats(
         not_available_quality=_match_stat(qp, ["not available", "not avaliable"]),
 
         # Availability
-        total_full=ap.get("total full", 0),
-        og_files=ap.get("og files", ap.get("og file", 0)),
-        stem_bounces=ap.get("stem bounces", ap.get("stem bounce", 0)),
+        total_full=ap.get(_TOTAL_FULL, 0),
+        og_files=ap.get(_OG_FILES, ap.get(_OG_FILE, 0)),
+        stem_bounces=ap.get(_STEM_BOUNCES, ap.get(_STEM_BOUNCE, 0)),
         full=ap.get("full", 0),
         tagged=ap.get("tagged", 0),
         partial=ap.get("partial", 0),
@@ -908,6 +918,61 @@ def _harvest_bare_credit(line: str, collected: dict[str, list[str]]) -> bool:
 _CREDIT_NAME_SPLIT_RE = re.compile(r"[,&]")
 
 
+def _take_credit_group(collected: dict[str, list[str]], match: "re.Match[str]") -> str:
+    """Harvest one bracketed group's credits; return "" if it was one."""
+    if match.group(2) is None:
+        return match.group(0)
+    parts = _split_credit_parts(match.group(1))
+    # The keyword must open the group, or "(Some Title, prod. X)" would lose its
+    # title half.
+    if not parts or _CREDIT_PART_RE.match(parts[0]) is None:
+        return match.group(0)
+    for part in parts:
+        # Always a match: _split_credit_parts only breaks where a keyword follows,
+        # and parts[0] was just checked.
+        keyword = _CREDIT_PART_RE.match(part)
+        # A wrapped list carries the newline into the value.
+        value = _WHITESPACE_RUN_RE.sub(" ", part[keyword.end():]).strip() if keyword else ""
+        if value and keyword.lastgroup:
+            collected.setdefault(keyword.lastgroup, []).append(value)
+    return ""
+
+
+def _flatten_nested_credit(m: "re.Match[str]") -> str:
+    outer, inner = m.group(1), m.group(2)
+    if _CREDIT_PART_RE.match(outer.strip()) and _CREDIT_PART_RE.match(inner.strip()):
+        return f"({outer.rstrip()}; {inner})"
+    return m.group(0)
+
+
+def _joined_credit(values: list[str] | None) -> str | None:
+    """One credit field's values joined. "(prod. A) (prod. A, B & C)" must not credit A
+    twice: a value that is already one of the names inside another value is dropped."""
+    if not values:
+        return None
+    names = [{n.strip().lower() for n in _CREDIT_NAME_SPLIT_RE.split(v)} for v in values]
+    kept = [
+        v for i, v in enumerate(values)
+        if not any(j != i and len(names[j]) > 1 and v.strip().lower() in names[j] for j in range(len(values)))
+    ]
+    return ", ".join(dict.fromkeys(kept))
+
+
+def _credit_alt_titles(lines: list[str], collected: dict[str, list[str]]) -> list[str]:
+    alt_titles: list[str] = []
+    for line in lines:
+        line = _route_alt_line(line.strip(), collected)
+        # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
+        if not line.strip("()[] "):
+            continue
+        # Multi-alias paren splitting — see docs/decisions.md::models.py::_ALIAS_LABEL_RE
+        if line.startswith("(") and line.endswith(")"):
+            alt_titles.extend(_split_alt_aliases(_strip_alias_label(line[1:-1].strip())))
+        elif not _harvest_bare_credit(line, collected):
+            alt_titles.append(_strip_alias_label(line))
+    return alt_titles
+
+
 def parse_song_credits(raw_name: str) -> SongCredits:
     """Parse a raw multi-line song name into title + structured credits.
 
@@ -920,81 +985,23 @@ def parse_song_credits(raw_name: str) -> SongCredits:
     anything left over becomes an alt title.
     """
     collected: dict[str, list[str]] = {}
-
-    def take_group(match: "re.Match[str]") -> str:
-        """Harvest one bracketed group's credits; return "" if it was one."""
-        if match.group(2) is None:
-            return match.group(0)
-        parts = _split_credit_parts(match.group(1))
-        opener = _CREDIT_PART_RE.match(parts[0]) if parts else None
-        # The keyword must open the group, or "(Some Title, prod. X)" would lose its
-        # title half.
-        if opener is None:
-            return match.group(0)
-        for part in parts:
-            keyword = _CREDIT_PART_RE.match(part)
-            # Guaranteed non-None: _split_credit_parts only breaks where a
-            # keyword follows, and parts[0] was just checked.
-            if keyword is None:
-                continue
-            # A wrapped list carries the newline into the value.
-            value = _WHITESPACE_RUN_RE.sub(" ", part[keyword.end():]).strip()
-            if value and keyword.lastgroup:
-                collected.setdefault(keyword.lastgroup, []).append(value)
-        return ""
-
     # Linear, and equivalent for everything below: every line is stripped
     # again before it is used, and group values collapse their whitespace.
     raw_name = "\n".join(line.strip() for line in raw_name.split("\n"))
-
-    def flatten_nested(m: "re.Match[str]") -> str:
-        outer, inner = m.group(1), m.group(2)
-        if _CREDIT_PART_RE.match(outer.strip()) and _CREDIT_PART_RE.match(inner.strip()):
-            return f"({outer.rstrip()}; {inner})"
-        return m.group(0)
-
-    raw_name = _NESTED_CREDIT_RE.sub(flatten_nested, raw_name)
-    cleaned = _CREDIT_GROUP_RE.sub(take_group, raw_name)
+    raw_name = _NESTED_CREDIT_RE.sub(_flatten_nested_credit, raw_name)
+    cleaned = _CREDIT_GROUP_RE.sub(partial(_take_credit_group, collected), raw_name)
     # A removed group leaves a double space behind ("Title (feat. A) Remix").
     cleaned = _INNER_SPACE_RE.sub(" ", cleaned)
-
-    def joined(field: str) -> str | None:
-        values = collected.get(field)
-        if not values:
-            return None
-        # "(prod. A) (prod. A, B & C)" must not credit A twice: drop a value
-        # that is already one of the names inside another value.
-        names = [{n.strip().lower() for n in _CREDIT_NAME_SPLIT_RE.split(v)} for v in values]
-        kept = [
-            v for i, v in enumerate(values)
-            if not any(j != i and len(names[j]) > 1 and v.strip().lower() in names[j] for j in range(len(values)))
-        ]
-        return ", ".join(dict.fromkeys(kept))
-
     # Split by newline: first line = title, rest = alt titles
     lines = [ln.strip() for ln in cleaned.split("\n")]
-    title = lines[0].strip()
-
-    alt_titles: list[str] = []
-    for line in lines[1:]:
-        line = _route_alt_line(line.strip(), collected)
-        # Empty, or a stray closer left by a doubled bracket ("Kanye West))").
-        if not line.strip("()[] "):
-            continue
-        # Multi-alias paren splitting — see docs/decisions.md::models.py::_ALIAS_LABEL_RE
-        if line.startswith("(") and line.endswith(")"):
-            inner = _strip_alias_label(line[1:-1].strip())
-            alt_titles.extend(_split_alt_aliases(inner))
-        elif not _harvest_bare_credit(line, collected):
-            alt_titles.append(_strip_alias_label(line))
-
+    alt_titles = _credit_alt_titles(lines[1:], collected)
     return SongCredits(
-        title=title,
-        featuring=joined("featuring"),
-        producers=joined("producers"),
-        collaboration=joined("collaboration"),
-        refs=joined("refs"),
-        director=joined("director"),
+        title=lines[0].strip(),
+        featuring=_joined_credit(collected.get("featuring")),
+        producers=_joined_credit(collected.get("producers")),
+        collaboration=_joined_credit(collected.get("collaboration")),
+        refs=_joined_credit(collected.get("refs")),
+        director=_joined_credit(collected.get("director")),
         alt_titles=alt_titles,
     )
 
@@ -1093,6 +1100,31 @@ def _is_og_listing(match: "re.Match[str]", rest: str) -> bool:
     return not rest[0].islower()
 
 
+def _og_block(lines: list[str], i: int) -> tuple[list[str], list[int]] | None:
+    """(filenames, line indices) of the OG listing starting at line *i*, or None."""
+    stripped = lines[i].strip()
+    m = _OG_LEADIN_PATTERN.match(stripped)
+    rest = stripped[m.end():].strip() if m else ""
+    if not m or not _is_og_listing(m, rest):
+        return None
+    # A quoted filename bounds the capture; otherwise take the line rest
+    # (_is_og_listing guarantees a non-empty rest).
+    quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
+    names = [quoted.group(1) if quoted else rest]
+    indices = [i]
+    # '&' continuation: the next line holds another filename — unless it
+    # is itself a labelled OG line, which the outer loop handles.
+    while names[-1].rstrip().endswith("&") and i + 1 < len(lines):
+        nxt = lines[i + 1].strip()
+        if _OG_LEADIN_PATTERN.match(nxt):
+            break
+        i += 1
+        indices.append(i)
+        if nxt:
+            names.append(nxt)
+    return names, indices
+
+
 def _walk_og_lines(notes: str):
     """Yield (line_index, is_og, names) per line.
 
@@ -1103,37 +1135,16 @@ def _walk_og_lines(notes: str):
     lines = notes.split("\n")
     i = 0
     while i < len(lines):
-        stripped = lines[i].strip()
-        m = _OG_LEADIN_PATTERN.match(stripped)
-        if not m:
+        block = _og_block(lines, i)
+        if block is None:
             yield i, False, []
             i += 1
             continue
-
-        rest = stripped[m.end():].strip()
-        if not _is_og_listing(m, rest):
-            yield i, False, []
-            i += 1
-            continue
-        # A quoted filename bounds the capture; otherwise take the line rest.
-        quoted = _OG_QUOTED_NAME_PATTERN.match(rest)
-        # _is_og_listing guarantees a non-empty rest.
-        names = [quoted.group(1) if quoted else rest]
-        indices = [i]
-        # '&' continuation: the next line holds another filename — unless it
-        # is itself a labelled OG line, which the outer loop handles.
-        while names and names[-1].rstrip().endswith("&") and i + 1 < len(lines):
-            nxt = lines[i + 1].strip()
-            if _OG_LEADIN_PATTERN.match(nxt):
-                break
-            i += 1
-            indices.append(i)
-            if nxt:
-                names.append(nxt)
+        names, indices = block
         yield indices[0], True, [n for n in (_clean_og_name(x) for x in names) if n]
         for extra in indices[1:]:
             yield extra, True, []
-        i += 1
+        i = indices[-1] + 1
 
 
 def extract_og_filenames(notes: str) -> list[str]:
@@ -1143,7 +1154,7 @@ def extract_og_filenames(notes: str) -> list[str]:
     '&'-continued multi-line lists, and quoted filenames embedded in prose.
     """
     names: list[str] = []
-    for _, is_og, line_names in _walk_og_lines(notes):
+    for _, _is_og, line_names in _walk_og_lines(notes):
         names.extend(line_names)
     # Quoted filenames mentioned mid-sentence ("… the file included it's
     # OG Filename: "X.mp3" …") — extract the quoted token only.
@@ -1206,6 +1217,37 @@ def _format_sample(song: str, artist: str | None) -> str:
     return f"{song} \u2014 {artist}" if artist else song
 
 
+def _sample_title_fits(segment: str, prev_end: int, title_match: "re.Match[str]", first: bool) -> bool:
+    """The lead-in and each further title must sit close to the previous one; quoted
+    phrases later in a sentence are quotations, not sample titles."""
+    gap = segment[prev_end:title_match.start()]
+    if first:
+        ok = len(gap) <= 50
+    else:
+        ok = len(gap) <= 60 and bool(re.search(r"(?:,|;|\band\b|&)\s*$", gap, re.IGNORECASE))
+    return ok and len(title_match.group(1).strip()) <= 80
+
+
+def _quoted_samples(segment: str, titles) -> list[str]:
+    """One enumeration of quoted titles ('"A" by X and "B" by Y'), read lazily with one
+    title of lookahead: materialising every later title would make a line of many
+    "Samples" quadratic."""
+    results: list[str] = []
+    title_match = next(titles, None)
+    prev_end = 0
+    while title_match and _sample_title_fits(segment, prev_end, title_match, not results):
+        # The text up to the next title holds the optional "by Artist" clause; slicing
+        # there keeps one sample's artist from swallowing the next sample.
+        following = next(titles, None)
+        tail = segment[title_match.end():following.start() if following else len(segment)]
+        artist_match = _SAMPLE_ARTIST_PATTERN.match(tail.strip())
+        artist = _clean_sample_artist(artist_match.group(1)) if artist_match else None
+        results.append(_format_sample(title_match.group(1).strip(), artist))
+        prev_end = title_match.end()
+        title_match = following
+    return results
+
+
 def extract_samples(notes: str) -> list[str]:
     """Extract sampled works from notes text.
 
@@ -1215,54 +1257,22 @@ def extract_samples(notes: str) -> list[str]:
     """
     text = _normalize_quotes(notes)
     results: list[str] = []
-
-    leads = list(_SAMPLES_LEADIN_PATTERN.finditer(text))
-    for i_lead, lead in enumerate(leads):
+    for lead in _SAMPLES_LEADIN_PATTERN.finditer(text):
         # One enumeration runs to the end of the line.
         end = text.find("\n", lead.end())
         end = end if end != -1 else len(text)
         segment = text[lead.end():end]
-
-        # Lazily, with one title of lookahead: materialising every later title would
-        # make a line of many "Samples" quadratic.
         titles = _SAMPLE_TITLE_PATTERN.finditer(segment)
-        title_match = next(titles, None)
-        if title_match:
-            prev_end = 0
-            i = 0
-            while title_match:
-                # The lead-in and each further title must sit close to the previous one; quoted
-                # phrases later in a sentence are quotations, not sample titles.
-                gap = segment[prev_end:title_match.start()]
-                if i == 0:
-                    if len(gap) > 50:
-                        break
-                elif len(gap) > 60 or not re.search(r"(?:,|;|\band\b|&)\s*$", gap, re.IGNORECASE):
-                    break
-                song = title_match.group(1).strip()
-                if len(song) > 80:
-                    break
-                # The text up to the next title holds the optional "by Artist" clause; slicing
-                # there keeps one sample's artist from swallowing the next sample.
-                following = next(titles, None)
-                tail_end = following.start() if following else len(segment)
-                tail = segment[title_match.end():tail_end]
-                artist_match = _SAMPLE_ARTIST_PATTERN.match(tail.strip())
-                artist = _clean_sample_artist(artist_match.group(1)) if artist_match else None
-                results.append(_format_sample(song, artist))
-                prev_end = title_match.end()
-                title_match = following
-                i += 1
-        else:
-            # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and length-bounded
-            # (a title may itself say "Samples"), so a line of many leads isn't rescanned.
-            stop = min(end, lead.start() + _POSSESSIVE_MAX_CHARS)
-            possessive = _SAMPLE_POSSESSIVE_PATTERN.match(text[lead.start():stop])
-            if possessive:
-                artist = possessive.group(1).strip()
-                song = possessive.group(2).strip()
-                results.append(_format_sample(song, artist or None))
-
+        first = next(titles, None)
+        if first:
+            results.extend(_quoted_samples(segment, itertools.chain([first], titles)))
+            continue
+        # Pattern 2: Samples Artist's 'Song'. Anchored at this lead and length-bounded
+        # (a title may itself say "Samples"), so a line of many leads isn't rescanned.
+        stop = min(end, lead.start() + _POSSESSIVE_MAX_CHARS)
+        possessive = _SAMPLE_POSSESSIVE_PATTERN.match(text[lead.start():stop])
+        if possessive:
+            results.append(_format_sample(possessive.group(2).strip(), possessive.group(1).strip() or None))
     return results
 
 

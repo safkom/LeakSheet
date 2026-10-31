@@ -6,7 +6,7 @@ gunicorn's UvicornWorker installs no logging config, so src.api sets one on impo
 
 import logging
 
-import src.api  # noqa: F401 — importing the app is what configures logging
+import src.api
 
 _DSN = "https://key@glitchtip.invalid/1"
 
@@ -81,7 +81,7 @@ def test_a_real_error_event_never_carries_the_key(monkeypatch):
 
     client = sentry_sdk.Client(**src.api._sentry_options(_DSN), transport=Capture())
 
-    def failing(api_key_header=[(b"x-goog-api-key", _KEY.encode())], innocuous=_KEY):  # noqa: B006
+    def failing(api_key_header=[(b"x-goog-api-key", _KEY.encode())], innocuous=_KEY):  # noqa: B006, B008
         raise RuntimeError("transport bug")
 
     with sentry_sdk.new_scope() as scope:

@@ -39,7 +39,8 @@ class TestDiscographyEraHeaders:
 
     def test_timeline_survives(self, drift):
         first = drift.eras[0]
-        assert first.timeline and first.timeline[0].date == "2019"
+        assert first.timeline
+        assert first.timeline[0].date == "2019"
 
     def test_stated_total_is_trusted_over_derivation(self, drift):
         by_name = {e.name: e for e in drift.eras}

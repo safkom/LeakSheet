@@ -27,7 +27,8 @@ async def test_a_body_under_the_cap_reads_normally():
     )
     async with httpx.AsyncClient(transport=transport) as client:
         r = await fetcher._get_capped(client, "https://example.com/")
-    assert r.status_code == 200 and r.text == "<table>ok"
+    assert r.status_code == 200
+    assert r.text == "<table>ok"
     r.raise_for_status()
 
 
@@ -88,8 +89,9 @@ async def test_a_private_google_sheet_is_access_denied(monkeypatch, fetch):
     NoTablesError, which a background revalidation treats as transient."""
     client = _signed_out_client()
     monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
+    fetch_fn = getattr(fetcher, fetch)
     with pytest.raises(fetcher.AccessDeniedError):
-        await getattr(fetcher, fetch)(SHEET, use_cache=False)
+        await fetch_fn(SHEET, use_cache=False)
     await client.aclose()
 
 
@@ -101,8 +103,9 @@ async def test_a_sign_in_redirect_from_a_mirror_is_not_access_denied(monkeypatch
     client = _signed_out_client()
     monkeypatch.setattr(fetcher, "_get_sheets_client", lambda: client)
     # NoTablesError: the fetch ran and found nothing, rather than being refused up front.
+    fetch_fn = getattr(fetcher, fetch)
     with pytest.raises(fetcher.NoTablesError):
-        await getattr(fetcher, fetch)("https://mirror.example/tracker", use_cache=False)
+        await fetch_fn("https://mirror.example/tracker", use_cache=False)
     await client.aclose()
 
 

@@ -159,31 +159,32 @@ KNOWN_TRACKERS: dict[str, str] = {
 }
 
 
+_SHEET_FILE = "sheet.html"
+
+
+def _unknown_tracker_dirs(directory: Path) -> list[tuple[str, Path]]:
+    """Tracker directories not in KNOWN_TRACKERS, named after the directory."""
+    results = []
+    for child in sorted(directory.iterdir()) if directory.exists() else ():
+        sheet_path = child / _SHEET_FILE
+        base_name = child.name.removesuffix("_files")
+        if child.is_dir() and child.name.endswith("_files") and base_name not in KNOWN_TRACKERS and sheet_path.exists():
+            results.append((base_name.replace(" - Google Drive", "").strip(), sheet_path))
+    return results
+
+
 def discover_trackers(trackers_dir: Path | None = None) -> list[tuple[str, Path]]:
     """Discover all tracker files in the given directory.
 
     Returns list of (artist_name, sheet_html_path) tuples.
     """
     directory = trackers_dir or TRACKERS_DIR
-    results = []
-
-    for tracker_name, artist_name in KNOWN_TRACKERS.items():
-        sheet_path = directory / f"{tracker_name}_files" / "sheet.html"
-        if sheet_path.exists():
-            results.append((artist_name, sheet_path))
-
-    # Also discover any unknown tracker directories
-    if directory.exists():
-        for child in sorted(directory.iterdir()):
-            if child.is_dir() and child.name.endswith("_files"):
-                sheet_path = child / "sheet.html"
-                if sheet_path.exists():
-                    base_name = child.name.removesuffix("_files")
-                    if base_name not in KNOWN_TRACKERS:
-                        artist_name = base_name.replace(" - Google Drive", "").strip()
-                        results.append((artist_name, sheet_path))
-
-    return results
+    results = [
+        (artist_name, directory / f"{tracker_name}_files" / _SHEET_FILE)
+        for tracker_name, artist_name in KNOWN_TRACKERS.items()
+        if (directory / f"{tracker_name}_files" / _SHEET_FILE).exists()
+    ]
+    return results + _unknown_tracker_dirs(directory)
 
 
 # Maps normalized header text to canonical field names.

@@ -52,7 +52,8 @@ class TestPublishedSheet:
             use_cache=False, write_cache=False,
         )
         assert artist.total_songs == 4
-        assert paths and all(p.startswith("/spreadsheets/d/e/2PACX-1vSYNTH/pubhtml") for p in paths), paths
+        assert paths
+        assert all(p.startswith("/spreadsheets/d/e/2PACX-1vSYNTH/pubhtml") for p in paths), paths
 
 
 class TestPrimaryTabSelection:

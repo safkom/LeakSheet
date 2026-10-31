@@ -13,7 +13,7 @@ import re
 from bisect import bisect_left
 from collections import Counter
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Callable, Iterable
 from html.parser import HTMLParser
 from pathlib import Path
@@ -113,27 +113,29 @@ class _TableExtractor(HTMLParser):
             self.in_tr = True
             self._current_row = []
         elif tag == "td" and self.in_tr:
-            self.in_td = True
-            self._cell_text = ""
-            self._cell_links = []
-            self._cell_link_lines = []
-            self._cell_images = []
-            try:
-                self._colspan = min(int(a.get("colspan", "1") or "1"), _MAX_COLSPAN)
-            except (ValueError, TypeError):
-                self._colspan = 1
-        elif tag == "a" and self.in_td:
+            self._start_cell(a)
+        elif self.in_td:
+            self._cell_tag(tag, a)
+
+    def _start_cell(self, a: dict) -> None:
+        self.in_td = True
+        self._cell_text = ""
+        self._cell_links = []
+        self._cell_link_lines = []
+        self._cell_images = []
+        self._colspan = _colspan(a.get("colspan", "1"))
+
+    def _cell_tag(self, tag: str, a: dict) -> None:
+        if tag == "a":
             self.in_a = True
             self._a_href = a.get("href", "")
-        elif tag == "img" and self.in_td:
+        elif tag == "img":
             src = a.get("src", "")
             if src:
                 self._cell_images.append(src)
             # Use alt text as cell text when present (handles image-based era names)
-            alt = a.get("alt", "")
-            if alt:
-                self._cell_text += alt
-        elif tag == "br" and self.in_td:
+            self._cell_text += a.get("alt", "") or ""
+        elif tag == "br":
             self._cell_text += "\n"
 
     def handle_endtag(self, tag: str) -> None:
@@ -200,6 +202,48 @@ except ImportError:  # pragma: no cover - lxml is a pinned dependency
     _lxml_html = None
 
 
+class _TdWalk:
+    """Text, links (with the line each anchor closes on) and images of one lxml <td>."""
+
+    __slots__ = ("parts", "links", "link_lines", "images", "newlines")
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.links: list[str] = []
+        self.link_lines: list[int] = []
+        self.images: list[str] = []
+        self.newlines = 0  # running count of "\n" appended so far
+
+    def _text(self, text: str | None) -> None:
+        if text:
+            self.parts.append(text)
+            self.newlines += text.count("\n")
+
+    def _void(self, el, tag: str) -> None:
+        if tag == "br":
+            self.parts.append("\n")
+            self.newlines += 1
+        elif tag == "img":
+            src = el.get("src")
+            if src:
+                self.images.append(src)
+            self._text(el.get("alt"))
+
+    def walk(self, el) -> None:
+        tag = el.tag
+        if not isinstance(tag, str):  # comment / processing instruction
+            return
+        self._void(el, tag)
+        self._text(el.text)
+        for child in el:
+            self.walk(child)
+            self._text(child.tail)
+        href = el.get("href") if tag == "a" else None
+        if href:
+            self.links.append(href)
+            self.link_lines.append(self.newlines)
+
+
 def _cell_from_td(td) -> _Cell:
     """Build a _Cell from an lxml <td> element.
 
@@ -209,51 +253,16 @@ def _cell_from_td(td) -> _Cell:
     """
     if not len(td):  # most cells: plain text, nothing to walk
         return _Cell(text=(td.text or "").strip())
-    parts: list[str] = []
-    links: list[str] = []
-    link_lines: list[int] = []
-    images: list[str] = []
-    newlines = 0  # running count of "\n" appended so far
+    w = _TdWalk()
+    w.walk(td)
+    return _Cell(text="".join(w.parts).strip(), links=w.links, link_lines=w.link_lines, images=w.images)
 
-    def walk(el) -> None:
-        nonlocal newlines
-        tag = el.tag
-        if not isinstance(tag, str):  # comment / processing instruction
-            return
-        if tag == "br":
-            parts.append("\n")
-            newlines += 1
-        elif tag == "img":
-            src = el.get("src")
-            if src:
-                images.append(src)
-            alt = el.get("alt")
-            if alt:
-                parts.append(alt)
-                newlines += alt.count("\n")
-        text = el.text
-        if text:
-            parts.append(text)
-            newlines += text.count("\n")
-        for child in el:
-            walk(child)
-            tail = child.tail
-            if tail:
-                parts.append(tail)
-                newlines += tail.count("\n")
-        if tag == "a":
-            href = el.get("href")
-            if href:
-                links.append(href)
-                link_lines.append(newlines)
 
-    walk(td)
-    return _Cell(
-        text="".join(parts).strip(),
-        links=links,
-        link_lines=link_lines,
-        images=images,
-    )
+def _colspan(raw: str | None) -> int:
+    try:
+        return min(int(raw or "1"), _MAX_COLSPAN)
+    except (ValueError, TypeError):
+        return 1
 
 
 def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
@@ -264,17 +273,9 @@ def _extract_table_lxml(html_content: str) -> list[list[_Cell]]:
     rows: list[list[_Cell]] = []
     for tr in doc.iter("tr"):
         current: list[_Cell] = []
-        for td in tr:
-            if td.tag != "td":
-                continue
-            cell = _cell_from_td(td)
-            current.append(cell)
-            try:
-                colspan = min(int(td.get("colspan", "1") or "1"), _MAX_COLSPAN)
-            except (ValueError, TypeError):
-                colspan = 1
-            for _ in range(colspan - 1):
-                current.append(_Cell())
+        for td in (td for td in tr if td.tag == "td"):
+            current.append(_cell_from_td(td))
+            current.extend(_Cell() for _ in range(_colspan(td.get("colspan", "1")) - 1))
         if current:
             rows.append(current)
     return rows
@@ -342,6 +343,19 @@ def _grid_cell(value: dict) -> _Cell:
     if hyperlink := value.get("hyperlink"):
         # htmlview renders a cell with a hyperlink as one anchor around all of it.
         return _Cell(text=text, links=[_grid_link(hyperlink)], link_lines=[_grid_text(raw).count("\n")])
+    spans = _grid_link_spans(value, raw)
+    if not spans:
+        return _Cell(text=text)
+    breaks = _line_breaks_before(raw)
+    return _Cell(
+        text=text,
+        links=[_grid_link(uri) for _start, _end, uri in spans],
+        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
+    )
+
+
+def _grid_link_spans(value: dict, raw: str) -> list[tuple[int, int, str]]:
+    """(start, end, uri) of each linked text run and smart chip, in text order."""
     runs = value.get("textFormatRuns") or []
     chips = value.get("chipRuns") or []
     link_runs = [(i, uri) for i, run in enumerate(runs)
@@ -349,9 +363,9 @@ def _grid_cell(value: dict) -> _Cell:
     link_chips = [(chip.get("startIndex", 0), uri) for chip in chips
                   if (uri := ((chip.get("chip") or {}).get("richLinkProperties") or {}).get("uri"))]
     if not link_runs and not link_chips:
-        return _Cell(text=text)
+        return []
     # Linear in the cell, not per run: a cell can hold thousands of runs.
-    offsets, breaks = _utf16_offsets(raw), _line_breaks_before(raw)
+    offsets = _utf16_offsets(raw)
 
     def index(units: int) -> int:
         return min(bisect_left(offsets, units), len(raw))
@@ -364,11 +378,51 @@ def _grid_cell(value: dict) -> _Cell:
         start = index(units)
         spans.append((start, start + 1, uri))
     spans.sort()
-    return _Cell(
-        text=text,
-        links=[_grid_link(uri) for _start, _end, uri in spans],
-        link_lines=[breaks[min(end, len(raw))] for _start, end, _uri in spans],
-    )
+    return spans
+
+
+def _grid_hidden(meta: list, i: int) -> bool:
+    m = meta[i] if i < len(meta) else {}
+    return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
+
+
+def _grid_covered(merges: list, row_meta: list, n_rows: int, n_cols: int) -> set[tuple[int, int]]:
+    """Cells a merge covers (all but its top row), which htmlview renders no <td> for."""
+    covered: set[tuple[int, int]] = set()
+    for m in merges:
+        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
+        if _grid_hidden(row_meta, m.get("startRowIndex", 0)):
+            continue
+        rows = range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows))
+        columns = range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols))
+        covered.update((r, c) for r in rows for c in columns)
+    return covered
+
+
+def _grid_row(r: int, cols: list[int], covered: set[tuple[int, int]], frozen_cols: int, cell_of) -> list[_Cell]:
+    """One htmlview row: an empty freezebar <td> follows the frozen columns of every row."""
+    row: list[_Cell] = []
+    placed = not frozen_cols
+    for c in cols:
+        if not placed and c >= frozen_cols:
+            row.append(_Cell())
+            placed = True
+        if (r, c) not in covered:
+            row.append(cell_of(c))
+    if not placed:
+        row.append(_Cell())
+    return row
+
+
+def _grid_parts(sheet: dict) -> tuple[dict, list, list, list]:
+    """(gridProperties, rowData, rowMetadata, columnMetadata) of one API sheet."""
+    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
+    data = (sheet.get("data") or [{}])[0]
+    return grid, data.get("rowData") or [], data.get("rowMetadata") or [], data.get("columnMetadata") or []
+
+
+def _grid_cell_of(values: list):
+    return lambda c: _grid_cell(values[c]) if c < len(values) else _Cell()
 
 
 def extract_grid(sheet: dict) -> list[list[_Cell]]:
@@ -377,55 +431,26 @@ def extract_grid(sheet: dict) -> list[list[_Cell]]:
     In-cell images are not in the API, so no cell carries any. The htmlview quirks
     mirrored here: docs/decisions.md::parser.py::extract_grid.
     """
-    grid = (sheet.get("properties") or {}).get("gridProperties") or {}
-    data = (sheet.get("data") or [{}])[0]
-    row_data = data.get("rowData") or []
-    row_meta = data.get("rowMetadata") or []
-    col_meta = data.get("columnMetadata") or []
-
-    def hidden(meta: list, i: int) -> bool:
-        m = meta[i] if i < len(meta) else {}
-        return bool(m.get("hiddenByUser") or m.get("hiddenByFilter"))
-
+    grid, row_data, row_meta, col_meta = _grid_parts(sheet)
     n_rows = max(grid.get("rowCount", 0), len(row_data))
     n_cols = grid.get("columnCount", 0)
     # The body is trimmed but the grid size is not: an empty tab can declare millions of cells.
     if max(n_rows, 1) * n_cols > _MAX_GRID_CELLS:
         raise ValueError(f"grid of {n_rows} x {n_cols} cells is too large")
-    cols = [c for c in range(n_cols) if not hidden(col_meta, c)]
-    covered: set[tuple[int, int]] = set()
-    for m in sheet.get("merges") or []:
-        # htmlview drops a hidden row with its <td>s: a rowspan starting there covers nothing.
-        if hidden(row_meta, m.get("startRowIndex", 0)):
-            continue
-        for r in range(m.get("startRowIndex", 0) + 1, min(m.get("endRowIndex", 0), n_rows)):
-            for c in range(m.get("startColumnIndex", 0), min(m.get("endColumnIndex", 0), n_cols)):
-                covered.add((r, c))
+    place = partial(
+        _grid_row,
+        cols=[c for c in range(n_cols) if not _grid_hidden(col_meta, c)],
+        covered=_grid_covered(sheet.get("merges") or [], row_meta, n_rows, n_cols),
+        frozen_cols=grid.get("frozenColumnCount", 0),
+    )
     frozen = grid.get("frozenRowCount", 0)
-    frozen_cols = grid.get("frozenColumnCount", 0)
-
-    def build(r: int, cell_of) -> list[_Cell]:
-        # htmlview puts an empty freezebar <td> after the frozen columns of every row.
-        row: list[_Cell] = []
-        placed = not frozen_cols
-        for c in cols:
-            if not placed and c >= frozen_cols:
-                row.append(_Cell())
-                placed = True
-            if (r, c) not in covered:
-                row.append(cell_of(c))
-        if not placed:
-            row.append(_Cell())
-        return row
-
     rows: list[list[_Cell]] = []
     for r in range(n_rows):
         if frozen and r == frozen:
-            rows.append(build(-1, lambda _c: _Cell()))
-        if hidden(row_meta, r):
+            rows.append(place(-1, cell_of=_grid_cell_of([])))
+        if _grid_hidden(row_meta, r):
             continue
-        values = (row_data[r].get("values") or []) if r < len(row_data) else []
-        row = build(r, lambda c: _grid_cell(values[c]) if c < len(values) else _Cell())
+        row = place(r, cell_of=_grid_cell_of((row_data[r].get("values") or []) if r < len(row_data) else []))
         if row:
             rows.append(row)
     return rows
@@ -455,6 +480,29 @@ def _match_column_alias(key: str) -> str | None:
     return None
 
 
+def _header_cell_column(text: str) -> str | None:
+    """The canonical column a header cell names, or None."""
+    raw = text.strip()
+    # Only the first word/phrase before any parenthetical (links/descriptions)
+    paren_idx = raw.find("(")
+    if paren_idx > 0:
+        raw = raw[:paren_idx]
+    # Normalize internal whitespace ('file \ndate' → 'file date'); colon-suffixed
+    # headers ('Track Titles:') must still match their alias.
+    key = re.sub(r'\s+', ' ', raw.strip().lower()).rstrip(":").strip()
+    canonical = _match_column_alias(key)
+    if canonical:
+        return canonical
+    # No match on the full cell: try each line, for a column name on its own line
+    # among notice text (e.g. "[notice]\nNotes").
+    for line in raw.split("\n"):
+        line_key = re.sub(r'\s+', ' ', line.strip().lower())
+        canonical = _match_column_alias(line_key) if line_key else None
+        if canonical:
+            return canonical
+    return None
+
+
 def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     """Map canonical field names to column indices from the header row.
 
@@ -462,35 +510,11 @@ def detect_columns(header_row: list[_Cell]) -> dict[str, int]:
     """
     col_map: dict[str, int] = {}
     for idx, cell in enumerate(header_row):
-        # Normalize: lowercase, strip parenthetical content (which contains links/descriptions)
-        raw = cell.text.strip()
-        # Take only the first word/phrase before any parenthetical
-        paren_idx = raw.find("(")
-        if paren_idx > 0:
-            raw = raw[:paren_idx]
-        key = raw.strip().lower()
-        key = re.sub(r'\s+', ' ', key)  # normalize internal whitespace (e.g. 'file \ndate' → 'file date')
-        # Colon-suffixed headers ('Track Titles:') must still match their alias.
-        key = key.rstrip(":").strip()
-
-        canonical = _match_column_alias(key)
-
-        # No match on the full cell: try each line, for a column name on its own line
-        # among notice text (e.g. "[notice]\nNotes").
-        if not canonical:
-            for line in raw.split("\n"):
-                line_key = re.sub(r'\s+', ' ', line.strip().lower())
-                if line_key:
-                    canonical = _match_column_alias(line_key)
-                    if canonical:
-                        break
-
+        canonical = _header_cell_column(cell.text)
         if canonical and canonical not in col_map:
             col_map[canonical] = idx
-
     if "name" not in col_map:
         col_map |= _infer_name_column(header_row, col_map)
-
     return col_map
 
 
@@ -573,6 +597,42 @@ def _is_alert_line(line: str) -> bool:
     return False
 
 
+def _line_links(cell: _Cell) -> dict[int, str]:
+    """Line index → cleaned URL of the link on that line."""
+    out: dict[int, str] = {}
+    for link_idx, line_num in enumerate(cell.link_lines):
+        if link_idx < len(cell.links):
+            cleaned = _clean_link(cell.links[link_idx])
+            if cleaned:
+                out[line_num] = cleaned
+    return out
+
+
+def _is_column_label(line: str) -> bool:
+    """A header-cell line that names a column (parenthetical ignored), not a notice."""
+    norm = re.sub(r'\s+', ' ', line.lower())
+    p = norm.find("(")
+    return bool(_match_column_alias(norm[:p].strip() if p > 0 else norm))
+
+
+class _NoticeCollector:
+    """Deduplicated notices, at least 10 characters, outer parentheses dropped."""
+
+    def __init__(self) -> None:
+        self.notices: list[Notice] = []
+        self._seen: set[str] = set()
+
+    def add(self, text: str, link: str | None = None) -> None:
+        text = text.strip()
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1].strip()
+        if len(text) < 10 or text.lower() in self._seen:
+            return
+        self._seen.add(text.lower())
+        kind = "alert" if any(_is_alert_line(line) for line in text.split("\n")) else "info"
+        self.notices.append(Notice(text=text, link=link, kind=kind))
+
+
 def _extract_header_notices(
     header_row: list[_Cell],
     pre_header_rows: list[list[_Cell]],
@@ -586,78 +646,27 @@ def _extract_header_notices(
 
     Returns a deduplicated list of Notice objects.
     """
-
-    notices: list[Notice] = []
-    seen: set[str] = set()
-
-    def _clean(text: str) -> str:
-        text = text.strip()
-        if text.startswith("(") and text.endswith(")"):
-            text = text[1:-1].strip()
-        return text
-
-    def _is_alert(text: str) -> bool:
-        return any(_is_alert_line(line) for line in text.split("\n"))
-
-    def _add(text: str, link: str | None = None) -> None:
-        text = _clean(text)
-        if len(text) < 10:
-            return
-        key = text.lower()
-        if key not in seen:
-            seen.add(key)
-            kind = "alert" if _is_alert(text) else "info"
-            notices.append(Notice(text=text, link=link, kind=kind))
-
-    # --- Header cell notices ---
+    collector = _NoticeCollector()
     for cell in header_row:
-        raw = cell.text.strip()
-        if not raw:
-            continue
-        # Build per-line link mapping: line_index → cleaned URL
-        line_link_map: dict[int, str] = {}
-        for link_idx, line_num in enumerate(cell.link_lines):
-            if link_idx < len(cell.links):
-                cleaned = _clean_link(cell.links[link_idx])
-                if cleaned:
-                    line_link_map[line_num] = cleaned
-
-        lines = raw.split("\n")
-        for line_idx, line in enumerate(lines):
+        links = _line_links(cell)
+        for line_idx, line in enumerate(cell.text.strip().split("\n")):
             stripped = line.strip()
-            if not stripped:
-                continue
-            # Normalise for alias matching
-            norm = re.sub(r'\s+', ' ', stripped.lower())
-            # Remove parenthetical for matching
-            p = norm.find("(")
-            match_key = norm[:p].strip() if p > 0 else norm
-            if _match_column_alias(match_key):
-                continue
-            _add(stripped, line_link_map.get(line_idx))
-
-    # --- Pre-header rows ---
+            if stripped and not _is_column_label(stripped):
+                collector.add(stripped, links.get(line_idx))
     artist_lower = artist_name.lower() if artist_name else ""
-    for row in pre_header_rows:
-        for cell in row:
-            text = cell.text.strip()
-            if not text:
-                continue
-            norm = text.lower()
-            # Skip if it's just the artist/tracker name
-            if norm == artist_lower or "tracker" in norm and len(text) < 40:
-                continue
-            # Build per-line link mapping
-            line_link_map = {}
-            for link_idx, line_num in enumerate(cell.link_lines):
-                if link_idx < len(cell.links):
-                    cleaned = _clean_link(cell.links[link_idx])
-                    if cleaned:
-                        line_link_map[line_num] = cleaned
-            for line_idx, line in enumerate(text.split("\n")):
-                _add(line.strip(), line_link_map.get(line_idx))
+    for cell in (c for row in pre_header_rows for c in row):
+        _add_pre_header_notices(collector, cell, artist_lower)
+    return collector.notices
 
-    return notices
+
+def _add_pre_header_notices(collector: _NoticeCollector, cell: _Cell, artist_lower: str) -> None:
+    text = cell.text.strip()
+    # Skip empty cells and ones that are just the artist/tracker name
+    if not text or text.lower() == artist_lower or ("tracker" in text.lower() and len(text) < 40):
+        return
+    links = _line_links(cell)
+    for line_idx, line in enumerate(text.split("\n")):
+        collector.add(line.strip(), links.get(line_idx))
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +802,29 @@ _NAME_FOOTER_KEYWORDS: frozenset[str] = frozenset({
 })
 
 
+_NUMERIC_STAT_RE = re.compile(r"^\d+\s")
+
+
+def _names_an_era(cell: _Cell) -> bool:
+    """Whether a cell of a stats-led row holds an era name or era art, not just counts."""
+    text = cell.text.strip()
+    if not text:
+        return False
+    # Images (era art) are a strong signal this is an era header
+    if cell.images:
+        return True
+    # A cell of nothing but counts holds no era name, whatever its vocabulary; without
+    # this the global stats footer's cells read as digit-leading era names.
+    if _is_stats_only_cell(text):
+        return False
+    first_line = text.split("\n")[0].strip()
+    # A first line that doesn't start with a digit is likely an era name.
+    # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
+    return not _NUMERIC_STAT_RE.match(first_line) or (
+        not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit()
+    )
+
+
 def _is_era_header(row: list[_Cell]) -> bool:
     """Check if a row is an era header (contains stats pattern in first cell).
 
@@ -806,40 +838,18 @@ def _is_era_header(row: list[_Cell]) -> bool:
     if not row:
         return False
     text = row[0].text
-    if not era_stats_match(text):
-        if not _is_spreadsheet_error(text):
-            return False
-        # The stats cell is unreadable, so it can carry no evidence either
-        # way — require the era name (or the era art) from another cell.
-        for c in row[1:]:
-            if c.images:
-                return True
-            first_line = c.text.split("\n")[0].strip()
-            if first_line and not re.match(r"^\d+\s", first_line):
-                return True
+    if era_stats_match(text):
+        # Real era headers have a non-stats era name in some cell (or cell 0's first
+        # line); global stats rows have only stat-like content.
+        return any(_names_an_era(c) for c in row)
+    if not _is_spreadsheet_error(text):
         return False
-    # Real era headers have a non-stats era name in some cell (or cell 0's first
-    # line); global stats rows have only stat-like content.
-    _NUMERIC_STAT_RE = re.compile(r"^\d+\s")
-    for c in row:
-        text = c.text.strip()
-        if not text:
-            continue
-        # Check for images (era art) — a strong signal this is an era header
-        if c.images:
+    # The stats cell is unreadable, so it can carry no evidence either
+    # way — require the era name (or the era art) from another cell.
+    for c in row[1:]:
+        first_line = c.text.split("\n")[0].strip()
+        if c.images or (first_line and not re.match(r"^\d+\s", first_line)):
             return True
-        # A cell of nothing but counts holds no era name, whatever its vocabulary; without
-        # this the global stats footer's cells read as digit-leading era names.
-        if _is_stats_only_cell(text):
-            continue
-        first_line = text.split("\n")[0].strip()
-        # If the first line doesn't start with a digit, it's likely an era name
-        if not _NUMERIC_STAT_RE.match(first_line):
-            return True
-        # Digit-leading era names — see docs/decisions.md::parser.py::digit-leading-era-names
-        if not ERA_STATS_PATTERN.search(first_line) and not first_line.replace(" ", "").isdigit():
-            return True
-    # Every non-empty cell states counts — pure stats row
     return False
 
 
@@ -867,6 +877,72 @@ _HANDLE_RE = re.compile(r"@\w+")
 _CHANGELOG_SLASH_RE = re.compile(r"^\d{1,2}/\d{1,2}\s*[-\u2013]")
 
 
+# Known non-era labels that appear in the era column.
+_NON_ERA_LABELS = frozenset({
+    "links", "link", "changelog", "changelogs", "notes",
+    "tracker guidelines", "guidelines", "discord", "credits",
+    "editors", "current editors", "update notes", "resources",
+    "template", "template:", "about", "info", "key", "legend",
+    "recent additions", "what's new", "what's new?",
+    # Meta-labels that aren't music eras
+    "types", "type", "owner", "general information", "release date",
+    "updates", "mega folder", "performance tracks",
+    "progress reports", "rules", "highlighted",
+    "current editor", "editor comments",
+    # Collaboration/feature labels → should be sections, not eras
+    "features", "collaborations", "collaboration", "featured",
+    "collaborations & features", "loosies", "guest verses",
+    "guest features",
+})
+_NON_ERA_PREFIXES = (
+    "collaboration with",  # a section label, not an era
+    "skip to ",  # navigation rows: "Skip to DRILL"
+    "*",  # asterisk-prefixed labels: "*New* Unreleased Guidelines"
+    # Changelog verbs: "Added ...", "Removed ...", "Updated ...", "Renamed ..."
+    "added ", "removed ", "updated ", "renamed ", "started ", "finished ",
+)
+_NON_ERA_SUBSTRINGS = (
+    "tracker",  # a header/label, not an era
+    "click to view", "click here",  # navigation rows
+    "discord.gg/", "discord.com/", "http://", "https://", ".gg/",  # NOSONAR(S5332)
+    "playlist", "spotify",  # streaming/playlist references
+    "sent all", "onlyfiles",  # changelog phrasing
+)
+_CONTACT_TLDS = (".icu", ".su", ".gg", ".com", ".net", ".org", ".io")
+
+
+def _is_contact_line(line: str) -> bool:
+    """A person/service with a handle ("symex (@symex.b) [vaulted.icu]") or a domain
+    ("pillows.su"), judged on the text before its parenthetical is stripped."""
+    if _HANDLE_RE.search(line) and len(line.split()) <= 4:
+        return True
+    lower = line.lower()
+    return bool(re.search(r"\.\w{2,4}\b", lower)) and any(tld in lower for tld in _CONTACT_TLDS)
+
+
+def _is_non_era_label(name: str) -> bool:
+    """Announcement, changelog, navigation and meta rows, judged on the stripped name."""
+    words = name.split()
+    lower = name.lower()
+    return (
+        len(words) > 10 or len(name) > 80  # too long: an announcement
+        or name.endswith(":")  # an announcement or label
+        or lower in _NON_ERA_LABELS
+        or lower.startswith(_NON_ERA_PREFIXES)
+        or any(tok in lower for tok in _NON_ERA_SUBSTRINGS)
+        # Date-prefixed changelog: "22.10.2025 - Big findings", "2024-01-05: ..."
+        or bool(_DATE_PREFIX_RE.match(name))
+        or (name.isdigit() and len(name) <= 3)  # "31", "7"
+        # Person name + social handle after paren stripping: "Fly (@damn4k)"
+        or (bool(_HANDLE_RE.search(name)) and len(words) <= 3)
+        # Short date-slash changelog: "1/23 - Sent all links"
+        or bool(_CHANGELOG_SLASH_RE.match(name))
+        or name.count("!") >= 2  # "NEW FINDINGS!!!"
+        # Era stats pattern masquerading as era name: "718 Total Full", "3 Leaks"
+        or bool(ERA_STATS_PATTERN.match(name))
+    )
+
+
 def _looks_like_era_name(text: str) -> bool:
     """Check if text looks like a plausible era name (not an announcement/footer).
 
@@ -879,129 +955,16 @@ def _looks_like_era_name(text: str) -> bool:
     lines = [l for l in text.split("\n") if l.strip()]
     if len(lines) >= 3:
         return False
-
-    # Take the first line only
     first_line = lines[0].strip() if lines else text.strip()
-
-    # Empty or whitespace-only → not an era
-    if not first_line:
-        return False
-
     # A broken formula is not a name; as an era, the abbreviated-era-name rule
-    # below would absorb every later era into it.
-    if _is_spreadsheet_error(first_line):
+    # would absorb every later era into it.
+    if not first_line or _is_spreadsheet_error(first_line) or _is_contact_line(first_line):
         return False
-
-    # Check original text for handles/domains before stripping
-    orig_lower = first_line.lower()
-
-    # Person/service + social handle in original: "symex (@symex.b) [vaulted.icu]"
-    if _HANDLE_RE.search(first_line):
-        # Check original (not stripped) text for handle detection
-        orig_words = first_line.split()
-        if len(orig_words) <= 4:
-            return False
-
-    # Domain names in original text: "vaulted.icu", "pillows.su"
-    if re.search(r"\.\w{2,4}\b", orig_lower) and any(
-        tld in orig_lower for tld in (".icu", ".su", ".gg", ".com", ".net", ".org", ".io")
-    ):
-        return False
-
-    # Strip parenthetical suffix for length check
+    # Strip parenthetical suffix for the remaining checks
     paren_idx = first_line.find("(")
     if paren_idx > 0:
         first_line = first_line[:paren_idx].strip()
-
-    words = first_line.split()
-    # Too long or too many words → announcement
-    if len(words) > 10 or len(first_line) > 80:
-        return False
-    # Ends with colon → announcement/label
-    if first_line.endswith(":"):
-        return False
-
-    lower = first_line.lower()
-
-    # Known non-era labels that appear in the era column
-    non_era = {
-        "links", "link", "changelog", "changelogs", "notes",
-        "tracker guidelines", "guidelines", "discord", "credits",
-        "editors", "current editors", "update notes", "resources",
-        "template", "template:", "about", "info", "key", "legend",
-        "recent additions", "what's new", "what's new?",
-        # Meta-labels that aren't music eras
-        "types", "type", "owner", "general information", "release date",
-        "updates", "mega folder", "performance tracks",
-        "progress reports", "rules", "highlighted",
-        "current editor", "editor comments",
-        # Collaboration/feature labels → should be sections, not eras
-        "features", "collaborations", "collaboration", "featured",
-        "collaborations & features", "loosies", "guest verses",
-        "guest features",
-    }
-    if lower in non_era:
-        return False
-
-    # Starts with "Collaboration with" → section label, not era
-    if lower.startswith("collaboration with"):
-        return False
-
-    # Contains "tracker" → likely a header/label, not an era
-    if "tracker" in lower:
-        return False
-
-    # Navigation rows: "Skip to DRILL", "Click to view..."
-    if lower.startswith("skip to ") or "click to view" in lower or "click here" in lower:
-        return False
-
-    # URLs / discord links → not an era name
-    if any(tok in lower for tok in ("discord.gg/", "discord.com/", "http://", "https://", ".gg/")):
-        return False
-
-    # Date-prefixed changelog: "22.10.2025 - Big findings", "2024-01-05: ..."
-    if _DATE_PREFIX_RE.match(first_line):
-        return False
-
-    # Changelog verbs: "Added ...", "Removed ...", "Updated ...", "Renamed ..."
-    changelog_verbs = ("added ", "removed ", "updated ", "renamed ", "started ", "finished ")
-    if lower.startswith(changelog_verbs):
-        return False
-
-    # Pure number or very short numeric: "31", "7", "3" — not an era
-    if first_line.isdigit() and len(first_line) <= 3:
-        return False
-
-    # Person name + social handle after paren stripping: "Fly (@damn4k)" (the
-    # check above runs on the original text).
-    if _HANDLE_RE.search(first_line) and len(words) <= 3:
-        return False
-
-    # Short date-slash changelog: "1/23 - Sent all links", "11/21 - All eras in"
-    if _CHANGELOG_SLASH_RE.match(first_line):
-        return False
-
-    # Streaming/playlist references: "Spotify playlist for every..."
-    if "playlist" in lower or "spotify" in lower:
-        return False
-
-    # Exclamation-heavy announcements: "NEW FINDINGS!!!"
-    if first_line.count("!") >= 2:
-        return False
-
-    # Asterisk-prefixed labels: "*New* Unreleased Guidelines"
-    if lower.startswith("*"):
-        return False
-
-    # "sent all" / "onlyfiles" patterns in changelogs
-    if "sent all" in lower or "onlyfiles" in lower:
-        return False
-
-    # Era stats pattern masquerading as era name: "718 Total Full", "3 Leaks"
-    if ERA_STATS_PATTERN.match(first_line):
-        return False
-
-    return len(words) >= 1
+    return not _is_non_era_label(first_line) and bool(first_line.split())
 
 
 def _is_section_separator(row: list[_Cell]) -> bool:
@@ -1158,6 +1121,41 @@ def _transfer_era_metadata(source: Era, target: Era) -> None:
         target.name = source.name
 
 
+def _era_song_count(era: Era) -> int:
+    return sum(len(s.songs) for s in era.sections)
+
+
+def _merge_stubs_forward(eras: list[Era]) -> list[Era]:
+    """A 0-song era followed by a related songs-bearing era hands it its metadata and goes."""
+    result: list[Era] = []
+    for i, era in enumerate(eras):
+        nxt = eras[i + 1] if i + 1 < len(eras) else None
+        if (
+            nxt is not None and _era_song_count(era) == 0 and _era_song_count(nxt) > 0
+            and (_era_names_are_related(era.name, nxt.name) or _is_collab_stub_match(era.name, nxt.name))
+        ):
+            _transfer_era_metadata(era, nxt)
+            continue
+        result.append(era)
+    return result
+
+
+def _merge_tagged_stubs(eras: list[Era]) -> list[Era]:
+    """Version-tagged empty eras merge into ANY era with a matching base name:
+    "HiTunes [V3]" (0 songs) → "HiTunes" (has songs)."""
+    merged_away: set[int] = set()
+    for empty_era in [e for e in eras if _era_song_count(e) == 0]:
+        base_key = _era_match_key(empty_era.name)
+        target = next((
+            t for t in eras
+            if base_key and t is not empty_era and _era_match_key(t.name) == base_key and _era_song_count(t) > 0
+        ), None)
+        if target is not None:
+            _transfer_era_metadata(empty_era, target)
+            merged_away.add(id(empty_era))
+    return [e for e in eras if id(e) not in merged_away]
+
+
 def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     """Merge 0-song stub eras into adjacent songs-bearing eras, transferring metadata.
 
@@ -1169,46 +1167,7 @@ def _merge_empty_stub_eras(eras: list[Era]) -> list[Era]:
     """
     if not eras:
         return eras
-    result: list[Era] = []
-    i = 0
-    while i < len(eras):
-        era = eras[i]
-        era_songs = sum(len(s.songs) for s in era.sections)
-        if era_songs == 0 and i + 1 < len(eras):
-            next_era = eras[i + 1]
-            next_songs = sum(len(s.songs) for s in next_era.sections)
-            if next_songs > 0 and (
-                _era_names_are_related(era.name, next_era.name)
-                or _is_collab_stub_match(era.name, next_era.name)
-            ):
-                _transfer_era_metadata(era, next_era)
-                # Skip this empty stub
-                i += 1
-                continue
-        result.append(era)
-        i += 1
-
-    # Second pass: merge version-tagged empty eras into ANY era with matching base name.
-    # e.g. "HiTunes [V3]" (0 songs) → merge into "HiTunes" (has songs).
-    remaining_empty = [e for e in result if sum(len(s.songs) for s in e.sections) == 0]
-    merged_away: set[int] = set()
-    for empty_era in remaining_empty:
-        base_key = _era_match_key(empty_era.name)
-        if not base_key:
-            continue
-        for target in result:
-            if target is empty_era:
-                continue
-            target_key = _era_match_key(target.name)
-            target_songs = sum(len(s.songs) for s in target.sections)
-            if target_key == base_key and target_songs > 0:
-                _transfer_era_metadata(empty_era, target)
-                merged_away.add(id(empty_era))
-                break
-    if merged_away:
-        result = [e for e in result if id(e) not in merged_away]
-
-    return result
+    return _merge_tagged_stubs(_merge_stubs_forward(eras))
 
 
 def _consolidate_group_labels(era: Era) -> None:
@@ -1391,6 +1350,19 @@ def _song_match_key(name: str) -> str:
     return key
 
 
+def _best_word_overlap(key_words: set[str], era_by_key: dict[str, Era]) -> Era | None:
+    """The era sharing at least 2 significant words and >= 50% of the smaller word set."""
+    best_match: Era | None = None
+    best_score = 0.0
+    for era_key, era in era_by_key.items():
+        era_words = _significant_words(era_key)
+        overlap = len(key_words & era_words)
+        score = overlap / min(len(key_words), len(era_words)) if era_words else 0
+        if score > best_score and overlap >= 2:
+            best_score, best_match = score, era
+    return best_match if best_score >= 0.5 else None
+
+
 def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     """Fuzzy match a row's era key against known era keys.
 
@@ -1403,33 +1375,14 @@ def _fuzzy_era_match(key: str, era_by_key: dict[str, Era]) -> Era | None:
     key_words = _significant_words(key)
     if not key_words:
         return None
-
-    best_match: Era | None = None
-    best_score = 0.0
-
-    for era_key, era in era_by_key.items():
-        era_words = _significant_words(era_key)
-        if not era_words:
-            continue
-        overlap = len(key_words & era_words)
-        min_size = min(len(key_words), len(era_words))
-        score = overlap / min_size if min_size > 0 else 0
-        if score > best_score and overlap >= 2:
-            best_score = score
-            best_match = era
-
-    if best_score >= 0.5 and best_match is not None:
-        return best_match
-
-    # Acronym matching: if key matches the acronym of a known era.
-    # e.g. "sftsaftm" → "Shoot For The Stars Aim For The Moon"
+    best = _best_word_overlap(key_words, era_by_key)
+    if best is not None:
+        return best
+    # Acronym matching: "sftsaftm" → "Shoot For The Stars Aim For The Moon"
     key_clean = key.replace(" ", "")
-    if len(key_clean) >= 3:
-        for era_key, era in era_by_key.items():
-            if _acronym(era_key) == key_clean:
-                return era
-
-    return None
+    if len(key_clean) < 3:
+        return None
+    return next((era for era_key, era in era_by_key.items() if _acronym(era_key) == key_clean), None)
 
 
 # Both helpers run once per era key PER UNMATCHED ROW (millions of calls on a
@@ -1489,6 +1442,31 @@ def _netloc(url: str) -> str:
     return parts[2].lower() if len(parts) > 2 else ""
 
 
+def _url_split_start(text: str, i: int) -> int:
+    """Where the piece before the URL at *i* ends: back over whitespace, raw or percent-encoded."""
+    j = i
+    while True:
+        if j and text[j - 1].isspace():
+            j -= 1
+        elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
+            j -= 3
+        else:
+            return j
+
+
+def _is_url_split(text: str, i: int, j: int, start: int, wrappers_only: bool) -> bool:
+    """Whether the URL at *i* (preceded by whitespace from *j*) starts a new piece."""
+    if wrappers_only and not (_GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])):
+        return False
+    if j != i:
+        return True
+    if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
+        return False
+    # A same-host scheme after "/" is a paste restarted, not a wrapper.
+    prev = text[i - 1]
+    return prev not in _PAYLOAD_PREV or (prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300]))
+
+
 def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
     """Split *text* at each URL that starts after whitespace or glued onto the previous one.
 
@@ -1501,27 +1479,9 @@ def _split_urls(text: str, wrappers_only: bool = False) -> list[str]:
     start = 0
     for m in _URL_START_RE.finditer(text, 1):
         i = m.start()
-        j = i
-        while True:  # step back over whitespace, raw or percent-encoded
-            if j and text[j - 1].isspace():
-                j -= 1
-            elif j >= 3 and text[j - 3 : j].lower() in _ENCODED_WS:
-                j -= 3
-            else:
-                break
-        if wrappers_only and not (
-            _GOOGLE_WRAPPER_RE.match(text, i) or any(c.isspace() for c in text[j:i])
-        ):
+        j = _url_split_start(text, i)
+        if not _is_url_split(text, i, j, start, wrappers_only):
             continue
-        if j == i:
-            prev = text[i - 1]
-            if text[i - 3 : i].lower() in _ENCODED_PAYLOAD_PREV:
-                continue
-            # A same-host scheme after "/" is a paste restarted, not a wrapper.
-            if prev in _PAYLOAD_PREV and not (
-                prev == "/" and _netloc(text[start:i]) == _netloc(text[i : i + 300])
-            ):
-                continue
         if j > start:
             pieces.append(text[start:j].rstrip(" ,;|"))
             glued.append(j == i)
@@ -1550,6 +1510,13 @@ def _extract_links_from_cell(cell: _Cell) -> list[str]:
     return [link for raw in cell.links for link in _split_links(raw)]
 
 
+def _set_part_keys(parts: Iterable[str], era: Era, target: dict[str, Era]) -> None:
+    for part in parts:
+        part_key = _era_match_key(part)
+        if part_key:
+            target.setdefault(part_key, era)
+
+
 def _register_era_keys(
     era: Era,
     era_name: str,
@@ -1573,26 +1540,16 @@ def _register_era_keys(
     full = _normalize_unicode(era_name).lower().strip()
     if full and full != primary:
         era_by_key.setdefault(full, era)
-    # Alt names
+    target = fallback_keys if fallback_keys is not None else era_by_key
     for alt in era.alt_names:
-        alt_key = _era_match_key(alt)
-        if alt_key:
-            era_by_key.setdefault(alt_key, era)
+        _set_part_keys([alt], era, era_by_key)
         # Comma alias list → fallback dict — see docs/decisions.md::parser.py::era-key-shadowing
         parts = _split_alt_aliases(alt)
         if len(parts) > 1:
-            target = fallback_keys if fallback_keys is not None else era_by_key
-            for part in parts:
-                part_key = _era_match_key(part)
-                if part_key:
-                    target.setdefault(part_key, era)
+            _set_part_keys(parts, era, target)
     # Slash-separated: "38 Baby / Ay Ay" → register both parts
     if " / " in era_name:
-        target = fallback_keys if fallback_keys is not None else era_by_key
-        for part in era_name.split(" / "):
-            part_key = _era_match_key(part)
-            if part_key:
-                target.setdefault(part_key, era)
+        _set_part_keys(era_name.split(" / "), era, target)
 
 
 # ---------------------------------------------------------------------------
@@ -1615,29 +1572,14 @@ def _era_own_keys(era: Era) -> set[str]:
     sibling era registered the shared key first in the global dicts. The tag
     keys also find a tagged row's sibling era.
     """
-    keys: set[str] = set()
-    primary = _era_match_key(era.name)
-    if primary:
-        keys.add(primary)
-    full = _normalize_unicode(era.name).lower().strip()
-    if full:
-        keys.add(full)
-    tag_key = _era_tag_key(era.name)
-    if tag_key:
-        keys.add(tag_key)
+    keys = {_era_match_key(era.name), _normalize_unicode(era.name).lower().strip(), _era_tag_key(era.name)}
     for alt in era.alt_names:
-        alt_key = _era_match_key(alt)
-        if alt_key:
-            keys.add(alt_key)
-        for part in _split_alt_aliases(alt):
-            part_key = _era_match_key(part)
-            if part_key:
-                keys.add(part_key)
+        keys.add(_era_match_key(alt))
+        keys.update(_era_match_key(part) for part in _split_alt_aliases(alt))
     if " / " in era.name:
         for part in era.name.split(" / "):
-            for part_key in (_era_match_key(part), _era_tag_key(part)):
-                if part_key:
-                    keys.add(part_key)
+            keys.update((_era_match_key(part), _era_tag_key(part)))
+    keys.discard("")
     return keys
 
 
@@ -1696,6 +1638,46 @@ def _first_row_image(row: list[_Cell], prefer_idx: int | None = None) -> str | N
     return None
 
 
+def _era_header_extras(row: list[_Cell], art_url: str | None, notes_col: int) -> tuple[str | None, list[str], str | None]:
+    """(art, highlighted producers, description) from the cells after the timeline column."""
+    highlighted_producers: list[str] = []
+    desc_candidates: list[str] = []
+    for cell in row[notes_col + 1:]:
+        if cell.images and not art_url:
+            art_url = cell.images[0]
+        text = cell.text.strip()
+        if text and "Highlighted" in text and "Producer" in text:
+            highlighted_producers = parse_highlighted_producers(text)
+        elif text:
+            desc_candidates.append(text)
+    return art_url, highlighted_producers, max(desc_candidates, key=len) if desc_candidates else None
+
+
+def _is_parenthesised(text: str) -> bool:
+    return text.startswith("(") and text.endswith(")")
+
+
+def _era_header_names(era_name_full: str) -> tuple[str, list[str], bool]:
+    """(name, alt names, needs backfill). Alt names follow on their own lines, in parens.
+
+    An image-based era name leaves no usable text (empty, or purely parenthetical):
+    the real name is backfilled from the first song row."""
+    name_lines = era_name_full.split("\n") if era_name_full else [""]
+    era_name = name_lines[0].strip()
+    alt_names: list[str] = []
+    for line in name_lines[1:]:
+        line = line.strip()
+        line = line[1:-1].strip() if _is_parenthesised(line) else line
+        if line:
+            alt_names.append(line)
+    if era_name and not _is_parenthesised(era_name):
+        return era_name, alt_names, False
+    inner = era_name[1:-1].strip() if era_name else ""
+    if inner and inner not in alt_names:
+        alt_names.insert(0, inner)
+    return "", alt_names, True
+
+
 def _parse_era_header_row(
     row: list[_Cell], col_map: dict[str, int]
 ) -> tuple[Era, bool]:
@@ -1713,71 +1695,23 @@ def _parse_era_header_row(
     """
     era_name_col = col_map.get("name", 1)
     notes_col = col_map.get("notes", 2)
-
-    era_name_full = _get_cell_text(row, era_name_col)
     timeline_raw = _get_cell_text(row, notes_col)
     era_stats_raw = _get_cell_text(row, 0)
-
-    # Extract era art, highlighted producers, and description from trailing cells.
-    art_url = None
-    highlighted_producers: list[str] = []
-    desc_candidates: list[str] = []
 
     # Image-only era name vs. album art — see docs/decisions.md::parser.py::name-cell-image
     name_cell = _get_cell(row, era_name_col)
     name_text = name_cell.text.strip()
-    name_has_usable_text = bool(
-        name_text
-        and not (name_text.startswith("(") and name_text.endswith(")"))
-    )
-    if name_cell.images and name_has_usable_text:
-        art_url = name_cell.images[0]
-
-    for i, cell in enumerate(row):
-        if i <= notes_col:
-            continue  # skip stats, name, timeline columns
-        if cell.images and not art_url:
-            art_url = cell.images[0]
-        text = cell.text.strip()
-        if text:
-            if "Highlighted" in text and "Producer" in text:
-                highlighted_producers = parse_highlighted_producers(text)
-            else:
-                desc_candidates.append(text)
-
-    era_desc = max(desc_candidates, key=len) if desc_candidates else None
-    timeline = parse_timeline(timeline_raw) if timeline_raw else []
-    era_stats = parse_era_stats(era_stats_raw) if era_stats_raw else None
-
-    # Split main name from alt names (newline-separated, alts in parens)
-    name_lines = era_name_full.split("\n") if era_name_full else [""]
-    era_name = name_lines[0].strip()
-    alt_names: list[str] = []
-    for _line in name_lines[1:]:
-        _line = _line.strip()
-        if _line.startswith("(") and _line.endswith(")"):
-            _line = _line[1:-1].strip()
-        if _line:
-            alt_names.append(_line)
-
-    # Image-based era name: the name cell has an image but no usable text (empty, or
-    # purely parenthetical). The real name is backfilled from the first song row.
-    needs_backfill = False
-    if not era_name or (era_name.startswith("(") and era_name.endswith(")")):
-        if era_name.startswith("(") and era_name.endswith(")"):
-            inner = era_name[1:-1].strip()
-            if inner and inner not in alt_names:
-                alt_names.insert(0, inner)
-            era_name = ""
-        needs_backfill = True
+    name_art = name_cell.images[0] if name_cell.images and name_text and not _is_parenthesised(name_text) else None
+    art_url, highlighted_producers, era_desc = _era_header_extras(row, name_art, notes_col)
+    era_name, alt_names, needs_backfill = _era_header_names(_get_cell_text(row, era_name_col))
 
     era = Era(
         name=era_name,
         alt_names=alt_names,
-        description=era_desc if era_desc else None,
-        timeline=timeline,
-        stats_raw=era_stats_raw if era_stats_raw else None,
-        stats=era_stats,
+        description=era_desc or None,
+        timeline=parse_timeline(timeline_raw) if timeline_raw else [],
+        stats_raw=era_stats_raw or None,
+        stats=parse_era_stats(era_stats_raw) if era_stats_raw else None,
         art_url=art_url,
         highlighted_producers=highlighted_producers,
         sections=[Section()],  # default unnamed section
@@ -1785,8 +1719,6 @@ def _parse_era_header_row(
     return era, needs_backfill
 
 
-# Column labels that mark an artwork tab, which otherwise parses as one "song" per
-# cover. Two hits required: a lone "Image" column also appears on physical-release tabs.
 _ARTWORK_COLUMN_SIGNS = frozenset({
     "art type", "project type", "designer", "cover art", "image type",
     "cover type", "photo type", "use", "used", "used?", "made by", "image",
@@ -1859,6 +1791,42 @@ class _TagIndex:
         return self.latest.get(tag_key)
 
 
+def _cached_own_keys(own_keys_cache: dict[int, set[str]]):
+    def own_keys(era: Era) -> set[str]:
+        own = own_keys_cache.get(id(era))
+        if own is None:
+            own = own_keys_cache[id(era)] = _era_own_keys(era)
+        return own
+    return own_keys
+
+
+def _keyed_era(norm: str, stripped: str, era_by_key: dict[str, Era], era_by_key_fallback: dict[str, Era]) -> Era | None:
+    """The primary then the fallback keys, each by full then stripped key."""
+    for keys in (era_by_key, era_by_key_fallback):
+        for key in (norm, stripped):
+            era = keys.get(key)
+            if era is not None:
+                return era
+    return None
+
+
+def _fuzzy_row_era(
+    norm: str, stripped: str, current_era: Era | None,
+    era_by_key: dict[str, Era], era_by_key_fallback: dict[str, Era],
+) -> tuple[Era | None, bool, bool]:
+    """A fuzzy match on the current era, then on all. A positional fuzzy hit is
+    registered as a fallback key for the rows that follow."""
+    cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
+    if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
+        era_by_key_fallback.setdefault(stripped, current_era)
+        logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
+        return current_era, True, False
+    era = _fuzzy_era_match(norm, era_by_key)
+    if era is not None:
+        logger.debug("Fuzzy era match: %r → %r", norm, era.name)
+    return era, era is not None, False
+
+
 def _resolve_row_era(
     row_era: str,
     current_era: Era | None,
@@ -1876,12 +1844,7 @@ def _resolve_row_era(
     (each by full then stripped key), a fuzzy match on the current era, then on all.
     A positional fuzzy hit is registered as a fallback key for the rows that follow.
     """
-    def own_keys(era: Era) -> set[str]:
-        own = own_keys_cache.get(id(era))
-        if own is None:
-            own = own_keys_cache[id(era)] = _era_own_keys(era)
-        return own
-
+    own_keys = _cached_own_keys(own_keys_cache)
     norm = _normalize_unicode(row_era).lower()
     stripped = _era_match_key(row_era)
     tag_key = _era_tag_key(row_era)
@@ -1894,20 +1857,26 @@ def _resolve_row_era(
         return tagged, False, stripped in own
     if stripped in own:
         return current_era, False, False
-    for keys in (era_by_key, era_by_key_fallback):
-        for key in (norm, stripped):
-            era = keys.get(key)
-            if era is not None:
-                return era, False, False
-    cur_key = _era_match_key(current_era.name) if current_era is not None and current_era.name else ""
-    if cur_key and _fuzzy_era_match(norm, {cur_key: current_era}):
-        era_by_key_fallback.setdefault(stripped, current_era)
-        logger.debug("Positional fuzzy match: %r → current era %r", norm, current_era.name)
-        return current_era, True, False
-    era = _fuzzy_era_match(norm, era_by_key)
-    if era is not None:
-        logger.debug("Fuzzy era match: %r → %r", norm, era.name)
-    return era, era is not None, False
+    keyed = _keyed_era(norm, stripped, era_by_key, era_by_key_fallback)
+    if keyed is not None:
+        return keyed, False, False
+    return _fuzzy_row_era(norm, stripped, current_era, era_by_key, era_by_key_fallback)
+
+
+def _lookahead_era_tag(rows: list[list[_Cell]], row_idx: int, era_col: int) -> str | None:
+    """The tag key of the first Era-column value below a heading row, or None when an era
+    header or a long row comes first."""
+    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
+        if _is_empty_row(row) or _is_section_separator(row):
+            continue
+        if _is_era_header(row):
+            return None
+        row_era = _get_cell_text(row, era_col)
+        if row_era:
+            return _era_tag_key(row_era)
+        if sum(1 for c in row if c.text.strip()) > 3:
+            return None
+    return None
 
 
 def _heads_tagged_era(
@@ -1932,18 +1901,7 @@ def _heads_tagged_era(
         return False
     if not _era_tag_key(current_era.name) and _era_match_key(label) in own:
         return False
-    era_col = col_map.get("era", 0)
-    for row in rows[row_idx + 1 : row_idx + 1 + _TAGGED_HEADING_LOOKAHEAD]:
-        if _is_empty_row(row) or _is_section_separator(row):
-            continue
-        if _is_era_header(row):
-            return False
-        row_era = _get_cell_text(row, era_col)
-        if row_era:
-            return _era_tag_key(row_era) == tag_key
-        if sum(1 for c in row if c.text.strip()) > 3:
-            return False
-    return False
+    return _lookahead_era_tag(rows, row_idx, col_map.get("era", 0)) == tag_key
 
 
 def _stats_less_era(row: list[_Cell], name: str, col_map: dict[str, int]) -> Era:
@@ -1965,6 +1923,343 @@ def _sample_unmatched(sample: list[str], row_idx: int, row: list[_Cell]) -> None
         row_text = " | ".join(c.text.strip() for c in row if c.text.strip())[:200]
         if row_text:
             sample.append(f"Row {row_idx}: {row_text}")
+
+
+class _SheetWalk:
+    """The row walk of `parse_sheet`: era/section/footer/song classification over one tab.
+
+    One method per row kind, tried in a fixed order; each returns True when it consumed the row.
+    """
+
+    def __init__(self, rows: list[list[_Cell]], header_row_idx: int, col_map: dict[str, int], notices: list[Notice]):
+        self.rows = rows
+        self.header_row_idx = header_row_idx
+        self.col_map = col_map
+        self.notices = notices
+        # Tabs without era header rows: the Era column is the only era signal, so it is
+        # authoritative (the abbreviated-era heuristic would collapse the tab into one era).
+        self.flat_era_mode = not any(_is_era_header(r) for r in rows[header_row_idx + 1:])
+        # How often each era-column value occurs: a one-character value seen once
+        # is a typo; seen repeatedly it is an era the sheet declares only in cells.
+        era_idx = col_map.get("era", 0)
+        self.era_value_counts = Counter(
+            _get_cell_text(r, era_idx).split("\n")[0].strip() for r in rows[header_row_idx + 1:]
+        )
+        self.eras: list[Era] = []
+        self.current_era: Era | None = None
+        # Lowercased, parenthetical- and version-tag-stripped era key → Era.
+        self.era_by_key: dict[str, Era] = {}
+        # Fallback registrations, consulted only when the primary dict misses, so a
+        # genuine "Ay Ay" era declared later beats a "38 Baby / Ay Ay" slash part.
+        self.era_by_key_fallback: dict[str, Era] = {}
+        # Eras whose name cell had an image but no usable text — backfill from
+        # the first song row's era column. Holds id(era) values.
+        self.needs_name_backfill: set[int] = set()
+        # id(era) → its own key forms, for the positional-exact prior.
+        self.era_own_keys_cache: dict[int, set[str]] = {}
+        self.tag_index = _TagIndex()
+        # Own keys of eras[:declared_upto], so a repeated tagged heading is found in O(1).
+        self.declared_keys: set[str] = set()
+        self.declared_upto = 0
+        # (id(era), song base name) → Song, for O(1) version grouping
+        self.song_index: dict[tuple[int, str], Song] = {}
+        self.in_footer = False
+        self.song_rows = 0
+        self.skipped_rows = 0
+        self.unmatched_rows: list[str] = []
+        self.unmatched_total = 0
+        self.footer_rows = 0
+        self.fuzzy_matched_rows = 0
+
+    # -- shared steps ---------------------------------------------------------
+
+    def _add(self, era: Era, version: SongVersion) -> None:
+        _add_version_to_era(era, version, self.song_index)
+        self.song_rows += 1
+
+    def _open_era(self, era: Era, key_text: str, primary: dict[str, Era] | None = None) -> None:
+        self.eras.append(era)
+        _register_era_keys(era, key_text, self.era_by_key if primary is None else primary, self.era_by_key_fallback)
+        self.current_era = era
+
+    def _unmatched(self, row_idx: int, row: list[_Cell]) -> None:
+        self.skipped_rows += 1
+        self.unmatched_total += 1
+        _sample_unmatched(self.unmatched_rows, row_idx, row)
+
+    # -- the walk -------------------------------------------------------------
+
+    def walk(self) -> None:
+        for row_idx, row in enumerate(self.rows):
+            # Skip the header row and any title/instruction rows before it, and empty rows.
+            if row_idx <= self.header_row_idx or _is_empty_row(row):
+                continue
+            self._row(row_idx, row)
+
+    def _row(self, row_idx: int, row: list[_Cell]) -> None:
+        if self.current_era is None and self._meta_banner(row):
+            return
+        # Era header FIRST (before separator/footer checks); it also resets footer state.
+        # See docs/decisions.md::parser.py::parse_sheet — era header checked before section separator
+        if self._era_header(row) or self._section_separator(row) or self._footer(row):
+            return
+        era_col = self.col_map.get("era", 0)
+        row_era = _get_cell_text(row, era_col)
+        if row_era:
+            if not self._backfill_era_name(row, row_era):
+                self._era_column_row(row_idx, row, row_era, era_col)
+            return
+        name_val = _get_cell_text(row, self.col_map.get("name", 1))
+        if name_val and self._name_column_row(row_idx, row, name_val):
+            return
+        if not name_val and self._section_or_spill(row):
+            return
+        if self._positional_song(row):
+            return
+        self._unmatched(row_idx, row)
+
+    def _meta_banner(self, row: list[_Cell]) -> bool:
+        """A meta banner between the header and the first era (Travis Scott:
+        '| Last Updated: … | Hover over the headers … |') becomes a notice."""
+        filled = [c for c in row if c.text.strip()]
+        if not (
+            len(filled) == 1
+            and not filled[0].links
+            and re.search(r"last updated|hover over|how to use", filled[0].text, re.IGNORECASE)
+        ):
+            return False
+        text = filled[0].text.strip().strip("|").strip()
+        # Dedupe against header notices and repeated banner rows (this append site
+        # bypasses _extract_header_notices' own seen-set).
+        if text.lower() not in {n.text.lower() for n in self.notices}:
+            self.notices.append(Notice(text=text, link=None, kind="info"))
+        return True
+
+    def _era_header(self, row: list[_Cell]) -> bool:
+        if not _is_era_header(row):
+            return False
+        self.in_footer = False
+        era, needs_backfill = _parse_era_header_row(row, self.col_map)
+        self._open_era(era, era.name)
+        if needs_backfill:
+            self.needs_name_backfill.add(id(era))
+        return True
+
+    def _section_separator(self, row: list[_Cell]) -> bool:
+        """Section separators become named sections within the current era."""
+        if not _is_section_separator(row):
+            return False
+        if self.current_era is not None:
+            non_empty = [c for c in row if c.text.strip()]
+            label = non_empty[0].text.strip() if non_empty else ""
+            if label:
+                self.current_era.sections.append(Section(name=label))
+        return True
+
+    def _footer(self, row: list[_Cell]) -> bool:
+        """Footer rows are flagged, not a stop: a later era header resets `in_footer`."""
+        name_col_text = _get_cell_text(row, self.col_map.get("name", 1)).strip().lower()
+        if name_col_text in _NAME_FOOTER_KEYWORDS or _is_tracker_footer(row):
+            self.in_footer = True
+        if self.in_footer:
+            self.footer_rows += 1
+        return self.in_footer
+
+    def _backfill_era_name(self, row: list[_Cell], row_era: str) -> bool:
+        """See docs/decisions.md::parser.py::backfill-era-priority."""
+        era = self.current_era
+        if era is None or id(era) not in self.needs_name_backfill:
+            return False
+        era.name = row_era
+        _register_era_keys(era, row_era, self.era_by_key, self.era_by_key_fallback)
+        self.needs_name_backfill.discard(id(era))
+        version = _parse_song_row(row, self.col_map)
+        if version:
+            self._add(era, version)
+        return True
+
+    # -- rows with an Era-column value -----------------------------------------
+
+    def _era_column_row(self, row_idx: int, row: list[_Cell], row_era: str, era_col: int) -> None:
+        # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
+        matched_era, fuzzy, sibling = _resolve_row_era(
+            row_era, self.current_era, self.eras, self.era_by_key, self.era_by_key_fallback,
+            self.era_own_keys_cache, self.tag_index,
+        )
+        self.fuzzy_matched_rows += fuzzy
+        if matched_era is not None:
+            # A tagged row's hop to a sibling keeps the header it sits under current.
+            if not sibling:
+                self.current_era = matched_era
+            version = _parse_song_row(row, self.col_map)
+            if version and _is_section_label_version(version, row, era_col):
+                matched_era.sections.append(Section(name=version.name, notes=version.notes))
+            elif version:
+                self._add(matched_era, version)
+        elif self.current_era is not None:
+            self._unknown_era_under_current(row, row_era, self.current_era)
+        else:
+            self._unknown_era_first(row_idx, row, row_era)
+
+    def _unknown_era_under_current(self, row: list[_Cell], row_era: str, current: Era) -> None:
+        """No key matched, but an era is open: same name (case-insensitive) joins it,
+        a different one may start a new era."""
+        current_key = _era_match_key(current.name) if current.name else ""
+        version = _parse_song_row(row, self.col_map)
+        if current_key and _era_match_key(row_era) == current_key:
+            # Same era (abbreviated or exact) — assign to current
+            if version:
+                self._add(current, version)
+            elif sum(1 for c in row if c.text.strip()) <= 3:
+                current.sections.append(Section(name=row_era))
+        elif version and _looks_like_era_name(row_era):
+            self._plausible_new_era(row_era, version, current)
+        elif version:
+            # Not a plausible era name but has song data: the current era is the fallback.
+            self._add(current, version)
+        elif sum(1 for c in row if c.text.strip()) <= 2 or not _looks_like_era_name(row_era):
+            # No song data and very few filled cells: a sub-era section of the current era.
+            current.sections.append(Section(name=row_era))
+        else:
+            # Enough data to be an era header without stats
+            self._open_era(_stats_less_era(row, row_era, self.col_map), row_era)
+
+    def _plausible_new_era(self, row_era: str, version: SongVersion, current: Era) -> None:
+        """A different, era-like name on a song row: auto-create a new era, but prefer
+        positional assignment when the row has real song data."""
+        stripped = row_era.strip()
+        # Abbreviated era names: docs/decisions.md::parser.py::abbreviated-era-names.
+        # Off in flat_era_mode, where a new Era-column value is a new era.
+        if _has_song_data(version) and not self.flat_era_mode:
+            self._add(current, version)
+            self.era_by_key_fallback.setdefault(_era_match_key(row_era), current)
+        elif len(stripped) <= 1 and self.era_value_counts[stripped] <= 1 and not self.flat_era_mode:
+            # A one-character era cell on a row with no song data is a typo on a sub-era
+            # label (Ye: "x"), not a new era holding one fake song.
+            current.sections.append(Section(name=version.name, notes=version.notes))
+        else:
+            # Auto-created eras keep the row's own song (docs/decisions.md::parser.py::parse_sheet
+            # — auto-created eras keep their row's song).
+            self._open_era(Era(name=row_era, sections=[Section()]), row_era)
+            self._add(self.current_era, version)
+
+    def _unknown_era_first(self, row_idx: int, row: list[_Cell], row_era: str) -> None:
+        """No era open yet: auto-create one from this row (trackers with no era headers,
+        Young Thug etc.)."""
+        if not _looks_like_era_name(row_era):
+            # Announcements, footers and other non-era rows
+            self._unmatched(row_idx, row)
+            return
+        version = _parse_song_row(row, self.col_map)
+        if version:
+            self._open_era(Era(name=row_era, sections=[Section()]), row_era)
+            self._add(self.current_era, version)
+        else:
+            # No song data — stats-less era header (Kid Cudi style)
+            self._open_era(_stats_less_era(row, row_era, self.col_map), row_era)
+
+    # -- rows without an Era-column value ---------------------------------------
+
+    def _name_column_row(self, row_idx: int, row: list[_Cell], name_val: str) -> bool:
+        """Sub-era header vs. section label — see docs/decisions.md::parser.py::sub-era-header.
+
+        Only short rows (three cells or fewer) are claimed; longer ones fall through to the
+        positional fallback."""
+        if sum(1 for c in row if c.text.strip()) > 3:
+            return False
+        # Split multi-line name cells (e.g. "The Graduates\n(2007 - 2009)")
+        # and use only the first line as the era display name.
+        name_first_line = name_val.split("\n")[0].strip()
+        # A \n means a <br>-separated second line (year range) — reliable
+        # signal that this row is a stats-less era header, not a section.
+        has_multiline_name = "\n" in name_val
+        heads_tagged = (
+            self.current_era is not None and not has_multiline_name
+            and self._heads_tagged(name_first_line, row_idx)
+        )
+        if heads_tagged or (has_multiline_name and _looks_like_era_name(name_first_line)):
+            self._stats_less_header(row, name_val, name_first_line, heads_tagged)
+        elif self.current_era is not None:
+            # Single-line section label ("Other Media", "OG / Uncut Files"): a named section
+            # of the current era; later song rows auto-create eras if needed.
+            notes = _get_cell_text(row, self.col_map["notes"]).strip() if "notes" in self.col_map else ""
+            self.current_era.sections.append(Section(name=name_first_line, notes=notes or None))
+            # Section-label-as-alias — see docs/decisions.md::parser.py::section-label-alias
+            _register_era_keys(self.current_era, name_first_line, self.era_by_key_fallback)
+        else:
+            # No current era — create one from the name column (Yung Lean style trackers).
+            self._open_era(Era(name=name_first_line, sections=[Section()]), name_val)
+        return True
+
+    def _heads_tagged(self, name_first_line: str, row_idx: int) -> bool:
+        for era in self.eras[self.declared_upto:]:
+            self.declared_keys |= _era_own_keys(era)
+        self.declared_upto = len(self.eras)
+        return _heads_tagged_era(
+            name_first_line, self.rows, row_idx, self.col_map, self.current_era, self.declared_keys
+        )
+
+    def _stats_less_header(self, row: list[_Cell], name_val: str, name_first_line: str, heads_tagged: bool) -> None:
+        """Stats-less era header: multi-line name (Travis style) or a tagged heading its
+        rows name. Captures the description and the era art."""
+        name_col_idx = self.col_map.get("name", 1)
+        desc_text = _get_cell_text(row, self.col_map.get("notes", 2))
+        new_era = Era(
+            name=name_first_line,
+            art_url=_first_row_image(row, prefer_idx=name_col_idx),
+            description=desc_text or None,
+            sections=[Section()],
+        )
+        # Register full name_val so _era_match_key strips the parenthetical year and
+        # matches e.g. "The Graduates". A tagged heading only aliases, so a later
+        # untagged "Album" era keeps its own key.
+        self._open_era(new_era, name_val, self.era_by_key_fallback if heads_tagged else None)
+
+    def _section_or_spill(self, row: list[_Cell]) -> bool:
+        """Short single-line text in a non-era cell may be a section label (Carti's
+        "WLR Higher Bitrate Files" in Notes, with Era and Name empty)."""
+        era = self.current_era
+        if era is None:
+            return False
+        # Timeline continuation row: the era header's timeline spills into a row holding
+        # only '(date) - event' text (Carti official).
+        filled = [c.text.strip() for c in row if c.text.strip()]
+        if len(filled) == 1 and filled[0].startswith("("):
+            spill_events = parse_timeline(filled[0])
+            if spill_events:
+                era.timeline = list(era.timeline or []) + spill_events
+                return True
+        dyn_label = _is_dynamic_section_label(row, self.col_map)
+        if dyn_label:
+            era.sections.append(Section(name=dyn_label))
+            return True
+        return False
+
+    def _positional_song(self, row: list[_Cell]) -> bool:
+        """See docs/decisions.md::parser.py::positional-fallback."""
+        if self.current_era is None:
+            return False
+        version = _parse_song_row(row, self.col_map)
+        if version and (version.name or _has_song_data(version)):
+            self._add(self.current_era, version)
+            return True
+        return False
+
+    def metadata(self) -> ParseMetadata:
+        total_rows = len(self.rows) - 1 - self.header_row_idx  # exclude header and pre-header rows
+        unknown_columns, duplicate_columns = detect_dropped_columns(self.rows[self.header_row_idx], self.col_map)
+        return ParseMetadata(
+            total_rows=total_rows,
+            song_rows=self.song_rows,
+            skipped_rows=self.skipped_rows,
+            unmatched_rows=self.unmatched_rows,
+            unmatched_rows_total=self.unmatched_total,
+            footer_rows=self.footer_rows,
+            other_rows=max(0, total_rows - self.song_rows - self.skipped_rows - self.footer_rows),
+            fuzzy_matched_rows=self.fuzzy_matched_rows,
+            dropped_columns=unknown_columns,
+            duplicate_columns=duplicate_columns,
+        )
 
 
 def parse_sheet(
@@ -2005,332 +2300,19 @@ def parse_sheet(
             ),
         )
 
-    # Tabs without era header rows: the Era column is the only era signal, so it is
-    # authoritative (the abbreviated-era heuristic would collapse the tab into one era).
-    flat_era_mode = not any(_is_era_header(r) for r in rows[header_row_idx + 1:])
-    # How often each era-column value occurs: a one-character value seen once
-    # is a typo; seen repeatedly it is an era the sheet declares only in cells.
-    _era_idx = col_map.get("era", 0)
-    era_value_counts = Counter(
-        _get_cell_text(r, _era_idx).split("\n")[0].strip() for r in rows[header_row_idx + 1:]
-    )
-
     # Step 1b: extract announcement notices from header cells and pre-header rows.
     pre_header_rows = rows[:header_row_idx] if header_row_idx > 0 else []
     notices = _extract_header_notices(rows[header_row_idx], pre_header_rows, artist_name)
 
     # Step 2: walk rows, classify and extract
-    eras: list[Era] = []
-    current_era: Era | None = None
-    # Map from lowercased era matching key → Era object.
-    # Keys are lowercase, parenthetical-stripped, version-tag-stripped.
-    era_by_key: dict[str, Era] = {}
-    # Fallback registrations, consulted only when the primary dict misses, so a
-    # genuine "Ay Ay" era declared later beats a "38 Baby / Ay Ay" slash part.
-    era_by_key_fallback: dict[str, Era] = {}
-    # Eras whose name cell had an image but no usable text — backfill from
-    # the first song row's era column.
-    _needs_name_backfill: set[int] = set()  # id(era) values
-    # id(era) → its own key forms, for the positional-exact prior.
-    _era_own_keys_cache: dict[int, set[str]] = {}
-    _tag_index = _TagIndex()
-    # Own keys of eras[:declared_upto], so a repeated tagged heading is found in O(1).
-    declared_keys: set[str] = set()
-    declared_upto = 0
-    # (id(era), song base name) → Song, for O(1) version grouping
-    song_index: dict[tuple[int, str], Song] = {}
-    in_footer = False
-
-    # Parse metadata tracking
-    total_rows = len(rows) - 1 - header_row_idx  # exclude header and pre-header rows
-    song_rows = 0
-    skipped_rows = 0
-    unmatched_rows: list[str] = []
-    unmatched_total = 0
-    footer_rows = 0
-    fuzzy_matched_rows = 0
-
-    for row_idx, row in enumerate(rows):
-        # Skip header row and any rows before it (title/instruction rows)
-        if row_idx <= header_row_idx:
-            continue
-
-        # Skip empty rows
-        if _is_empty_row(row):
-            continue
-
-        # Meta banner between the header and the first era (Travis Scott:
-        # '| Last Updated: … | Hover over the headers … |') → notice.
-        if current_era is None:
-            filled = [c for c in row if c.text.strip()]
-            if (
-                len(filled) == 1
-                and not filled[0].links
-                and re.search(
-                    r"last updated|hover over|how to use", filled[0].text, re.IGNORECASE
-                )
-            ):
-                text = filled[0].text.strip().strip("|").strip()
-                # Dedupe against header notices and repeated banner rows (this append site
-                # bypasses _extract_header_notices' own seen-set).
-                if text.lower() not in {n.text.lower() for n in notices}:
-                    notices.append(Notice(text=text, link=None, kind="info"))
-                continue
-
-        # Era header FIRST (before separator/footer checks); it also resets footer state.
-        # See docs/decisions.md::parser.py::parse_sheet — era header checked before section separator
-        if _is_era_header(row):
-            in_footer = False
-            current_era, needs_backfill = _parse_era_header_row(row, col_map)
-            eras.append(current_era)
-            _register_era_keys(current_era, current_era.name, era_by_key, era_by_key_fallback)
-            if needs_backfill:
-                _needs_name_backfill.add(id(current_era))
-            continue
-
-        # Section separators → capture as named sections within current era
-        if _is_section_separator(row):
-            if current_era is not None:
-                non_empty = [c for c in row if c.text.strip()]
-                label = non_empty[0].text.strip() if non_empty else ""
-                if label:
-                    current_era.sections.append(Section(name=label))
-            continue
-
-        # Check name column for footer signals (e.g. "CARTI TRACKER HUB").
-        name_col_text = _get_cell_text(row, col_map.get("name", 1)).strip().lower()
-        if name_col_text in _NAME_FOOTER_KEYWORDS:
-            in_footer = True
-            footer_rows += 1
-            continue
-
-        # Footer detection: flag instead of break.
-        # If a new era header appears after footer content, in_footer resets above.
-        if _is_tracker_footer(row):
-            in_footer = True
-            footer_rows += 1
-            continue
-
-        if in_footer:
-            footer_rows += 1
-            continue
-
-        # Check for song row: first cell should match a known era key
-        era_col = col_map.get("era", 0)
-        row_era = _get_cell_text(row, era_col)
-
-        # Backfill-era priority — see docs/decisions.md::parser.py::backfill-era-priority
-        if (
-            row_era
-            and current_era is not None
-            and id(current_era) in _needs_name_backfill
-        ):
-            current_era.name = row_era
-            _register_era_keys(current_era, row_era, era_by_key, era_by_key_fallback)
-            _needs_name_backfill.discard(id(current_era))
-            version = _parse_song_row(row, col_map)
-            if version:
-                _add_version_to_era(current_era, version, song_index)
-                song_rows += 1
-            continue
-
-        if row_era:
-            # Positional-prior order: docs/decisions.md::parser.py::parse_sheet — positional-prior era matching
-            matched_era, fuzzy, sibling = _resolve_row_era(
-                row_era, current_era, eras, era_by_key, era_by_key_fallback, _era_own_keys_cache, _tag_index
-            )
-            fuzzy_matched_rows += fuzzy
-
-            if matched_era is not None:
-                # A tagged row's hop to a sibling keeps the header it sits under current.
-                if not sibling:
-                    current_era = matched_era
-                version = _parse_song_row(row, col_map)
-                if version:
-                    if _is_section_label_version(version, row, era_col):
-                        matched_era.sections.append(Section(name=version.name, notes=version.notes))
-                    else:
-                        _add_version_to_era(matched_era, version, song_index)
-                        song_rows += 1
-                continue
-
-            # No matching era found in era_by_key (exact or fuzzy).
-            # Two paths depending on whether we already have a current_era.
-            if current_era is not None:
-                # There IS a current era: same era name (case-insensitive) → assign;
-                # different → auto-create a new era.
-                current_key = _era_match_key(current_era.name) if current_era.name else ""
-                row_key = _era_match_key(row_era)
-                if current_key and row_key == current_key:
-                    # Same era (abbreviated or exact) — assign to current
-                    version = _parse_song_row(row, col_map)
-                    if version:
-                        _add_version_to_era(current_era, version, song_index)
-                        song_rows += 1
-                    else:
-                        non_empty = [c for c in row if c.text.strip()]
-                        if len(non_empty) <= 3 and row_era:
-                            current_era.sections.append(Section(name=row_era))
-                    continue
-                else:
-                    # Different era name: auto-create a new era if plausible, but prefer positional
-                    # assignment when the row has real song data.
-                    version = _parse_song_row(row, col_map)
-                    if version and _looks_like_era_name(row_era):
-                        # Abbreviated era names: docs/decisions.md::parser.py::abbreviated-era-names.
-                        # Off in flat_era_mode, where a new Era-column value is a new era.
-                        if _has_song_data(version) and not flat_era_mode:
-                            _add_version_to_era(current_era, version, song_index)
-                            song_rows += 1
-                            era_by_key_fallback.setdefault(_era_match_key(row_era), current_era)
-                        elif len(row_era.strip()) <= 1 and era_value_counts[row_era.strip()] <= 1 and not flat_era_mode:
-                            # A one-character era cell on a row with no song data is a typo on a sub-era
-                            # label (Ye: "x"), not a new era holding one fake song.
-                            current_era.sections.append(Section(name=version.name, notes=version.notes))
-                        else:
-                            new_era = Era(name=row_era, sections=[Section()])
-                            eras.append(new_era)
-                            _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
-                            current_era = new_era
-                            # Auto-created eras keep the row's own song (docs/decisions.md::parser.py::parse_sheet
-                            # — auto-created eras keep their row's song).
-                            _add_version_to_era(current_era, version, song_index)
-                            song_rows += 1
-                    elif version:
-                        # Not a plausible era name but has song data —
-                        # assign to current era as fallback
-                        _add_version_to_era(current_era, version, song_index)
-                        song_rows += 1
-                    else:
-                        # No song data: a sub-era section header or a stats-less era header. Very few
-                        # filled cells means a section of the current era.
-                        non_empty = sum(1 for c in row if c.text.strip())
-                        if non_empty <= 2 or not _looks_like_era_name(row_era):
-                            current_era.sections.append(Section(name=row_era))
-                        else:
-                            # Enough data to be an era header without stats
-                            new_era = _stats_less_era(row, row_era, col_map)
-                            eras.append(new_era)
-                            _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
-                            current_era = new_era
-                    continue
-            else:
-                # No current era at all — auto-create from this row.
-                # Handles trackers with no era headers (Young Thug, etc.)
-                if not _looks_like_era_name(row_era):
-                    # Skip non-era rows (announcements, footers, etc.)
-                    skipped_rows += 1
-                    unmatched_total += 1
-                    _sample_unmatched(unmatched_rows, row_idx, row)
-                    continue
-
-                version = _parse_song_row(row, col_map)
-                if version:
-                    new_era = Era(name=row_era, sections=[Section()])
-                    eras.append(new_era)
-                    _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
-                    current_era = new_era
-                    _add_version_to_era(current_era, version, song_index)
-                    song_rows += 1
-                else:
-                    # No song data — stats-less era header (Kid Cudi style)
-                    new_era = _stats_less_era(row, row_era, col_map)
-                    eras.append(new_era)
-                    _register_era_keys(new_era, row_era, era_by_key, era_by_key_fallback)
-                    current_era = new_era
-                continue
-
-        # Sub-era header vs. section label — see docs/decisions.md::parser.py::sub-era-header
-        name_col_idx = col_map.get("name", 1)
-        name_val = _get_cell_text(row, name_col_idx)
-        if name_val:
-            # Split multi-line name cells (e.g. "The Graduates\n(2007 - 2009)")
-            # and use only the first line as the era display name.
-            name_first_line = name_val.split("\n")[0].strip()
-            # A \n means a <br>-separated second line (year range) — reliable
-            # signal that this row is a stats-less era header, not a section.
-            has_multiline_name = "\n" in name_val
-            non_empty = sum(1 for c in row if c.text.strip())
-            if non_empty <= 3:
-                heads_tagged = False
-                if current_era is not None and not has_multiline_name:
-                    for era in eras[declared_upto:]:
-                        declared_keys |= _era_own_keys(era)
-                    declared_upto = len(eras)
-                    heads_tagged = _heads_tagged_era(
-                        name_first_line, rows, row_idx, col_map, current_era, declared_keys
-                    )
-                if heads_tagged or (has_multiline_name and _looks_like_era_name(name_first_line)):
-                    # Stats-less era header: multi-line name (Travis style) or a tagged heading
-                    # its rows name. Create a new era, capture description, and scan for art image.
-                    notes_idx = col_map.get("notes", 2)
-                    desc_text = _get_cell_text(row, notes_idx)
-                    _era_art_url = _first_row_image(row, prefer_idx=name_col_idx)
-                    new_era = Era(
-                        name=name_first_line,
-                        art_url=_era_art_url,
-                        description=desc_text or None,
-                        sections=[Section()],
-                    )
-                    eras.append(new_era)
-                    # Register full name_val so _era_match_key strips the
-                    # parenthetical year and matches e.g. "The Graduates". A tagged heading
-                    # only aliases, so a later untagged "Album" era keeps its own key.
-                    _register_era_keys(
-                        new_era, name_val, era_by_key_fallback if heads_tagged else era_by_key, era_by_key_fallback
-                    )
-                    current_era = new_era
-                elif current_era is not None:
-                    # Single-line section label ("Other Media", "OG / Uncut Files"): a named section
-                    # of the current era; later song rows auto-create eras if needed.
-                    notes = _get_cell_text(row, col_map["notes"]).strip() if "notes" in col_map else ""
-                    current_era.sections.append(Section(name=name_first_line, notes=notes or None))
-                    # Section-label-as-alias — see docs/decisions.md::parser.py::section-label-alias
-                    _register_era_keys(current_era, name_first_line, era_by_key_fallback)
-                else:
-                    # No current era — create one from the name column.
-                    # This handles Yung Lean style trackers.
-                    new_era = Era(name=name_first_line, sections=[Section()])
-                    eras.append(new_era)
-                    _register_era_keys(new_era, name_val, era_by_key, era_by_key_fallback)
-                    current_era = new_era
-                continue
-
-        # Fallback: short single-line text in a non-era cell may be a section label
-        # (Carti's "WLR Higher Bitrate Files" in Notes, with Era and Name empty).
-        if current_era is not None and not row_era and not name_val:
-            # Timeline continuation row: the era header's timeline spills into a row holding
-            # only '(date) - event' text (Carti official).
-            filled = [c.text.strip() for c in row if c.text.strip()]
-            if len(filled) == 1 and filled[0].startswith("("):
-                spill_events = parse_timeline(filled[0])
-                if spill_events:
-                    current_era.timeline = list(current_era.timeline or []) + spill_events
-                    continue
-
-            dyn_label = _is_dynamic_section_label(row, col_map)
-            if dyn_label:
-                current_era.sections.append(Section(name=dyn_label))
-                continue
-
-        # Positional fallback — see docs/decisions.md::parser.py::positional-fallback
-        if not row_era and current_era is not None:
-            version = _parse_song_row(row, col_map)
-            if version and (version.name or _has_song_data(version)):
-                _add_version_to_era(current_era, version, song_index)
-                song_rows += 1
-                continue
-
-        # Unmatched row — track it for diagnostics
-        skipped_rows += 1
-        unmatched_total += 1
-        _sample_unmatched(unmatched_rows, row_idx, row)
+    walk = _SheetWalk(rows, header_row_idx, col_map, notices)
+    walk.walk()
 
     # Step 3: detect and parse global stats row
     tracker_stats = _find_global_stats(rows)
 
     # Merge 0-song stub eras — see docs/decisions.md::parser.py::merge-stub-eras
-    eras = _merge_empty_stub_eras(eras)
+    eras = _merge_empty_stub_eras(walk.eras)
 
     if source_url:
         _absolutize_era_art(eras, source_url)
@@ -2342,38 +2324,17 @@ def parse_sheet(
     _reconcile_title_misreads(eras)
 
     # Step 4: build parse metadata
-    unknown_columns, duplicate_columns = detect_dropped_columns(
-        rows[header_row_idx], col_map
-    )
-    metadata = ParseMetadata(
-        total_rows=total_rows,
-        song_rows=song_rows,
-        skipped_rows=skipped_rows,
-        unmatched_rows=unmatched_rows,
-        unmatched_rows_total=unmatched_total,
-        footer_rows=footer_rows,
-        other_rows=max(0, total_rows - song_rows - skipped_rows - footer_rows),
-        fuzzy_matched_rows=fuzzy_matched_rows,
-        dropped_columns=unknown_columns,
-        duplicate_columns=duplicate_columns,
-    )
-
+    metadata = walk.metadata()
     logger.debug(
         "Parsed %r: %d eras, %d song rows, %d skipped, %d fuzzy-matched era rows",
-        artist_name,
-        len(eras),
-        song_rows,
-        skipped_rows,
-        fuzzy_matched_rows,
+        artist_name, len(eras), walk.song_rows, walk.skipped_rows, walk.fuzzy_matched_rows,
     )
-    if unmatched_rows:
+    if walk.unmatched_rows:
         # DEBUG: runs per candidate tab, and parse_metadata already carries these rows.
         logger.debug(
             "Parser found %d unmatched rows in %r (showing first %d): %s",
-            len(unmatched_rows),
-            artist_name,
-            min(5, len(unmatched_rows)),
-            " | ".join(unmatched_rows[:5]),
+            len(walk.unmatched_rows), artist_name, min(5, len(walk.unmatched_rows)),
+            " | ".join(walk.unmatched_rows[:5]),
         )
 
     return Artist(
@@ -2384,6 +2345,33 @@ def parse_sheet(
         parse_metadata=metadata,
         notices=notices,
     )
+
+
+def _title_index(songs: list[Song]) -> tuple[set[str], dict[str, set[str]]]:
+    """(every title key, family key → its titles and alt titles)."""
+    titles: set[str] = set()
+    family_names: dict[str, set[str]] = {}
+    for song in songs:
+        title_key = _song_match_key(song.base_name)
+        titles.add(title_key)
+        names = family_names.setdefault(song.song_key or title_key, set())
+        names.add(title_key)
+        for version in song.versions:
+            names.update(_song_match_key(alt) for alt in version.alt_titles)
+    titles.discard("")
+    return titles, family_names
+
+
+def _undo_alias_collab(version: SongVersion, names: set[str]) -> None:
+    """An alias line misread as a "(with X)" credit: every part names the song family."""
+    parts = [p.strip() for p in (version.collaboration or "").split(", ") if p.strip()]
+    if not parts or _song_match_key(f"With {parts[0]}") not in names:
+        return
+    if not all(_song_match_key(p) in names or _song_match_key(f"With {p}") in names for p in parts[1:]):
+        return
+    restored = [f"With {parts[0]}", *parts[1:]]
+    version.alt_titles = version.alt_titles + [alt for alt in restored if alt not in version.alt_titles]
+    version.collaboration = None
 
 
 def _reconcile_title_misreads(eras: list[Era]) -> None:
@@ -2402,40 +2390,15 @@ def _reconcile_title_misreads(eras: list[Era]) -> None:
       title somewhere in the tracker.
     """
     songs = [song for era in eras for section in era.sections for song in section.songs]
-    titles: set[str] = set()
-    family_names: dict[str, set[str]] = {}
-    for song in songs:
-        title_key = _song_match_key(song.base_name)
-        titles.add(title_key)
-        names = family_names.setdefault(song.song_key or title_key, set())
-        names.add(title_key)
-        for version in song.versions:
-            names.update(_song_match_key(alt) for alt in version.alt_titles)
-    titles.discard("")
-
+    titles, family_names = _title_index(songs)
     for song in songs:
         names = family_names.get(song.song_key or _song_match_key(song.base_name), set())
         names.discard("")
         for version in song.versions:
             if len(version.alt_titles) > 1:
                 version.alt_titles = _rejoin_split_aliases(version.alt_titles, titles)
-            collab = version.collaboration
-            if not collab:
-                continue
-            parts = [p.strip() for p in collab.split(", ") if p.strip()]
-            if (
-                parts
-                and _song_match_key(f"With {parts[0]}") in names
-                and all(
-                    _song_match_key(p) in names or _song_match_key(f"With {p}") in names
-                    for p in parts[1:]
-                )
-            ):
-                restored = [f"With {parts[0]}", *parts[1:]]
-                version.alt_titles = version.alt_titles + [
-                    alt for alt in restored if alt not in version.alt_titles
-                ]
-                version.collaboration = None
+            if version.collaboration:
+                _undo_alias_collab(version, names)
 
 
 def _rejoin_split_aliases(alts: list[str], titles: set[str]) -> list[str]:
@@ -2475,6 +2438,32 @@ def _disambiguate_era_names(eras: list[Era]) -> list[Era]:
     return out
 
 
+# Which stat group a cell holds, by the labels it carries. Independent: one cell may
+# hold several stat lines.
+_GLOBAL_STAT_GROUPS = (
+    ("links", ("Total Link", "Missing Links")),
+    ("quality", ("Lossless", "CD Quality")),
+    ("availability", ("Total Full", "OG Files", "OG File")),
+    ("highlights", ("Best Of", "Special", "Grails")),
+)
+
+
+def _global_stats_of_row(row: list[_Cell]) -> TrackerStats | None:
+    """The tracker stats a footer row holds, or None when it is not the stats row."""
+    texts = dict.fromkeys(("links", "quality", "availability", "highlights"), "")
+    for cell in row:
+        for group, labels in _GLOBAL_STAT_GROUPS:
+            if any(label in cell.text for label in labels):
+                texts[group] = cell.text
+    stats = parse_tracker_stats(texts["links"], texts["quality"], texts["availability"], texts["highlights"])
+    # A footer may hold all its stats in one cell, so count parsed fields. An
+    # era header or a note that mentions a total yields at most one field.
+    parsed = sum(1 for v in stats.model_dump().values() if v)
+    if parsed < 2 or (parsed < 4 and _is_era_header(row)):
+        return None
+    return stats
+
+
 def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     """Scan rows for the global tracker stats row and parse it.
 
@@ -2489,36 +2478,10 @@ def _find_global_stats(rows: list[list[_Cell]]) -> TrackerStats | None:
     colspan differences, so we extract by content matching.
     """
     for row in reversed(rows):
-        cell_texts = [c.text for c in row]
-        has_links = any("Total Link" in t for t in cell_texts)
-        has_avail = any("Total Full" in t for t in cell_texts)
-
-        if has_links or has_avail:
-            links_text = ""
-            quality_text = ""
-            availability_text = ""
-            highlights_text = ""
-
-            # Independent checks: one cell may hold several stat lines.
-            for cell in row:
-                t = cell.text
-                if "Total Link" in t or "Missing Links" in t:
-                    links_text = t
-                if "Lossless" in t or "CD Quality" in t:
-                    quality_text = t
-                if "Total Full" in t or "OG Files" in t or "OG File" in t:
-                    availability_text = t
-                if "Best Of" in t or "Special" in t or "Grails" in t:
-                    highlights_text = t
-
-            # A footer may hold all its stats in one cell, so count parsed fields. An
-            # era header or a note that mentions a total yields at most one field.
-            stats = parse_tracker_stats(links_text, quality_text, availability_text, highlights_text)
-            parsed = sum(1 for v in stats.model_dump().values() if v)
-            if parsed < 2 or (parsed < 4 and _is_era_header(row)):
-                continue
-            return stats
-
+        if any("Total Link" in c.text or "Total Full" in c.text for c in row):
+            stats = _global_stats_of_row(row)
+            if stats is not None:
+                return stats
     return None
 
 
@@ -2578,137 +2541,143 @@ def _split_compound_availability(text: str) -> tuple[str, str | None, int | None
     return text, quality, rating
 
 
-def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
-    """Parse a song data row into a SongVersion."""
-    name_idx = col_map.get("name", 1)
-    raw_name = _get_cell_text(row, name_idx)
+def _opt_col(row: list[_Cell], col_map: dict[str, int], key: str) -> str | None:
+    """A dedicated column's text, or None when the column is absent or empty."""
+    return _get_cell_text(row, col_map.get(key, -1)) or None
 
-    if not raw_name:
-        return None
 
-    # Extract badge emoji
-    badge, after_badge = extract_badge(raw_name)
-
-    # Parse credits and alt titles from the multi-line name
-    song_credits = parse_song_credits(after_badge)
-    title = song_credits.title
-    featuring = song_credits.featuring
-    producers = song_credits.producers
-    collaboration = song_credits.collaboration
-    refs = song_credits.refs
-    alt_titles = song_credits.alt_titles
-
+def _song_title(after_badge: str, title: str, alt_titles: list[str]) -> tuple[str, str | None, list[str]] | None:
+    """(title, version tag, alt titles) of a name cell, or None when nothing names the song."""
     # "(unfinished)"/"[unfinished]" is a status tag, not an alt name: move it from
     # alt_titles to version_tag (only if no tag was found).
-    _found_unfinished = any(_UNFINISHED_RE.fullmatch(t.strip()) for t in alt_titles)
-    if _found_unfinished:
+    found_unfinished = any(_UNFINISHED_RE.fullmatch(t.strip()) for t in alt_titles)
+    if found_unfinished:
         alt_titles = [t for t in alt_titles if not _UNFINISHED_RE.fullmatch(t.strip())]
-
-    # Extract version tag from the clean title
-    version_tag, _base = extract_version_tag(title)
-    # Use base name (tag stripped) to avoid duplication in the UI
-    title = _base
+    # Base name (tag stripped), so the UI doesn't show the tag twice.
+    version_tag, title = extract_version_tag(title)
     # A credit-only name cell leaves no title: borrow an alt title or the raw line.
     if not title:
         raw_line = next((ln.strip() for ln in after_badge.split("\n") if ln.strip()), "")
         title = alt_titles.pop(0) if alt_titles else raw_line
         if not title:
             return None
-
-    # If found unfinished tag but no explicit version tag, set one
-    if _found_unfinished and not version_tag:
+    if found_unfinished and not version_tag:
         version_tag = "Unfinished"
+    return title, version_tag, alt_titles
 
-    # Build the version object
-    notes_idx = col_map.get("notes", 2)
-    notes_cell = _get_cell(row, notes_idx)
+
+def _song_notes(row: list[_Cell], col_map: dict[str, int], notes_cell: _Cell) -> tuple[str | None, list[str], list]:
+    """(notes, OG filenames, samples). The OG lines leave the notes so clients don't
+    render the filenames twice."""
     notes_text = notes_cell.text.strip() if notes_cell.text else None
-
-    # Extract structured metadata from notes, then strip the OG lines so clients
-    # don't render the filenames twice.
     og_filenames = extract_og_filenames(notes_text) if notes_text else []
     samples = extract_samples(notes_text) if notes_text else []
     if og_filenames and notes_text:
         notes_text = strip_og_filename_lines(notes_text) or None
-
     # Dedicated File Name / Instrumental Name column: column values lead, notes-derived
     # names follow (docs/decisions.md::parser.py — dedicated credit and filename columns).
     og_col_text = _get_cell_text(row, col_map.get("og_filename_col", -1))
     if og_col_text:
         col_names = [ln.strip() for ln in og_col_text.split("\n") if ln.strip()]
         og_filenames = col_names + [n for n in og_filenames if n not in col_names]
+    return notes_text, og_filenames, samples
 
-    # Dedicated credit columns: a Producer column fills producers only when inline
-    # '(prod. …)' didn't; Artist columns are the performer, NOT a feature (same entry).
-    if not producers:
-        producers = _get_cell_text(row, col_map.get("producers_col", -1)) or None
-    credited_artists = _get_cell_text(row, col_map.get("credited_artists", -1)) or None
 
-    links_idx = col_map.get("links")
-    alt_links_idx = col_map.get("alt_links")
-    link_cell = _get_cell(row, links_idx) if links_idx is not None else _Cell()
-    alt_link_cell = _get_cell(row, alt_links_idx) if alt_links_idx is not None else _Cell()
+def _song_sources(row: list[_Cell], sources_idx: int | None, has_link_column: bool) -> tuple[list[SourceRef], list[str]]:
+    """Sources column (Travis Scott): labeled evidence links, kept apart from listen
+    links; each URL pairs with its text line (link_lines, as for notices).
 
-    # Sources column (Travis Scott): labeled evidence links, kept apart from listen
-    # links; each URL pairs with its text line (link_lines, as for notices).
+    Returns (sources, listen links). With no link column, "Source" is the link column
+    (docs/decisions.md::parser.py::sources-as-links)."""
     sources: list[SourceRef] = []
-    source_listen: list[str] = []
-    sources_idx = col_map.get("sources")
-    if sources_idx is not None:
-        src_cell = _get_cell(row, sources_idx)
-        src_lines = src_cell.text.split("\n")
-        for link_idx, link in enumerate(src_cell.links):
-            line_num = (
-                src_cell.link_lines[link_idx]
-                if link_idx < len(src_cell.link_lines)
-                else -1
-            )
-            label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
-            for cleaned in _split_links(link):
-                # With no link column, "Source" is the link column (docs/decisions.md::parser.py::sources-as-links).
-                if links_idx is None and resolve_stream_url(cleaned):
-                    source_listen.append(cleaned)
-                else:
-                    sources.append(SourceRef(label=label, url=cleaned))
-    # Collect links from the dedicated links cell, alternate links cell, and the notes cell,
-    # merging them while preserving order and removing duplicates.
-    all_links = _extract_links_from_cell(link_cell) + _extract_links_from_cell(alt_link_cell) + source_listen
-    note_links = _extract_links_from_cell(notes_cell)
-    seen: set[str] = set()
-    merged_links: list[str] = []
-    for lnk in all_links + note_links:
-        if lnk not in seen:
-            seen.add(lnk)
-            merged_links.append(lnk)
+    listen: list[str] = []
+    if sources_idx is None:
+        return sources, listen
+    src_cell = _get_cell(row, sources_idx)
+    src_lines = src_cell.text.split("\n")
+    for link_idx, link in enumerate(src_cell.links):
+        line_num = src_cell.link_lines[link_idx] if link_idx < len(src_cell.link_lines) else -1
+        label = src_lines[line_num].strip() if 0 <= line_num < len(src_lines) else ""
+        for cleaned in _split_links(link):
+            if not has_link_column and resolve_stream_url(cleaned):
+                listen.append(cleaned)
+            else:
+                sources.append(SourceRef(label=label, url=cleaned))
+    return sources, listen
 
+
+def _song_availability(row: list[_Cell], col_map: dict[str, int]) -> tuple[str, str, bool | None, int | None]:
+    """(availability, quality, streaming, rating)."""
     avail_text = _get_cell_text(row, col_map.get("available_length", -1))
     quality_text = _get_cell_text(row, col_map.get("quality", -1))
     streaming_text = _get_cell_text(row, col_map.get("streaming", -1)).strip().lower()
-    streaming = {"yes": True, "no": False}.get(streaming_text)
     rating = None
     if avail_text and "quality" not in col_map:
         # Travis-style trackers fold quality (and a fan star rating) into the
         # availability cell: 'Full - HQ (Unofficial)\n⭐⭐⭐⭐☆'.
         avail_text, split_quality, rating = _split_compound_availability(avail_text)
         quality_text = split_quality or ""
+    return avail_text, quality_text, {"yes": True, "no": False}.get(streaming_text), rating
 
+
+def _song_links(row: list[_Cell], col_map: dict[str, int], notes_cell: _Cell, source_listen: list[str]) -> list[str]:
+    """The links cell, alternate links cell, Sources listen links and the notes cell,
+    merged in that order without duplicates."""
+    def column_links(key: str) -> list[str]:
+        idx = col_map.get(key)
+        return _extract_links_from_cell(_get_cell(row, idx)) if idx is not None else []
+
+    return list(dict.fromkeys(
+        column_links("links") + column_links("alt_links") + source_listen + _extract_links_from_cell(notes_cell)
+    ))
+
+
+def _move_unplayable_to_sources(links: list[str], sources: list[SourceRef]) -> list[str]:
+    """On a no-audio row only what /stream cannot play is evidence
+    (docs/decisions.md::parser.py::sources-as-links): those links join `sources`."""
+    known = {s.url for s in sources}
+    playable = {u: _playable_no_audio(u) for u in links}
+    sources += [SourceRef(url=u) for u in links if u not in known and not playable[u]]
+    return [u for u in links if playable[u]]
+
+
+def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | None:
+    """Parse a song data row into a SongVersion."""
+    raw_name = _get_cell_text(row, col_map.get("name", 1))
+    if not raw_name:
+        return None
+
+    badge, after_badge = extract_badge(raw_name)
+    # Parse credits and alt titles from the multi-line name
+    song_credits = parse_song_credits(after_badge)
+    named = _song_title(after_badge, song_credits.title, song_credits.alt_titles)
+    if named is None:
+        return None
+    title, version_tag, alt_titles = named
+
+    notes_cell = _get_cell(row, col_map.get("notes", 2))
+    notes_text, og_filenames, samples = _song_notes(row, col_map, notes_cell)
+
+    # Dedicated credit columns: a Producer column fills producers only when inline
+    # '(prod. …)' didn't; Artist columns are the performer, NOT a feature (same entry).
+    producers = song_credits.producers or _opt_col(row, col_map, "producers_col")
+
+    sources, source_listen = _song_sources(row, col_map.get("sources"), "links" in col_map)
+    merged_links = _song_links(row, col_map, notes_cell, source_listen)
+    avail_text, quality_text, streaming, rating = _song_availability(row, col_map)
     if _has_no_audio(avail_text, quality_text):
-        # Only what /stream cannot play is evidence (docs/decisions.md::parser.py::sources-as-links).
-        known = {s.url for s in sources}
-        playable = {u: _playable_no_audio(u) for u in merged_links}
-        sources += [SourceRef(url=u) for u in merged_links if u not in known and not playable[u]]
-        merged_links = [u for u in merged_links if playable[u]]
+        merged_links = _move_unplayable_to_sources(merged_links, sources)
 
-    version = SongVersion(
+    return SongVersion(
         name=title,
         version_tag=version_tag,
         badge=badge,
-        featuring=featuring,
+        featuring=song_credits.featuring,
         producers=producers,
-        credited_artists=credited_artists,
-        engineer=_get_cell_text(row, col_map.get("engineer", -1)) or None,
-        collaboration=collaboration,
-        refs=refs,
+        credited_artists=_opt_col(row, col_map, "credited_artists"),
+        engineer=_opt_col(row, col_map, "engineer"),
+        collaboration=song_credits.collaboration,
+        refs=song_credits.refs,
         director=song_credits.director,
         alt_titles=alt_titles,
         notes=notes_text,
@@ -2716,21 +2685,19 @@ def _parse_song_row(row: list[_Cell], col_map: dict[str, int]) -> SongVersion | 
         og_filenames=og_filenames,
         samples=samples,
         sources=sources,
-        track_length=_get_cell_text(row, col_map.get("track_length", -1)) or None,
-        file_date=_get_cell_text(row, col_map.get("file_date", -1)) or None,
-        leak_date=_get_cell_text(row, col_map.get("leak_date", -1)) or None,
+        track_length=_opt_col(row, col_map, "track_length"),
+        file_date=_opt_col(row, col_map, "file_date"),
+        leak_date=_opt_col(row, col_map, "leak_date"),
         available_length=avail_text or None,
         quality=quality_text or None,
         streaming=streaming,
         rating=rating,
         links=merged_links,
-        date_of_recording=_get_cell_text(row, col_map.get("date_of_recording", -1)) or None,
-        recording_location=_get_cell_text(row, col_map.get("recording_location", -1)) or None,
-        preview_date=_get_cell_text(row, col_map.get("preview_date", -1)) or None,
-        type=_get_cell_text(row, col_map.get("type", -1)) or None,
+        date_of_recording=_opt_col(row, col_map, "date_of_recording"),
+        recording_location=_opt_col(row, col_map, "recording_location"),
+        preview_date=_opt_col(row, col_map, "preview_date"),
+        type=_opt_col(row, col_map, "type"),
     )
-
-    return version
 
 
 _NO_AUDIO_AVAILABILITY = frozenset({"rumored", "rumoured", "confirmed"})
@@ -2780,6 +2747,28 @@ def _sort_era_versions(era: Era) -> None:
             ]
 
 
+def _add_placeholder_version(
+    era: Era, version: SongVersion, base_key: str, song_index: dict[tuple[int, str], Song]
+) -> None:
+    """A placeholder name groups by a fan-made alt title; without one the row is its own Song."""
+    alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
+    if not alts:
+        # No fan-made identity — song_key stays empty (no cross-era link).
+        era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
+        return
+    # Any shared alt title joins the group — a row listing several alts
+    # bridges renames (e.g. '???. Bon Iver' later known as 'Time2Time').
+    alt_keys = [(id(era), f"alt::{a}") for a in alts]
+    song = next((song_index[k] for k in alt_keys if k in song_index), None)
+    if song is None:
+        song = Song(base_name=base_key, song_key=_song_match_key(alts[0]), versions=[version])
+        era.sections[-1].songs.append(song)
+    else:
+        song.versions.append(version)
+    for k in alt_keys:
+        song_index.setdefault(k, song)
+
+
 def _add_version_to_era(
     era: Era,
     version: SongVersion,
@@ -2797,34 +2786,11 @@ def _add_version_to_era(
     """
     if not era.sections:
         era.sections.append(Section())
-
     _, base_name = extract_version_tag(version.name)
     base_key = base_name.strip()
-
     if base_key.lower() in _PLACEHOLDER_BASE_NAMES:
-        alts = [a.strip().lower() for a in (version.alt_titles or []) if a.strip()]
-        if not alts:
-            # No fan-made identity — song_key stays empty (no cross-era link).
-            era.sections[-1].songs.append(Song(base_name=base_key, versions=[version]))
-            return
-        # Group by fan-made alt title instead of the placeholder name. Any
-        # shared alt title joins the group — a row listing several alts
-        # bridges renames (e.g. '???. Bon Iver' later known as 'Time2Time').
-        alt_keys = [(id(era), f"alt::{a}") for a in alts]
-        song = next((song_index[k] for k in alt_keys if k in song_index), None)
-        if song is None:
-            song = Song(
-                base_name=base_key,
-                song_key=_song_match_key(alts[0]),
-                versions=[version],
-            )
-            era.sections[-1].songs.append(song)
-        else:
-            song.versions.append(version)
-        for k in alt_keys:
-            song_index.setdefault(k, song)
+        _add_placeholder_version(era, version, base_key, song_index)
         return
-
     song_key = _song_match_key(base_key)
     # A name of pure punctuation has an empty key; fall back to the exact text
     # rather than lumping every such row into one song.
@@ -2833,13 +2799,8 @@ def _add_version_to_era(
     if song is not None:
         song.versions.append(version)
         return
-
     # Create new song in the last (current) section
-    song = Song(
-        base_name=base_key,
-        song_key=song_key,
-        versions=[version],
-    )
+    song = Song(base_name=base_key, song_key=song_key, versions=[version])
     era.sections[-1].songs.append(song)
     song_index[key] = song
 
@@ -2898,6 +2859,40 @@ def _badge_target(song: Song, entry_tag: str | None) -> SongVersion:
     return song.versions[0]
 
 
+def _badge_song_index(artist: Artist) -> tuple[dict[tuple[str, str], Song], dict[str, list[Song]]]:
+    """Songs keyed by (era key, song key) and by song key alone, placeholders left out."""
+    by_era_and_name: dict[tuple[str, str], Song] = {}
+    by_name: dict[str, list[Song]] = {}
+    for era in artist.eras:
+        era_key = _era_match_key(era.name)
+        for song in (song for section in era.sections for song in section.songs):
+            _, song_name = extract_badge(song.base_name)
+            song_key = _song_match_key(song_name)
+            if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES or not song_key:
+                continue
+            by_era_and_name.setdefault((era_key, song_key), song)
+            by_name.setdefault(song_key, []).append(song)
+    return by_era_and_name, by_name
+
+
+def _badge_entry_target(
+    entry: MiscEntry, by_era_and_name: dict[tuple[str, str], Song], by_name: dict[str, list[Song]]
+) -> tuple[Song, str | None] | None:
+    """The unbadged song a highlight entry names, with the entry's version tag."""
+    _, entry_name = extract_badge(entry.name)
+    entry_tag, base_name = extract_version_tag(entry_name)
+    song_key = _song_match_key(base_name)
+    if not song_key:
+        return None
+    song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
+    candidates = by_name.get(song_key, [])
+    if song is None and len(candidates) == 1:
+        song = candidates[0]
+    if song is None or not song.versions or any(v.badge is not None for v in song.versions):
+        return None
+    return song, entry_tag
+
+
 def apply_badge_tabs(
     artist: Artist, tabs: list[tuple[str, list[MiscEntry]]]
 ) -> int:
@@ -2910,44 +2905,16 @@ def apply_badge_tabs(
     """
     if not any(_BADGE_BY_TAB_KIND.get(kind) for kind, _ in tabs):
         return 0
-
-    by_era_and_name: dict[tuple[str, str], Song] = {}
-    by_name: dict[str, list[Song]] = {}
-    for era in artist.eras:
-        era_key = _era_match_key(era.name)
-        for section in era.sections:
-            for song in section.songs:
-                _, song_name = extract_badge(song.base_name)
-                if song_name.strip().lower() in _PLACEHOLDER_BASE_NAMES:
-                    continue
-                song_key = _song_match_key(song_name)
-                if not song_key:
-                    continue
-                by_era_and_name.setdefault((era_key, song_key), song)
-                by_name.setdefault(song_key, []).append(song)
-
+    by_era_and_name, by_name = _badge_song_index(artist)
     applied = 0
     for kind, entries in tabs:
         tab_default = _BADGE_BY_TAB_KIND.get(kind)
-        if tab_default is None:
-            continue
-        for entry in entries:
-            _, entry_name = extract_badge(entry.name)
-            entry_tag, base_name = extract_version_tag(entry_name)
-            song_key = _song_match_key(base_name)
-            if not song_key:
-                continue
-            song = by_era_and_name.get((_era_match_key(entry.era_name), song_key))
-            if song is None:
-                candidates = by_name.get(song_key, [])
-                if len(candidates) == 1:
-                    song = candidates[0]
-            if song is None or not song.versions:
-                continue
-            if any(v.badge is not None for v in song.versions):
-                continue
-            _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
-            applied += 1
+        for entry in entries if tab_default is not None else ():
+            target = _badge_entry_target(entry, by_era_and_name, by_name)
+            if target is not None:
+                song, entry_tag = target
+                _badge_target(song, entry_tag).badge = _badge_for_entry(entry, tab_default)
+                applied += 1
     return applied
 
 
@@ -3034,6 +3001,171 @@ def _looks_like_section_label(text: str) -> bool:
     return len(text) <= 40 and not text.startswith(("<", "-", "*")) and not text.endswith((".", ":"))
 
 
+def _misc_header(rows: list[list[_Cell]]) -> tuple[int, dict[str, int]]:
+    """The header row of a content tab: needs a name column plus era, links or date."""
+    for idx, row in enumerate(rows[: _MAX_HEADER_SCAN_ROWS]):
+        candidate: dict[str, int] = {}
+        for c_idx, cell in enumerate(row):
+            canonical = _MISC_COLUMN_ALIASES.get(_misc_header_key(cell.text))
+            if canonical and canonical not in candidate:
+                candidate[canonical] = c_idx
+        # A name column plus any second content signal qualifies — "date"
+        # covers Stems layouts that have neither an Era nor a Links header.
+        if "name" in candidate and ("era" in candidate or "links" in candidate or "date" in candidate):
+            return idx, candidate
+    return -1, {}
+
+
+def _misc_cell_text(row: list[_Cell], col_map: dict[str, int], field: str) -> str:
+    idx = col_map.get(field, -1)
+    if idx < 0 or idx >= len(row):
+        return ""
+    return row[idx].text.strip()
+
+
+def _misc_known_eras(
+    rows: list[list[_Cell]], header_idx: int, col_map: dict[str, int], artist_eras: Iterable[str]
+) -> set[str]:
+    """Every value the era column uses: a title naming one is a header for the rows
+    that follow (the empty-era-cell header style), no keyword list needed."""
+    known: set[str] = {k for k in map(_era_match_key, artist_eras) if k}
+    era_col = col_map.get("era", -1)
+    if era_col < 0:
+        return known
+    for row in rows[header_idx + 1:]:
+        if era_col < len(row):
+            key = _era_match_key(row[era_col].text.split("\n")[0].strip())
+            if key:
+                known.add(key)
+    return known
+
+
+def _misc_links(row: list[_Cell], col_map: dict[str, int]) -> list[str]:
+    """Parsed <a href> targets, else URL-ish text."""
+    links_idx = col_map.get("links", -1)
+    if not 0 <= links_idx < len(row):
+        return []
+    cell = row[links_idx]
+    links = [l for raw in cell.links for l in _split_links(raw)]
+    if not links:
+        text = cell.text.strip()
+        if text.startswith(("http://", "https://")):
+            links = _split_links(text)
+    return [l for l in links if l]
+
+
+def _misc_optional(field: str, val: str) -> str | None:
+    if field == "date" and not _looks_like_date(val):
+        return None
+    # A length carries a digit ("3:14") or is a tiny placeholder ("?:??", "N/A", "-");
+    # era header rows put a description in Full Length instead.
+    if field == "length" and not (_looks_like_date(val) or (val and len(val) <= 5)):
+        return None
+    return val or None
+
+
+class _MiscWalk:
+    """The row walk of `parse_misc_tab`: era headers, section labels and entries."""
+
+    def __init__(self, kind: str, col_map: dict[str, int], known_eras: set[str]):
+        self.kind = kind
+        self.col_map = col_map
+        self.known_eras = known_eras
+        # Only highlight tabs carry block separators; elsewhere a lone "Special"
+        # cell is an entry, not a label.
+        self.is_badge_tab = kind in _BADGE_BY_TAB_KIND
+        self.entries: list[MiscEntry] = []
+        self.current_era = ""
+        self.current_section = ""
+
+    def _text(self, row: list[_Cell], field: str) -> str:
+        return _misc_cell_text(row, self.col_map, field)
+
+    def _set_era(self, era: str) -> None:
+        # A content tab's sub-sections belong to one era. Badge-tab blocks
+        # (Grails / Wanted) span eras, so theirs carry over.
+        if era != self.current_era and not self.is_badge_tab:
+            self.current_section = ""
+        self.current_era = era
+
+    def row(self, row: list[_Cell]) -> None:
+        if all(not c.text.strip() for c in row) or self._badge_separator(row):
+            return
+        era_text = self._text(row, "era")
+        name = self._text(row, "name")
+        # Era header row: stats text in the era column, era name in the name
+        # column (mirrors the main tab's grammar).
+        if era_text and _MISC_ERA_STATS_RE.search(era_text):
+            if name:
+                self._set_era(name.split("\n")[0].strip())
+            return
+        if name:
+            self._named_row(row, era_text, name)
+
+    def _badge_separator(self, row: list[_Cell]) -> bool:
+        """Grails/Wanted section separator — see docs/decisions.md::parser.py::grails-wanted-separator"""
+        if not self.is_badge_tab:
+            return False
+        lone = [c.text.strip() for c in row if c.text.strip()]
+        if len(lone) != 1:
+            return False
+        _, label = extract_badge(lone[0])
+        if label.lower() not in BADGE_SECTION_LABELS:
+            return False
+        self.current_section = label
+        return True
+
+    def _named_row(self, row: list[_Cell], era_text: str, name: str) -> None:
+        first_line = name.split("\n")[0].strip()
+        name_key = _era_match_key(first_line)
+        era_key = _era_match_key(era_text.split("\n")[0].strip()) if era_text else ""
+        if era_text:
+            self._set_era(era_text.split("\n")[0].strip())
+        entry = self._entry(row, first_line)
+        # Structural-row detection — see docs/decisions.md::parser.py::badge-tab-structural-rows
+        has_track_data = any((
+            entry.date, entry.length,
+            entry.available, entry.quality, entry.links,
+        )) or entry.streaming is not None
+        # Two more era-header shapes — see docs/decisions.md::parser.py::badge-tab-structural-rows
+        stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
+        if (
+            name_key and name_key in self.known_eras and name_key != era_key
+            and (stats_era or (not era_text and not has_track_data))
+        ):
+            self._set_era(first_line)
+            return
+        # Bare label rows: docs/decisions.md::parser.py::badge-tab-structural-rows. A divider
+        # keyword with no track data is a label even with an aside (Travis's "Project" rows).
+        if not has_track_data and (
+            (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS
+        ):
+            if not self.is_badge_tab and _looks_like_section_label(first_line):
+                self.current_section = first_line
+            return
+        self.entries.append(entry)
+
+    def _entry(self, row: list[_Cell], first_line: str) -> MiscEntry:
+        def opt(field: str) -> str | None:
+            return _misc_optional(field, self._text(row, field))
+
+        return MiscEntry(
+            era_name=self.current_era,
+            row_index=len(self.entries),
+            section=self.current_section,
+            name=first_line,
+            notes=opt("notes"),
+            entry_type=opt("entry_type"),
+            date=opt("date"),
+            length=opt("length"),
+            available=opt("available"),
+            quality=opt("quality"),
+            streaming={"yes": True, "no": False}.get(self._text(row, "streaming").lower()),
+            links=_misc_links(row, self.col_map),
+            source_tab=self.kind,
+        )
+
+
 def parse_misc_tab(
     html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = ()
 ) -> list[MiscEntry]:
@@ -3049,157 +3181,13 @@ def parse_misc_tab(
     rows = extract_table(html) if isinstance(html, str) else html
     if not rows:
         return []
-
-    # Find the header row: needs at least era+name (or name+links) matches.
-    col_map: dict[str, int] = {}
-    header_idx = -1
-    for idx, row in enumerate(rows[: _MAX_HEADER_SCAN_ROWS]):
-        candidate: dict[str, int] = {}
-        for c_idx, cell in enumerate(row):
-            key = _misc_header_key(cell.text)
-            canonical = _MISC_COLUMN_ALIASES.get(key)
-            if canonical and canonical not in candidate:
-                candidate[canonical] = c_idx
-        # A name column plus any second content signal qualifies — "date"
-        # covers Stems layouts that have neither an Era nor a Links header.
-        if "name" in candidate and (
-            "era" in candidate or "links" in candidate or "date" in candidate
-        ):
-            col_map = candidate
-            header_idx = idx
-            break
+    header_idx, col_map = _misc_header(rows)
     if header_idx < 0:
         return []
-
-    def cell_text(row: list[_Cell], field: str) -> str:
-        idx = col_map.get(field, -1)
-        if idx < 0 or idx >= len(row):
-            return ""
-        return row[idx].text.strip()
-
-    # Every value the era column uses: a title naming one is a header for the rows
-    # that follow (the empty-era-cell header style), no keyword list needed.
-    era_col = col_map.get("era", -1)
-    known_eras: set[str] = {k for k in map(_era_match_key, artist_eras) if k}
-    if era_col >= 0:
-        for row in rows[header_idx + 1:]:
-            if era_col < len(row):
-                key = _era_match_key(row[era_col].text.split("\n")[0].strip())
-                if key:
-                    known_eras.add(key)
-
-    entries: list[MiscEntry] = []
-    current_era = ""
-    current_section = ""
-    # Only highlight tabs carry block separators; elsewhere a lone "Special"
-    # cell is an entry, not a label.
-    is_badge_tab = kind in _BADGE_BY_TAB_KIND
-
-    def set_era(era: str) -> None:
-        # A content tab's sub-sections belong to one era. Badge-tab blocks
-        # (Grails / Wanted) span eras, so theirs carry over.
-        nonlocal current_era, current_section
-        if era != current_era and not is_badge_tab:
-            current_section = ""
-        current_era = era
-
+    walk = _MiscWalk(kind, col_map, _misc_known_eras(rows, header_idx, col_map, artist_eras))
     for row in rows[header_idx + 1:]:
-        if all(not c.text.strip() for c in row):
-            continue
-
-        era_text = cell_text(row, "era")
-        name = cell_text(row, "name")
-
-        # Grails/Wanted section separator — see docs/decisions.md::parser.py::grails-wanted-separator
-        lone = [c.text.strip() for c in row if c.text.strip()]
-        if is_badge_tab and len(lone) == 1:
-            _, label = extract_badge(lone[0])
-            if label.lower() in BADGE_SECTION_LABELS:
-                current_section = label
-                continue
-
-        # Era header row: stats text in the era column, era name in the name
-        # column (mirrors the main tab's grammar).
-        if era_text and _MISC_ERA_STATS_RE.search(era_text):
-            if name:
-                set_era(name.split("\n")[0].strip())
-            continue
-        if not name:
-            continue
-
-        first_line = name.split("\n")[0].strip()
-        name_key = _era_match_key(first_line)
-        era_key = _era_match_key(era_text.split("\n")[0].strip()) if era_text else ""
-
-        if era_text:
-            set_era(era_text.split("\n")[0].strip())
-
-        # Links: prefer parsed <a href> targets, fall back to URL-ish text.
-        links: list[str] = []
-        links_idx = col_map.get("links", -1)
-        if 0 <= links_idx < len(row):
-            cell = row[links_idx]
-            links.extend(l for raw in cell.links for l in _split_links(raw))
-            if not links:
-                text = cell.text.strip()
-                if text.startswith(("http://", "https://")):
-                    links.extend(_split_links(text))
-        links = [l for l in links if l]
-
-        streaming_text = cell_text(row, "streaming").lower()
-        streaming = {"yes": True, "no": False}.get(streaming_text)
-
-        def opt(field: str) -> str | None:
-            val = cell_text(row, field)
-            if field == "date" and not _looks_like_date(val):
-                return None
-            # A length carries a digit ("3:14") or is a tiny placeholder ("?:??", "N/A", "-");
-            # era header rows put a description in Full Length instead.
-            if field == "length" and not (
-                _looks_like_date(val) or (val and len(val) <= 5)
-            ):
-                return None
-            return val or None
-
-        entry = MiscEntry(
-            era_name=current_era,
-            row_index=len(entries),
-            section=current_section,
-            name=first_line,
-            notes=opt("notes"),
-            entry_type=opt("entry_type"),
-            date=opt("date"),
-            length=opt("length"),
-            available=opt("available"),
-            quality=opt("quality"),
-            streaming=streaming,
-            links=links,
-            source_tab=kind,
-        )
-        # Structural-row detection — see docs/decisions.md::parser.py::badge-tab-structural-rows
-        has_track_data = any((
-            entry.date, entry.length,
-            entry.available, entry.quality, entry.links,
-        )) or entry.streaming is not None
-
-        # Two more era-header shapes — see docs/decisions.md::parser.py::badge-tab-structural-rows
-        stats_era = bool(_STATS_LIKE_ERA_RE.match(era_text))
-        if name_key and name_key in known_eras and name_key != era_key:
-            if stats_era or (not era_text and not has_track_data):
-                set_era(first_line)
-                continue
-
-        if not has_track_data:
-            # Bare label rows: docs/decisions.md::parser.py::badge-tab-structural-rows. A divider
-            # keyword with no track data is a label even with an aside (Travis's "Project" rows).
-            if (not entry.notes and not entry.entry_type) or first_line.lower() in SECTION_SEPARATORS:
-                if not is_badge_tab and _looks_like_section_label(first_line):
-                    current_section = first_line
-                continue
-
-        entries.append(entry)
-
-    return entries
+        walk.row(row)
+    return walk.entries
 
 
 # ---------------------------------------------------------------------------
@@ -3229,6 +3217,21 @@ class ArtMap(dict):
         self.synthetic: set[str] = set()
 
 
+def _art_header_columns(row: list[_Cell]) -> tuple[int | None, int | None]:
+    """(Era column, best-ranked Project Type column) of one candidate header row."""
+    era_idx = type_idx = None
+    type_rank = len(_ART_TYPE_HEADERS)
+    for c_idx, cell in enumerate(row):
+        key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
+        if era_idx is None and key in _ART_ERA_HEADERS:
+            era_idx = c_idx
+        # Best-ranked header wins, not the leftmost one.
+        rank = _ART_TYPE_HEADERS.index(key) if key in _ART_TYPE_HEADERS else type_rank
+        if rank < type_rank:
+            type_rank, type_idx = rank, c_idx
+    return era_idx, type_idx
+
+
 def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, int]:
     """Locate the Era and Project Type columns and the first data row.
 
@@ -3239,21 +3242,73 @@ def _art_tab_columns(rows: list[list[_Cell]]) -> tuple[int | None, int | None, i
     for idx, row in enumerate(rows[:5]):
         if any(cell.images for cell in row):
             break  # already into the data; no header row above it
-        era_idx = type_idx = None
-        type_rank = len(_ART_TYPE_HEADERS)
-        for c_idx, cell in enumerate(row):
-            key = re.sub(r"\s+", " ", cell.text.strip().lower()).rstrip(":").strip()
-            if era_idx is None and key in _ART_ERA_HEADERS:
-                era_idx = c_idx
-            # Best-ranked header wins, not the leftmost one.
-            if key in _ART_TYPE_HEADERS:
-                rank = _ART_TYPE_HEADERS.index(key)
-                if rank < type_rank:
-                    type_rank, type_idx = rank, c_idx
+        era_idx, type_idx = _art_header_columns(row)
         if era_idx is not None or type_idx is not None:
             return era_idx, type_idx, idx + 1
     start = 1 if rows and not any(cell.images for cell in rows[0]) else 0
     return None, None, start
+
+
+class _ArtCollector:
+    """Per-era images of an Art tab: the cover-labelled one and the first one seen."""
+
+    def __init__(self, era_idx: int | None, type_idx: int | None):
+        self.era_idx = era_idx
+        self.type_idx = type_idx
+        # {era_key: {"cover": url, "first": url}}
+        self.era_info: dict[str, dict[str, str | None]] = {}
+        # Version-stripped key → the FIRST versioned key filed under it, so an era
+        # the Art tab spells without a version tag still resolves.
+        self.base_keys: dict[str, str] = {}
+        # Art tabs leave the era cell blank on an era's continuation rows, so the last
+        # seen era carries forward (the first text cell is the artwork's own name).
+        self.last_era_name = ""
+
+    def _era_name(self, row: list[_Cell]) -> str:
+        if self.era_idx is not None:
+            return _get_cell_text(row, self.era_idx).strip() or self.last_era_name
+        # No Era header — fall back to the first non-empty text cell.
+        return next((cell.text.strip() for cell in row if cell.text.strip()), "")
+
+    def add(self, row: list[_Cell]) -> None:
+        # First image found in the row is the candidate
+        img_url = next((cell.images[0] for cell in row if cell.images), None)
+        era_name = self._era_name(row) if img_url else ""
+        if not era_name:
+            return
+        self.last_era_name = era_name
+        # Version-aware: the Art tab lists each version's own cover, so
+        # "Donda [V2]" must not collapse onto "Donda [V1]".
+        key = _era_match_key(era_name, keep_discriminators=True)
+        if not key:
+            return
+        self.base_keys.setdefault(_era_match_key(era_name), key)
+        info = self.era_info.setdefault(key, {"cover": None, "first": None})
+        if info["first"] is None:
+            info["first"] = img_url
+        if self.type_idx is not None:
+            cover_text = _get_cell_text(row, self.type_idx)
+        else:
+            cover_text = " ".join(c.text.strip() for c in row if c.text.strip())
+        if info["cover"] is None and _COVER_RE.search(cover_text):
+            info["cover"] = img_url
+
+    def result(self, source_url: str | None) -> "ArtMap":
+        # Prefer the cover-labelled image, fall back to the first image
+        result = ArtMap()
+        for key, info in self.era_info.items():
+            chosen = info["cover"] or info["first"]
+            if chosen and source_url and not urlparse(chosen).netloc:
+                chosen = urljoin(source_url, chosen)
+            if chosen:
+                result[key] = chosen
+        # Also file each entry under its version-stripped key (first versioned entry wins),
+        # marked synthetic: see docs/decisions.md::parser.py::art-version-keys.
+        for base, versioned in self.base_keys.items():
+            if base not in result and versioned in result:
+                result[base] = result[versioned]
+                result.synthetic.add(base)
+        return result
 
 
 def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
@@ -3269,75 +3324,12 @@ def parse_art_tab(html: str, source_url: str | None = None) -> dict[str, str]:
     rows = extract_table(html)
     if not rows:
         return {}
-
     era_idx, type_idx, start = _art_tab_columns(rows)
-
-    # First pass: collect all images per era key, noting which have cover descriptions.
-    # era_info: {era_key: {"cover": url, "first": url}}
-    era_info: dict[str, dict[str, str | None]] = {}
-    # Version-stripped key → the FIRST versioned key filed under it, so an era
-    # the Art tab spells without a version tag still resolves.
-    base_keys: dict[str, str] = {}
-    # Art tabs leave the era cell blank on an era's continuation rows, so the last
-    # seen era carries forward (the first text cell is the artwork's own name).
-    last_era_name = ""
-
+    collector = _ArtCollector(era_idx, type_idx)
     for row in rows[start:]:
-        if not row:
-            continue
-
-        # First image found in the row is the candidate
-        img_url = next((cell.images[0] for cell in row if cell.images), None)
-        if not img_url:
-            continue
-
-        if era_idx is not None:
-            era_name = _get_cell_text(row, era_idx).strip() or last_era_name
-        else:
-            # No Era header — fall back to the first non-empty text cell.
-            era_name = next((cell.text.strip() for cell in row if cell.text.strip()), "")
-        if not era_name:
-            continue
-        last_era_name = era_name
-
-        # Version-aware: the Art tab lists each version's own cover, so
-        # "Donda [V2]" must not collapse onto "Donda [V1]".
-        key = _era_match_key(era_name, keep_discriminators=True)
-        if not key:
-            continue
-        base_keys.setdefault(_era_match_key(era_name), key)
-
-        if key not in era_info:
-            era_info[key] = {"cover": None, "first": None}
-
-        # Record the first image seen for this era
-        if era_info[key]["first"] is None:
-            era_info[key]["first"] = img_url
-
-        if type_idx is not None:
-            cover_text = _get_cell_text(row, type_idx)
-        else:
-            cover_text = " ".join(c.text.strip() for c in row if c.text.strip())
-        if era_info[key]["cover"] is None and _COVER_RE.search(cover_text):
-            era_info[key]["cover"] = img_url
-
-    # Build final map: prefer cover-labelled image, fall back to first image
-    result = ArtMap()
-    for key, info in era_info.items():
-        chosen = info["cover"] or info["first"]
-        if chosen:
-            if source_url and not urlparse(chosen).netloc:
-                chosen = urljoin(source_url, chosen)
-            result[key] = chosen
-
-    # Also file each entry under its version-stripped key (first versioned entry wins),
-    # marked synthetic: see docs/decisions.md::parser.py::art-version-keys.
-    for base, versioned in base_keys.items():
-        if base not in result and versioned in result:
-            result[base] = result[versioned]
-            result.synthetic.add(base)
-
-    return result
+        if row:
+            collector.add(row)
+    return collector.result(source_url)
 
 
 def art_tab_candidates(artist: Artist, art_map: dict[str, str]) -> dict[str, str]:
@@ -3419,11 +3411,12 @@ def parse_artistgrid_csv(csv_text: str) -> list[TrackerEntry]:
         raw_url = (row.get("url") or "").strip()
         if not name or not raw_url:
             continue
-        url = (
-            raw_url if re.match(r"https?://", raw_url, re.IGNORECASE)
-            else f"https://{raw_url}/" if "." in raw_url
-            else f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
-        )
+        if re.match(r"https?://", raw_url, re.IGNORECASE):
+            url = raw_url
+        elif "." in raw_url:
+            url = f"https://{raw_url}/"
+        else:
+            url = f"https://docs.google.com/spreadsheets/d/{raw_url}/edit"
         entries.append(TrackerEntry(
             name=name,
             url=url,

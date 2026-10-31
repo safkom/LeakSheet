@@ -24,7 +24,8 @@ def test_nginx_never_sends_a_decoded_uri_upstream():
     """$uri is decoded: %0d%0a in it would reach the API as raw CRLF (header injection)."""
     block = NGINX.split("location /api/", 1)[1].split("}", 1)[0]
     code = "\n".join(line for line in block.splitlines() if not line.strip().startswith("#"))
-    assert "$uri" not in code and "rewrite" not in code
+    assert "$uri" not in code
+    assert "rewrite" not in code
     assert "proxy_pass $api_upstream$api_uri;" in code
     assert "$request_uri" in NGINX
 
@@ -46,7 +47,8 @@ def test_web_restarts_with_api():
 
 
 def test_deploy_recreates_web():
-    assert "--force-recreate" in DEPLOY and "web" in DEPLOY.split("--force-recreate", 1)[1].splitlines()[0]
+    assert "--force-recreate" in DEPLOY
+    assert "web" in DEPLOY.split("--force-recreate", 1)[1].splitlines()[0]
 
 
 @pytest.mark.parametrize(("rate", "hops", "ok"), [

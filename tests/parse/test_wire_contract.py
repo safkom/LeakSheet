@@ -76,7 +76,8 @@ def test_the_payload_keeps_the_ios_hard_decode_contract():
 
 
 def test_the_shared_fixture_matches_the_serializer():
-    assert FIXTURE.exists() and json.loads(FIXTURE.read_text()) == contract_payload(), (
+    assert FIXTURE.exists()
+    assert json.loads(FIXTURE.read_text()) == contract_payload(), (
         "The /sheet wire format changed. Regenerate the Swift fixture: "
         "uv run python -m tests.parse.test_wire_contract"
     )
@@ -84,16 +85,20 @@ def test_the_shared_fixture_matches_the_serializer():
 
 def test_edge_payload_is_what_swift_can_decode():
     payload = edge_payload()
-    assert payload.get("tracker_stats") is None and payload.get("parse_metadata") is None
+    assert payload.get("tracker_stats") is None
+    assert payload.get("parse_metadata") is None
     entry = payload["misc_entries"][0]
-    assert entry["links"] == [] and entry["era_name"] == "" and entry["source_tab"] == "other"
+    assert entry["links"] == []
+    assert entry["era_name"] == ""
+    assert entry["source_tab"] == "other"
     assert payload["eras"][0]["sections"][0]["songs"][0]["versions"] == []
     # An empty versions list decodes; the invariant flags it as a content defect.
     assert ios_contract_violations(payload) == ["Song 'Hollow' has no versions"]
 
 
 def test_the_edge_fixture_matches_the_serializer():
-    assert EDGE_FIXTURE.exists() and json.loads(EDGE_FIXTURE.read_text()) == edge_payload(), (
+    assert EDGE_FIXTURE.exists()
+    assert json.loads(EDGE_FIXTURE.read_text()) == edge_payload(), (
         "Regenerate the Swift fixtures: uv run python -m tests.parse.test_wire_contract"
     )
 

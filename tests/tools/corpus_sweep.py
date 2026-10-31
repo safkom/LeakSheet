@@ -328,7 +328,7 @@ def collect(
                 try:
                     html, title, _url = _load(path)
                     artist = parse_sheet(html, title, _url or None)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     t.tabs_failed += 1
                     continue
                 # Must stay identical to the fetcher's score tuple, or the
@@ -351,7 +351,7 @@ def collect(
     for html, title, url in selected:
         try:
             sweep_tab(html, title, t, url)
-        except Exception:  # noqa: BLE001 - a crash is itself a measured defect
+        except Exception:
             t.tabs_failed += 1
     return t
 

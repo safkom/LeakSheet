@@ -290,7 +290,7 @@ class TestResolverUpstreamStatus:
         ((451, 429), 429),
     ])
     async def test_imgur_4xx_on_every_host_keeps_a_code(self, monkeypatch, statuses, expected):
-        by_host = dict(zip(("imgur.gg", "temp.imgur.gg"), statuses))
+        by_host = dict(zip(("imgur.gg", "temp.imgur.gg"), statuses, strict=True))
         self._serve(monkeypatch, lambda request: httpx.Response(by_host[request.url.host]))
         with pytest.raises(streaming.UpstreamStatusError) as exc:
             await streaming.resolve_imgur_cdn_url(API)

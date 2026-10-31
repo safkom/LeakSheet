@@ -50,6 +50,10 @@ import httpx
 
 from src.config import USER_AGENT
 
+# Literals used in several places.
+_DRIVE_HOST = "drive.google.com"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,7 +194,7 @@ async def _get_text_capped(
     headers: dict[str, str],
     *,
     cap: int = _SCRAPER_READ_CAP,
-    timeout: httpx.Timeout | float | None = None,
+    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483)
 ) -> tuple[int, str]:
     """GET *url*, decoding at most *cap* decompressed bytes. Returns
     (status_code, text). Stops consuming the body once the cap is reached."""
@@ -229,7 +233,7 @@ async def get_capped(
     url: str,
     headers: dict[str, str],
     *,
-    timeout: httpx.Timeout | float | None = None,
+    timeout: httpx.Timeout | float | None = None,  # NOSONAR(S7483)
 ) -> CappedResponse:
     """A small provider API answer, read with the scraper byte cap."""
     return CappedResponse(*await _get_text_capped(client, url, headers, timeout=timeout))
@@ -244,26 +248,26 @@ async def get_capped(
 
 # pillows.su / pillowcase.su / plwcse.top: one id space, all served by api.pillows.su
 _PILLOWS_PATTERN = re.compile(
-    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?(pillows\.su|pillowcase\.su|plwcse\.top)/f/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 
 # imgur.gg / temp.imgur.gg
 _IMGUR_PATTERN = re.compile(
-    r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?((?:temp\.)?imgur\.gg)/f/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 # music.froste.lol
 # The lookahead stops a non-hex id resolving to its hex prefix; "&sa=…" tracking
 # glued onto the path still matches.
 _FROSTE_PATTERN = re.compile(
-    r"https?://music\.froste\.lol/song/([A-Fa-f0-9]+)(?![A-Za-z0-9])",
+    r"https?://music\.froste\.lol/song/([a-f0-9]+)(?![a-z0-9])",
     re.IGNORECASE | re.ASCII,
 )
 
 # krakenfiles.com
 _KRAKEN_PATTERN = re.compile(
-    r"https?://(?:www\.)?krakenfiles\.com/view/([A-Za-z0-9_-]+)/file\.html",
+    r"https?://(?:www\.)?krakenfiles\.com/view/([a-z0-9_-]+)/file\.html",
     re.IGNORECASE | re.ASCII,
 )
 
@@ -277,13 +281,13 @@ _KRAKEN_CDN_AUDIO_PATTERN = re.compile(
 
 # pixeldrain.com: /u/ is a single file; /l/ lists are deliberately unsupported.
 _PIXELDRAIN_PATTERN = re.compile(
-    r"https?://(?:www\.)?pixeldrain\.com/u/([A-Za-z0-9]+)",
+    r"https?://(?:www\.)?pixeldrain\.com/u/([a-z0-9]+)",
     re.IGNORECASE | re.ASCII,
 )
 
 # gdrive URL forms — see docs/decisions.md::streaming.py::gdrive-url-forms
 _GDRIVE_FILE_D_PATTERN = re.compile(
-    r"https?://(?:www\.)?drive\.google\.com/file/d/([A-Za-z0-9_-]+)",
+    r"https?://(?:www\.)?drive\.google\.com/file/d/([a-z0-9_-]+)",
     re.IGNORECASE | re.ASCII,
 )
 _GDRIVE_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -298,7 +302,7 @@ ALLOWED_STREAM_HOSTS = frozenset({
     "krakenfiles.com",    # view URL passes through; CDN host validated by
                           # _KRAKEN_CDN_AUDIO_PATTERN when resolved lazily
     "pixeldrain.com",
-    "drive.google.com",   # uc?export=download form; the usercontent.google.com
+    _DRIVE_HOST,   # uc?export=download form; the usercontent.google.com
                           # confirm retry is validated inside _fetch_gdrive
 })
 
@@ -452,7 +456,7 @@ def _extract_gdrive_id(link: str) -> str | None:
     except ValueError:  # unclosed "[" in the host
         return None
     # netloc, not hostname: a port or userinfo is no more welcome here than in the regex forms.
-    if parsed.netloc.lower() not in ("drive.google.com", "www.drive.google.com"):
+    if parsed.netloc.lower() not in (_DRIVE_HOST, "www.drive.google.com"):
         return None
     if parsed.path.lower() not in ("/open", "/uc"):
         return None
@@ -623,6 +627,36 @@ def is_imgur_api_url(url: str) -> bool:
     return _IMGUR_API_PATTERN.match(url) is not None
 
 
+def _imgur_hosts(api_url: str) -> list[str]:
+    """The URL, then temp.imgur.gg when it uses imgur.gg: either host may be the live one."""
+    if "://imgur.gg/" not in api_url and "://www.imgur.gg/" not in api_url:
+        return [api_url]
+    return [api_url, api_url.replace("://imgur.gg/", "://temp.imgur.gg/").replace("://www.imgur.gg/", "://temp.imgur.gg/")]
+
+
+async def _imgur_cdn_url_from(url: str, statuses: list[int]) -> str:
+    """The cdnUrl one imgur host reports; ValueError (with the status noted) otherwise."""
+    try:
+        resp = await get_capped(_get_shared_client(), url, {"User-Agent": _STREAM_USER_AGENT})
+    except httpx.HTTPError as exc:
+        raise ValueError(f"imgur.gg API request failed: {exc}") from exc
+    if resp.status_code != 200:
+        statuses.append(resp.status_code)
+        raise ValueError(f"imgur.gg API returned {resp.status_code} for {url}")
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        logger.warning("imgur API returned non-JSON response (status %s): %s", resp.status_code, exc)
+        raise ValueError(f"imgur API non-JSON response: {exc}") from exc
+    cdn_url = data.get("cdnUrl")
+    if not cdn_url:
+        raise ValueError(f"imgur.gg API response missing cdnUrl: {url}")
+    # The cdnUrl is attacker-influenceable — validate the destination
+    # is a public https host before the caller streams from it (SSRF).
+    await _run_dns(_assert_public_https_url, cdn_url, source="imgur.gg cdnUrl")
+    return cdn_url
+
+
 async def resolve_imgur_cdn_url(api_url: str) -> str:
     """Fetch imgur.gg file metadata and return the CDN stream URL.
 
@@ -637,50 +671,16 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
     Raises ValueError on network or API errors.
     """
     async def _do() -> str:
-        urls_to_try = [api_url]
-        # If the URL uses imgur.gg (not temp.), queue temp.imgur.gg as fallback
-        if "://imgur.gg/" in api_url or "://www.imgur.gg/" in api_url:
-            fallback = api_url.replace("://imgur.gg/", "://temp.imgur.gg/").replace(
-                "://www.imgur.gg/", "://temp.imgur.gg/"
-            )
-            urls_to_try.append(fallback)
-
+        urls_to_try = _imgur_hosts(api_url)
         last_err: Exception | None = None
         statuses: list[int] = []
         for url in urls_to_try:
             try:
-                client = _get_shared_client()
-                resp = await get_capped(client, url, {"User-Agent": _STREAM_USER_AGENT})
-                if resp.status_code != 200:
-                    statuses.append(resp.status_code)
-                    last_err = ValueError(
-                        f"imgur.gg API returned {resp.status_code} for {url}"
-                    )
-                    continue
-                try:
-                    data = resp.json()
-                except ValueError as exc:
-                    logger.warning("imgur API returned non-JSON response (status %s): %s", resp.status_code, exc)
-                    last_err = ValueError(f"imgur API non-JSON response: {exc}")
-                    continue
-                cdn_url = data.get("cdnUrl")
-                if not cdn_url:
-                    last_err = ValueError(
-                        f"imgur.gg API response missing cdnUrl: {url}"
-                    )
-                    continue
-                # The cdnUrl is attacker-influenceable — validate the destination
-                # is a public https host before the caller streams from it (SSRF).
-                await _run_dns(_assert_public_https_url, cdn_url, source="imgur.gg cdnUrl")
-                return cdn_url
+                return await _imgur_cdn_url_from(url, statuses)
             # ValueError too: the SSRF pre-flight raises it (even for a transient DNS
             # failure), and that must still reach the temp.imgur.gg fallback.
-            except (httpx.HTTPError, ValueError) as exc:
-                last_err = exc if isinstance(exc, ValueError) else ValueError(
-                    f"imgur.gg API request failed: {exc}"
-                )
-                continue
-
+            except ValueError as exc:
+                last_err = exc
         # A 4xx on every host is that answer, not an outage; max() prefers 429 ("try
         # later") over 410 over 404, and a relayed status over any other 4xx.
         if len(statuses) == len(urls_to_try) and all(400 <= s < 500 for s in statuses):
@@ -691,7 +691,7 @@ async def resolve_imgur_cdn_url(api_url: str) -> str:
 
 
 # Virus-scan interstitial bypass — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
-_GDRIVE_ALLOWED_HOSTS = {"drive.google.com", "drive.usercontent.google.com"}
+_GDRIVE_ALLOWED_HOSTS = {_DRIVE_HOST, "drive.usercontent.google.com"}
 _GDRIVE_USERCONTENT_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.googleusercontent\.com\Z")
 
 
@@ -759,7 +759,7 @@ def is_gdrive_stream_url(url: str) -> bool:
     """Return True if *url* is the drive.google.com stream URL produced by
     ``resolve_stream_url`` (used to dispatch into the gdrive fetch path)."""
     try:
-        return (urlparse(url).hostname or "").lower() == "drive.google.com"
+        return (urlparse(url).hostname or "").lower() == _DRIVE_HOST
     except Exception:
         return False
 
@@ -775,6 +775,43 @@ def _is_gdrive_host_allowed(url: str) -> bool:
 _GDRIVE_MAX_REDIRECTS = 5
 
 
+async def _gdrive_get(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> httpx.Response:
+    """GET with redirects followed by hand, so every hop is vetted before it is requested."""
+    for _ in range(_GDRIVE_MAX_REDIRECTS + 1):
+        if not _is_gdrive_host_allowed(url):
+            raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
+        request = client.build_request("GET", url, headers=headers)
+        resp = await client.send(request, stream=True, follow_redirects=False)
+        if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
+            return resp
+        location = resp.headers["location"]
+        await resp.aclose()
+        try:
+            url = str(resp.url.join(location))
+        except httpx.InvalidURL as exc:
+            raise ValueError("gdrive redirect with a malformed Location") from exc
+    raise ValueError("gdrive request redirected too many times")
+
+
+def _is_html_page(resp: httpx.Response) -> bool:
+    return resp.status_code == 200 and resp.headers.get("content-type", "").split(";")[0].strip().lower() == "text/html"
+
+
+async def _gdrive_confirm_url(resp: httpx.Response) -> str:
+    """The confirm-form URL of a virus-scan interstitial. The read is capped: the form is
+    always near the top, and an uncapped decompressed read of a crafted page could OOM."""
+    buf = bytearray()
+    async for chunk in resp.aiter_bytes():
+        buf.extend(chunk)
+        if len(buf) >= _SCRAPER_READ_CAP:
+            break
+    await resp.aclose()
+    fields = parse_gdrive_confirm_form(bytes(buf[:_SCRAPER_READ_CAP]).decode("utf-8", errors="ignore"))
+    if not fields:
+        raise GdriveInterstitialError("drive.google.com returned HTML with no recognisable confirm form")
+    return build_gdrive_confirm_url(fields)
+
+
 async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Response:
     """Fetch a Google Drive stream URL, transparently bypassing the
     virus-scan interstitial once via the confirm-form retry.
@@ -784,60 +821,15 @@ async def _fetch_gdrive(stream_url: str, headers: dict[str, str]) -> httpx.Respo
     ValueError if a request would target a host outside the fixed allowlist.
     """
     client = _get_shared_client()
-
-    async def _get(url: str) -> httpx.Response:
-        # Redirects are followed by hand so every hop is vetted before it is requested.
-        for _ in range(_GDRIVE_MAX_REDIRECTS + 1):
-            if not _is_gdrive_host_allowed(url):
-                raise ValueError(f"gdrive request targets disallowed host: {url[:80]}")
-            request = client.build_request("GET", url, headers=headers)
-            resp = await client.send(request, stream=True, follow_redirects=False)
-            if resp.status_code not in (301, 302, 303, 307, 308) or "location" not in resp.headers:
-                return resp
-            location = resp.headers["location"]
-            await resp.aclose()
-            try:
-                url = str(resp.url.join(location))
-            except httpx.InvalidURL as exc:
-                raise ValueError("gdrive redirect with a malformed Location") from exc
-        raise ValueError("gdrive request redirected too many times")
-
-    resp = await _get(stream_url)
-
+    resp = await _gdrive_get(client, stream_url, headers)
     # Private files: pass the 403 through for the caller to relay as-is, rather
     # than treating it as an interstitial or a generic upstream error.
-    if resp.status_code == 403:
+    if resp.status_code == 403 or not _is_html_page(resp):
         return resp
-
-    ct = resp.headers.get("content-type", "")
-    base_ct = ct.split(";")[0].strip().lower()
-    if resp.status_code == 200 and base_ct == "text/html":
-        # Cap the interstitial read — the confirm form is always near the top,
-        # and an uncapped decompressed read of a crafted page could OOM.
-        buf = bytearray()
-        async for chunk in resp.aiter_bytes():
-            buf.extend(chunk)
-            if len(buf) >= _SCRAPER_READ_CAP:
-                break
+    resp = await _gdrive_get(client, await _gdrive_confirm_url(resp), headers)
+    if _is_html_page(resp):
         await resp.aclose()
-        fields = parse_gdrive_confirm_form(
-            bytes(buf[:_SCRAPER_READ_CAP]).decode("utf-8", errors="ignore")
-        )
-        if not fields:
-            raise GdriveInterstitialError(
-                "drive.google.com returned HTML with no recognisable confirm form"
-            )
-        confirm_url = build_gdrive_confirm_url(fields)
-        resp = await _get(confirm_url)
-        if resp.status_code == 403:
-            return resp
-        retry_ct = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-        if retry_ct == "text/html" and resp.status_code == 200:
-            await resp.aclose()
-            raise GdriveInterstitialError(
-                "drive.google.com interstitial persisted after confirm retry"
-            )
-
+        raise GdriveInterstitialError("drive.google.com interstitial persisted after confirm retry")
     return resp
 
 
@@ -850,6 +842,42 @@ def _is_audio_content_type(ct: str) -> bool:
     """Return True if content-type looks like audio or binary."""
     ct = ct.lower()
     return any(ct.startswith(m) for m in _AUDIO_MIMES)
+
+
+def _check_stream_response(resp: httpx.Response, allow_403: bool) -> None:
+    """A gdrive 403 (a private file) passes for the caller to relay; 416 passes so the API
+    layer can relay a real 416 (Range Not Satisfiable). Anything else must be a 200/206 of audio."""
+    if allow_403 and resp.status_code == 403:
+        return
+    if resp.status_code not in (200, 206, 416):
+        raise UpstreamStatusError(resp.status_code)
+    ct = resp.headers.get("content-type", "")
+    if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
+        raise NonMediaError(f"Upstream returned non-audio content: {ct}")
+
+
+async def _checked(resp: httpx.Response, allow_403: bool = False) -> httpx.Response:
+    try:
+        _check_stream_response(resp, allow_403)
+    except Exception:
+        await resp.aclose()
+        raise
+    return resp
+
+
+def _stream_headers(stream_url: str, range_header: str | None) -> dict[str, str]:
+    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range (gdrive
+    # included), so the body must not arrive content-encoded (httpx would decode it).
+    req_headers = {"User-Agent": _STREAM_USER_AGENT, "Accept-Encoding": "identity"}
+    if range_header:
+        req_headers["Range"] = range_header
+    # music.froste.lol requires a Referer header
+    if "music.froste.lol/song/" in stream_url:
+        req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
+    # The kraken CDN requires Referer: https://krakenfiles.com/
+    if _KRAKEN_CDN_AUDIO_PATTERN.match(stream_url):
+        req_headers["Referer"] = "https://krakenfiles.com/"
+    return req_headers
 
 
 async def stream_audio(
@@ -872,61 +900,16 @@ async def stream_audio(
     # imgur.gg: resolve metadata API → CDN URL first
     if is_imgur_api_url(stream_url):
         stream_url = await resolve_imgur_cdn_url(stream_url)
-
     # krakenfiles.com: fetch view page to extract CDN URL
     if is_kraken_view_url(stream_url):
         stream_url = await resolve_kraken_cdn_url(stream_url)
-
-    # Relayed byte-for-byte with the upstream's Content-Length/Content-Range (gdrive
-    # included), so the body must not arrive content-encoded (httpx would decode it).
-    req_headers = {"User-Agent": _STREAM_USER_AGENT, "Accept-Encoding": "identity"}
-    if range_header:
-        req_headers["Range"] = range_header
-
     # gdrive dedicated path — see docs/decisions.md::streaming.py::gdrive-interstitial-bypass
     if is_gdrive_stream_url(stream_url):
-        resp = await _fetch_gdrive(stream_url, req_headers)
-        try:
-            if resp.status_code == 403:
-                return resp
-            if resp.status_code not in (200, 206, 416):
-                raise UpstreamStatusError(resp.status_code)
-            ct = resp.headers.get("content-type", "")
-            if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-                raise NonMediaError(f"Upstream returned non-audio content: {ct}")
-        except Exception:
-            await resp.aclose()
-            raise
-        return resp
-
-    # music.froste.lol requires a Referer header
-    if "music.froste.lol/song/" in stream_url:
-        req_headers["Referer"] = re.sub(r"/(?:file|download)$", "", stream_url)
-
-    # The kraken CDN requires Referer: https://krakenfiles.com/
-    if _KRAKEN_CDN_AUDIO_PATTERN.match(stream_url):
-        req_headers["Referer"] = "https://krakenfiles.com/"
-
+        return await _checked(await _fetch_gdrive(stream_url, _stream_headers(stream_url, range_header)), allow_403=True)
     client = _get_shared_client()
-
-    request = client.build_request("GET", stream_url, headers=req_headers)
+    request = client.build_request("GET", stream_url, headers=_stream_headers(stream_url, range_header))
     resp = await client.send(request, stream=True)
-
     # A redirect can land on an internal host even from an allow-listed URL (SSRF):
     # re-validate the final url before relaying any bytes.
     await assert_public_redirect_target(resp, source="stream upstream")
-
-    try:
-        ct = resp.headers.get("content-type", "")
-        # 416 passes through so the API layer can relay it as a real 416
-        # (Range Not Satisfiable) instead of a generic upstream error.
-        if resp.status_code not in (200, 206, 416):
-            raise UpstreamStatusError(resp.status_code)
-
-        if resp.status_code != 416 and ct and not _is_audio_content_type(ct):
-            raise NonMediaError(f"Upstream returned non-audio content: {ct}")
-    except Exception:
-        await resp.aclose()
-        raise
-
-    return resp
+    return await _checked(resp)

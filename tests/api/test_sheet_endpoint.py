@@ -550,7 +550,8 @@ class TestProgressStream:
         events = [json.loads(e) for e in events]
         assert events[0] == {"type": "progress", "stage": "fetching",
                              "message": "Found 3 tabs — downloading Unreleased"}
-        assert events[1]["done"] == 1 and events[1]["total"] == 2
+        assert events[1]["done"] == 1
+        assert events[1]["total"] == 2
         header = events[-1]
         assert header["type"] == "artist"
         assert header["bytes"] == len(payload)
@@ -720,7 +721,8 @@ class TestDisplayName:
             "/sheet", json={"url": URL, "artist_name": "Renamed"},
             headers={"If-None-Match": plain.headers["ETag"]},
         )
-        assert r.status_code == 200 and r.json()["name"] == "Renamed"
+        assert r.status_code == 200
+        assert r.json()["name"] == "Renamed"
 
 
 class TestRevalidationBackoff:

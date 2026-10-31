@@ -335,7 +335,8 @@ class TestUpstreamStatusIsRelayed:
     def test_no_upstream_detail_leaks_to_the_client(self, api_client, monkeypatch):
         self._raise(monkeypatch, 404)
         body = api_client.get("/stream", params={"url": PILLOWS}).text.lower()
-        assert "pillows" not in body and "api.pillows.su" not in body
+        assert "pillows" not in body
+        assert "api.pillows.su" not in body
 
 
 class TestNonMediaBodyIsRefused:

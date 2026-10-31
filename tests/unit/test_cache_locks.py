@@ -84,10 +84,11 @@ async def test_secondary_tabs_cancels_the_api_task_it_started(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(fetcher, "_load_secondary_tabs_with", boom)
+    artist, timer = Artist(name="X", slug="x", eras=[]), PhaseTimer()
     with pytest.raises(RuntimeError):
         await _load_secondary_tabs(
-            Artist(name="X", slug="x", eras=[]), None, [("1", "misc", "Misc")], URL, "T",
-            client=None, timeout=1, cache_ttl=0, use_cache=False, t=PhaseTimer(),
+            artist, None, [("1", "misc", "Misc")], URL, "T",
+            client=None, timeout=1, cache_ttl=0, use_cache=False, t=timer,
         )
     await asyncio.sleep(0)
     assert task.cancelled()

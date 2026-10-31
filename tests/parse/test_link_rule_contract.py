@@ -288,7 +288,8 @@ def contract_payload() -> dict:
 
 
 def test_the_shared_fixture_matches_the_python_rules():
-    assert FIXTURE.exists() and json.loads(FIXTURE.read_text()) == contract_payload(), (
+    assert FIXTURE.exists()
+    assert json.loads(FIXTURE.read_text()) == contract_payload(), (
         "A link rule changed. Regenerate the Swift fixture: "
         "uv run python -m tests.parse.test_link_rule_contract"
     )

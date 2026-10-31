@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -105,6 +106,22 @@ logging.getLogger().setLevel(os.environ.get("LEAKSHEET_LOG_LEVEL", "INFO").upper
 for _noisy in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# Media types and metadata tags used in several places.
+_MIME_MP4 = "audio/mp4"
+_MIME_OGG = "audio/ogg"
+_MIME_FLAC = "audio/flac"
+_MIME_WAV = "audio/wav"
+_MIME_MPEG = "audio/mpeg"
+_MIME_OCTET = "application/octet-stream"
+_MIME_JSON = "application/json"
+_UNEXPECTED_HEAD = "unexpected payload head"
+_UPSTREAM_ERROR = "Upstream error"
+_TAG_CODEC_PROFILE = "CODEC PROFILE"
+_TAG_SAMPLE_RATE = "SAMPLE RATE"
+_TAG_BITS = "BITS PER SAMPLE"
+_TAG_CHANNELS = "NUMBER OF CHANNELS"
+
+
 # Secrets this process holds. Frame locals are scrubbed only by variable name, so these
 # are also replaced by value anywhere in an event or log line.
 _SECRET_ENV = ("LEAKSHEET_GOOGLE_API_KEY", "LEAKSHEET_ADMIN_TOKEN")
@@ -138,23 +155,23 @@ def _sentry_options(dsn: str) -> dict:
     from sentry_sdk.integrations.starlette import StarletteIntegration
     from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
-    return dict(
-        dsn=dsn,
-        release=f"leaksheet-api@{VERSION}",
-        enable_logs=True,
-        traces_sample_rate=0.0,
-        send_default_pii=False,
+    return {
+        "dsn": dsn,
+        "release": f"leaksheet-api@{VERSION}",
+        "enable_logs": True,
+        "traces_sample_rate": 0.0,
+        "send_default_pii": False,
         # send_default_pii=False scrubs X-Forwarded-For but not Cloudflare's IP headers.
-        event_scrubber=EventScrubber(
+        "event_scrubber": EventScrubber(
             denylist=DEFAULT_DENYLIST + ["cf-connecting-ip", "true-client-ip", "x-admin-token", "x-goog-api-key"]
         ),
-        before_send=_scrub_secrets,
-        before_send_log=_scrub_secrets,
-        integrations=[
+        "before_send": _scrub_secrets,
+        "before_send_log": _scrub_secrets,
+        "integrations": [
             StarletteIntegration(failed_request_status_codes=set()),
             FastApiIntegration(failed_request_status_codes=set()),
         ],
-    )
+    }
 
 
 if _sentry_dsn := os.environ.get("SENTRY_DSN"):
@@ -176,9 +193,9 @@ logger = logging.getLogger(__name__)
 
 _MIME_CORRECTIONS: dict[str, str] = {
     # audio/m4a, audio/x-m4a are not registered IANA types; Safari needs audio/mp4
-    "audio/m4a": "audio/mp4",
-    "audio/m4b": "audio/mp4",
-    "audio/x-m4a": "audio/mp4",
+    "audio/m4a": _MIME_MP4,
+    "audio/m4b": _MIME_MP4,
+    "audio/x-m4a": _MIME_MP4,
 }
 
 # Audio format sniffing — see docs/decisions.md::api.py::mime-sniffing
@@ -201,35 +218,35 @@ def _sniff_audio_format(header: bytes) -> str | None:
 
     # Ogg container (Vorbis, Opus, FLAC-in-Ogg) — "OggS"
     if header[:4] == b"OggS":
-        return "audio/ogg"
+        return _MIME_OGG
     # Partial Ogg: a short read (Safari's bytes=0-1 probe) that is a genuine prefix of
     # "OggS", not any byte starting 'O', which would misclassify tiny bodies.
     if 0 < len(header) < 4 and b"OggS".startswith(header):
-        return "audio/ogg"
+        return _MIME_OGG
 
     # FLAC — "fLaC"
     if header[:4] == b"fLaC":
-        return "audio/flac"
+        return _MIME_FLAC
 
     # WAV — "RIFF....WAVE"
     if header[:4] == b"RIFF" and (len(header) < 12 or header[8:12] == b"WAVE"):
-        return "audio/wav"
+        return _MIME_WAV
 
     # MP3 — ID3 tag header
     if header[:3] == b"ID3":
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     # MP3 — raw sync frame (0xFF 0xEx or 0xFF 0xFx)
     if len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0:
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     # MP4 / M4A — standard ftyp box at offset 4
     if len(header) >= 8 and header[4:8] == b"ftyp":
-        return "audio/mp4"
+        return _MIME_MP4
 
     # Other MP4 boxes at offset 4 (moov, mdat, free, skip, wide)
     if len(header) >= 8 and header[4:8] in _MP4_BOXES:
-        return "audio/mp4"
+        return _MIME_MP4
 
     return None
 
@@ -241,23 +258,23 @@ _SNIFF_BYTES = 16
 # Map file extensions to MIME types — used to resolve generic upstream types
 # (application/octet-stream) when the URL contains a recognisable extension.
 _EXT_TO_MIME: dict[str, str] = {
-    ".m4a": "audio/mp4",
-    ".m4b": "audio/mp4",
-    ".mp3": "audio/mpeg",
-    ".ogg": "audio/ogg",
-    ".oga": "audio/ogg",
-    ".flac": "audio/flac",
+    ".m4a": _MIME_MP4,
+    ".m4b": _MIME_MP4,
+    ".mp3": _MIME_MPEG,
+    ".ogg": _MIME_OGG,
+    ".oga": _MIME_OGG,
+    ".flac": _MIME_FLAC,
     ".aac": "audio/aac",
-    ".wav": "audio/wav",
+    ".wav": _MIME_WAV,
 }
 
 # Map corrected MIME types to file extensions for Content-Disposition
 _MIME_TO_EXT: dict[str, str] = {
-    "audio/mp4": ".m4a",
-    "audio/mpeg": ".mp3",
-    "audio/ogg": ".ogg",
-    "audio/wav": ".wav",
-    "audio/flac": ".flac",
+    _MIME_MP4: ".m4a",
+    _MIME_MPEG: ".mp3",
+    _MIME_OGG: ".ogg",
+    _MIME_WAV: ".wav",
+    _MIME_FLAC: ".flac",
     "audio/aac": ".aac",
 }
 
@@ -303,7 +320,7 @@ def _fix_audio_mime(
         return _MIME_CORRECTIONS[base]
 
     # For generic binary types, try to determine the real format.
-    if base in ("application/octet-stream", "binary/octet-stream", ""):
+    if base in (_MIME_OCTET, "binary/octet-stream", ""):
         # 1. Content-Disposition filename (e.g. 'attachment; filename="track.m4a"')
         if content_disposition:
             ext = _ext_from_content_disposition(content_disposition)
@@ -319,7 +336,7 @@ def _fix_audio_mime(
                 return _EXT_TO_MIME[ext]
 
         # Unknown format — fall back to a safe generic
-        return "audio/mpeg"
+        return _MIME_MPEG
 
     return base
 
@@ -635,8 +652,8 @@ async def _background_revalidate(url: str) -> None:
         if isinstance(e, (SignedOutError, SourceGoneError)):
             try:
                 await asyncio.to_thread(drop_cached_entry, url)
-            except OSError as exc:
-                logger.error("Could not drop the cached entry for %s: %s", url[:80], exc)
+            except OSError:
+                logger.exception("Could not drop the cached entry for %s", url[:80])
 
 
 # Per worker, like _parses. Keyed by normalized URL.
@@ -671,7 +688,56 @@ class SheetRequest(BaseModel):
     force_refresh: bool = Field(False, description="Force a fresh fetch, ignoring cache")
 
 
-@app.post("/sheet")
+def _sheet_headers(etag: str, status: str, timer: PhaseTimer | None = None) -> dict[str, str]:
+    headers = {
+        "ETag": f'"{etag}"',
+        "X-Cache-Status": status,
+        "Cache-Control": _CC_SHEET,
+        "Vary": "Accept",
+    }
+    if timer is not None:
+        headers["Server-Timing"] = timer.server_timing_header()
+    return headers
+
+
+async def _validated_304(req: SheetRequest, request: Request, bg: BackgroundTasks) -> Response | None:
+    """The ETag-based 304 fast path."""
+    if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
+    server_etag = await async_get_cached_etag(req.url) if if_none_match else None
+    if not server_etag or _display_etag(server_etag, req.artist_name) != if_none_match:
+        return None
+    age = await async_get_cached_age(req.url)
+    if age is None or age >= SERVE_STALE_TTL:
+        return None
+    if age > DEFAULT_CACHE_TTL:
+        bg.add_task(_background_revalidate, req.url)
+    return Response(status_code=304, headers=_sheet_headers(if_none_match, "validated"))
+
+
+async def _cached_sheet(req: SheetRequest, bg: BackgroundTasks) -> Response | None:
+    """Stale-while-revalidate fast path — see docs/decisions.md::api.py::swr-fast-path"""
+    timer = PhaseTimer()
+    with timer.phase("cache_read"):
+        cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
+    if cached is None:
+        return None
+    raw, etag, age = cached
+    if req.artist_name:
+        with timer.phase("rename"):
+            raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
+    is_stale = age > DEFAULT_CACHE_TTL
+    if is_stale:
+        bg.add_task(_background_revalidate, req.url)
+    return Response(
+        content=raw, media_type=_MIME_JSON, headers=_sheet_headers(etag, "stale" if is_stale else "hit", timer),
+    )
+
+
+@app.post("/sheet", responses={
+    400: {"description": "Bad Request"},
+    404: {"description": "Not Found"},
+    503: {"description": "Service Unavailable"},
+})
 async def parse_sheet(
     req: SheetRequest,
     request: Request,
@@ -692,79 +758,23 @@ async def parse_sheet(
         _normalize_url(req.url)
     except InvalidURLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid URL: {e}") from e
-
-    # --- ETag-based 304 fast path ---
     if use_cache:
-        if_none_match = _parse_if_none_match(request.headers.get("if-none-match", ""))
-        if if_none_match:
-            server_etag = await async_get_cached_etag(req.url)
-            if server_etag:
-                server_etag = _display_etag(server_etag, req.artist_name)
-            if server_etag and server_etag == if_none_match:
-                age = await async_get_cached_age(req.url)
-                if age is not None and age < SERVE_STALE_TTL:
-                    if age > DEFAULT_CACHE_TTL:
-                        bg.add_task(_background_revalidate, req.url)
-                    return Response(
-                        status_code=304,
-                        headers={
-                            "ETag": f'"{server_etag}"',
-                            "X-Cache-Status": "validated",
-                            "Cache-Control": _CC_SHEET,
-                            "Vary": "Accept",
-                        },
-                    )
-
-    # Stale-while-revalidate fast path — see docs/decisions.md::api.py::swr-fast-path
-    if use_cache:
-        timer = PhaseTimer()
-        with timer.phase("cache_read"):
-            cached = await async_get_cached_parsed_bytes(req.url, max_age=SERVE_STALE_TTL)
+        cached = await _validated_304(req, request, bg) or await _cached_sheet(req, bg)
         if cached is not None:
-            raw, etag, age = cached
-            if req.artist_name:
-                with timer.phase("rename"):
-                    raw, etag = await asyncio.to_thread(_with_display_name, raw, etag, req.artist_name)
-            is_stale = age > DEFAULT_CACHE_TTL
-
-            if is_stale:
-                bg.add_task(_background_revalidate, req.url)
-
-            return Response(
-                content=raw,
-                media_type="application/json",
-                headers={
-                    "ETag": f'"{etag}"',
-                    "X-Cache-Status": "stale" if is_stale else "hit",
-                    "Cache-Control": _CC_SHEET,
-                    "Vary": "Accept",
-                    "Server-Timing": timer.server_timing_header(),
-                },
-            )
+            return cached
 
     # --- Cache miss: full fetch + parse ---
     # Accept: application/x-ndjson streams progress events, then the artist. Hits,
     # stale hits and 304s stay plain JSON: they are instant.
     if _NDJSON in request.headers.get("accept", ""):
         return _stream_sheet(req)
-
     timer = PhaseTimer()
     try:
         body, etag = await _parse_for_response(req, timer)
     except Exception as e:
         raise _sheet_http_error(req, e) from e
     logger.info("sheet_timing url=%s status=miss %s", req.url[:80], timer.log_line())
-    return Response(
-        content=body,
-        media_type="application/json",
-        headers={
-            "ETag": f'"{etag}"',
-            "X-Cache-Status": "miss",
-            "Cache-Control": _CC_SHEET,
-            "Vary": "Accept",
-            "Server-Timing": timer.server_timing_header(),
-        },
-    )
+    return Response(content=body, media_type=_MIME_JSON, headers=_sheet_headers(etag, "miss", timer))
 
 
 _NDJSON = "application/x-ndjson"
@@ -817,7 +827,7 @@ def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
     Raises ValueError unless the object opens with exactly those two keys.
     """
     if not head.startswith("{"):
-        raise ValueError("unexpected payload head")
+        raise ValueError(_UNEXPECTED_HEAD)
     decoder = json.JSONDecoder()
     values = []
     i = 0
@@ -826,12 +836,12 @@ def _leading_name_and_slug(head: str) -> tuple[tuple[str, str], int]:
         found, i = decoder.raw_decode(head, i)
         i = _skip_json_ws(head, i)
         if found != key or head[i:i + 1] != ":":
-            raise ValueError("unexpected payload head")
+            raise ValueError(_UNEXPECTED_HEAD)
         value, i = decoder.raw_decode(head, _skip_json_ws(head, i + 1))
         values.append(value)
         i = _skip_json_ws(head, i)
         if head[i:i + 1] != ",":
-            raise ValueError("unexpected payload head")
+            raise ValueError(_UNEXPECTED_HEAD)
     return (values[0], values[1]), i
 
 
@@ -976,7 +986,10 @@ def _stream_sheet(req: SheetRequest) -> StreamingResponse:
 # POST /cache/clear — clear the fetch cache (served as /api/cache/clear in prod)
 # ---------------------------------------------------------------------------
 
-@app.post("/cache/clear")
+@app.post("/cache/clear", responses={
+    401: {"description": "Unauthorized"},
+    503: {"description": "Service Unavailable"},
+})
 async def clear_fetch_cache(request: Request):
     """Clear the URL fetch cache (privileged).
 
@@ -1174,6 +1187,39 @@ def _maybe_evict_image_cache() -> None:
     _evict_image_cache()
 
 
+def _image_meta_path(bin_path: Path) -> Path:
+    return bin_path.with_name(bin_path.name[:-4] + ".meta.json")
+
+
+def _image_entry_kind(bin_path: Path, expired_before: float) -> tuple[bool, bool]:
+    """(is an era original, has expired). Unreadable metadata counts as a live variant."""
+    try:
+        meta = json.loads(_image_meta_path(bin_path).read_text())
+        is_original = meta.get("original") is True
+        return is_original, is_original and meta["timestamp"] < expired_before
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return False, False
+
+
+def _unlink_unless_rewritten(bin_path: Path, mtime: float) -> None:
+    try:
+        if bin_path.stat().st_mtime == mtime:  # else a worker just rewrote it
+            bin_path.unlink(missing_ok=True)
+            _image_meta_path(bin_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _trim_image_entries(entries: list[tuple[float, int, Path]], cap: int) -> None:
+    """Drop the oldest entries until the rest fit *cap*."""
+    entries.sort()
+    total = sum(size for _, size, _ in entries)
+    while entries and total > cap:
+        mtime, size, victim = entries.pop(0)
+        total -= size
+        _unlink_unless_rewritten(victim, mtime)
+
+
 def _evict_image_cache() -> None:
     """Drop oldest resized images (by mtime) once they exceed the cap, era originals
     only against their own larger budget, and cover aliases no parse has re-written in _IMAGE_ALIAS_TTL."""
@@ -1190,35 +1236,13 @@ def _evict_image_cache() -> None:
             stat = bin_path.stat()
         except OSError:
             continue
-        meta_path = bin_path.with_name(bin_path.name[:-4] + ".meta.json")
-        try:
-            meta = json.loads(meta_path.read_text())
-            is_original = meta.get("original") is True
-            expired = is_original and meta["timestamp"] < expired_before
-        except (OSError, ValueError, AttributeError, KeyError, TypeError):
-            is_original = expired = False
+        is_original, expired = _image_entry_kind(bin_path, expired_before)
         if expired:  # _read_image_cache would miss it; it only holds budget
-            try:
-                if bin_path.stat().st_mtime == stat.st_mtime:  # else a worker just rewrote it
-                    bin_path.unlink(missing_ok=True)
-                    meta_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            continue
-        (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
-    for entries, cap in ((variants, _IMAGE_CACHE_MAX_BYTES), (originals, _IMAGE_ORIGINALS_MAX_BYTES)):
-        entries.sort()
-        total = sum(size for _, size, _ in entries)
-        while entries and total > cap:
-            mtime, size, victim = entries.pop(0)
-            total -= size
-            try:
-                if victim.stat().st_mtime != mtime:  # a worker just rewrote it
-                    continue
-            except OSError:
-                continue
-            for p in (victim, victim.with_name(victim.name[:-4] + ".meta.json")):
-                p.unlink(missing_ok=True)
+            _unlink_unless_rewritten(bin_path, stat.st_mtime)
+        else:
+            (originals if is_original else variants).append((stat.st_mtime, stat.st_size, bin_path))
+    _trim_image_entries(variants, _IMAGE_CACHE_MAX_BYTES)
+    _trim_image_entries(originals, _IMAGE_ORIGINALS_MAX_BYTES)
 
 
 async def _cap_original(data: bytes, content_type: str) -> tuple[bytes, str]:
@@ -1365,28 +1389,45 @@ def _spawn_detached(coro) -> asyncio.Task:
     return task
 
 
-async def _warm_era_art(artist, tracker_url: str) -> None:
-    """Download each era cover now, while its URL still works, and keep it.
-
-    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
-    the era's last good cover; an Art-tab image showing the same picture replaces it
-    (docs/decisions.md::fetcher.py::art-tab-identity).
-    """
-    # A parse carries its token URLs aside: its payload holds slot keys.
+def _warm_covers(artist) -> dict[str, str]:
+    """{era name: cover URL} worth downloading. A parse carries its token URLs aside: its
+    payload holds slot keys."""
     sources = artist._art_sources or {era.name: era.art_url or "" for era in artist.eras}
     covers: dict[str, str] = {}
     for name, url in sources.items():
-        if url.startswith("//"):
-            url = "https:" + url
+        url = "https:" + url if url.startswith("//") else url
         if url.startswith(("http://", "https://")) and _image_host_allowed(url):
             covers[name] = url
-    if not covers:
-        return
-    candidates = artist._art_candidates
-    slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+    return covers
 
-    async def download(url: str) -> tuple[bytes, str]:
-        async with slots:
+
+class _Fingerprints:
+    """Per-era memo of image fingerprints, computed off the event loop."""
+
+    def __init__(self) -> None:
+        self._fps: dict[bytes, tuple[int, int | None]] = {}
+
+    async def of(self, data: bytes) -> tuple[int, int | None]:
+        if data not in self._fps:
+            self._fps[data] = await asyncio.to_thread(_fingerprint, data)
+        return self._fps[data]
+
+    async def upgrades(self, current: bytes, other: bytes) -> bool:
+        """True when *other* is the same picture as *current* with more pixels."""
+        cur, oth = await self.of(current), await self.of(other)
+        return oth[0] > cur[0] and _same_fingerprint(cur, oth)
+
+
+class _EraArtWarm:
+    """One tracker's cover warm: download, compare against the stored copy, keep the best."""
+
+    def __init__(self, tracker_url: str, candidates: dict[str, str]):
+        self.tracker_url = tracker_url
+        self.candidates = candidates
+        self.slots = asyncio.Semaphore(_ERA_ART_WARM_CONCURRENCY)
+
+    async def _download(self, url: str) -> tuple[bytes, str]:
+        async with self.slots:
             try:
                 resp, data = await _get_image_capped(url, _image_request_headers(url))
                 return data, resp.headers.get("content-type", "")
@@ -1394,42 +1435,23 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 logger.debug("era art warm: %s failed: %s", url[:80], exc)
                 return b"", ""
 
-    async def download_full(url: str) -> tuple[bytes, str]:
+    async def _download_full(self, url: str) -> tuple[bytes, str]:
         full = _full_size_cover_url(url)
-        got = await download(full)
-        got = got if got[0] or full == url else await download(url)
+        got = await self._download(full)
+        got = got if got[0] or full == url else await self._download(url)
         # Capped before any comparison, so a re-warm of an unchanged picture is byte-equal.
         return await _cap_original(*got)
 
-    async def warm(era_name: str, url: str) -> None:
-        fps: dict[bytes, tuple[int, int | None]] = {}
-
-        async def fp(data: bytes) -> tuple[int, int | None]:
-            if data not in fps:
-                fps[data] = await asyncio.to_thread(_fingerprint, data)
-            return fps[data]
-
-        async def upgrades(current: bytes, other: bytes) -> bool:
-            """True when *other* is the same picture as *current* with more pixels."""
-            cur, oth = await fp(current), await fp(other)
-            return oth[0] > cur[0] and _same_fingerprint(cur, oth)
-
+    async def warm(self, era_name: str, url: str) -> None:
+        fps = _Fingerprints()
         # Keyed on (tracker, era), NOT the URL (see _era_art_base); the alias lets
         # /image-proxy find it under whatever token URL a client's payload holds.
-        base = _era_art_base(tracker_url, era_name)
+        base = _era_art_base(self.tracker_url, era_name)
         key = _image_cache_key(base, None)
         await asyncio.to_thread(_write_image_alias, url, base)
-        data, content_type = await download_full(url)
+        data, content_type = await self._download_full(url)
         stored = await asyncio.to_thread(_read_image_cache, key)
-        candidate = candidates.get(era_name)
-        if data and candidate:
-            better, better_type = await download_full(candidate)
-            if better and await upgrades(data, better):
-                data, content_type = better, better_type
-        if data and stored and await upgrades(data, stored[0]):
-            # A larger copy of the same picture is already stored (an Art-tab image, or
-            # a full-size download that failed this time): never downgrade it.
-            data, content_type = stored[0], stored[1]
+        data, content_type = await self._prefer_better(era_name, data, content_type, stored, fps)
         if not data:
             # Already dead (yetracker.net serves Cloudflare copies up to an hour old):
             # keep serving the era's last good cover from the slot.
@@ -1437,17 +1459,43 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
                 return
             data, content_type = stored[0], stored[1]
         elif stored and stored[0] != data:
-            # The sheet changed this era's cover: its thumbnails show the old one, and a
-            # new picture gets a new version so clients holding the old one refetch.
-            await asyncio.to_thread(_drop_image_thumbnails, base)
-            # A sharper copy is a new version too, or clients keep the thumbnail they hold.
-            if not _same_fingerprint(await fp(stored[0]), await fp(data)) or await upgrades(
-                stored[0], data
-            ):
-                await asyncio.to_thread(update_art_pointer, base, bump=True)
+            await self._replace_version(base, stored[0], data, fps)
         await asyncio.to_thread(_write_image_cache, key, data, content_type, original=True)
 
-    await asyncio.gather(*(warm(name, url) for name, url in covers.items()))
+    async def _prefer_better(self, era_name: str, data: bytes, content_type: str, stored, fps: _Fingerprints) -> tuple[bytes, str]:
+        candidate = self.candidates.get(era_name)
+        if data and candidate:
+            better, better_type = await self._download_full(candidate)
+            if better and await fps.upgrades(data, better):
+                data, content_type = better, better_type
+        if data and stored and await fps.upgrades(data, stored[0]):
+            # A larger copy of the same picture is already stored (an Art-tab image, or
+            # a full-size download that failed this time): never downgrade it.
+            data, content_type = stored[0], stored[1]
+        return data, content_type
+
+    @staticmethod
+    async def _replace_version(base: str, old: bytes, new: bytes, fps: _Fingerprints) -> None:
+        """The sheet changed this era's cover: its thumbnails show the old one, and a new
+        picture gets a new version so clients holding the old one refetch."""
+        await asyncio.to_thread(_drop_image_thumbnails, base)
+        # A sharper copy is a new version too, or clients keep the thumbnail they hold.
+        if not _same_fingerprint(await fps.of(old), await fps.of(new)) or await fps.upgrades(old, new):
+            await asyncio.to_thread(update_art_pointer, base, bump=True)
+
+
+async def _warm_era_art(artist, tracker_url: str) -> None:
+    """Download each era cover now, while its URL still works, and keep it.
+
+    See docs/decisions.md::api.py::_warm_era_art. A URL that is already dead here keeps
+    the era's last good cover; an Art-tab image showing the same picture replaces it
+    (docs/decisions.md::fetcher.py::art-tab-identity).
+    """
+    covers = _warm_covers(artist)
+    if not covers:
+        return
+    warm = _EraArtWarm(tracker_url, artist._art_candidates)
+    await asyncio.gather(*(warm.warm(name, url) for name, url in covers.items()))
 
 
 async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
@@ -1461,7 +1509,129 @@ async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:
         logger.warning("slot original not stored: %s", exc)
 
 
-@app.get("/image-proxy")
+async def _image_source(url: str) -> tuple[str, str | None]:
+    """(upstream URL, cover slot). A payload's stable cover key is served from its slot,
+    filled from the slot's latest source on a miss (docs/decisions.md::api.py::_era_art_base)."""
+    slot = None
+    if url.startswith("leaksheet:"):
+        match = _ART_SLOT_RE.fullmatch(url)
+        if match is None:
+            raise HTTPException(status_code=400, detail="Invalid cover key")
+        slot = match.group(1)
+        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
+    # Fix protocol-relative URLs
+    if url.startswith("//"):
+        url = "https:" + url
+    # A slot with no recorded source can still be served from its stored copy.
+    if slot is None or url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Invalid URL scheme")
+        if not _image_host_allowed(url):
+            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
+    return url, slot
+
+
+def _image_base_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": _CC_IMAGE,
+        # Wider than the app CORS allowlist: web clients read covers through a canvas
+        # (crossorigin="anonymous"). Reach is bounded by _image_host_allowed.
+        "Access-Control-Allow-Origin": "*",
+        # Served from the app's own origin: an image must never run script.
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+    }
+
+
+async def _google_resized(url: str, width: int, headers: dict, base_headers: dict) -> Response | None:
+    """Google-side resizing, preferred: no local decode, no disk cache (the CDN did the work)."""
+    google_url = _rewrite_google_size(url, width)
+    if google_url is None:
+        return None
+    try:
+        # Capped, like the fallback path: a plain .get() buffers the whole body.
+        resp, gdata = await _get_image_capped(google_url, headers)
+    except httpx.HTTPError as exc:
+        # Fall through to the original URL + Pillow path.
+        logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
+        return None
+    ct = resp.headers.get("content-type", "")
+    if resp.status_code == 200 and _is_raster_image(ct):
+        return Response(content=gdata, media_type=ct, headers={**base_headers, "X-Cache-Status": "origin"})
+    return None
+
+
+async def _original_image(url: str, slot: str | None, headers: dict, stored) -> tuple[bytes, str, int]:
+    """(bytes, content type, upstream status) of the original: the stored copy, else the
+    upstream, streamed with a byte cap (the allowlist admits drive.usercontent.google.com,
+    so a plain .get() of a huge user upload could OOM the worker before any check)."""
+    if stored is not None:
+        return stored[0], stored[1], 200
+    if not url:
+        raise HTTPException(status_code=404, detail="Unknown cover")
+    resp, data = await _get_image_capped(url, headers)
+    ct = resp.headers.get("content-type", "")
+    if slot is not None and resp.status_code == 200 and _is_raster_image(ct):
+        # A cold slot keeps its original, so other widths need no upstream; the
+        # capping decode runs after the response, not before it.
+        _spawn_detached(_store_slot_original(slot, data, ct))
+    return data, ct, resp.status_code
+
+
+async def _resized_image_response(
+    data: bytes, ct: str, width: int, cache_key: str, base_headers: dict
+) -> Response:
+    original_len = len(data)
+    async with _resize_slot():
+        data, ct = await asyncio.to_thread(_resize_image_bytes, data, width, ct)
+    # _resize_image_bytes returns the input untouched when it refuses to decode;
+    # only a resize, or an original that already fits, is filed under the width.
+    status = "origin"
+    if len(data) < original_len or _fits_width(data, width):
+        written_etag = await asyncio.to_thread(_write_image_cache, cache_key, data, ct)
+        if written_etag:
+            base_headers["ETag"] = f'"{written_etag}"'
+        status = "miss"
+    return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": status})
+
+
+def _image_failure(upstream_status: int, url: str) -> HTTPException:
+    # An expired Google cover token is a cover that is gone, not an outage; a 503 here
+    # would also read as one.
+    if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
+        logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
+        return HTTPException(status_code=404, detail="Cover token expired")
+    # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
+    # is 503 (Cloudflare masks a 502).
+    logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
+    return HTTPException(
+        status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
+        detail="Upstream image fetch failed",
+    )
+
+
+async def _serve_image(url: str, slot: str | None, width: int | None, cache_base: str, cache_key: str | None, base_headers: dict) -> Response:
+    headers = _image_request_headers(url)
+    # A cover _warm_era_art downloaded while its token worked. Read before any
+    # upstream request, but after the thumbnail hit, which never needs the original.
+    stored = await asyncio.to_thread(_read_image_cache, _image_cache_key(cache_base, None))
+    if width is not None and stored is None:
+        resized = await _google_resized(url, width, headers, base_headers)
+        if resized is not None:
+            return resized
+    data, ct, upstream_status = await _original_image(url, slot, headers, stored)
+    if upstream_status != 200 or not _is_raster_image(ct):
+        raise _image_failure(upstream_status, url)
+    if width is not None:
+        return await _resized_image_response(data, ct, width, cache_key, base_headers)
+    return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": "origin"})
+
+
+@app.get("/image-proxy", responses={
+    400: {"description": "Bad Request"},
+    403: {"description": "Forbidden"},
+    404: {"description": "Not Found"},
+    503: {"description": "Service Unavailable"},
+})
 async def proxy_image(
     request: Request,
     url: str = Query(..., description="Image URL to proxy"),
@@ -1473,145 +1643,31 @@ async def proxy_image(
     supports ``=sNNN`` sizing, else locally with Pillow (result disk-cached
     in CACHE_DIR as flat ``img_*`` files, cleared by /cache/clear).
     """
-    # A payload's stable cover key: served from its slot, filled from the slot's latest
-    # source on a miss (docs/decisions.md::api.py::_era_art_base).
-    slot = None
-    if url.startswith("leaksheet:"):
-        match = _ART_SLOT_RE.fullmatch(url)
-        if match is None:
-            raise HTTPException(status_code=400, detail="Invalid cover key")
-        slot = match.group(1)
-        url = (await asyncio.to_thread(read_art_pointer, slot)).get("src", "")
-
-    # Fix protocol-relative URLs
-    if url.startswith("//"):
-        url = "https:" + url
-
-    # A slot with no recorded source can still be served from its stored copy.
-    if slot is None or url:
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Invalid URL scheme")
-        if not _image_host_allowed(url):
-            raise HTTPException(status_code=403, detail="Domain not allowed for image proxy")
-
+    url, slot = await _image_source(url)
     width = _snap_image_width(w) if w else None
-    base_headers = {
-        "Cache-Control": _CC_IMAGE,
-        # Wider than the app CORS allowlist: web clients read covers through a canvas
-        # (crossorigin="anonymous"). Reach is bounded by _image_host_allowed.
-        "Access-Control-Allow-Origin": "*",
-        # Served from the app's own origin: an image must never run script.
-        "Content-Security-Policy": "sandbox; default-src 'none'",
-    }
-
+    base_headers = _image_base_headers()
     # The client's URL may be an expired cover token: resolve the (tracker, era) slot
     # it was warmed into, so original and thumbnail survive the next reparse.
     cache_base = slot or await asyncio.to_thread(_read_image_alias, url) or url
 
     # ETag scoped to disk cache — see docs/decisions.md::api.py::image-proxy-etag
     cache_key = None
-    cached = None
     if width is not None:
         cache_key = _image_cache_key(cache_base, width)
         cached = await asyncio.to_thread(_read_image_cache, cache_key)
         if cached is not None:
-            entry_etag = cached[2]
+            data, ct, entry_etag = cached
             base_headers["ETag"] = f'"{entry_etag}"'
             if _parse_if_none_match(request.headers.get("if-none-match", "")) == entry_etag:
                 return Response(status_code=304, headers=base_headers)
-
-    headers = _image_request_headers(url)
-
+            return Response(content=data, media_type=ct, headers={**base_headers, "X-Cache-Status": "hit"})
     try:
-        if cached is not None:
-            data, ct, _etag = cached
-            return Response(
-                content=data, media_type=ct,
-                headers={**base_headers, "X-Cache-Status": "hit"},
-            )
-
-        # A cover _warm_era_art downloaded while its token worked. Read before any
-        # upstream request, but after the thumbnail hit, which never needs the original.
-        stored = await asyncio.to_thread(
-            _read_image_cache, _image_cache_key(cache_base, None)
-        )
-
-        if width is not None:
-
-            # Prefer Google-side resizing — no local decode, no disk cache
-            # needed (the CDN did the work).
-            google_url = _rewrite_google_size(url, width)
-            if google_url is not None and stored is None:
-                try:
-                    # Capped, like the fallback path below: a plain .get() buffers the whole body.
-                    resp, gdata = await _get_image_capped(google_url, headers)
-                    ct = resp.headers.get("content-type", "")
-                    if resp.status_code == 200 and _is_raster_image(ct):
-                        return Response(
-                            content=gdata, media_type=ct,
-                            headers={**base_headers, "X-Cache-Status": "origin"},
-                        )
-                except httpx.HTTPError as exc:
-                    # Fall through to the original URL + Pillow path.
-                    logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
-
-        # Streamed with a byte cap: the allowlist admits drive.usercontent.google.com, so
-        # a plain .get() of a huge user upload could OOM the worker before any check.
-        if stored is not None:
-            data, ct = stored[0], stored[1]
-            upstream_status = 200
-        elif not url:
-            raise HTTPException(status_code=404, detail="Unknown cover")
-        else:
-            resp, data = await _get_image_capped(url, headers)
-            ct = resp.headers.get("content-type", "")
-            upstream_status = resp.status_code
-            if slot is not None and upstream_status == 200 and _is_raster_image(ct):
-                # A cold slot keeps its original, so other widths need no upstream; the
-                # capping decode runs after the response, not before it.
-                _spawn_detached(_store_slot_original(slot, data, ct))
-        if upstream_status == 200 and _is_raster_image(ct):
-            if width is not None:
-                original_len = len(data)
-                async with _resize_slot():
-                    data, ct = await asyncio.to_thread(
-                        _resize_image_bytes, data, width, ct
-                    )
-                # _resize_image_bytes returns the input untouched when it refuses to decode;
-                # only a resize, or an original that already fits, is filed under the width.
-                if len(data) < original_len or _fits_width(data, width):
-                    written_etag = await asyncio.to_thread(
-                        _write_image_cache, cache_key, data, ct
-                    )
-                    if written_etag:
-                        base_headers["ETag"] = f'"{written_etag}"'
-                    status = "miss"
-                else:
-                    status = "origin"
-            else:
-                status = "origin"
-            return Response(
-                content=data, media_type=ct,
-                headers={**base_headers, "X-Cache-Status": status},
-            )
-
-        # An expired Google cover token is a cover that is gone, not an outage; a 503 here
-        # would also read as one.
-        if upstream_status in (401, 403, 404, 410) and _is_sheet_image_token(url):
-            logger.info("image proxy: expired cover token (%s) for %s", upstream_status, url[:80])
-            raise HTTPException(status_code=404, detail="Cover token expired")
-        # Only "gone" and "slow down" relay. Anything else, a non-image 200 included,
-        # is 503 (Cloudflare masks a 502).
-        logger.info("image proxy: upstream %s for %s", upstream_status, url[:80])
-        raise HTTPException(
-            status_code={404: 404, 410: 404, 429: 429}.get(upstream_status, 503),
-            detail="Upstream image fetch failed",
-        )
+        return await _serve_image(url, slot, width, cache_base, cache_key, base_headers)
     except HTTPException:
         raise
     except Exception as e:
         _log_upstream_failure("Image proxy error", url, e)
-        raise HTTPException(status_code=503, detail="Image proxy error")
+        raise HTTPException(status_code=503, detail="Image proxy error") from e
 
 
 def _parse_content_length(raw: str | None) -> int | None:
@@ -1683,12 +1739,12 @@ _metadata_cache = TTLCache(ttl=3600.0, max_entries=500)
 
 
 # Known fields in pillows.su metadata — longer multi-word keys first to avoid
-# partial matches (e.g. "CODEC PROFILE" before "CODEC").
+# partial matches (e.g. _TAG_CODEC_PROFILE before "CODEC").
 _PILLOWS_FIELDS = [
     "FILE FORMAT INFO", "COMMON INFO",
-    "CODEC PROFILE", "CODEC", "CONTAINER",
-    "DURATION", "BITRATE", "SAMPLE RATE", "BITS PER SAMPLE",
-    "LOSSLESS", "NUMBER OF CHANNELS",
+    _TAG_CODEC_PROFILE, "CODEC", "CONTAINER",
+    "DURATION", "BITRATE", _TAG_SAMPLE_RATE, _TAG_BITS,
+    "LOSSLESS", _TAG_CHANNELS,
     "CREATION TIME", "MODIFICATION TIME",
     "TRACK GAIN", "ALBUM GAIN",
     "ALBUM ARTIST", "ARTIST", "ALBUM", "TITLE", "TRACK",
@@ -1737,6 +1793,23 @@ def _derive_media_kind(container: str | None, codec: str | None) -> str:
     return "unknown"
 
 
+# pillows.su field → normalized key, in output order. LOSSLESS and channels convert below.
+_PILLOWS_OUTPUT = (
+    ("CONTAINER", "container"), ("CODEC", "codec"), (_TAG_CODEC_PROFILE, "codec_profile"),
+    ("BITRATE", "bitrate"), (_TAG_SAMPLE_RATE, "sample_rate"), (_TAG_BITS, "bits_per_sample"),
+    ("LOSSLESS", "lossless"), (_TAG_CHANNELS, "channels"), ("DURATION", "duration"),
+    ("ARTIST", "artist"), ("TITLE", "title"),
+)
+
+
+def _pillows_value(key: str, val: str):
+    if key == "LOSSLESS":
+        return val.lower() == "true"
+    if key == _TAG_CHANNELS:
+        return int(val) if val.isdigit() else val
+    return val
+
+
 def _parse_pillows_metadata(text: str) -> dict:
     """Parse pillows.su metadata text format into normalized dict.
 
@@ -1748,34 +1821,12 @@ def _parse_pillows_metadata(text: str) -> dict:
     # parts is [preamble, KEY1, VAL1, KEY2, VAL2, ...]
     pairs: dict[str, str] = {}
     for i in range(1, len(parts) - 1, 2):
-        key = parts[i].strip().upper()
         val = parts[i + 1].strip()
         if val and val.lower() not in ("unknown", "null", "[object object]"):
-            pairs[key] = val
-
-    if "CONTAINER" in pairs:
-        result["container"] = pairs["CONTAINER"]
-    if "CODEC" in pairs:
-        result["codec"] = pairs["CODEC"]
-    if "CODEC PROFILE" in pairs:
-        result["codec_profile"] = pairs["CODEC PROFILE"]
-    if "BITRATE" in pairs:
-        result["bitrate"] = pairs["BITRATE"]
-    if "SAMPLE RATE" in pairs:
-        result["sample_rate"] = pairs["SAMPLE RATE"]
-    if "BITS PER SAMPLE" in pairs:
-        result["bits_per_sample"] = pairs["BITS PER SAMPLE"]
-    if "LOSSLESS" in pairs:
-        result["lossless"] = pairs["LOSSLESS"].lower() == "true"
-    if "NUMBER OF CHANNELS" in pairs:
-        v = pairs["NUMBER OF CHANNELS"]
-        result["channels"] = int(v) if v.isdigit() else v
-    if "DURATION" in pairs:
-        result["duration"] = pairs["DURATION"]
-    if "ARTIST" in pairs:
-        result["artist"] = pairs["ARTIST"]
-    if "TITLE" in pairs:
-        result["title"] = pairs["TITLE"]
+            pairs[parts[i].strip().upper()] = val
+    for key, name in _PILLOWS_OUTPUT:
+        if key in pairs:
+            result[name] = _pillows_value(key, pairs[key])
     result["media_kind"] = _derive_media_kind(result.get("container"), result.get("codec"))
     return result
 
@@ -1857,7 +1908,58 @@ async def _pillows_stream_head_fallback(file_url: str) -> dict | None:
         return None
 
 
-@app.get("/metadata")
+def _metadata_response(payload: str, status: str) -> Response:
+    return Response(
+        content=payload, media_type=_MIME_JSON,
+        headers={"Cache-Control": _CC_METADATA, "X-Cache-Status": status},
+    )
+
+
+def _metadata_request_headers(provider: str, meta_url: str) -> dict[str, str]:
+    headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
+    if provider == "pillows":
+        headers["Referer"] = "https://pillows.su/"
+    elif provider == "froste":
+        headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
+    return headers
+
+
+def _parse_metadata(provider: str, resp: httpx.Response, meta_url: str) -> dict:
+    parsers = {
+        "pillows": lambda: _parse_pillows_metadata(resp.text),
+        "froste": lambda: _parse_froste_metadata(resp.json()),
+        "imgur": lambda: _parse_imgur_metadata(resp.json()),
+        "pixeldrain": lambda: _parse_pixeldrain_metadata(resp.json()),
+    }
+    try:
+        parse = parsers.get(provider)
+        return parse() if parse else {"provider": provider}
+    # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
+    # provider's outage, not a bug of ours.
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
+        raise HTTPException(status_code=503, detail="Metadata fetch failed") from e
+
+
+async def _fetch_metadata(url: str, meta_url: str, provider: str) -> Response:
+    async with asyncio.timeout(_METADATA_DEADLINE_S):
+        client = _get_shared_client()
+        resp = await get_capped(client, meta_url, _metadata_request_headers(provider, meta_url), timeout=_METADATA_TIMEOUT)
+        if resp.status_code == 200:
+            result = _parse_metadata(provider, resp, meta_url)
+        else:
+            # pillows' metadata .txt endpoint 404s for some files — notably
+            # videos. The CDN's Content-Type on the stream URL is accurate,
+            # so fall back to a HEAD probe before giving up.
+            result = await _pillows_stream_head_fallback(url) if provider == "pillows" else None
+            if result is None:
+                raise HTTPException(status_code=503, detail=f"Provider returned {resp.status_code}")
+        payload = json.dumps(result)
+        _metadata_cache.set(meta_url, payload)
+        return _metadata_response(payload, "miss")
+
+
+@app.get("/metadata", responses={404: {"description": "Not Found"}, 503: {"description": "Service Unavailable"}})
 async def proxy_metadata(
     url: str = Query(..., description="Original file-sharing link"),
 ):
@@ -1865,85 +1967,17 @@ async def proxy_metadata(
     meta_info = resolve_metadata_url(url)
     if not meta_info:
         raise HTTPException(status_code=404, detail="No metadata API for this provider")
-
     meta_url = meta_info["url"]
-    provider = meta_info["provider"]
-
     cached = _metadata_cache.get(meta_url)
     if cached is not None:
-        return Response(
-            content=cached,
-            media_type="application/json",
-            headers={
-                "Cache-Control": _CC_METADATA,
-                "X-Cache-Status": "hit",
-            },
-        )
-
-    headers: dict[str, str] = {"User-Agent": _METADATA_USER_AGENT}
-    if provider == "pillows":
-        headers["Referer"] = "https://pillows.su/"
-    elif provider == "froste":
-        headers["Referer"] = meta_url.rsplit("/analyze-quality", 1)[0]
-
+        return _metadata_response(cached, "hit")
     try:
-        async with asyncio.timeout(_METADATA_DEADLINE_S):
-            client = _get_shared_client()
-            resp = await get_capped(client, meta_url, headers, timeout=_METADATA_TIMEOUT)
-            if resp.status_code != 200:
-                # pillows' metadata .txt endpoint 404s for some files — notably
-                # videos. The CDN's Content-Type on the stream URL is accurate,
-                # so fall back to a HEAD probe before giving up.
-                if provider == "pillows":
-                    fallback = await _pillows_stream_head_fallback(url)
-                    if fallback is not None:
-                        payload = json.dumps(fallback)
-                        _metadata_cache.set(meta_url, payload)
-                        return Response(
-                            content=payload,
-                            media_type="application/json",
-                            headers={
-                                "Cache-Control": _CC_METADATA,
-                                "X-Cache-Status": "miss",
-                            },
-                        )
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider returned {resp.status_code}",
-                )
-
-            try:
-                if provider == "pillows":
-                    result = _parse_pillows_metadata(resp.text)
-                elif provider == "froste":
-                    result = _parse_froste_metadata(resp.json())
-                elif provider == "imgur":
-                    result = _parse_imgur_metadata(resp.json())
-                elif provider == "pixeldrain":
-                    result = _parse_pixeldrain_metadata(resp.json())
-                else:
-                    result = {"provider": provider}
-            # A non-JSON or oddly shaped 200 (a challenge page, a null field) is the
-            # provider's outage, not a bug of ours.
-            except (ValueError, TypeError, KeyError, AttributeError) as e:
-                logger.warning("Metadata from %s unreadable: %r", meta_url[:80], e)
-                raise HTTPException(status_code=503, detail="Metadata fetch failed")
-
-            payload = json.dumps(result)
-            _metadata_cache.set(meta_url, payload)
-            return Response(
-                content=payload,
-                media_type="application/json",
-                headers={
-                    "Cache-Control": _CC_METADATA,
-                    "X-Cache-Status": "miss",
-                },
-            )
+        return await _fetch_metadata(url, meta_url, meta_info["provider"])
     except HTTPException:
         raise
     except Exception as e:
         _log_upstream_failure("Metadata proxy error", meta_url, e)
-        raise HTTPException(status_code=503, detail="Metadata fetch failed")
+        raise HTTPException(status_code=503, detail="Metadata fetch failed") from e
 
 
 # ---------------------------------------------------------------------------
@@ -1975,7 +2009,7 @@ async def health() -> Response:
     return Response(
         # Compact: uptime monitors match the keyword "status":"ok" in this body.
         content=json.dumps({"status": "ok", "version": VERSION}, separators=(",", ":")),
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={"Cache-Control": "no-store"},
     )
 
@@ -1998,7 +2032,7 @@ async def list_trackers():
     if cached is not None:
         return Response(
             content=cached,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "hit",
@@ -2009,7 +2043,7 @@ async def list_trackers():
         payload = await _load_trackers_once()
         return Response(
             content=payload,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_METADATA,
                 "X-Cache-Status": "miss",
@@ -2051,7 +2085,7 @@ def _trackers_fallback_response() -> Response:
     if _trackers_stale is not None:
         return Response(
             content=_trackers_stale,
-            media_type="application/json",
+            media_type=_MIME_JSON,
             headers={
                 "Cache-Control": _CC_TRACKERS_STALE,
                 "X-Cache-Status": "stale",
@@ -2059,7 +2093,7 @@ def _trackers_fallback_response() -> Response:
         )
     return Response(
         content=_SEED_PAYLOAD,
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={
             "Cache-Control": _CC_TRACKERS_STALE,
             "X-Cache-Status": "seed",
@@ -2200,12 +2234,221 @@ async def list_stream_hosts() -> Response:
     hosts = await asyncio.to_thread(host_health.snapshot)
     return Response(
         content=json.dumps({"hosts": hosts}),
-        media_type="application/json",
+        media_type=_MIME_JSON,
         headers={"Cache-Control": "public, max-age=30"},
     )
 
 
-@app.get("/stream")
+async def _stream_target(url: str) -> tuple[str, str | None]:
+    """The resolved stream URL and its provider; refuses unsupported, disallowed or down hosts."""
+    stream_url = resolve_stream_url(url)
+    if stream_url is None:
+        raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
+    if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
+        raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
+    # A provider known to be down is refused at once, until a retry is due: see
+    # docs/decisions.md::host_health.py.
+    provider = host_health.provider_of(stream_url)
+    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{outage['host']} is temporarily unavailable",
+            headers={"Retry-After": "60"},
+        )
+    return stream_url, provider
+
+
+def _client_range(range_header: str | None) -> tuple[str | None, int, bool]:
+    """(Range header to forward, its start byte, whether it is a suffix range).
+
+    Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
+    not forwarded: upstreams turn garbage Range values into hard errors."""
+    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
+    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
+        return None, 0, False  # malformed or inverted: ignored, never forwarded
+    if not range_header:
+        return None, 0, False
+    start = re.match(r"bytes=(\d{1,19})-", range_header)
+    if start:
+        return range_header, int(start.group(1)), False
+    return range_header, 0, bool(re.match(r"bytes=-\d+", range_header))
+
+
+def _upstream_status_exception(e: UpstreamStatusError) -> HTTPException:
+    """Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
+    crosses over (see UpstreamStatusError). Everything else is 503."""
+    if e.status_code in (404, 410):
+        return HTTPException(status_code=404, detail="Upstream file not found")
+    if e.status_code == 429:
+        return HTTPException(status_code=429, detail="Upstream rate limited", headers={"Retry-After": "30"})
+    if e.status_code in (401, 403):
+        # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
+        return HTTPException(status_code=424, detail="upstream_forbidden")
+    if 400 <= e.status_code < 500:
+        return HTTPException(status_code=e.status_code, detail="Upstream refused the request")
+    return HTTPException(status_code=503, detail=_UPSTREAM_ERROR)
+
+
+async def _open_stream(url: str, stream_url: str, provider: str | None, range_header: str | None) -> httpx.Response:
+    """The upstream response, with every failure mapped to the status a client acts on."""
+    try:
+        resp = await stream_audio(stream_url, range_header=range_header)
+    except GdriveInterstitialError as e:
+        # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
+        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
+        raise HTTPException(status_code=409, detail="gdrive_interstitial") from e
+    except UpstreamStatusError as e:
+        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
+        await _record_stream_outcome(provider, url, e)
+        raise _upstream_status_exception(e) from e
+    except NonMediaError as e:
+        logger.warning("Stream non-media for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=415, detail="not_media") from e
+    except ValueError as e:
+        # The message can name internal hosts and SSRF-check internals: log it, return
+        # something generic.
+        logger.warning("Stream error for %s: %s", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR) from e
+    except Exception as e:
+        _log_upstream_failure("Stream error", stream_url, e)
+        await _record_stream_outcome(provider, url, e)
+        raise HTTPException(status_code=503, detail=_UPSTREAM_ERROR) from e
+    await _record_stream_outcome(provider, url, None)
+    return resp
+
+
+async def _refusal_response(resp: httpx.Response) -> Response | None:
+    """A 403 or 416 the upstream returned (not raised), closed and relayed."""
+    # Permission-required/private gdrive files come back from stream_audio
+    # as a real 403 response object (not raised); see the 424 mapping above.
+    if resp.status_code == 403:
+        await resp.aclose()
+        raise HTTPException(status_code=424, detail="upstream_forbidden")
+    # Upstream judged the (valid) range unsatisfiable — relay it faithfully
+    # instead of collapsing it into a generic 503.
+    if resp.status_code == 416:
+        cr = resp.headers.get("content-range")
+        await resp.aclose()
+        return Response(status_code=416, headers={"Content-Range": cr or "bytes */*"})
+    return None
+
+
+class _UpstreamBody:
+    """The upstream body with its sniffed first chunk put back in front; every stream
+    it hands out closes the upstream response when done."""
+
+    def __init__(self, resp: httpx.Response):
+        self.resp = resp
+        self.iterator = resp.aiter_bytes()
+        self.prepend = b""
+
+    async def sniff(self, url: str) -> bytes:
+        """Read the first _SNIFF_BYTES for MIME sniffing — see docs/decisions.md::api.py::mime-sniffing"""
+        try:
+            while len(self.prepend) < _SNIFF_BYTES:
+                self.prepend += await self.iterator.__anext__()
+        except StopAsyncIteration:
+            pass
+        except Exception as exc:
+            # A read error while sniffing would leak `resp`'s pooled connection: close it and
+            # surface a 503.
+            await self.resp.aclose()
+            logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
+            raise HTTPException(status_code=503, detail="Upstream read error") from exc
+        return self.prepend
+
+    async def _chunks(self):
+        if self.prepend:
+            yield self.prepend
+        async for chunk in self.iterator:
+            yield chunk
+
+    async def _closing(self, iterator):
+        try:
+            async for chunk in iterator:
+                yield chunk
+        finally:
+            await self.resp.aclose()
+
+    def stream(self):
+        return self._closing(self._chunks())
+
+    def slice(self, start: int, end: int):
+        # The slice operates on the FULL byte-offset stream (prepend chunk first).
+        return self._closing(_slice_byte_stream(self._chunks(), start, end))
+
+
+def _passthrough_206_headers(resp: httpx.Response, ct: str | None, disposition: str | None) -> dict[str, str]:
+    headers: dict[str, str] = {"Accept-Ranges": "bytes"}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    if ct:
+        headers["Content-Type"] = ct
+    cr = resp.headers.get("content-range")
+    if cr:
+        headers["Content-Range"] = cr
+        # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
+        # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
+        cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
+        if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
+            headers["Content-Length"] = str(int(cr_match.group(2)) - int(cr_match.group(1)) + 1)
+    if "Content-Length" not in headers:
+        cl = _parse_content_length(resp.headers.get("content-length"))
+        if cl is not None:
+            headers["Content-Length"] = str(cl)
+    return headers
+
+
+def _full_body_headers(ct: str | None, disposition: str | None, total_size: int | None) -> dict[str, str]:
+    headers = {"Accept-Ranges": "bytes"}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    if ct:
+        headers["Content-Type"] = ct
+    if total_size is not None:
+        headers["Content-Length"] = str(total_size)
+    return headers
+
+
+async def _synthesized_range_response(
+    body: _UpstreamBody, range_header: str, total_size: int | None, ct: str | None, disposition: str | None,
+) -> Response:
+    """Client requested Range but upstream ignored it — plan the response."""
+    plan = _plan_synthesized_range(range_header, total_size)
+    if plan.kind == "unsatisfiable":
+        await body.resp.aclose()
+        cr_total = str(total_size) if total_size is not None else "*"
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{cr_total}"})
+    headers = {"Accept-Ranges": "bytes", "Content-Type": ct or _MIME_OCTET}
+    if plan.kind == "full":
+        # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
+        if disposition:
+            headers["Content-Disposition"] = disposition
+        return StreamingResponse(body.stream(), status_code=200, headers=headers, media_type=ct or _MIME_OCTET)
+    # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233 when the complete
+    # length is unknown). A 'partial' plan is only made when total_size is known.
+    headers["Content-Length"] = str(plan.end - plan.start + 1)
+    headers["Content-Range"] = f"bytes {plan.start}-{plan.end}/{total_size}"
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    return StreamingResponse(
+        body.slice(plan.start, plan.end), status_code=206, headers=headers, media_type=ct or _MIME_OCTET,
+    )
+
+
+@app.get("/stream", responses={
+    400: {"description": "Bad Request"},
+    403: {"description": "Forbidden"},
+    404: {"description": "Not Found"},
+    409: {"description": "Conflict"},
+    415: {"description": "Unsupported Media Type"},
+    424: {"description": "Failed Dependency"},
+    429: {"description": "Too Many Requests"},
+    503: {"description": "Service Unavailable"},
+})
 async def proxy_stream(
     request: Request,
     url: str = Query(..., description="Original file-sharing link"),
@@ -2217,245 +2460,38 @@ async def proxy_stream(
     When upstream doesn't support Range, synthesises partial responses locally.
     Pass ?download=true to get a Content-Disposition: attachment header.
     """
-    stream_url = resolve_stream_url(url)
-    if stream_url is None:
-        raise HTTPException(status_code=400, detail="URL is not from a supported streaming host")
+    stream_url, provider = await _stream_target(url)
+    # The range shape is parsed early: the MIME sniffing decision below needs it.
+    range_header, range_start, is_suffix_range = _client_range(request.headers.get("range"))
+    resp = await _open_stream(url, stream_url, provider, range_header)
+    refusal = await _refusal_response(resp)
+    if refusal is not None:
+        return refusal
 
-    if not _is_allowed_domain(stream_url, ALLOWED_STREAM_HOSTS):
-        raise HTTPException(status_code=403, detail="Domain not allowed for audio streaming")
-
-    # A provider known to be down is refused at once, until a retry is due: see
-    # docs/decisions.md::host_health.py.
-    provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
-        raise HTTPException(
-            status_code=503,
-            detail=f"{outage['host']} is temporarily unavailable",
-            headers={"Retry-After": "60"},
-        )
-
-    # Malformed or multi-part Range headers are ignored per RFC 7233 (serve 200 full),
-    # not forwarded: upstreams turn garbage Range values into hard errors.
-    range_header = request.headers.get("range")
-    spec = _RANGE_SPEC.match(range_header.strip()) if range_header else None
-    if range_header and (not spec or (spec[1] and spec[2] and int(spec[2]) < int(spec[1]))):
-        range_header = None  # malformed or inverted: ignored, never forwarded
-
-    # Parse range shape early — needed for the MIME sniffing decision below.
-    _range_start = 0
-    _is_suffix_range = False
-    if range_header:
-        _rs_m = re.match(r"bytes=(\d{1,19})-", range_header)
-        if _rs_m:
-            _range_start = int(_rs_m.group(1))
-        else:
-            _is_suffix_range = bool(re.match(r"bytes=-\d+", range_header))
-
-    try:
-        resp = await stream_audio(stream_url, range_header=range_header)
-    except GdriveInterstitialError as e:
-        # Never proxy HTML as audio — see docs/decisions.md::api.py::gdrive-interstitial
-        logger.warning("gdrive interstitial for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, None)  # drive answered; the file needs a confirm
-        raise HTTPException(status_code=409, detail="gdrive_interstitial")
-    except UpstreamStatusError as e:
-        # Relay upstream's 4xx so a client can tell "gone" from "throttled"; only the code
-        # crosses over (see UpstreamStatusError). Everything else is 503.
-        logger.warning("Stream upstream %s for %s", e.status_code, stream_url)
-        await _record_stream_outcome(provider, url, e)
-        if e.status_code in (404, 410):
-            raise HTTPException(status_code=404, detail="Upstream file not found")
-        if e.status_code == 429:
-            raise HTTPException(
-                status_code=429,
-                detail="Upstream rate limited",
-                headers={"Retry-After": "30"},
-            )
-        if e.status_code in (401, 403):
-            # Not 403: that is our own "Domain not allowed", and a client must tell them apart.
-            raise HTTPException(status_code=424, detail="upstream_forbidden")
-        if 400 <= e.status_code < 500:
-            raise HTTPException(status_code=e.status_code, detail="Upstream refused the request")
-        raise HTTPException(status_code=503, detail="Upstream error")
-    except NonMediaError as e:
-        logger.warning("Stream non-media for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=415, detail="not_media")
-    except ValueError as e:
-        # The message can name internal hosts and SSRF-check internals: log it, return
-        # something generic.
-        logger.warning("Stream error for %s: %s", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail="Upstream error")
-    except Exception as e:
-        _log_upstream_failure("Stream error", stream_url, e)
-        await _record_stream_outcome(provider, url, e)
-        raise HTTPException(status_code=503, detail="Upstream error")
-    await _record_stream_outcome(provider, url, None)
-
-    # Permission-required/private gdrive files come back from stream_audio
-    # as a real 403 response object (not raised); see the 424 mapping above.
-    if resp.status_code == 403:
-        await resp.aclose()
-        raise HTTPException(status_code=424, detail="upstream_forbidden")
-
-    # Upstream judged the (valid) range unsatisfiable — relay it faithfully
-    # instead of collapsing it into a generic 503.
-    if resp.status_code == 416:
-        cr = resp.headers.get("content-range")
-        await resp.aclose()
-        return Response(
-            status_code=416,
-            headers={"Content-Range": cr} if cr else {"Content-Range": "bytes */*"},
-        )
-
-    raw_ct = resp.headers.get("content-type")
-    raw_cd = resp.headers.get("content-disposition")
-    ct = _fix_audio_mime(raw_ct, url=str(resp.url), content_disposition=raw_cd)
+    ct = _fix_audio_mime(
+        resp.headers.get("content-type"), url=str(resp.url), content_disposition=resp.headers.get("content-disposition")
+    )
     total_size = _parse_content_length(resp.headers.get("content-length"))
-
-    # MIME sniffing on the first bytes — see docs/decisions.md::api.py::mime-sniffing
-    _stream_iter = resp.aiter_bytes()
-    _prepend_chunk: bytes = b""
-
+    body = _UpstreamBody(resp)
     # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
     # A 206 to a suffix range ('bytes=-N') starts at the file TAIL: never sniff it.
-    _body_starts_at_zero = resp.status_code == 200 or (
-        _range_start == 0 and not _is_suffix_range
-    )
-    if _body_starts_at_zero:
-        try:
-            while len(_prepend_chunk) < _SNIFF_BYTES:
-                _prepend_chunk += await _stream_iter.__anext__()
-        except StopAsyncIteration:
-            pass
-        except Exception as exc:
-            # A read error while sniffing would leak `resp`'s pooled connection: close it and
-            # surface a 503.
-            await resp.aclose()
-            logger.warning("stream first-chunk read failed for %s: %s", url[:80], exc)
-            raise HTTPException(status_code=503, detail="Upstream read error") from exc
-        sniffed = _sniff_audio_format(_prepend_chunk[:_SNIFF_BYTES])
+    if resp.status_code == 200 or (range_start == 0 and not is_suffix_range):
+        head = await body.sniff(url)
+        sniffed = _sniff_audio_format(head[:_SNIFF_BYTES])
         if sniffed:
             ct = sniffed
-        elif _is_non_media(_prepend_chunk):
+        elif _is_non_media(head):
             await resp.aclose()
             raise HTTPException(status_code=415, detail="Not an audio or video file")
 
     # When ?download=true, add Content-Disposition with correct extension
-    if download:
-        ext = _MIME_TO_EXT.get(ct, ".mp3")
-        _disposition = f'attachment; filename="track{ext}"'
-    else:
-        _disposition = None
-
-    async def _iter_upstream():
-        """Prepend the sniffed first chunk, then relay the upstream body."""
-        if _prepend_chunk:
-            yield _prepend_chunk
-        async for chunk in _stream_iter:
-            yield chunk
-
-    async def _closing(iterator):
-        """Relay *iterator*, guaranteeing the upstream response is closed."""
-        try:
-            async for chunk in iterator:
-                yield chunk
-        finally:
-            await resp.aclose()
-
-    # ---------- upstream DID handle Range → pass through as-is ----------
+    disposition = f'attachment; filename="track{_MIME_TO_EXT.get(ct, ".mp3")}"' if download else None
+    # Upstream DID handle Range: pass through as-is.
     if resp.status_code == 206:
-        headers: dict[str, str] = {"Accept-Ranges": "bytes"}
-        if _disposition:
-            headers["Content-Disposition"] = _disposition
-        if ct:
-            headers["Content-Type"] = ct
-        cr = resp.headers.get("content-range")
-        if cr:
-            headers["Content-Range"] = cr
-            # Derive Content-Length from Content-Range: some upstreams (pillows.su) send the
-            # total size even on a 206, which breaks iOS Safari. Bounded digits, as _RANGE_SPEC.
-            cr_match = re.match(r"bytes (\d{1,18})-(\d{1,18})/", cr)
-            if cr_match and int(cr_match.group(2)) >= int(cr_match.group(1)):
-                headers["Content-Length"] = str(
-                    int(cr_match.group(2)) - int(cr_match.group(1)) + 1
-                )
-        if "Content-Length" not in headers:
-            cl = _parse_content_length(resp.headers.get("content-length"))
-            if cl is not None:
-                headers["Content-Length"] = str(cl)
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=206,
-            headers=headers,
-            media_type=ct or "application/octet-stream",
-        )
-
-    # ---------- upstream returned 200 (no Range support) ----------------
-    # If the client didn't ask for Range either, just pass the full body.
+        headers = _passthrough_206_headers(resp, ct, disposition)
+        return StreamingResponse(body.stream(), status_code=206, headers=headers, media_type=ct or _MIME_OCTET)
+    # Upstream returned 200 (no Range support) and the client didn't ask for Range either.
     if not range_header:
-        headers = {"Accept-Ranges": "bytes"}
-        if _disposition:
-            headers["Content-Disposition"] = _disposition
-        if ct:
-            headers["Content-Type"] = ct
-        if total_size is not None:
-            headers["Content-Length"] = str(total_size)
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=200,
-            headers=headers,
-            media_type=ct or "application/octet-stream",
-        )
-
-    # Client requested Range but upstream ignored it — plan the response.
-    plan = _plan_synthesized_range(range_header, total_size)
-
-    if plan.kind == "unsatisfiable":
-        await resp.aclose()
-        cr_total = str(total_size) if total_size is not None else "*"
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{cr_total}"},
-        )
-
-    if plan.kind == "full":
-        # 200-not-206 fallback — see docs/decisions.md::api.py::range-fallback
-        _unknown_headers: dict[str, str] = {
-            "Accept-Ranges": "bytes",
-            "Content-Type": ct or "application/octet-stream",
-        }
-        if _disposition:
-            _unknown_headers["Content-Disposition"] = _disposition
-
-        return StreamingResponse(
-            _closing(_iter_upstream()),
-            status_code=200,
-            headers=_unknown_headers,
-            media_type=ct or "application/octet-stream",
-        )
-
-    # Synthesise a 206 with Content-Range ('*' total is valid per RFC 7233
-    # when the complete length is unknown).
-    range_start, range_end = plan.start, plan.end
-    content_length = range_end - range_start + 1
-
-    # The slice operates on the FULL byte-offset stream (prepend chunk first).
-    # A 'partial' plan is only made when total_size is known.
-    partial_headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Type": ct or "application/octet-stream",
-        "Content-Length": str(content_length),
-        "Content-Range": f"bytes {range_start}-{range_end}/{total_size}",
-    }
-    if _disposition:
-        partial_headers["Content-Disposition"] = _disposition
-    return StreamingResponse(
-        _closing(_slice_byte_stream(_iter_upstream(), range_start, range_end)),
-        status_code=206,
-        headers=partial_headers,
-        media_type=ct or "application/octet-stream",
-    )
+        headers = _full_body_headers(ct, disposition, total_size)
+        return StreamingResponse(body.stream(), status_code=200, headers=headers, media_type=ct or _MIME_OCTET)
+    return await _synthesized_range_response(body, range_header, total_size, ct, disposition)
