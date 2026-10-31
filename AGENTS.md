@@ -25,6 +25,14 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
   Also build the `My Mac` destination and the `LeakSheetTV` scheme: they compile their own views.
 - Deploy: `ops/deploy.sh` on the server. Never `docker compose up` in the checkout.
 
+## Repositories
+
+- GitLab (`origin`, gitlab.bevk.me, tailnet only) is the primary: branches and merge requests
+  live there, and `.gitlab-ci.yml` runs the offline gate, scanners and SonarQube on its runner.
+- GitHub (`github` remote) is the public mirror, pushed by GitLab's push mirror. GitHub Actions
+  (`.github/workflows`) runs the Apple targets, which need a macOS runner GitLab does not have.
+  Never merge on GitHub: the next mirror push would overwrite it.
+
 ## Layout
 
 - `src/api.py` — HTTP layer: `/sheet` (ETag, stale-while-revalidate, NDJSON progress),

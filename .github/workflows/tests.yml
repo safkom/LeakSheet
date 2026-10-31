@@ -1,8 +1,8 @@
 name: tests
 
+# GitHub is a push mirror of GitLab: every mirrored branch gets the Apple targets, as MRs have no PR here.
 on:
   push:
-    branches: [main]
   pull_request:
 
 concurrency:
