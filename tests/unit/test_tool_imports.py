@@ -5,7 +5,7 @@ import pathlib
 
 import pytest
 
-TOOLS = sorted(p.stem for p in pathlib.Path("scripts/tools").glob("*.py"))
+TOOLS = sorted(p.stem for p in (pathlib.Path(__file__).parents[2] / "scripts/tools").glob("*.py"))
 
 
 @pytest.mark.parametrize("name", TOOLS)
