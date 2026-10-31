@@ -13,6 +13,7 @@ extension AudioEngine {
             player = AVPlayer()
             player?.allowsExternalPlayback = false
             player?.automaticallyWaitsToMinimizeStalling = true
+            player?.volume = volume
         }
         player?.replaceCurrentItem(with: item)
         player?.actionAtItemEnd = .none
