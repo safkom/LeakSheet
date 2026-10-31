@@ -1064,12 +1064,12 @@ _SAMPLE_TITLE_PATTERN = re.compile(r'"([^"\n]+)"')
 # "Samples" + artist (<=60) + 's + a title (<=80), with room to spare.
 _POSSESSIVE_MAX_CHARS = 300
 _SAMPLE_POSSESSIVE_PATTERN = re.compile(
-    r"Samples\s+([^\"'\n]+?)'s\s+'(.+?)'(?=[\s,.;)!?]|$)",
+    r"Samples\s+([^\"'\n]+?)'s\s+'(.+?)'(?=[\s,.;)!?]|$)",  # NOSONAR(S8786)
     re.IGNORECASE,
 )
 
 # Artist capture after "by", up to the next sample/separator.
-_SAMPLE_ARTIST_PATTERN = re.compile(r"^\s*by\s+(.+)$", re.IGNORECASE | re.DOTALL)
+_SAMPLE_ARTIST_PATTERN = re.compile(r"^\s*by\s+(.+)$", re.IGNORECASE | re.DOTALL)  # NOSONAR(S8786)
 
 _SMART_QUOTES = {
     "\u201c": '"', "\u201d": '"',   # “ ”
@@ -1202,12 +1202,12 @@ def _clean_sample_artist(artist: str) -> str | None:
 
 # Each starts with (?<!\s) so a long whitespace run is scanned once, from its
 # first character, instead of once from every character in it.
-_ARTIST_TRAILING_AND_RE = re.compile(r"(?<!\s)\s+and$", re.IGNORECASE)
+_ARTIST_TRAILING_AND_RE = re.compile(r"(?<!\s)\s+and$", re.IGNORECASE)  # NOSONAR(S8786)
 # DOTALL: a `.+$` that stops at a newline rescans the line from every start.
 _ARTIST_NOISE_RES = [
-    re.compile(r"(?<!\s)\s+and\s+.+$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?<!\s)\s+and\s+.+$", re.IGNORECASE | re.DOTALL),  # NOSONAR(S8786)
     re.compile(r"(?<!\s)\s+vs\.?\s*.*$", re.IGNORECASE | re.DOTALL),
-    re.compile(r"(?<!\s)\s+feat\.?(\s+.+)?$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?<!\s)\s+feat\.?(\s+.+)?$", re.IGNORECASE | re.DOTALL),  # NOSONAR(S8786)
     # Prose continuation ('CyHi from his 2014 mixtape …') is commentary.
     re.compile(r"(?<!\s)\s+from\s+(?:his|her|their|the)\b.*$", re.IGNORECASE | re.DOTALL),
 ]

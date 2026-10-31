@@ -566,9 +566,9 @@ _TRACKER_QUALIFIER_RE = re.compile(
     r"|\[[^\]]*\]|\([^)]*\))\s*$",
     re.IGNORECASE,
 )
-_TRAILING_BRACKET_RE = re.compile(r"(?<!\s)\s*[\(\[][^()\[\]]*[\)\]]\s*$")
+_TRAILING_BRACKET_RE = re.compile(r"(?<!\s)\s*[\(\[][^()\[\]]*[\)\]]\s*$")  # NOSONAR(S8786)
 _TAB_QUALIFIER_RE = re.compile(r"[\(\[][^()\[\]]*[\)\]]\s*$")
-_SLASH_SPACING_RE = re.compile(r"(?<!\s)\s*/\s*")
+_SLASH_SPACING_RE = re.compile(r"(?<!\s)\s*/\s*")  # NOSONAR(S8786)
 
 
 def _infer_artist_name(title: str) -> str:

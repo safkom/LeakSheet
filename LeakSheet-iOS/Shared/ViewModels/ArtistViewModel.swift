@@ -44,7 +44,7 @@ final class ArtistViewModel {
     var searchQuery: String = "" {
         didSet { scheduleDebounce() }
     }
-    internal(set) var debouncedQuery: String = ""
+    var debouncedQuery: String = ""
     var debounceTask: Task<Void, Never>?
 
     // MARK: - Filters
@@ -61,27 +61,27 @@ final class ArtistViewModel {
     var isBadgeFilterActive: Bool { bestOf || worstOf || grails }
     /// Selected content-tab id (TabSection.id): a strict switch, not a peer filter. Only
     /// that tab's entries show, one chip per parsed tab.
-    internal(set) var selectedTabKey: String? = nil
+    var selectedTabKey: String? = nil
     var expandedEra: String? = nil
     /// Expanded multi-version songs, keyed "eraName::baseName". Lives here
     /// (not view @State) because lazy containers discard offscreen state.
-    internal(set) var expandedSongs: Set<String> = []
+    var expandedSongs: Set<String> = []
 
     // MARK: - Pipeline output
 
-    internal(set) var content: FilteredContent
+    var content: FilteredContent
     /// True while a filter change is being computed off-main. Chips flip
     /// instantly; the list keeps the previous content until the new one lands.
-    internal(set) var isFiltering = false
+    var isFiltering = false
     var filterTask: Task<Void, Never>?
 
     /// Flattened rows for the eras branch — rebuilt on content/expansion
     /// changes so `body` only iterates.
-    internal(set) var eraRows: [EraRow] = []
+    var eraRows: [EraRow] = []
 
     /// The appearance the cached `eraDisplay` values were derived for; switching
     /// re-derives them (the dominant colours are appearance-independent).
-    internal(set) var colorScheme: ColorScheme = .dark
+    var colorScheme: ColorScheme = .dark
 
     /// songKey → eras containing that song (only keys spanning >1 era) —
     /// built once in Precomputed.
@@ -103,19 +103,19 @@ final class ArtistViewModel {
     let allEraPlaybackContexts: [EraSongContext]
     /// Era rollover order for the current filters: a chip that hides songs hides them from
     /// auto-advance too. Views re-register whenever `eraPlaybackRevision` changes.
-    internal(set) var eraPlaybackContexts: [EraSongContext]
-    internal(set) var eraPlaybackRevision = 0
+    var eraPlaybackContexts: [EraSongContext]
+    var eraPlaybackRevision = 0
     var eraPlaybackIsFiltered = false
 
     // MARK: - Recents windowing
 
-    internal(set) var visibleRecents: [RecentResult] = []
+    var visibleRecents: [RecentResult] = []
     static let recentsPageSize = 60
 
     // MARK: - Era display colors
 
     /// Derived display colors per era, computed once per extracted color.
-    internal(set) var eraDisplay: [String: EraDisplayColors] = [:]
+    var eraDisplay: [String: EraDisplayColors] = [:]
     /// Colors derived since the last flush, so a burst of extractions lands as one
     /// `eraDisplay` write (per-card writes trip the glassEffect multiple-updates fault).
     var pendingEraColors: [String: EraDisplayColors] = [:]

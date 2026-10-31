@@ -53,7 +53,7 @@ final class AudioEngine {
     var streamUrl = ""
     /// Format info read from the live AVPlayerItem once playback is ready —
     /// the fallback source for File Info when a provider has no metadata API.
-    internal(set) var streamFormat: StreamFormatInfo?
+    var streamFormat: StreamFormatInfo?
 
     /// Playback-ordering decisions (queue, era rollover, ad-hoc lists) live
     /// in a pure value type so they are unit-testable; the engine executes
@@ -80,11 +80,11 @@ final class AudioEngine {
     /// True when the current item carries a video track (e.g. an .mp4
     /// behind an opaque pillows id). Set from the asset's track list in
     /// `captureStreamFormat` — the one signal that works for every host.
-    internal(set) var hasVideo = false
+    var hasVideo = false
     /// width/height of the current video track (transform-corrected), so
     /// the Now Playing surface can size itself to the real picture instead
     /// of letterboxing inside the square artwork frame.
-    internal(set) var videoAspectRatio: Double?
+    var videoAspectRatio: Double?
     var timeObserver: Any?
     var observations: [NSKeyValueObservation] = []
     var endOfTrackObserver: (any NSObjectProtocol)?

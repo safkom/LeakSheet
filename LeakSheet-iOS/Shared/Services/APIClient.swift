@@ -140,7 +140,7 @@ actor APIClient {
         // Chunked delegate download — see DECISIONS.md::APIClient.swift::chunked-download
         let downloadTask = session.dataTask(with: request)
         let (data, response, stream) = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: ChunkedDownloadDelegate.Outcome) in
+            try await withCheckedThrowingContinuation { (continuation: DownloadOutcome) in
                 downloadTask.delegate = ChunkedDownloadDelegate(
                     onProgress: onProgress, continuation: continuation
                 )
@@ -176,6 +176,8 @@ actor APIClient {
         return ParseResult(artist: artist, rawData: data, etag: etag)
     }
 
+    typealias DownloadOutcome = CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
+
     /// How a streamed (NDJSON) cold parse ended.
     nonisolated struct StreamOutcome: Sendable {
         var etag: String?
@@ -191,9 +193,7 @@ actor APIClient {
     /// `.server` phases until the artist header; everything after is the payload.
     private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let onProgress: (@Sendable (LoadPhase) -> Void)?
-        typealias Outcome = CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
-
-        private let continuation: Outcome
+        private let continuation: DownloadOutcome
         private var data = Data()
         private var response: URLResponse?
         private var expected: Int64?
@@ -204,7 +204,7 @@ actor APIClient {
 
         init(
             onProgress: (@Sendable (LoadPhase) -> Void)?,
-            continuation: Outcome
+            continuation: DownloadOutcome
         ) {
             self.onProgress = onProgress
             self.continuation = continuation
