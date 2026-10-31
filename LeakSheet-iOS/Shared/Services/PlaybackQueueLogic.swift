@@ -157,7 +157,14 @@ nonisolated struct PlaybackQueueLogic {
     // MARK: - Queue
 
     /// `playNext` puts the item at the front, ahead of anything already queued.
-    mutating func addToQueue(_ version: SongVersion, artistName: String, eraName: String, artUrl: String, artistSlug: String = "", playNext: Bool = false) {
+    mutating func addToQueue(
+        _ version: SongVersion,
+        artistName: String,
+        eraName: String,
+        artUrl: String,
+        artistSlug: String = "",
+        playNext: Bool = false
+    ) {
         guard queue.count < 200 else { return }
         queueIdCounter += 1
         let item = QueueItem(

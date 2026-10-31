@@ -82,12 +82,17 @@ struct ModelsDecodingTests {
     // MARK: - 2026-08: fields the API already sent but nothing decoded
 
     @Test func `song version decodes preview_date`() throws {
-        let song = try decodeSong(#"{"base_name": "Snippet Only", "versions": [{"name": "Snippet Only", "preview_date": "Mar 20, 2023"}]}"#)
+        let song = try decodeSong(
+            #"{"base_name": "Snippet Only", "versions": [{"name": "Snippet Only", "preview_date": "Mar 20, 2023"}]}"#
+        )
         #expect(song.versions.first?.previewDate == "Mar 20, 2023")
     }
 
     @Test func `tracker stats decode the link totals`() throws {
-        let artist = try decodeArtist(#"{"name": "A", "slug": "a", "eras": [], "tracker_stats": {"total_links": 1203, "missing_links": 42, "not_available_links": 7}}"#)
+        let artist = try decodeArtist(
+            #"{"name": "A", "slug": "a", "eras": [], "# +
+            #""tracker_stats": {"total_links": 1203, "missing_links": 42, "not_available_links": 7}}"#
+        )
         #expect(artist.trackerStats?.totalLinks == 1203)
         #expect(artist.trackerStats?.notAvailableLinks == 7)
     }

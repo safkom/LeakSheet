@@ -109,7 +109,8 @@ extension Color {
     static let badgeBeatOnly = tone(hue: 275 / 360, saturation: 0.50, brightness: 0.96)
     static let badgeStem = tone(hue: 270 / 360, saturation: 0.50, brightness: 0.96)
     static let badgeUnavailable = tone(hue: 0 / 360, saturation: 0.0, brightness: 0.88, lightBrightness: 0.40)
-    static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)      // tentative amber
+    // tentative amber
+    static let badgeRumored = tone(hue: 40 / 360, saturation: 0.45, brightness: 0.86, lightBrightness: 0.44)
     static let badgeConflicting = tone(hue: 15 / 360, saturation: 0.55, brightness: 0.88)  // disputed red-amber
 
     // Content-tab entry type ("Production", "Music Video"). Deliberately neutral:
@@ -182,24 +183,28 @@ func qualityVariant(_ quality: String?) -> BadgeVariant {
     return .na
 }
 
-func availabilityVariant(_ avail: String?) -> BadgeVariant {
-    guard let a = avail?.lowercased() else { return .na }
-    if a.contains("og file") || a.contains("original file") { return .ogfile }
-    if a == "full" { return .full }
-    if a.contains("tagged") { return .tagged }
-    if a.contains("stem") { return .stem }
-    if a.contains("beat") { return .beatonly }
-    if a.contains("partial") || a.contains("cut") { return .partial }
-    if a.contains("snippet") { return .snippet }
-    if a.contains("rumo") { return .rumored }  // rumored + British "rumoured"
-    if a.contains("conflicting") { return .conflicting }
-    if a.contains("confirmed") { return .confirmed }
-    if a.contains("unavailable") || a.contains(/\blost\b/) { return .unavailable }
+/// Availability wording → variant, first match wins.
+private nonisolated let availabilityRules: [(matches: @Sendable (String) -> Bool, variant: BadgeVariant)] = [
+    ({ $0.contains("og file") || $0.contains("original file") }, .ogfile),
+    ({ $0 == "full" }, .full),
+    ({ $0.contains("tagged") }, .tagged),
+    ({ $0.contains("stem") }, .stem),
+    ({ $0.contains("beat") }, .beatonly),
+    ({ $0.contains("partial") || $0.contains("cut") }, .partial),
+    ({ $0.contains("snippet") }, .snippet),
+    ({ $0.contains("rumo") }, .rumored),  // rumored + British "rumoured"
+    ({ $0.contains("conflicting") }, .conflicting),
+    ({ $0.contains("confirmed") }, .confirmed),
+    ({ $0.contains("unavailable") || $0.contains(/\blost\b/) }, .unavailable),
     // Compound values ("Full Lossless") land here; without this they'd paint neutral
     // grey beside a blue "Full". Last, so it never outranks a more specific match.
-    if a.contains("full") { return .full }
-    if a.contains("lossless") { return .lossless }
-    return .na
+    ({ $0.contains("full") }, .full),
+    ({ $0.contains("lossless") }, .lossless),
+]
+
+func availabilityVariant(_ avail: String?) -> BadgeVariant {
+    guard let a = avail?.lowercased() else { return .na }
+    return availabilityRules.first { $0.matches(a) }?.variant ?? .na
 }
 
 // MARK: - Color Utilities
@@ -314,8 +319,10 @@ extension Color {
     // MARK: - Filter-specific accent colors
 
     static let filterBestOf = tone(hue: 45 / 360, saturation: 0.85, brightness: 0.90, lightBrightness: 0.46)
-    static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)   // trophy gold (grails + wanted)
-    static let filterWorstOf = tone(hue: 20 / 360, saturation: 0.45, brightness: 0.80, lightBrightness: 0.40)  // rust, not Best Of's gold
+    // trophy gold (grails + wanted)
+    static let filterGrail = tone(hue: 43 / 360, saturation: 0.92, brightness: 0.96, lightBrightness: 0.44)
+    // rust, not Best Of's gold
+    static let filterWorstOf = tone(hue: 20 / 360, saturation: 0.45, brightness: 0.80, lightBrightness: 0.40)
     static let filterRecent = tone(hue: 140 / 360, saturation: 0.70, brightness: 0.80, lightBrightness: 0.42)
     static let filterNoSnippets = tone(hue: 280 / 360, saturation: 0.60, brightness: 0.85)
     static let filterMisc = tone(hue: 200 / 360, saturation: 0.65, brightness: 0.85)
@@ -323,91 +330,6 @@ extension Color {
 
 // MARK: - Shared formatters
 
-/// Tiny cross-cutting formatters with one definition each.
-nonisolated enum Format {
-    /// Seconds → "m:ss" (e.g. 139.8 → "2:19").
-    static func time(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
-    }
-
-    /// Host without a leading "www." (only leading), for compact link labels.
-    static func shortHost(_ urlString: String) -> String {
-        guard let url = URL(string: urlString), let host = url.host else { return urlString }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
-
-    /// Up to two uppercased initials from a display name.
-    static func initials(_ name: String) -> String {
-        name.split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-            .joined()
-    }
-}
-
 // MARK: - String Slugify
 
-extension String {
-    /// Derive a URL-safe slug from a name (lowercase, spaces → hyphens, strip non-alphanumeric).
-    var slugified: String {
-        lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
-    }
-}
-
 // MARK: - Credit Tag Colors
-
-enum CreditType: String {
-    case featuring, producers, collaboration, refs, director, engineer, creditedArtists
-
-    // `static let`, not literals in the switch: `Color.tone` builds a dynamic platform
-    // colour, and `CreditTagsView` reads `color` twice per tag per body evaluation.
-    private static let featuringColor = Color.tone(hue: 200 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.46)
-    private static let producersColor = Color.tone(hue: 280 / 360, saturation: 0.50, brightness: 0.87, lightBrightness: 0.46)
-    private static let collaborationColor = Color.tone(hue: 160 / 360, saturation: 0.50, brightness: 0.72, lightBrightness: 0.38)
-    private static let refsColor = Color.tone(hue: 30 / 360, saturation: 0.60, brightness: 0.78, lightBrightness: 0.44)
-    private static let directorColor = Color.tone(hue: 250 / 360, saturation: 0.45, brightness: 0.90, lightBrightness: 0.48)
-    private static let creditedArtistsColor = Color.tone(hue: 340 / 360, saturation: 0.50, brightness: 0.84, lightBrightness: 0.46)
-
-    var color: Color {
-        switch self {
-        case .featuring: Self.featuringColor
-        case .producers: Self.producersColor
-        case .collaboration: Self.collaborationColor
-        case .refs: Self.refsColor
-        case .director: Self.directorColor
-        // Shares the director tone: both are technical credits with no page of their own.
-        case .engineer: Self.directorColor
-        case .creditedArtists: Self.creditedArtistsColor
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .featuring: "feat."
-        case .producers: "prod."
-        case .collaboration: "with"
-        case .refs: "ref."
-        case .director: "dir."
-        case .engineer: "eng."
-        case .creditedArtists: "artist"
-        }
-    }
-
-    /// Spoken form for VoiceOver — the abbreviated visual label reads poorly.
-    var accessibilityLabel: String {
-        switch self {
-        case .featuring: "Featuring"
-        case .producers: "Produced by"
-        case .collaboration: "With"
-        case .refs: "Reference by"
-        case .director: "Directed by"
-        case .engineer: "Engineered by"
-        case .creditedArtists: "Artist"
-        }
-    }
-}

@@ -32,18 +32,37 @@ struct SongContextMenu: View {
                 if let onPlay {
                     onPlay(version)
                 } else {
-                    player.playTrack(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+                    player.playTrack(
+                        version,
+                        artistName: artistName,
+                        eraName: eraName,
+                        artUrl: eraArt ?? "",
+                        artistSlug: artistSlug
+                    )
                 }
             } label: {
                 Label("Play", systemImage: "play.fill")
             }
             Button {
-                player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug, playNext: true)
+                player.addToQueue(
+                    version,
+                    artistName: artistName,
+                    eraName: eraName,
+                    artUrl: eraArt ?? "",
+                    artistSlug: artistSlug,
+                    playNext: true
+                )
             } label: {
                 Label("Play Next", systemImage: "text.insert")
             }
             Button {
-                player.addToQueue(version, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+                player.addToQueue(
+                    version,
+                    artistName: artistName,
+                    eraName: eraName,
+                    artUrl: eraArt ?? "",
+                    artistSlug: artistSlug
+                )
             } label: {
                 Label("Add to Queue", systemImage: "text.append")
             }
@@ -52,7 +71,13 @@ struct SongContextMenu: View {
                 Menu {
                     ForEach(Array(sources.enumerated()), id: \.element) { index, link in
                         Button {
-                            player.playTrack(version.playing(link), artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+                            player.playTrack(
+                                version.playing(link),
+                                artistName: artistName,
+                                eraName: eraName,
+                                artUrl: eraArt ?? "",
+                                artistSlug: artistSlug
+                            )
                         } label: {
                             // The checkmark marks the source Play uses.
                             Label("Source \(index + 1) · \(Format.shortHost(link))",

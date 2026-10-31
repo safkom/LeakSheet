@@ -62,9 +62,11 @@ struct TrackerURLNormalizerTests {
 struct RecentTrackerDedupTests {
     @Test func `one undecodable entry keeps the rest`() {
         let json = #"""
-        [{"name":"A","slug":"a","sourceUrl":"https://a.example/","totalSongs":1,"availableCount":0,"snippetCount":0,"confirmedCount":0},
+        [{"name":"A","slug":"a","sourceUrl":"https://a.example/","totalSongs":1,
+          "availableCount":0,"snippetCount":0,"confirmedCount":0},
          {"name":"broken"},
-         {"name":"C","slug":"c","sourceUrl":"https://c.example/","totalSongs":2,"availableCount":0,"snippetCount":0,"confirmedCount":0}]
+          {"name":"C","slug":"c","sourceUrl":"https://c.example/","totalSongs":2,
+           "availableCount":0,"snippetCount":0,"confirmedCount":0}]
         """#
         let decoded = RecentTrackersManager.decodeEntries(Data(json.utf8))
         #expect(decoded.map(\.slug) == ["a", "c"])
@@ -88,7 +90,10 @@ struct RecentTrackerDedupTests {
         let variant = "https://docs.google.com/spreadsheets/d/AAA/edit?usp=sharing"
 
         #expect(RecentTrackersManager.savedName(forSourceUrl: variant, in: [saved]) == "Billie Eilish [Alt #3]")
-        #expect(RecentTrackersManager.savedName(forSourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview", in: [saved]) == nil)
+        #expect(RecentTrackersManager.savedName(
+            forSourceUrl: "https://docs.google.com/spreadsheets/d/BBB/htmlview",
+            in: [saved]
+        ) == nil)
         #expect(RecentTrackersManager.savedName(forSourceUrl: "  ", in: [saved]) == nil)
     }
 

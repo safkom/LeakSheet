@@ -1,4 +1,6 @@
 #!/usr/bin/env swift
+// swiftlint:disable file_length
+// A script run as `xcrun swift Tools/make-icons.swift` must be one file.
 //
 // Regenerates every app icon for iOS, macOS and tvOS from one geometric source.
 // Run from the repo's LeakSheet-iOS directory:
@@ -553,7 +555,12 @@ writeJSON([
         ["filename": "App Icon.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "400x240"],
         ["filename": "App Icon - App Store.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "1280x768"],
         ["filename": "Top Shelf Image.imageset", "idiom": "tv", "role": "top-shelf-image", "size": "1920x720"],
-        ["filename": "Top Shelf Image Wide.imageset", "idiom": "tv", "role": "top-shelf-image-wide", "size": "2320x720"],
+        [
+            "filename": "Top Shelf Image Wide.imageset",
+            "idiom": "tv",
+            "role": "top-shelf-image-wide",
+            "size": "2320x720"
+        ],
     ],
     "info": info,
 ], to: "\(brand)/Contents.json")

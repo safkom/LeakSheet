@@ -8,7 +8,8 @@ nonisolated enum CreditNames {
 
     static func split(_ raw: String?) -> [String] {
         guard let raw, !raw.isEmpty else { return [] }
-        // shortcut: a comma inside a name ("Tyler, The Creator") splits it; upgrade with a known-names list if users hit it.
+        // shortcut: a comma inside a name ("Tyler, The Creator") splits it; upgrade with a
+        // known-names list if users hit it.
         var parts = raw.split(whereSeparator: { ",&+/;".contains($0) }).map(String.init)
         for word in [" x ", " and "] {
             parts = parts.flatMap { splitOn($0, separator: word) }

@@ -46,7 +46,11 @@ struct FlowLayout: Layout {
         return cache
     }
 
-    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (offsets: [CGPoint], sizes: [CGSize], size: CGSize) {
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (
+        offsets: [CGPoint],
+        sizes: [CGSize],
+        size: CGSize
+    ) {
         let maxWidth = proposal.width ?? .infinity
         var offsets: [CGPoint] = []
         var sizes: [CGSize] = []

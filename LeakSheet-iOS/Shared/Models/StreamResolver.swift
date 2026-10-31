@@ -79,58 +79,81 @@ enum StreamResolver {
         if hasWWW { host = String(host.dropFirst(4)) }
 
         // Empty segments stay: the backend's patterns need the literal /f/{id} shape.
-        let path = comps.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+        let path = comps.percentEncodedPath.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).dropFirst().map(String.init)
+        return hostResolvers[host]?(LinkParts(path: path, comps: comps, hasWWW: hasWWW, rawLink: rawLink))
+    }
 
-        switch host {
-        case "pillows.su", "pillowcase.su", "plwcse.top":
-            let id = path.count >= 2 && path[0].lowercased() == "f" ? idPrefix(path[1]) : ""
-            guard !id.isEmpty else { return nil }
-            return .pillows(id: String(id))
+    /// The pieces of a link a host's resolver reads.
+    private nonisolated struct LinkParts: Sendable {
+        let path: [String]
+        let comps: URLComponents
+        let hasWWW: Bool
+        let rawLink: String
 
-        case "imgur.gg", "temp.imgur.gg":
-            let id = path.count >= 2 && path[0].lowercased() == "f" ? idPrefix(path[1]) : ""
-            guard !id.isEmpty else { return nil }
-            return .imgur(id: String(id))
-
-        case "music.froste.lol":
-            // The backend's froste pattern has no www. form, unlike every other host.
-            // Like the backend, the hash is a whole alphanumeric run: `0123abcdzz` is no hex prefix.
-            guard !hasWWW, path.count >= 2, path[0].lowercased() == "song" else { return nil }
-            let hash = idPrefix(path[1], allowsSeparators: false)
-            guard isHex(String(hash)) else { return nil }
-            return .froste(hash: String(hash))
-
-        case "krakenfiles.com":
-            // The view page itself is the target; the backend scrapes its CDN URL.
-            guard path.count >= 3, path[0].lowercased() == "view",
-                  isID(path[1]), path[2].lowercased().hasPrefix("file.html") else { return nil }
-            return .kraken
-
-        case "pixeldrain.com":
-            // /u/ is a single file; /l/ is a list and stays unresolved.
-            let id = path.count >= 2 && path[0].lowercased() == "u" ? idPrefix(path[1], allowsSeparators: false) : ""
-            guard !id.isEmpty else { return nil }
-            return .pixeldrain(id: String(id))
-
-        case "drive.google.com":
-            // The three forms the backend resolves (streaming._extract_gdrive_id):
-            // /file/d/{id}, /open?id=, /uc?id=. Folders carry no file id.
-            if path.count >= 3, path[0].lowercased() == "file", path[1].lowercased() == "d",
-               !idPrefix(path[2]).isEmpty {
-                return .gdrive
-            }
-            // Python refuses a link with a tab/CR/LF in it (urlsplit would drop it), and its
-            // parse_qs drops blank values, so the first NON-empty id is the one.
-            if !hasLineBreakOrTab(rawLink), ["/open", "/uc"].contains(comps.percentEncodedPath.lowercased()),
-               let id = comps.queryItems?.first(where: { $0.name == "id" && $0.value?.isEmpty == false })?.value,
-               isID(id) {
-                return .gdrive
-            }
-            return nil
-
-        default:
-            return nil
+        /// The id after a `/{segment}/` prefix, or "" when the path has another shape.
+        func id(after segment: String, allowsSeparators: Bool = true) -> String {
+            guard path.count >= 2, path[0].lowercased() == segment else { return "" }
+            return String(StreamResolver.idPrefix(path[1], allowsSeparators: allowsSeparators))
         }
+    }
+
+    private nonisolated static let hostResolvers: [String: @Sendable (LinkParts) -> Target?] = {
+        let pillows: @Sendable (LinkParts) -> Target? = { link in
+            let id = link.id(after: "f")
+            return id.isEmpty ? nil : .pillows(id: id)
+        }
+        let imgur: @Sendable (LinkParts) -> Target? = { link in
+            let id = link.id(after: "f")
+            return id.isEmpty ? nil : .imgur(id: id)
+        }
+        return [
+            "pillows.su": pillows, "pillowcase.su": pillows, "plwcse.top": pillows,
+            "imgur.gg": imgur, "temp.imgur.gg": imgur,
+            "music.froste.lol": froste,
+            "krakenfiles.com": kraken,
+            "pixeldrain.com": { link in
+                // /u/ is a single file; /l/ is a list and stays unresolved.
+                let id = link.id(after: "u", allowsSeparators: false)
+                return id.isEmpty ? nil : .pixeldrain(id: id)
+            },
+            "drive.google.com": gdrive,
+        ]
+    }()
+
+    /// The backend's froste pattern has no www. form, unlike every other host. Like the
+    /// backend, the hash is a whole alphanumeric run: `0123abcdzz` is no hex prefix.
+    private nonisolated static func froste(_ link: LinkParts) -> Target? {
+        guard !link.hasWWW else { return nil }
+        let hash = link.id(after: "song", allowsSeparators: false)
+        return isHex(hash) ? .froste(hash: hash) : nil
+    }
+
+    /// The view page itself is the target; the backend scrapes its CDN URL.
+    private nonisolated static func kraken(_ link: LinkParts) -> Target? {
+        let path = link.path
+        guard path.count >= 3, path[0].lowercased() == "view",
+              isID(path[1]), path[2].lowercased().hasPrefix("file.html") else { return nil }
+        return .kraken
+    }
+
+    /// The three forms the backend resolves (streaming._extract_gdrive_id): /file/d/{id},
+    /// /open?id=, /uc?id=. Folders carry no file id.
+    private nonisolated static func gdrive(_ link: LinkParts) -> Target? {
+        let path = link.path
+        if path.count >= 3, path[0].lowercased() == "file", path[1].lowercased() == "d",
+           !idPrefix(path[2]).isEmpty {
+            return .gdrive
+        }
+        // Python refuses a link with a tab/CR/LF in it (urlsplit would drop it), and its
+        // parse_qs drops blank values, so the first NON-empty id is the one.
+        guard !hasLineBreakOrTab(link.rawLink),
+              ["/open", "/uc"].contains(link.comps.percentEncodedPath.lowercased()),
+              let id = link.comps.queryItems?.first(where: { $0.name == "id" && $0.value?.isEmpty == false })?.value
+        else { return nil }
+        return isID(id) ? .gdrive : nil
     }
 
     /// The backend's provider key for a link, as `GET /hosts` names it.

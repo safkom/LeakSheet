@@ -118,7 +118,9 @@ struct MiscLinkClassifierTests {
         ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
     ])
     func `YouTube thumbnail is derived from the video id in any URL form`(url: String, id: String) {
-        #expect(MiscLinkClassifier.thumbnailURL(for: url, kind: .embed) == "https://img.youtube.com/vi/\(id)/hqdefault.jpg")
+        #expect(
+            MiscLinkClassifier.thumbnailURL(for: url, kind: .embed) == "https://img.youtube.com/vi/\(id)/hqdefault.jpg"
+        )
     }
 
     @Test func `embed links with no derivable id have no thumbnail`() {

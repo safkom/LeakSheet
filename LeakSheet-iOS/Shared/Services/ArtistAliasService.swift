@@ -1,20 +1,23 @@
 import Foundation
 
-nonisolated enum MusicBrainzParsing {
-    private struct Response: Decodable {
-        struct Artist: Decodable {
-            struct Alias: Decodable { let name: String }
-            let name: String
-            let score: Int?
-            let aliases: [Alias]?
-        }
-        let artists: [Artist]
-    }
+// The MusicBrainz search response, as far as alias matching reads it.
+private nonisolated struct MusicBrainzAlias: Decodable { let name: String }
 
+private nonisolated struct MusicBrainzArtist: Decodable {
+    let name: String
+    let score: Int?
+    let aliases: [MusicBrainzAlias]?
+}
+
+private nonisolated struct MusicBrainzResponse: Decodable {
+    let artists: [MusicBrainzArtist]
+}
+
+nonisolated enum MusicBrainzParsing {
     /// Other names of the artist `name` refers to ("Ye" for "Kanye West"), empty when MusicBrainz
     /// has no confident match. A hit needs a high score and `name` as its name or an alias.
     static func aliases(from data: Data, for name: String) -> [String] {
-        guard let response = try? JSONDecoder().decode(Response.self, from: data) else { return [] }
+        guard let response = try? JSONDecoder().decode(MusicBrainzResponse.self, from: data) else { return [] }
         let want = LibraryMatcher.normalize(name)
         for artist in response.artists where (artist.score ?? 0) >= 95 {
             let names = [artist.name] + (artist.aliases ?? []).map(\.name)

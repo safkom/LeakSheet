@@ -8,7 +8,8 @@ private func version(_ name: String, tag: String? = nil, link: String? = nil) ->
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
-        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] }, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] },
+        dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
@@ -83,7 +84,11 @@ struct FavouritesGroupingTests {
 /// and the heart silently went cold.
 @Suite("Favourite version-tag migration")
 struct FavouriteTagMigrationTests {
-    private func stored(_ song: String, era: String = "Era", artist: String = "ye") -> FavouritesManager.FavouriteEntry {
+    private func stored(
+        _ song: String,
+        era: String = "Era",
+        artist: String = "ye"
+    ) -> FavouritesManager.FavouriteEntry {
         entry(artist: artist, era: era, song: song, addedAt: Date(timeIntervalSince1970: 0))
     }
 
@@ -359,7 +364,11 @@ struct FavouriteSourceUrlTests {
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent]) == recent.sourceUrl)
         #expect(FavouritesManager.resolvedSourceUrl("", artistSlug: "ye", recents: [recent]) == recent.sourceUrl)
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "joji", recents: [recent]) == nil)
-        #expect(FavouritesManager.resolvedSourceUrl("https://x.example/", artistSlug: "ye", recents: [recent]) == "https://x.example/")
+        #expect(FavouritesManager.resolvedSourceUrl(
+            "https://x.example/",
+            artistSlug: "ye",
+            recents: [recent]
+        ) == "https://x.example/")
     }
 
     @Test func `two trackers sharing a slug leave the url unset`() {

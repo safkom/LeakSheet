@@ -81,7 +81,11 @@ final class LoadActivity {
                 Task { @MainActor in LoadActivity.shared.attach(box.task) }
             }
         }
-        let request = BGContinuedProcessingTaskRequest(identifier: Self.identifier, title: title, subtitle: latest.subtitle)
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: Self.identifier,
+            title: title,
+            subtitle: latest.subtitle
+        )
         // A stale queued load is worse than none: fail instead of waiting for room.
         request.strategy = .fail
         do {

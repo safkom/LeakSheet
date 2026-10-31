@@ -121,6 +121,44 @@ struct BrowseArtistsView: View {
             .onAppear { loadingUrl = "" }
     }
 
+    private func rowText(_ artist: DiscoveryArtist) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(artist.name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if artist.best == true {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsStar)
+                        .accessibilityLabel("Best of")
+                }
+            }
+            HStack(spacing: 6) {
+                if let credit = artist.credit, !credit.isEmpty {
+                    // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
+                    Text("by \(credit)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if artist.upToDate == false {
+                    Text("outdated")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsWarning)
+                }
+                // Link health is tri-state upstream: only a definite false is worth a warning,
+                // shown BEFORE the user opens a tracker whose files are gone.
+                if artist.workingLinks == false {
+                    Text("dead links")
+                        .font(.caption2)
+                        .foregroundStyle(Color.lsError)
+                }
+            }
+        }
+    }
+
     private func row(_ artist: DiscoveryArtist) -> some View {
         Button {
             loadingUrl = artist.url
@@ -135,41 +173,7 @@ struct BrowseArtistsView: View {
                     .background(Color.lsCard)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(artist.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if artist.best == true {
-                            Image(systemName: "star.fill")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsStar)
-                                .accessibilityLabel("Best of")
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        if let credit = artist.credit, !credit.isEmpty {
-                            // .secondary (not .tertiary) clears WCAG AA on OLED black for this text.
-                            Text("by \(credit)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        if artist.upToDate == false {
-                            Text("outdated")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsWarning)
-                        }
-                        // Link health is tri-state upstream: only a definite false is worth a warning,
-                        // shown BEFORE the user opens a tracker whose files are gone.
-                        if artist.workingLinks == false {
-                            Text("dead links")
-                                .font(.caption2)
-                                .foregroundStyle(Color.lsError)
-                        }
-                    }
-                }
+                rowText(artist)
 
                 Spacer()
 

@@ -73,6 +73,27 @@ actor EraColorExtractor {
 
     /// Returns the dominant RGB color from the image using pixel quantization.
     /// Matches what ColorThief's getPalette()[0] returns for the same image.
+    /// Every second pixel each way, without transparent and pure-white ones.
+    /// Sample filtering — see DECISIONS.md::EraColorExtractor.swift::sample-filtering
+    private nonisolated static func samplePixels(
+        _ pixels: UnsafeMutablePointer<UInt8>,
+        width: Int,
+        height: Int
+    ) -> [Pixel] {
+        var samples: [Pixel] = []
+        samples.reserveCapacity((width / 2 + 1) * (height / 2 + 1))
+        for y in Swift.stride(from: 0, to: height, by: 2) {
+            for x in Swift.stride(from: 0, to: width, by: 2) {
+                let o = (y * width + x) * 4
+                let r = Int(pixels[o]), g = Int(pixels[o + 1]), b = Int(pixels[o + 2])
+                let transparent = Int(pixels[o + 3]) < 125
+                let white = r > 250 && g > 250 && b > 250
+                if !transparent && !white { samples.append(Pixel(r: r, g: g, b: b)) }
+            }
+        }
+        return samples
+    }
+
     nonisolated static func dominantRGB(from cgImage: CGImage) -> RGB? {
         // Downsample to at most 100×100 for speed
         let sampleW = min(cgImage.width, 100)
@@ -91,26 +112,7 @@ actor EraColorExtractor {
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: sampleW, height: sampleH))
         guard let data = context.data else { return nil }
         let pixels = data.bindMemory(to: UInt8.self, capacity: sampleW * sampleH * 4)
-
-        // Sample filtering — see DECISIONS.md::EraColorExtractor.swift::sample-filtering
-        var samples: [Pixel] = []
-        samples.reserveCapacity((sampleW / 2 + 1) * (sampleH / 2 + 1))
-
-        let pixelStride = 2
-        for y in Swift.stride(from: 0, to: sampleH, by: pixelStride) {
-            for x in Swift.stride(from: 0, to: sampleW, by: pixelStride) {
-                let o = (y * sampleW + x) * 4
-                let r = Int(pixels[o])
-                let g = Int(pixels[o + 1])
-                let b = Int(pixels[o + 2])
-                let a = Int(pixels[o + 3])
-
-                if a < 125 { continue }                       // transparent
-                if r > 250 && g > 250 && b > 250 { continue } // pure white
-                samples.append(Pixel(r: r, g: g, b: b))
-            }
-        }
-
+        let samples = samplePixels(pixels, width: sampleW, height: sampleH)
         guard !samples.isEmpty else { return nil }
 
         // Median cut to 3 levels → up to 8 boxes; the most populated box's

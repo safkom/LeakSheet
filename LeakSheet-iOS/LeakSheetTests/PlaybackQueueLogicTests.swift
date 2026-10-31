@@ -8,9 +8,11 @@ import Testing
 private func version(_ name: String, tag: String? = nil, notes: String? = nil) -> SongVersion {
     SongVersion(
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
-        collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: notes, ogFilename: nil,
+        collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: notes,
+        ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
-        availableLength: nil, quality: nil, streaming: nil, links: nil, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, streaming: nil, links: nil,
+        dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
@@ -265,7 +267,11 @@ struct CrossArtistEraListTests {
 
     @Test func `a refresh that inserts an earlier era still rolls into the next one`() {
         var logic = PlaybackQueueLogic()
-        let before = [era("A1", artist: "Alpha", ["a1"]), era("A2", artist: "Alpha", ["a2"]), era("A3", artist: "Alpha", ["a3"])]
+        let before = [
+            era("A1", artist: "Alpha", ["a1"]),
+            era("A2", artist: "Alpha", ["a2"]),
+            era("A3", artist: "Alpha", ["a3"])
+        ]
         logic.setArtistEras(before)
         _ = logic.playInEra(before[0].versions[0], context: before[0])
         #expect(playedName(logic.next()) == "a2")  // rolled over: the era position is now recorded
@@ -323,7 +329,12 @@ struct CrossArtistEraListTests {
 
     @Test func `upcoming lists the rest of the playing era`() {
         var logic = PlaybackQueueLogic()
-        let ctx = EraSongContext(eraName: "Yeezus", artistName: "Ye", artUrl: "", versions: [version("A"), version("B"), version("C")])
+        let ctx = EraSongContext(
+            eraName: "Yeezus",
+            artistName: "Ye",
+            artUrl: "",
+            versions: [version("A"), version("B"), version("C")]
+        )
         _ = logic.playInEra(ctx.versions[0], context: ctx)
         #expect(logic.upcoming(limit: 10).map(\.version.name) == ["B", "C"])
         #expect(logic.upcoming(limit: 10).allSatisfy { $0.eraName == "Yeezus" })

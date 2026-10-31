@@ -45,7 +45,11 @@ struct AliasMatchingTests {
 
     @Test func aliasMatchesTracker() {
         let library = [LibraryArtist(name: "Kanye West", plays: 40)]
-        let hits = LibraryMatcher.recommend(library: library, trackers: [tracker("Ye")], aliases: ["Kanye West": ["Ye"]])
+        let hits = LibraryMatcher.recommend(
+            library: library,
+            trackers: [tracker("Ye")],
+            aliases: ["Kanye West": ["Ye"]]
+        )
         #expect(hits.map(\.name) == ["Ye"])
     }
 

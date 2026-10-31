@@ -33,7 +33,12 @@ struct CreditProfileTests {
                                 quality: "High Quality", link: "https://pillows.su/f/b2"),
                     ]],
                     ["base_name": "Song Three", "versions": [
-                        version("Song Three", producers: "Other", featuring: "Test Artist, Guest", quality: "Recording"),
+                        version(
+                            "Song Three",
+                            producers: "Other",
+                            featuring: "Test Artist, Guest",
+                            quality: "Recording"
+                        ),
                     ]],
                 ]]]],
                 ["name": "Second", "sections": [["name": "Main", "songs": [

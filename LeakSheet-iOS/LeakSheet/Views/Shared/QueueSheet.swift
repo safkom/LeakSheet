@@ -101,6 +101,38 @@ struct QueueSheet: View {
             .background(Color.lsBackground)
     }
 
+    private func queueRowText(_ item: QueueItem) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 5) {
+            if let b = item.version.badge, let badge = Badge(rawValue: b) {
+                Text(badge.emoji)
+                    .font(.caption)
+                    .accessibilityLabel(badge.label)
+            }
+            Text(item.version.name)
+                .font(.subheadline)
+                .lineLimit(1)
+        }
+        Text(item.eraName.isEmpty ? item.artistName : "\(item.artistName) · \(item.eraName)")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        // Quality/availability badges
+        BadgeRowView(version: item.version)
+        // Credits (feat. only for compactness)
+        if let feat = item.version.featuring, !feat.isEmpty {
+            HStack(spacing: 3) {
+                Text("feat.")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                Text(feat)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+    }
+
     private func row(_ item: QueueItem) -> some View {
         HStack(spacing: 10) {
             // Era art thumbnail
@@ -115,35 +147,7 @@ struct QueueSheet: View {
                     .frame(width: 40, height: 40)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    if let b = item.version.badge, let badge = Badge(rawValue: b) {
-                        Text(badge.emoji)
-                            .font(.caption)
-                            .accessibilityLabel(badge.label)
-                    }
-                    Text(item.version.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                }
-                Text(item.eraName.isEmpty ? item.artistName : "\(item.artistName) · \(item.eraName)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                // Quality/availability badges
-                BadgeRowView(version: item.version)
-                // Credits (feat. only for compactness)
-                if let feat = item.version.featuring, !feat.isEmpty {
-                    HStack(spacing: 3) {
-                        Text("feat.")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.tertiary)
-                        Text(feat)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            queueRowText(item)
 
             Spacer()
 

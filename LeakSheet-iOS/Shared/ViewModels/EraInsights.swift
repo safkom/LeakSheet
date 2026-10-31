@@ -61,7 +61,10 @@ struct EraInsights {
             quality: qualityOrder.compactMap { v in tiers[v].map { (v, $0) } },
             topProducers: top(producers, limit: topLimit),
             topFeatures: top(features, limit: topLimit),
-            sections: (era.sections ?? []).filter { !$0.name.isEmpty }.map { Count(label: $0.name, value: $0.songs.count) },
+            sections: (era.sections ?? []).filter { !$0.name.isEmpty }.map { Count(
+                label: $0.name,
+                value: $0.songs.count
+            ) },
             miscEntries: misc,
             previousEra: index.flatMap { $0 > 0 ? eraNames[$0 - 1] : nil },
             nextEra: index.flatMap { $0 + 1 < eraNames.count ? eraNames[$0 + 1] : nil }
@@ -71,7 +74,8 @@ struct EraInsights {
     /// Earliest and latest of the dates that parse; unparseable strings are skipped.
     static func dateRange(_ raws: [String]) -> DateRange? {
         let parsed = raws.map { ($0, ArtistViewModel.parseLeakDate($0)) }.filter { $0.1 > 0 }
-        guard let first = parsed.min(by: { $0.1 < $1.1 }), let last = parsed.max(by: { $0.1 < $1.1 }) else { return nil }
+        guard let first = parsed.min(by: { $0.1 < $1.1 }),
+              let last = parsed.max(by: { $0.1 < $1.1 }) else { return nil }
         return DateRange(first: first.0, last: last.0)
     }
 

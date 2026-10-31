@@ -25,7 +25,13 @@ struct EraInsightsTests {
                 version("One [V2]", leak: "not a date", quality: "Lossless", producers: "maker", featuring: "Guest"),
             ]],
             ["base_name": "Two", "versions": [
-                version("Two", leak: "03/04/2019", file: "05/06/2018", quality: "CD Quality", producers: "Maker & Third"),
+                version(
+                    "Two",
+                    leak: "03/04/2019",
+                    file: "05/06/2018",
+                    quality: "CD Quality",
+                    producers: "Maker & Third"
+                ),
             ]],
         ]
         let json: [String: Any] = [
@@ -62,7 +68,10 @@ struct EraInsightsTests {
         }
         let json: [String: Any] = [
             "name": "Sheet Name", "slug": "s",
-            "eras": [["name": "Only", "sections": [["name": "", "songs": [["base_name": "Song", "versions": versions]]]]]],
+            "eras": [[
+                "name": "Only",
+                "sections": [["name": "", "songs": [["base_name": "Song", "versions": versions]]]]
+            ]],
         ]
         let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
         // "Star" leads "Guest" 4 to 2, so it is the sheet's artist; the sheet name is dropped too.
@@ -85,7 +94,10 @@ struct EraInsightsTests {
             ]]]]]]],
         ]
         let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
-        #expect(EraInsights.compute(era: a.eras[0], artist: a).fileDates == .init(first: "01/01/2018", last: "02/03/2019"))
+        #expect(EraInsights.compute(era: a.eras[0], artist: a).fileDates == .init(
+            first: "01/01/2018",
+            last: "02/03/2019"
+        ))
     }
 
     @Test func `misc entries match the era by key, and neighbours stop at the ends`() throws {

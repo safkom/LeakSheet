@@ -9,10 +9,18 @@ struct BadgeLegendSheet: View {
         NavigationStack {
             List {
                 SwiftUI.Section("Quality") {
-                    ForEach(BadgeLogic.qualityGlossary) { swatchRow($0.name, $0.detail, color: qualityVariant($0.name).color) }
+                    ForEach(BadgeLogic.qualityGlossary) { swatchRow(
+                        $0.name,
+                        $0.detail,
+                        color: qualityVariant($0.name).color
+                    ) }
                 }
                 SwiftUI.Section("Availability") {
-                    ForEach(BadgeLogic.availabilityGlossary) { swatchRow($0.name, $0.detail, color: availabilityVariant($0.name).color) }
+                    ForEach(BadgeLogic.availabilityGlossary) { swatchRow(
+                        $0.name,
+                        $0.detail,
+                        color: availabilityVariant($0.name).color
+                    ) }
                 }
                 SwiftUI.Section("Badges") {
                     ForEach(BadgeLogic.badgeGlossary) { term in

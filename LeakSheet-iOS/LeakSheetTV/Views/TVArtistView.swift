@@ -185,7 +185,13 @@ struct TVArtistView: View {
                 // collide in ForEach (the same reason EraRow.id carries an ordinal).
                 LazyVStack(spacing: 10) {
                     ForEach(Array(songs.enumerated()), id: \.offset) { _, song in
-                        TVSongRowView(song: song, eraName: era.name, eraArt: era.artUrl, artist: vm.artist, eraSongs: songs)
+                        TVSongRowView(
+                            song: song,
+                            eraName: era.name,
+                            eraArt: era.artUrl,
+                            artist: vm.artist,
+                            eraSongs: songs
+                        )
                     }
                 }
             }

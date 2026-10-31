@@ -132,7 +132,10 @@ final class ListeningHistory {
             plays = snapshot.plays
             recent = Array(snapshot.recent.prefix(Self.recentLimit))
         } catch {
-            Self.log.error("Failed to decode listening history (\(data.count, privacy: .public) bytes): \(error.localizedDescription, privacy: .public)")
+            Self.log.error("""
+                Failed to decode listening history (\(data.count, privacy: .public) bytes): \
+                \(error.localizedDescription, privacy: .public)
+                """)
             // Keep the unreadable file, as favourites do: the next save would replace it.
             let aside = fileURL.deletingPathExtension().appendingPathExtension("unreadable.json")
             try? FileManager.default.removeItem(at: aside)

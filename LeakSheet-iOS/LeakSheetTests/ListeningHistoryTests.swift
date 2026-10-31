@@ -8,7 +8,8 @@ private func version(_ name: String, tag: String? = nil, link: String? = nil) ->
         name: name, versionTag: tag, badge: nil, featuring: nil, producers: nil,
         collaboration: nil, refs: nil, director: nil, creditedArtists: nil, altTitles: nil, notes: nil, ogFilename: nil,
         ogFilenames: nil, samples: nil, trackLength: nil, fileDate: nil, leakDate: nil, previewDate: nil,
-        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] }, dateOfRecording: nil, type: nil, sources: nil, rating: nil
+        availableLength: nil, quality: nil, streaming: nil, links: link.map { [$0] },
+        dateOfRecording: nil, type: nil, sources: nil, rating: nil
     )
 }
 
@@ -90,7 +91,9 @@ struct ListeningHistoryTests {
     @Test func `recent keeps the newest 30 distinct versions`() {
         let (history, _) = makeHistory()
         for index in 0..<35 {
-            history.record(version("Song \(index)"), artistSlug: "artist", artistName: "Artist", eraName: "Era", eraArt: nil)
+            history.record(
+                version("Song \(index)"), artistSlug: "artist", artistName: "Artist", eraName: "Era", eraArt: nil
+            )
         }
 
         #expect(history.recent.count == 30)
@@ -144,9 +147,30 @@ struct ListeningSummaryTests {
         ])
         let early = Date(timeIntervalSince1970: 1_000)
         let late = Date(timeIntervalSince1970: 3_000)
-        history.record(version("Alpha", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: early)
-        history.record(version("Alpha", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: early)
-        history.record(version("Beta", tag: "V1"), artistSlug: "artist", artistName: "Artist", eraName: "Era A", eraArt: nil, at: late)
+        history.record(
+            version("Alpha", tag: "V1"),
+            artistSlug: "artist",
+            artistName: "Artist",
+            eraName: "Era A",
+            eraArt: nil,
+            at: early
+        )
+        history.record(
+            version("Alpha", tag: "V1"),
+            artistSlug: "artist",
+            artistName: "Artist",
+            eraName: "Era A",
+            eraArt: nil,
+            at: early
+        )
+        history.record(
+            version("Beta", tag: "V1"),
+            artistSlug: "artist",
+            artistName: "Artist",
+            eraName: "Era A",
+            eraArt: nil,
+            at: late
+        )
 
         let listening = ListeningHistory.eraListening(eraA, entries: history.entries(for: "artist"))
 
@@ -173,7 +197,13 @@ struct ListeningSummaryTests {
             era("Middle", songs: [song("M", [version("M")])]),
             era("Unplayed", songs: [song("U", [version("U")])]),
         ]
-        for _ in 0..<3 { history.record(version("L"), artistSlug: "artist", artistName: "Artist", eraName: "Loud", eraArt: nil) }
+        for _ in 0..<3 { history.record(
+            version("L"),
+            artistSlug: "artist",
+            artistName: "Artist",
+            eraName: "Loud",
+            eraArt: nil
+        ) }
         history.record(version("M"), artistSlug: "artist", artistName: "Artist", eraName: "Middle", eraArt: nil)
         history.record(version("M"), artistSlug: "artist", artistName: "Artist", eraName: "Middle", eraArt: nil)
         history.record(version("Q"), artistSlug: "artist", artistName: "Artist", eraName: "Quiet", eraArt: nil)
