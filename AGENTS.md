@@ -32,6 +32,8 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 - GitHub (`github` remote) is the public mirror, pushed by GitLab's push mirror. GitHub Actions
   (`.github/workflows`) runs the Apple targets, which need a macOS runner GitLab does not have.
   Never merge on GitHub: the next mirror push would overwrite it.
+- Dependency updates: Renovate (`renovate.json`) runs from a weekly GitLab pipeline schedule and
+  opens merge requests. Swift packages live in the Xcode project, which it cannot read.
 
 ## Layout
 

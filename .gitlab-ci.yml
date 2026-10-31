@@ -3,6 +3,8 @@
 #
 # CI/CD variables:
 #   SONAR_HOST_URL, SONAR_TOKEN (masked): enable the sonarqube job.
+#   RENOVATE_TOKEN (masked, protected): project access token (Developer, api + write_repository)
+#   for the scheduled renovate job; GITHUB_COM_TOKEN (masked, no scopes) lifts github.com rate limits.
 #   build-image and container_scanning skip until the instance enables the container registry.
 
 include:
@@ -108,3 +110,26 @@ sonarqube:
   script:
     # sonar-project.properties pins the LAN project key; the CI values must win.
     - sonar-scanner -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.projectKey="$SONAR_PROJECT_KEY" -Dsonar.qualitygate.wait=true
+
+# Dependency updates (renovate.json). Runs only from a pipeline schedule on the default branch.
+renovate:
+  stage: build
+  image: renovate/renovate:44.165.1
+  needs: []
+  variables:
+    RENOVATE_PLATFORM: gitlab
+    RENOVATE_ENDPOINT: $CI_API_V4_URL
+    RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
+    RENOVATE_ONBOARDING: "false"
+    RENOVATE_REQUIRE_CONFIG: required
+    RENOVATE_BASE_DIR: $CI_PROJECT_DIR/.renovate
+    RENOVATE_GIT_AUTHOR: Renovate Bot <renovate-bot@noreply.gitlab.bevk.me>
+    LOG_LEVEL: info
+  cache:
+    key: renovate
+    paths: [.renovate/cache]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_TOKEN && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - renovate
+
