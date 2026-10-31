@@ -7,7 +7,6 @@ import SwiftUI
 extension AudioEngine {
     // MARK: - Audio Session
 
-
     /// macOS has no AVAudioSession — CoreAudio handles routing and there is no
     /// interruption/deactivation model to observe. tvOS has the *full* iOS 27
     /// API, so this and `setupInterruptionHandling` fork on `os(macOS)`, not

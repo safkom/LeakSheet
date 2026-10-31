@@ -13,7 +13,7 @@ nonisolated enum BadgeLogic {
     static let informativeAvailability: Set<String> = [
         "og file", "og files", "full", "tagged", "stem", "stem bounce",
         "stem bounces", "beat only", "partial", "snippet", "confirmed",
-        "unavailable",
+        "unavailable"
     ]
 
     private static func norm(_ s: String?) -> String {
@@ -77,7 +77,7 @@ extension BadgeLogic {
         .init(name: "High Quality", detail: "Good lossy quality."),
         .init(name: "Recording", detail: "Captured from a playback, not a source file."),
         .init(name: "Low Quality", detail: "Compressed or degraded audio."),
-        .init(name: "Not Available", detail: "No file is circulating."),
+        .init(name: "Not Available", detail: "No file is circulating.")
     ]
 
     static let availabilityGlossary: [Term] = [
@@ -91,7 +91,7 @@ extension BadgeLogic {
         .init(name: "Confirmed", detail: "Known to exist, but not circulating."),
         .init(name: "Rumored", detail: "Reported to exist — unverified."),
         .init(name: "Conflicting Sources", detail: "Sources disagree on the details."),
-        .init(name: "Unavailable", detail: "Not obtainable."),
+        .init(name: "Unavailable", detail: "Not obtainable.")
     ]
 
     static let badgeGlossary: [BadgeTerm] = [
@@ -100,6 +100,6 @@ extension BadgeLogic {
         .init(badge: .grail, detail: "A highly sought-after holy grail."),
         .init(badge: .wanted, detail: "Actively wanted by the community."),
         .init(badge: .worst, detail: "Widely disliked."),
-        .init(badge: .ai, detail: "AI-generated — not an authentic leak."),
+        .init(badge: .ai, detail: "AI-generated — not an authentic leak.")
     ]
 }

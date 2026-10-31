@@ -26,11 +26,11 @@ struct CreditProfileTests {
                     ["base_name": "Song One", "versions": [
                         version("Song One [V1]", badge: "grail", producers: "Maker, Other", featuring: "Guest",
                                 quality: "Lossless", link: "https://pillows.su/f/a1"),
-                        version("Song One [V2]", badge: "best", producers: "maker", quality: "CD Quality"),
+                        version("Song One [V2]", badge: "best", producers: "maker", quality: "CD Quality")
                     ]],
                     ["base_name": "Song Two", "versions": [
                         version("Song Two", producers: "Maker & Third", featuring: "Test Artist",
-                                quality: "High Quality", link: "https://pillows.su/f/b2"),
+                                quality: "High Quality", link: "https://pillows.su/f/b2")
                     ]],
                     ["base_name": "Song Three", "versions": [
                         version(
@@ -38,19 +38,19 @@ struct CreditProfileTests {
                             producers: "Other",
                             featuring: "Test Artist, Guest",
                             quality: "Recording"
-                        ),
-                    ]],
+                        )
+                    ]]
                 ]]]],
                 ["name": "Second", "sections": [["name": "Main", "songs": [
                     ["base_name": "Song Four", "versions": [
                         version("Song Four", badge: "special", producers: "Other", featuring: "Test Artist, Third",
-                                quality: "Low Quality"),
+                                quality: "Low Quality")
                     ]],
                     ["base_name": "Song Five", "versions": [
-                        version("Song Five", badge: "best", producers: "Other", featuring: "Test Artist"),
-                    ]],
-                ]]]],
-            ],
+                        version("Song Five", badge: "best", producers: "Other", featuring: "Test Artist")
+                    ]]
+                ]]]]
+            ]
         ]
         return try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
     }

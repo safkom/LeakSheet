@@ -266,4 +266,3 @@ struct CacheServiceTests {
         #expect(entry.etag == "new")
     }
 }
-

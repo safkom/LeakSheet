@@ -109,7 +109,7 @@ extension SongDescriptionSheet {
             ("with", active.version.collaboration),
             ("ref.", active.version.refs),
             ("eng.", active.version.engineer),
-            ("artist", active.version.creditedArtists),
+            ("artist", active.version.creditedArtists)
         ].compactMap { label, val in
             guard let v = val, !v.isEmpty else { return nil }
             return (label, v)
@@ -191,7 +191,7 @@ extension SongDescriptionSheet {
             ("Preview Date", active.version.previewDate),
             ("Type", active.version.type),
             ("Recording", active.version.dateOfRecording),
-            ("Recorded At", active.version.recordingLocation),
+            ("Recorded At", active.version.recordingLocation)
         ])
     }
 

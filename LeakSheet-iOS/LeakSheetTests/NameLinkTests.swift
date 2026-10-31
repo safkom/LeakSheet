@@ -49,9 +49,9 @@ struct NameLinkTests {
                     song("Stay On Em / Precious"),
                     song("With Child", alts: ["Precious"]),
                     song("You're Too Precious", alts: ["Precious"]),
-                    song("Unrelated"),
+                    song("Unrelated")
                 ]),
-                era("Donda [V3]", [song("Hands Down")]),
+                era("Donda [V3]", [song("Hands Down")])
             ],
             trackerStats: nil, notices: nil, totalSongs: nil, totalVersions: nil, tabs: nil
         )
@@ -70,7 +70,7 @@ struct NameLinkTests {
             "DONDA [V1]/Stay On Em / Precious",
             "DONDA [V1]/With Child",
             "DONDA [V1]/You're Too Precious",
-            "Donda [V3]/Hands Down",
+            "Donda [V3]/Hands Down"
         ])
     }
 

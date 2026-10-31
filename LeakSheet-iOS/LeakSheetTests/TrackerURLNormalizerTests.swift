@@ -17,7 +17,7 @@ struct TrackerURLNormalizerTests {
         "http://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
         "docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit",
         "  https://docs.google.com/spreadsheets/d/1AbC_d-42xYz/edit  ",
-        "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit",
+        "HTTPS://DOCS.GOOGLE.COM/spreadsheets/d/1AbC_d-42xYz/edit"
     ])
     func `google sheet URL variants collapse to the htmlview form`(url: String) {
         #expect(TrackerURLNormalizer.normalize(url) == Self.canonical)
@@ -28,7 +28,7 @@ struct TrackerURLNormalizerTests {
         "https://yetracker.net",
         "https://yetracker.net/",
         "yetracker.net/#top",
-        "HTTPS://YETRACKER.NET/",
+        "HTTPS://YETRACKER.NET/"
     ])
     func `bare host variants collapse to the trailing-slash form`(url: String) {
         #expect(TrackerURLNormalizer.normalize(url) == "https://yetracker.net/")

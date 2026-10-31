@@ -120,7 +120,7 @@ struct CreditPageView: View {
             StatGrid(items: [
                 .init(label: profile.songCount == 1 ? "Song" : "Songs", value: profile.songCount),
                 .init(label: profile.versionCount == 1 ? "Track" : "Tracks", value: profile.versionCount),
-                .init(label: "Available", value: profile.playableCount, tint: BadgeVariant.full.color),
+                .init(label: "Available", value: profile.playableCount, tint: BadgeVariant.full.color)
             ], minWidth: 90)
         }
         .frame(maxWidth: .infinity)

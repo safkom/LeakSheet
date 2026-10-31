@@ -9,6 +9,10 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only token: no job writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   offline:
     name: Offline suite (gate)

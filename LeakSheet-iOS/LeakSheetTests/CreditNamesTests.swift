@@ -64,12 +64,12 @@ struct CreditNamesTests {
         #expect(index.creditIndex[.producer]?["maker"] == [
             .init(era: 0, section: 0, song: 0, version: 0),
             .init(era: 0, section: 0, song: 0, version: 1),
-            .init(era: 0, section: 0, song: 1, version: 0),
+            .init(era: 0, section: 0, song: 1, version: 0)
         ])
         #expect(index.creditIndex[.producer]?["other"] == [.init(era: 0, section: 0, song: 0, version: 1)])
         #expect(index.creditIndex[.feature]?["guest"] == [
             .init(era: 0, section: 0, song: 0, version: 0),
-            .init(era: 0, section: 0, song: 1, version: 0),
+            .init(era: 0, section: 0, song: 1, version: 0)
         ])
         #expect(index.creditIndex[.feature]?["maker"] == nil)
         #expect(index.creditDisplayNames["maker"] == "Maker")
@@ -98,14 +98,14 @@ struct CreditNamesTests {
                     [
                         "name": "v\(j)",
                         "producers": "Producer \(i % 50)",
-                        "featuring": "Guest \(j % 7) & Feat \(i % 13)",
+                        "featuring": "Guest \(j % 7) & Feat \(i % 13)"
                     ] as [String: Any]
-                },
+                }
             ]
         }
         let root: [String: Any] = [
             "name": "Synthetic", "slug": "synthetic",
-            "eras": [["name": "Era", "sections": [["name": "Main", "songs": songs]]]],
+            "eras": [["name": "Era", "sections": [["name": "Main", "songs": songs]]]]
         ]
         let artist = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: root))
 

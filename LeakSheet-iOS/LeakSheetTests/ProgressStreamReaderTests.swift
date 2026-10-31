@@ -26,7 +26,7 @@ struct ProgressStreamReaderTests {
     private static let expectedEvents: [ProgressStreamReader.Event] = [
         .progress(message: "Found 19 tabs — downloading Unreleased", done: nil, total: nil),
         .progress(message: "Read Misc", done: 2, total: 9),
-        .artist(etag: "8c6f587cdeec162e", bytes: 39),
+        .artist(etag: "8c6f587cdeec162e", bytes: 39)
     ]
 
     private static func read(_ chunks: [Data]) -> ([ProgressStreamReader.Event], Data) {
@@ -52,7 +52,7 @@ struct ProgressStreamReaderTests {
     @Test func `any split into two chunks gives the same result`() {
         for cut in 1..<Self.stream.count {
             let (events, payload) = Self.read([
-                Self.stream.prefix(cut), Self.stream.suffix(from: cut),
+                Self.stream.prefix(cut), Self.stream.suffix(from: cut)
             ])
             #expect(events == Self.expectedEvents, "split at \(cut)")
             #expect(payload == Self.payload + Data([0x0A]), "split at \(cut)")

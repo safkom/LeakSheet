@@ -86,7 +86,7 @@ struct MacSongRow: View {
 
                 // One flowing line, badges then credits.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if (!hasMultiple || showVersionBadge), let v = version {
+                    if !hasMultiple || showVersionBadge, let v = version {
                         BadgeRowView(version: v)
                         CreditTagsView(version: v, inline: true)
                     } else if let best = song.bestPlayableVersion {

@@ -53,12 +53,12 @@ struct RadioBuilderTests {
     @Test func `era radio picks one best playable version per song and skips unplayable songs`() {
         let alpha = song("Alpha", [
             version("Alpha", tag: "Lossless", quality: "Lossless", link: nil),
-            version("Alpha", tag: "Low", quality: "Low Quality"),
+            version("Alpha", tag: "Low", quality: "Low Quality")
         ])
         let beta = song("Beta", [version("Beta", link: nil)])
         let gamma = song("Gamma", [
             version("Gamma", tag: "A", quality: "High Quality"),
-            version("Gamma", tag: "B", quality: "CD Quality"),
+            version("Gamma", tag: "B", quality: "CD Quality")
         ])
         var rng = SplitMix64(state: 1)
         let items = RadioBuilder.eraRadio(
@@ -110,7 +110,7 @@ struct RadioBuilderTests {
             version("Old", leakDate: "01/15/2024"),
             version("Newest", leakDate: "03/20/2024"),
             version("Unplayable", leakDate: "04/01/2024", link: nil),
-            version("Middle", leakDate: "02/10/2024"),
+            version("Middle", leakDate: "02/10/2024")
         ]))
         #expect(items.map(\.version.name) == ["Newest", "Middle", "Old"])
         #expect(items.allSatisfy { $0.artistSlug == "ye" && $0.eraName == "E1" })
@@ -129,7 +129,7 @@ struct RadioBuilderTests {
         let favourites = (0..<7).map { item("F\($0)", era: $0 % 2 == 0 ? "E1" : "E2") }
         let candidates = [
             "ye::E1": [item("C1a"), item("C1b"), item("C1c")],
-            "ye::E2": [item("C2a", era: "E2"), item("C2b", era: "E2")],
+            "ye::E2": [item("C2a", era: "E2"), item("C2b", era: "E2")]
         ]
         var rng = SplitMix64(state: 3)
         let out = RadioBuilder.smartShuffle(

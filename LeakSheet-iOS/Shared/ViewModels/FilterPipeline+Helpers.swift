@@ -117,9 +117,7 @@ extension ArtistViewModel {
         if bn.hasPrefix(query) { return 70 }
         if alts.contains(where: { $0.hasPrefix(query) }) { return 60 }
         if bn.contains(query) { return 40 }
-        for v in song.versions {
-            if Song.nameKey(v.name).contains(query) { return 20 }
-        }
+        if song.versions.contains(where: { Song.nameKey($0.name).contains(query) }) { return 20 }
         if alts.contains(where: { $0.contains(query) }) { return 20 }
         return 0
     }

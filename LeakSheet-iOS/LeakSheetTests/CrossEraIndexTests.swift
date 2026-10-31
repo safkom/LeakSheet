@@ -37,8 +37,8 @@ struct CrossEraIndexTests {
                 era("War", songs: [song("This One Here", key: "this one here")]),
                 era("Donda 2", songs: [
                     song("This One Here", key: "this one here", versions: 3),
-                    song("Unique", key: "unique"),
-                ]),
+                    song("Unique", key: "unique")
+                ])
             ],
             trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, tabs: nil
@@ -74,7 +74,7 @@ struct CrossEraIndexTests {
             name: "T", slug: "t", sourceUrl: nil,
             eras: [
                 era("War", songs: [song("???", key: ""), song("???", key: "")]),
-                era("Donda 2", songs: [song("???", key: ""), song("Real Song", key: "real song")]),
+                era("Donda 2", songs: [song("???", key: ""), song("Real Song", key: "real song")])
             ],
             trackerStats: nil, notices: nil,
             totalSongs: nil, totalVersions: nil, tabs: nil

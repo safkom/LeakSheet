@@ -28,7 +28,7 @@ struct EraAction: Identifiable {
             EraAction(id: "Add Era to Queue", systemImage: "text.append") {
                 Haptics.light()
                 player.queueEra(era, artistName: artistName, artistSlug: artistSlug)
-            },
+            }
         ]
     }
 }

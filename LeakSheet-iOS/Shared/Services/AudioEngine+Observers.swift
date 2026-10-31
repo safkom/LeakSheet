@@ -324,7 +324,7 @@ extension AudioEngine {
             // Render the FourCC itself (e.g. "mp4a") when it's printable.
             let bytes = [
                 UInt8((fourCC >> 24) & 0xFF), UInt8((fourCC >> 16) & 0xFF),
-                UInt8((fourCC >> 8) & 0xFF), UInt8(fourCC & 0xFF),
+                UInt8((fourCC >> 8) & 0xFF), UInt8(fourCC & 0xFF)
             ]
             guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else { return nil }
             return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces).uppercased()

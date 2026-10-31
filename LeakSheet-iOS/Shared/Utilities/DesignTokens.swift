@@ -199,7 +199,7 @@ private nonisolated let availabilityRules: [(matches: @Sendable (String) -> Bool
     // Compound values ("Full Lossless") land here; without this they'd paint neutral
     // grey beside a blue "Full". Last, so it never outranks a more specific match.
     ({ $0.contains("full") }, .full),
-    ({ $0.contains("lossless") }, .lossless),
+    ({ $0.contains("lossless") }, .lossless)
 ]
 
 func availabilityVariant(_ avail: String?) -> BadgeVariant {

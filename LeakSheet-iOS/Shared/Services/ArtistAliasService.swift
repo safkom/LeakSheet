@@ -66,7 +66,7 @@ actor ArtistAliasService {
         components?.queryItems = [
             URLQueryItem(name: "query", value: "artist:\"\(phrase)\""),
             URLQueryItem(name: "fmt", value: "json"),
-            URLQueryItem(name: "limit", value: "3"),
+            URLQueryItem(name: "limit", value: "3")
         ]
         guard let url = components?.url else { return nil }
         var request = URLRequest(url: url, timeoutInterval: 10)

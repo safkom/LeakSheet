@@ -106,7 +106,7 @@ struct FilterPipelineTests: FilterPipelineFixture {
         // leak/file date wins when present; a preview-only version has neither
         // and used to be skipped outright, so snippets never showed in Recents.
         let previewOnly = song("Preview Only", versions: [
-            version("Preview Only", leakDate: nil, previewDate: "05/01/2024"),
+            version("Preview Only", leakDate: nil, previewDate: "05/01/2024")
         ])
         let eraC = era("Era C", songs: [previewOnly])
         let withPreview = Artist(

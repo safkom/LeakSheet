@@ -161,7 +161,7 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     /// Names the fanbase uses for an unidentified track. Mirrors the backend's
     /// `_PLACEHOLDER_BASE_NAMES`: such rows are distinct tracks, sent with an empty `songKey`.
     static let placeholderBaseNames: Set<String> = [
-        "???", "??", "?", "unknown", "untitled", "tba", "n/a",
+        "???", "??", "?", "unknown", "untitled", "tba", "n/a"
     ]
 
     /// True when this song's title identifies nothing — see above.
@@ -190,11 +190,11 @@ nonisolated struct Song: Codable, Identifiable, Hashable, Sendable {
     /// multi-version row (highest quality wins, availability breaks ties).
     private static let qualityRank: [String: Int] = [
         "Lossless": 6, "CD Quality": 5, "High Quality": 4,
-        "Recording": 3, "Low Quality": 2, "Not Available": 0,
+        "Recording": 3, "Low Quality": 2, "Not Available": 0
     ]
     private static let availabilityRank: [String: Int] = [
         "OG File": 8, "Full": 7, "Tagged": 6, "Partial": 5,
-        "Snippet": 4, "Stem Bounce": 3, "Beat Only": 2, "Confirmed": 1,
+        "Snippet": 4, "Stem Bounce": 3, "Beat Only": 2, "Confirmed": 1
     ]
 
     /// The version with the best quality (availability breaks ties) — what a

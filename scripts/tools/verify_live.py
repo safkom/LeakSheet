@@ -89,8 +89,9 @@ trackers = [
     ("https://docs.google.com/spreadsheets/d/1-FxUYaxBqav0G6txAAixy7bhTGs86sItN_0_F8ekeKQ/htmlview", "Baby Keem"),
 ]
 
-for url, name in trackers:
-    try:
-        verify_tracker(url, name)
-    except Exception as e:
-        print(f"  ERROR: {e}")
+if __name__ == "__main__":
+    for url, name in trackers:
+        try:
+            verify_tracker(url, name)
+        except Exception as e:
+            print(f"  ERROR: {e}")

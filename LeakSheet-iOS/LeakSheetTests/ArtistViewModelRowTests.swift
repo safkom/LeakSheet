@@ -58,7 +58,7 @@ struct ArtistViewModelRowTests: FilterPipelineFixture {
         let mysteryEra = era("Mystery Era", songs: [
             song("???", versions: [version("???", link: nil)]),
             song("???", versions: [version("???", link: nil)]),
-            song("???", versions: [version("???", link: nil)]),
+            song("???", versions: [version("???", link: nil)])
         ])
         let a = Artist(
             name: "PH", slug: "ph", sourceUrl: nil, eras: [mysteryEra],
@@ -82,7 +82,7 @@ struct ArtistViewModelRowTests: FilterPipelineFixture {
             Section(name: "Surfaced", group: "Deluxe", songs: [mystery()]),
             Section(name: "Unsurfaced", group: "Deluxe", songs: [mystery()]),
             Section(name: "Surfaced", group: "Other", songs: [mystery()]),
-            Section(name: "Surfaced", group: "Deluxe", songs: [mystery(), mystery()]),
+            Section(name: "Surfaced", group: "Deluxe", songs: [mystery(), mystery()])
         ]
         let grouped = Era(
             name: "Grouped Era", altNames: nil, description: nil, timeline: nil, artUrl: nil,

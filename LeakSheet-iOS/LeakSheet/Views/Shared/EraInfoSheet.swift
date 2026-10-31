@@ -60,7 +60,7 @@ struct EraInfoSheet: View {
                         InfoGrid(items: [
                             ("Leaked", insights.leakDates.map(rangeText)),
                             ("File Dates", insights.fileDates.map(rangeText)),
-                            ("Tracker Total", era.stats?.statedTotal.flatMap { $0 > 0 ? "\($0)" : nil }),
+                            ("Tracker Total", era.stats?.statedTotal.flatMap { $0 > 0 ? "\($0)" : nil })
                         ])
                         listeningCard(listening)
                         qualitySection(insights)

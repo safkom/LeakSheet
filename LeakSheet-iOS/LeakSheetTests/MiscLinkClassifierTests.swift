@@ -6,7 +6,7 @@ import Testing
 struct MiscLinkClassifierTests {
     @Test(arguments: [
         "someapp://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "someapp://soundcloud.com/artist/track",
+        "someapp://soundcloud.com/artist/track"
     ])
     func `custom schemes on embed hosts stay plain links`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .link)
@@ -21,7 +21,7 @@ struct MiscLinkClassifierTests {
         "https://music.froste.lol/song/0a1b2c3d",
         "https://krakenfiles.com/view/abc123/file.html",
         "https://pixeldrain.com/u/aBc123",
-        "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing",
+        "https://drive.google.com/file/d/1AbC-x_9/view?usp=sharing"
     ])
     func `known streamable hosts classify as stream`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .stream)
@@ -31,7 +31,7 @@ struct MiscLinkClassifierTests {
         "https://i.imgur.com/abc123.jpg",
         "https://example.com/cover.png",
         "https://i.ibb.co/xyz/photo.jpeg",
-        "https://postimg.cc/image.webp",
+        "https://postimg.cc/image.webp"
     ])
     func `image hosts and extensions classify as image`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .image)
@@ -46,7 +46,7 @@ struct MiscLinkClassifierTests {
     // in-app embed players); .video now means a direct video file.
     @Test(arguments: [
         "https://example.com/clip.mp4",
-        "https://example.com/clip.mov",
+        "https://example.com/clip.mov"
     ])
     func `video file extensions classify as video`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .video)
@@ -58,7 +58,7 @@ struct MiscLinkClassifierTests {
         "https://vimeo.com/123456789",
         "https://soundcloud.com/artist/track",
         "https://on.soundcloud.com/abc123",
-        "https://m.soundcloud.com/artist/track",
+        "https://m.soundcloud.com/artist/track"
     ])
     func `embeddable hosts classify as embed`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .embed)
@@ -70,7 +70,7 @@ struct MiscLinkClassifierTests {
         "https://example.com/archive.zip",
         "https://mega.nz/file/abc123",
         "https://www.mediafire.com/file/abc123",
-        "https://drive.google.com/drive/folders/1AbCdEf",
+        "https://drive.google.com/drive/folders/1AbCdEf"
     ])
     func `archive hosts and extensions classify as archive`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .archive)
@@ -80,7 +80,7 @@ struct MiscLinkClassifierTests {
         "https://www.instagram.com/p/abc123",
         "https://twitter.com/user/status/123",
         "https://web.archive.org/web/2020/https://example.com",
-        "not a url at all",
+        "not a url at all"
     ])
     func `anything unrecognized falls back to a generic link`(url: String) {
         #expect(MiscLinkClassifier.classify(url) == .link)
@@ -98,7 +98,7 @@ struct MiscLinkClassifierTests {
         ("https://www.instagram.com/p/abc", "Instagram"),
         ("https://twitter.com/user/status/1", "Twitter/X"),
         ("https://x.com/user/status/1", "Twitter/X"),
-        ("https://example.com/page", "example.com"),
+        ("https://example.com/page", "example.com")
     ])
     func `label derives a short host name`(url: String, expected: String) {
         #expect(MiscLinkClassifier.label(for: url) == expected)
@@ -115,7 +115,7 @@ struct MiscLinkClassifierTests {
         ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"),
         ("https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
         ("https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
-        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ")
     ])
     func `YouTube thumbnail is derived from the video id in any URL form`(url: String, id: String) {
         #expect(

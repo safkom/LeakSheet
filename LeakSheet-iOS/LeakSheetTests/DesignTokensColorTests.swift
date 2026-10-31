@@ -56,7 +56,7 @@ struct DesignTokensColorTests {
             (Color.lsBackground, "lsBackground"),
             (Color.lsCard, "lsCard"),
             (Color.badgeOG, "badgeOG"),
-            (Color.lsAccent, "lsAccent"),
+            (Color.lsAccent, "lsAccent")
         ] {
             let dark = color.rgbComponents(in: .dark)
             let light = color.rgbComponents(in: .light)
@@ -136,7 +136,7 @@ struct DesignTokensColorTests {
                 .lsFavourite,
                 "lsFavourite"
             ), (.lsWarning, "lsWarning"),
-            (.lsSuccess, "lsSuccess"),
+            (.lsSuccess, "lsSuccess")
         ] {
             expectAA(color, on: .lsBackground, label, scheme)
         }
@@ -168,7 +168,7 @@ struct DesignTokensColorTests {
         (.badgeStem, "badgeStem"), (.badgeUnavailable, "badgeUnavailable"),
         (.badgeRumored, "badgeRumored"), (.badgeConflicting, "badgeConflicting"),
         (.badgeEntryType, "badgeEntryType"),
-        (.lsAccent, "lsAccent"),
+        (.lsAccent, "lsAccent")
     ]
 
     private static let creditTones: [(Color, String)] = [
@@ -177,7 +177,7 @@ struct DesignTokensColorTests {
         (CreditType.collaboration.color, "credit.collaboration"),
         (CreditType.refs.color, "credit.refs"),
         (CreditType.director.color, "credit.director"),
-        (CreditType.creditedArtists.color, "credit.creditedArtists"),
+        (CreditType.creditedArtists.color, "credit.creditedArtists")
     ]
 }
 
@@ -204,7 +204,7 @@ struct EraDisplayColorsContrastTests {
         (Color(hex: 0xFFFFFF), "white"),
         (Color(hex: 0x1227B7), "royal blue"),
         (Color(hex: 0x7E5797), "purple"),
-        (Color(hex: 0x9E3A25), "brick"),
+        (Color(hex: 0x9E3A25), "brick")
     ]
 
     @Test("Card title clears AA on both gradient stops", arguments: [ColorScheme.dark, .light])

@@ -21,7 +21,7 @@ struct TrackerStatsSheet: View {
             Row(label: "High Quality", value: stats.highQuality ?? 0, color: .badgeHQ),
             Row(label: "Recording", value: stats.recordings ?? 0, color: .badgeRec),
             Row(label: "Low Quality", value: stats.lowQuality ?? 0, color: .badgeLQ),
-            Row(label: "Not Available", value: stats.notAvailableQuality ?? 0, color: .badgeNA),
+            Row(label: "Not Available", value: stats.notAvailableQuality ?? 0, color: .badgeNA)
         ].filter { $0.value > 0 }
     }
 
@@ -35,7 +35,7 @@ struct TrackerStatsSheet: View {
             Row(label: "Partial", value: stats.partial ?? 0, color: .badgePartial),
             Row(label: "Snippets", value: stats.snippets ?? 0, color: .badgeSnippet),
             Row(label: "Stem Bounces", value: stats.stemBounces ?? 0, color: .badgeStem),
-            Row(label: "Unavailable", value: stats.unavailable ?? 0, color: .badgeUnavailable),
+            Row(label: "Unavailable", value: stats.unavailable ?? 0, color: .badgeUnavailable)
         ].filter { $0.value > 0 }
     }
 
@@ -52,7 +52,7 @@ struct TrackerStatsSheet: View {
             BadgeRow(badge: .special, label: Badge.special.label, value: stats.special ?? 0),
             BadgeRow(badge: .grail, label: "Grails", value: stats.grails ?? 0),
             BadgeRow(badge: .wanted, label: Badge.wanted.label, value: stats.wanted ?? 0),
-            BadgeRow(badge: .worst, label: Badge.worst.label, value: stats.worstOf ?? 0),
+            BadgeRow(badge: .worst, label: Badge.worst.label, value: stats.worstOf ?? 0)
         ].filter { $0.value > 0 }
     }
 

@@ -125,7 +125,7 @@ final class ArtistViewModel {
 
     /// Badge-annotation kinds: never pages. Older cached payloads may still carry them.
     private static let badgeTabKinds: Set<String> = [
-        "best_of", "worst_of", "special", "grails", "wanted",
+        "best_of", "worst_of", "special", "grails", "wanted"
     ]
 
     /// Parsed content tabs (Misc / Music Videos / Released / Stems / …), one
