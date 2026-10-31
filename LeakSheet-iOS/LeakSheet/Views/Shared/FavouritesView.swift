@@ -67,6 +67,9 @@ struct FavouritesView: View {
                                 ForEach(artistGroup.eras, id: \.eraName) { eraGroup in
                                     ForEach(eraGroup.entries) { entry in
                                         Button {
+                                            #if os(macOS)
+                                            selectedKey = entry.key  // the button eats the click List selects on
+                                            #endif
                                             if let payload = entry.toDescriptionPayload {
                                                 if let onShowDescription {
                                                     onShowDescription(payload)

@@ -25,6 +25,8 @@ struct MacSongRow: View {
 
     @State private var hovering = false
 
+    private var showsControls: Bool { hovering || isFavourited }
+
     private var isPlaying: Bool {
         player.isNowPlaying(version, inEra: eraName)
     }
@@ -196,8 +198,9 @@ struct MacSongRow: View {
         // The heart is state, not a control — it stays visible.
         // Invisible controls stay out of the key-view loop and VoiceOver; the row's
         // context menu and Return/Space keep every action reachable.
-        .disabled(!hovering)
-        .opacity(hovering || isFavourited ? 1 : 0)
+        .disabled(!showsControls)
+        .accessibilityHidden(!showsControls)
+        .opacity(showsControls ? 1 : 0)
     }
 
     private var isFavourited: Bool {
