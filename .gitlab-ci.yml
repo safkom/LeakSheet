@@ -3,7 +3,7 @@
 #
 # CI/CD variables:
 #   SONAR_HOST_URL, SONAR_TOKEN (masked): enable the sonarqube job.
-#   The container registry must be enabled for build-image and container_scanning.
+#   build-image and container_scanning skip until the instance enables the container registry.
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
@@ -98,7 +98,7 @@ sonarqube:
   variables:
     GIT_DEPTH: "0"
     SONAR_USER_HOME: $CI_PROJECT_DIR/.sonar
-    # The GitLab-imported project on that server, not the LAN key in sonar-project.properties.
+    # The GitLab-imported project on that server, not the key in sonar-project.properties.
     SONAR_PROJECT_KEY: safko_leaksheet_ccdc0356-e598-4098-95bc-392eed429112
   cache:
     key: sonar
@@ -106,5 +106,5 @@ sonarqube:
   rules:
     - if: $SONAR_HOST_URL && $SONAR_TOKEN && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    # sonar-project.properties pins the LAN host and key; the CI values must win.
+    # sonar-project.properties pins the LAN project key; the CI values must win.
     - sonar-scanner -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.projectKey="$SONAR_PROJECT_KEY" -Dsonar.qualitygate.wait=true
