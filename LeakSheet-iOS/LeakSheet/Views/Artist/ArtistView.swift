@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Artist detail screen — stats, search/filter, era cards, song lists.
 ///
-/// All list content renders as direct children of ONE LazyVStack (`vm.eraRows` is
+/// All list content renders as direct children of ONE LazyVStack (`viewModel.eraRows` is
 /// flattened), filtering runs off-main in the view model, and each content branch
 /// is its own `View` type with narrow inputs, not a computed property.
 struct ArtistView: View {
@@ -11,7 +11,7 @@ struct ArtistView: View {
     /// frame has content. Nil only for entry points that push without preparing one.
     var preparedVM: ArtistViewModel?
     @State private var displayed: Artist?
-    @State private var vm: ArtistViewModel?
+    @State private var viewModel: ArtistViewModel?
     @State private var lastUpdated: Date?
     /// Pull-to-refresh goes through the landing screen's loader: it keeps the artist's
     /// name (favourites key), falls back to the saved copy, and reports failure.
@@ -24,9 +24,9 @@ struct ArtistView: View {
 
     var body: some View {
         Group {
-            if let vm = vm ?? preparedVM {
+            if let viewModel = viewModel ?? preparedVM {
                 ArtistContentView(
-                    artist: current, vm: vm,
+                    artist: current, viewModel: viewModel,
                     lastUpdated: lastUpdated,
                     onRefresh: refresh
                 )
@@ -38,14 +38,14 @@ struct ArtistView: View {
             }
         }
         .task(id: artist.slug) {
-            if vm == nil {
+            if viewModel == nil {
                 displayed = artist
                 // Already prepared upstream in the common path; only build
                 // here for entry points that pushed without preparing.
                 if let preparedVM {
-                    vm = preparedVM
+                    viewModel = preparedVM
                 } else {
-                    vm = await ArtistViewModel.make(artist: artist)
+                    viewModel = await ArtistViewModel.make(artist: artist)
                 }
                 if let url = artist.sourceUrl {
                     // Sidecar read, not the multi-MB payload, so the data-age row lands before
@@ -55,7 +55,7 @@ struct ArtistView: View {
             }
             // The first screenful was warmed before this screen was pushed (see
             // ArtistViewModel.make); warm the rest now. Cancelled when the screen goes away.
-            await vm?.warmEraArt()
+            await viewModel?.warmEraArt()
         }
     }
 
@@ -65,19 +65,19 @@ struct ArtistView: View {
         guard let url = current.sourceUrl, !url.isEmpty else { return }
         let fresh = await refresher.load(url, artistName: current.name, forceRefresh: true, recents: recents)
         guard let fresh, refresher.staleNotice == nil else {
-            (vm ?? preparedVM)?.loadNotice = refresher.error ?? refresher.staleNotice
+            (viewModel ?? preparedVM)?.loadNotice = refresher.error ?? refresher.staleNotice
             return
         }
         let refreshedVM = await ArtistViewModel.make(artist: fresh)
         displayed = fresh
-        vm = refreshedVM
+        viewModel = refreshedVM
         lastUpdated = .now
     }
 }
 
 private struct ArtistContentView: View {
     let artist: Artist
-    @Bindable var vm: ArtistViewModel
+    @Bindable var viewModel: ArtistViewModel
     let lastUpdated: Date?
     let onRefresh: () async -> Void
 
@@ -104,9 +104,9 @@ private struct ArtistContentView: View {
     /// MiscListView takes a small dictionary instead of the whole era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist, vm: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
+    init(artist: Artist, viewModel: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
         self.artist = artist
-        self.vm = vm
+        self.viewModel = viewModel
         self.lastUpdated = lastUpdated
         self.onRefresh = onRefresh
         var eraArt: [String: String?] = [:]
@@ -137,8 +137,8 @@ private struct ArtistContentView: View {
 
                 // Stats bar — tap for the full TrackerStats breakdown.
                 ArtistStatsBarView(
-                    stats: vm.visibleStats,
-                    unit: vm.isShowingTabEntries ? "entries" : "tracks",
+                    stats: viewModel.visibleStats,
+                    unit: viewModel.isShowingTabEntries ? "entries" : "tracks",
                     onTap: artist.trackerStats != nil ? { showStats = true } : nil
                 )
 
@@ -147,29 +147,29 @@ private struct ArtistContentView: View {
                 // The timeline re-evaluates the label so "N seconds ago" keeps ticking.
                 TimelineView(.periodic(from: .now, by: 15)) { _ in
                 Text(
-                    vm.loadNotice
+                    viewModel.loadNotice
                         ?? lastUpdated.map { "Updated \($0.formatted(.relative(presentation: .named)))" }
                         ?? " "
                 )
                     .font(.caption2)
-                    .foregroundStyle(vm.loadNotice == nil ? Color.secondary : Color.lsError)
+                    .foregroundStyle(viewModel.loadNotice == nil ? Color.secondary : Color.lsError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 1)
-                    .opacity(vm.loadNotice == nil && lastUpdated == nil ? 0 : 1)
-                    .accessibilityHidden(vm.loadNotice == nil && lastUpdated == nil)
+                    .opacity(viewModel.loadNotice == nil && lastUpdated == nil ? 0 : 1)
+                    .accessibilityHidden(viewModel.loadNotice == nil && lastUpdated == nil)
                 }
 
                 // Sections first, then the filters for the section showing; filters act only on
                 // the song tree, so they disappear on a content tab.
-                ContentTabsView(vm: vm)
+                ContentTabsView(viewModel: viewModel)
                     .padding(.bottom, 8)
 
                 // Branch on computed state — see DECISIONS.md::ArtistView.swift::content-state-branching
-                let contentState = vm.content.state
+                let contentState = viewModel.content.state
                 if contentState.tabKey != nil {
                     MiscListView(
-                        vm: vm,
+                        viewModel: viewModel,
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         eraArtByLowercasedName: eraArtByLowercasedName,
@@ -181,7 +181,7 @@ private struct ArtistContentView: View {
                     .id(contentState.tabKey ?? "misc")
                 } else if !contentState.query.isEmpty {
                     SearchResultsListView(
-                        vm: vm,
+                        viewModel: viewModel,
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         sourceUrl: artist.sourceUrl,
@@ -189,7 +189,7 @@ private struct ArtistContentView: View {
                     )
                 } else if contentState.recents {
                     RecentsListView(
-                        vm: vm,
+                        viewModel: viewModel,
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         sourceUrl: artist.sourceUrl,
@@ -197,7 +197,7 @@ private struct ArtistContentView: View {
                     )
                 } else {
                     ErasListView(
-                        vm: vm,
+                        viewModel: viewModel,
                         artistName: artist.name,
                         artistSlug: artist.slug,
                         sourceUrl: artist.sourceUrl,
@@ -235,7 +235,7 @@ private struct ArtistContentView: View {
         )
         // Bottom-anchored so it can't hide behind the nav bar or the search drawer.
         .overlay(alignment: .bottom) {
-            if vm.isFiltering {
+            if viewModel.isFiltering {
                 ProgressView()
                     .controlSize(.small)
                     .padding(8)
@@ -246,14 +246,16 @@ private struct ArtistContentView: View {
         }
         // Era card gradients and header contrast are derived per appearance.
         .onChange(of: colorScheme, initial: true) { _, scheme in
-            vm.setColorScheme(scheme)
+            viewModel.setColorScheme(scheme)
         }
-        .onChange(of: ObjectIdentifier(vm)) {
-            vm.setColorScheme(colorScheme)
+        .onChange(of: ObjectIdentifier(viewModel)) {
+            viewModel.setColorScheme(colorScheme)
         }
         .swipeActionsContainer()
         .navigationTitle(artist.name)
-        .navigationSubtitle("\(vm.visibleStats.total.formatted()) \(vm.isShowingTabEntries ? "entries" : "tracks")")
+        .navigationSubtitle(
+            "\(viewModel.visibleStats.total.formatted()) \(viewModel.isShowingTabEntries ? "entries" : "tracks")"
+        )
         // .large is iOS/watchOS only; a Mac window title has no large variant.
         #if os(iOS)
         .toolbarTitleDisplayMode(.large)
@@ -269,7 +271,7 @@ private struct ArtistContentView: View {
                         Button { showTimeline = true } label: { Label("Timeline", systemImage: "clock") }
                     }
                     Button { showLegend = true } label: { Label("Badge Legend", systemImage: "info.circle") }
-                    Button { player.playNewestLeaks(vm.artist) } label: {
+                    Button { player.playNewestLeaks(viewModel.artist) } label: {
                         Label("Newest Leaks", systemImage: "clock.arrow.circlepath")
                     }
                 } label: {
@@ -289,7 +291,7 @@ private struct ArtistContentView: View {
         // DECISIONS.md::ArtistView.swift::search-field-placement. iOS-only modifiers.
         #if os(iOS)
         .searchable(
-            text: $vm.searchQuery,
+            text: $viewModel.searchQuery,
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search songs…"
         )
@@ -298,15 +300,15 @@ private struct ArtistContentView: View {
         // safe-area adjustment made the list jump while the bar collapsed.
         .toolbarMinimizationSafeAreaAdjustment(.disabled, for: .navigationBar)
         #else
-        .searchable(text: $vm.searchQuery, prompt: "Search songs…")
+        .searchable(text: $viewModel.searchQuery, prompt: "Search songs…")
         #endif
         .sheet(item: $eraInfo) { ref in
             EraInfoSheet(eraName: ref.name)
-                .environment(vm)
+                .environment(viewModel)
         }
         .sheet(item: $showDescription) { payload in
             SongDescriptionSheet(payload: payload)
-                .environment(vm)  // enables the cross-era "Also in" section
+                .environment(viewModel)  // enables the cross-era "Also in" section
         }
         .sheet(isPresented: $showQueue) {
             QueueSheet()
@@ -328,18 +330,18 @@ private struct ArtistContentView: View {
         }
         // Keyed on the view model so a pull-to-refresh, which swaps in a new
         // one, re-registers its eras instead of leaving the old song lists.
-        .onChange(of: vm.eraPlaybackRevision) {
-            player.setArtistEras(vm.eraPlaybackContexts)
+        .onChange(of: viewModel.eraPlaybackRevision) {
+            player.setArtistEras(viewModel.eraPlaybackContexts)
         }
-        .task(id: ObjectIdentifier(vm)) {
+        .task(id: ObjectIdentifier(viewModel)) {
             // Prebuilt off-main in Precomputed.
-            player.setArtistEras(vm.eraPlaybackContexts)
+            player.setArtistEras(viewModel.eraPlaybackContexts)
             // Seeded colors (from the persisted extraction cache) give the
             // background tint immediately; otherwise the first per-card
             // extraction callback sets it.
             if activeEraColor == nil {
-                if let first = artist.eras.first(where: { vm.eraDisplay[$0.name] != nil }) {
-                    activeEraColor = vm.eraDisplay[first.name]?.dominant
+                if let first = artist.eras.first(where: { viewModel.eraDisplay[$0.name] != nil }) {
+                    activeEraColor = viewModel.eraDisplay[first.name]?.dominant
                 }
             }
         }

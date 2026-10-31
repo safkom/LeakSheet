@@ -22,9 +22,9 @@ struct BrowseArtistsView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var filtered: [DiscoveryArtist] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return artists }
-        return artists.filter { $0.name.lowercased().contains(q) }
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return artists }
+        return artists.filter { $0.name.lowercased().contains(query) }
     }
 
     var body: some View {
@@ -204,10 +204,10 @@ struct BrowseArtistsView: View {
             // Server sorts best-first then by name; re-sort locally so the
             // order survives a backend that doesn't.
             artists = try await APIClient.shared.fetchTrackers()
-                .sorted { a, b in
-                    if a.best == true && b.best != true { return true }
-                    if a.best != true && b.best == true { return false }
-                    return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                .sorted { lhs, rhs in
+                    if lhs.best == true && rhs.best != true { return true }
+                    if lhs.best != true && rhs.best == true { return false }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
                 }
             // Not awaited: alias lookups take seconds and would hold the refresh spinner.
             recommendTask?.cancel()

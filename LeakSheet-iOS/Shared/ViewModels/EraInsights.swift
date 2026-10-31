@@ -29,7 +29,16 @@ struct EraInsights {
     let previousEra: String?
     let nextEra: String?
 
-    static let qualityOrder: [BadgeVariant] = [.lossless, .og, .cd, .hq, .rec, .lq, .beatonly, .na]
+    static let qualityOrder: [BadgeVariant] = [
+        .lossless,
+        .original,
+        .cdQuality,
+        .highQuality,
+        .rec,
+        .lowQuality,
+        .beatonly,
+        .notAvailable
+    ]
 
     static func compute(era: Era, artist: Artist, topLimit: Int = 8) -> EraInsights {
         let versions = era.allSongs.flatMap(\.versions)
@@ -58,7 +67,7 @@ struct EraInsights {
             leakDates: dateRange(versions.compactMap(\.leakDate)),
             // Trackers name the same fact "File Date" or "Recording Date"; the parser keeps both.
             fileDates: dateRange(versions.compactMap { $0.fileDate ?? $0.dateOfRecording }),
-            quality: qualityOrder.compactMap { v in tiers[v].map { (v, $0) } },
+            quality: qualityOrder.compactMap { variant in tiers[variant].map { (variant, $0) } },
             topProducers: top(producers, limit: topLimit),
             topFeatures: top(features, limit: topLimit),
             sections: (era.sections ?? []).filter { !$0.name.isEmpty }.map { Count(

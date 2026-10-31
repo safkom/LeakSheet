@@ -145,7 +145,7 @@ nonisolated enum MiscLinkClassifier {
             return components.path.split(separator: "/").first.map(String.init)
         }
         if host == "youtube.com" || host == "m.youtube.com" {
-            if let v = components.queryItems?.first(where: { $0.name == "v" })?.value { return v }
+            if let videoID = components.queryItems?.first(where: { $0.name == "v" })?.value { return videoID }
             let parts = components.path.split(separator: "/")
             if parts.count >= 2, ["embed", "shorts"].contains(parts[0]) {
                 return String(parts[1])

@@ -12,7 +12,7 @@ struct EraInfoSheet: View {
         self.embedded = embedded
     }
 
-    @Environment(ArtistViewModel.self) var vm
+    @Environment(ArtistViewModel.self) var viewModel
     @Environment(PlayerViewModel.self) var player
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
@@ -20,7 +20,7 @@ struct EraInfoSheet: View {
     /// The credit page the embedded form presents, since it has no stack to push onto.
     @State var creditSheet: CreditRef?
 
-    private var era: Era? { vm.artist.eras.first { $0.name == eraName } }
+    private var era: Era? { viewModel.artist.eras.first { $0.name == eraName } }
 
     var body: some View {
         if embedded {
@@ -47,10 +47,10 @@ struct EraInfoSheet: View {
     @ViewBuilder
     var content: some View {
         if let era {
-            let insights = EraInsights.compute(era: era, artist: vm.artist)
+            let insights = EraInsights.compute(era: era, artist: viewModel.artist)
             let listening = ListeningHistory.eraListening(
                 era,
-                entries: ListeningHistory.shared.entries(for: vm.artist.slug)
+                entries: ListeningHistory.shared.entries(for: viewModel.artist.slug)
             )
             VStack(spacing: 0) {
                 ScrollView {
@@ -176,16 +176,20 @@ struct EraInfoSheet: View {
     /// The counts the tracker states in its era header, which can differ from what parsed.
     @ViewBuilder
     private func trackerCounts(_ stats: EraStats?) -> some View {
-        let items: [StatGrid.Item] = stats.map { s in
+        let items: [StatGrid.Item] = stats.map { stat in
             // Tinted like the availability pills on the rows, so the two read as one vocabulary.
-            [StatGrid.Item(label: "OG Files", value: s.ogFiles ?? 0, tint: BadgeVariant.ogfile.color),
-             StatGrid.Item(label: "Full", value: max(s.full ?? 0, s.totalFull ?? 0), tint: BadgeVariant.full.color),
-             StatGrid.Item(label: "Tagged", value: s.tagged ?? 0, tint: BadgeVariant.tagged.color),
-             StatGrid.Item(label: "Partial", value: s.partial ?? 0, tint: BadgeVariant.partial.color),
-             StatGrid.Item(label: "Snippets", value: s.snippets ?? 0, tint: BadgeVariant.snippet.color),
-             StatGrid.Item(label: "Stem Bounces", value: s.stemBounces ?? 0, tint: BadgeVariant.stem.color),
-             StatGrid.Item(label: "Unavailable", value: s.unavailable ?? 0, tint: .secondary)]
-            + (s.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { StatGrid.Item(
+            [StatGrid.Item(label: "OG Files", value: stat.ogFiles ?? 0, tint: BadgeVariant.ogfile.color),
+             StatGrid.Item(
+                 label: "Full",
+                 value: max(stat.full ?? 0, stat.totalFull ?? 0),
+                 tint: BadgeVariant.full.color
+             ),
+             StatGrid.Item(label: "Tagged", value: stat.tagged ?? 0, tint: BadgeVariant.tagged.color),
+             StatGrid.Item(label: "Partial", value: stat.partial ?? 0, tint: BadgeVariant.partial.color),
+             StatGrid.Item(label: "Snippets", value: stat.snippets ?? 0, tint: BadgeVariant.snippet.color),
+             StatGrid.Item(label: "Stem Bounces", value: stat.stemBounces ?? 0, tint: BadgeVariant.stem.color),
+             StatGrid.Item(label: "Unavailable", value: stat.unavailable ?? 0, tint: .secondary)]
+            + (stat.releaseTypes ?? [:]).sorted { $0.key < $1.key }.map { StatGrid.Item(
                 label: $0.key.capitalized,
                 value: $0.value
             ) }
@@ -204,11 +208,11 @@ struct EraInfoSheet: View {
         if !counts.isEmpty {
             CardSection(title: title) {
                 FlowLayout(spacing: 6) {
-                    ForEach(counts) { c in
+                    ForEach(counts) { count in
                         CreditNameLink(
-                            ref: CreditRef(key: CreditNames.key(c.label), role: role),
-                            text: "\(c.label) · \(c.value)",
-                            spokenLabel: "\(c.label), \(c.value) tracks",
+                            ref: CreditRef(key: CreditNames.key(count.label), role: role),
+                            text: "\(count.label) · \(count.value)",
+                            spokenLabel: "\(count.label), \(count.value) tracks",
                             pushes: !embedded,
                             onOpen: { creditSheet = $0 }
                         )

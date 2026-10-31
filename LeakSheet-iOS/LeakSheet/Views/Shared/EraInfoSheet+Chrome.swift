@@ -5,11 +5,11 @@ extension EraInfoSheet {
 
     @ViewBuilder
     var playBar: some View {
-        if let filtered = vm.filteredEra(named: eraName), !filtered.streamableVersions.isEmpty {
+        if let filtered = viewModel.filteredEra(named: eraName), !filtered.streamableVersions.isEmpty {
             HStack(spacing: 12) {
                 Button {
                     Haptics.light()
-                    player.playEra(filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                    player.playEra(filtered, artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug)
                     if !embedded { dismiss() }
                 } label: {
                     Label("Play Era", systemImage: "play.fill")
@@ -23,7 +23,7 @@ extension EraInfoSheet {
                 .buttonStyle(.plain)
                 Button {
                     Haptics.light()
-                    player.shuffleEra(filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                    player.shuffleEra(filtered, artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug)
                     if !embedded { dismiss() }
                 } label: {
                     Image(systemName: "shuffle")
@@ -36,7 +36,7 @@ extension EraInfoSheet {
                 .accessibilityLabel("Shuffle era")
                 Button {
                     Haptics.light()
-                    player.playEraRadio(filtered, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                    player.playEraRadio(filtered, artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug)
                     if !embedded { dismiss() }
                 } label: {
                     Image(systemName: "dot.radiowaves.left.and.right")
@@ -95,11 +95,11 @@ extension EraInfoSheet {
     static func label(for variant: BadgeVariant) -> String {
         switch variant {
         case .lossless: "Lossless"
-        case .og: "OG"
-        case .cd: "CD Quality"
-        case .hq: "High Quality"
+        case .original: "OG"
+        case .cdQuality: "CD Quality"
+        case .highQuality: "High Quality"
         case .rec: "Recording"
-        case .lq: "Low Quality"
+        case .lowQuality: "Low Quality"
         case .beatonly: "Beat Only"
         default: "Unknown"
         }

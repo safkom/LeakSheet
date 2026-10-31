@@ -6,9 +6,9 @@ import SwiftUI
 /// selectable `List` for clicks, keys and hover) but on the same `ArtistViewModel`.
 struct MacArtistView: View {
     let artist: Artist
-    @Bindable var vm: ArtistViewModel
+    @Bindable var viewModel: ArtistViewModel
 
-    @State var ui = MacUIState.shared
+    @State var uiState = MacUIState.shared
     @State var lastUpdated: Date?
     @State var showStats = false
     @State var showTimeline = false
@@ -24,9 +24,9 @@ struct MacArtistView: View {
     /// so `MiscListView` takes a small dictionary instead of the whole era tree.
     let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist, vm: ArtistViewModel) {
+    init(artist: Artist, viewModel: ArtistViewModel) {
         self.artist = artist
-        self.vm = vm
+        self.viewModel = viewModel
         var eraArt: [String: String?] = [:]
         for era in artist.eras where eraArt[era.name.lowercased()] == nil {
             eraArt[era.name.lowercased()] = era.artUrl
@@ -38,13 +38,13 @@ struct MacArtistView: View {
     /// tabs force the flat list. Reads the view model's `expandedEra` directly: a second
     /// copy desyncs when turning off a badge filter clears it.
     var openEra: String? {
-        isFlatMode ? nil : vm.expandedEra
+        isFlatMode ? nil : viewModel.expandedEra
     }
 
     /// True when the filter state produces one cross-era song list; see
     /// DECISIONS.md::MacArtistView.swift::flat-modes.
     var isFlatMode: Bool {
-        vm.isSearching || vm.isBadgeFilterActive || vm.recents || isMiscMode
+        viewModel.isSearching || viewModel.isBadgeFilterActive || viewModel.recents || isMiscMode
     }
 
     /// Content tabs carry `MiscEntry` values, not songs, so they render through the
@@ -52,7 +52,7 @@ struct MacArtistView: View {
     ///
     /// ponytail: reuses iOS `MiscListView` verbatim (no selection, keys or hover); fork it if tabs get browsed heavily.
     var isMiscMode: Bool {
-        vm.selectedTabKey != nil
+        viewModel.selectedTabKey != nil
     }
 
     var hasTimeline: Bool {
@@ -67,17 +67,17 @@ struct MacArtistView: View {
         .background(Color.lsBackground)
         .navigationTitle(openEra ?? artist.name)
         .navigationSubtitle(subtitleText)
-        .searchable(text: $vm.searchQuery, prompt: "Search songs…")
+        .searchable(text: $viewModel.searchQuery, prompt: "Search songs…")
         .searchFocused($searchFocused)
         // ⌘F focuses the search field; the command bumps a token because focus state
         // belongs to this view.
-        .onChange(of: ui.focusSearchToken) { _, _ in searchFocused = true }
+        .onChange(of: uiState.focusSearchToken) { _, _ in searchFocused = true }
         .toolbar { toolbarItems }
         // Esc leaves an open era, as ⌘[ does.
         .onExitCommand {
             guard openEra != nil else { return }
-            vm.openEra(nil)
-            ui.selectedSong = nil
+            viewModel.openEra(nil)
+            uiState.selectedSong = nil
         }
         .sheet(isPresented: $showStats) {
             if let trackerStats = artist.trackerStats { TrackerStatsSheet(stats: trackerStats, artist: artist) }
@@ -88,28 +88,28 @@ struct MacArtistView: View {
         .sheet(item: $embedItem) { EmbedPlayerView(item: $0) }
         // Era card gradients and header contrast are derived per appearance.
         .onChange(of: colorScheme, initial: true) { _, scheme in
-            vm.setColorScheme(scheme)
+            viewModel.setColorScheme(scheme)
         }
         // Keyed on the view model's identity, not the slug: ⌘R replaces the parsed
         // tracker in place under the same slug.
-        .onChange(of: vm.eraPlaybackRevision) {
-            player.setArtistEras(vm.eraPlaybackContexts)
+        .onChange(of: viewModel.eraPlaybackRevision) {
+            player.setArtistEras(viewModel.eraPlaybackContexts)
         }
-        .task(id: ObjectIdentifier(vm)) {
+        .task(id: ObjectIdentifier(viewModel)) {
             if let url = artist.sourceUrl {
                 lastUpdated = await CacheService.shared.getCachedMeta(for: url)?.timestamp
             }
-            player.setArtistEras(vm.eraPlaybackContexts)
-            await vm.warmEraArt()
+            player.setArtistEras(viewModel.eraPlaybackContexts)
+            await viewModel.warmEraArt()
         }
     }
 
     private var subtitleText: String {
-        if let openEra, let era = vm.filteredEra(named: openEra) {
-            let n = era.allSongs.count
-            return "\(n.formatted()) song\(n == 1 ? "" : "s") · \(artist.name)"
+        if let openEra, let era = viewModel.filteredEra(named: openEra) {
+            let count = era.allSongs.count
+            return "\(count.formatted()) song\(count == 1 ? "" : "s") · \(artist.name)"
         }
-        return "\(vm.artistStats.total.formatted()) tracks"
+        return "\(viewModel.artistStats.total.formatted()) tracks"
     }
 
 }

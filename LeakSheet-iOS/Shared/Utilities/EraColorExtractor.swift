@@ -34,7 +34,7 @@ actor EraColorExtractor {
         // Run pixel sampling off the actor so concurrent extractions don't serialize.
         guard let rgb = await Self.dominantRGBOffActor(from: image) else { return nil }
         cache(rgb, forKey: cacheKey)
-        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+        return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
     }
 
     /// Extract from a URL via ImageCache (a 128px thumbnail is plenty: sampling is
@@ -46,7 +46,7 @@ actor EraColorExtractor {
         guard let image = await ImageCache.shared.loadImage(from: url, maxPixelSize: 128) else { return nil }
         guard let rgb = await Self.dominantRGBOffActor(from: image) else { return nil }
         cache(rgb, forKey: cacheKey)
-        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+        return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
     }
 
     /// Synchronous snapshot of the persisted color cache — lets view models
@@ -69,7 +69,7 @@ actor EraColorExtractor {
 
     // MARK: - Dominant RGB extraction (ColorThief-style median cut approximation)
 
-    struct RGB: Sendable { let r, g, b: Double }
+    struct RGB: Sendable { let red, green, blue: Double }
 
     /// Returns the dominant RGB color from the image using pixel quantization.
     /// Matches what ColorThief's getPalette()[0] returns for the same image.
@@ -82,13 +82,13 @@ actor EraColorExtractor {
     ) -> [Pixel] {
         var samples: [Pixel] = []
         samples.reserveCapacity((width / 2 + 1) * (height / 2 + 1))
-        for y in Swift.stride(from: 0, to: height, by: 2) {
-            for x in Swift.stride(from: 0, to: width, by: 2) {
-                let o = (y * width + x) * 4
-                let r = Int(pixels[o]), g = Int(pixels[o + 1]), b = Int(pixels[o + 2])
-                let transparent = Int(pixels[o + 3]) < 125
-                let white = r > 250 && g > 250 && b > 250
-                if !transparent && !white { samples.append(Pixel(r: r, g: g, b: b)) }
+        for yPos in Swift.stride(from: 0, to: height, by: 2) {
+            for xPos in Swift.stride(from: 0, to: width, by: 2) {
+                let offset = (yPos * width + xPos) * 4
+                let red = Int(pixels[offset]), green = Int(pixels[offset + 1]), blue = Int(pixels[offset + 2])
+                let transparent = Int(pixels[offset + 3]) < 125
+                let white = red > 250 && green > 250 && blue > 250
+                if !transparent && !white { samples.append(Pixel(red: red, green: green, blue: blue)) }
             }
         }
         return samples
@@ -130,30 +130,31 @@ actor EraColorExtractor {
         guard let best = boxes.max(by: { $0.count < $1.count }), !best.isEmpty else { return nil }
 
         var rSum = 0, gSum = 0, bSum = 0
-        for p in best { rSum += p.r; gSum += p.g; bSum += p.b }
-        let n = Double(best.count)
-        return RGB(r: Double(rSum) / n / 255.0, g: Double(gSum) / n / 255.0, b: Double(bSum) / n / 255.0)
+        for pixel in best { rSum += pixel.red; gSum += pixel.green; bSum += pixel.blue }
+        let count = Double(best.count)
+        return RGB(red: Double(rSum) / count / 255.0, green: Double(gSum) / count / 255.0,
+                   blue: Double(bSum) / count / 255.0)
     }
 
-    private struct Pixel: Sendable { let r, g, b: Int }
+    private struct Pixel: Sendable { let red, green, blue: Int }
 
     /// Splits a box at the median of its widest channel.
     nonisolated private static func medianSplit(_ box: ArraySlice<Pixel>) -> [ArraySlice<Pixel>] {
         var minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0
-        for p in box {
-            minR = min(minR, p.r); maxR = max(maxR, p.r)
-            minG = min(minG, p.g); maxG = max(maxG, p.g)
-            minB = min(minB, p.b); maxB = max(maxB, p.b)
+        for pixel in box {
+            minR = min(minR, pixel.red); maxR = max(maxR, pixel.red)
+            minG = min(minG, pixel.green); maxG = max(maxG, pixel.green)
+            minB = min(minB, pixel.blue); maxB = max(maxB, pixel.blue)
         }
         let rangeR = maxR - minR, rangeG = maxG - minG, rangeB = maxB - minB
 
         var sorted = Array(box)
         if rangeR >= rangeG && rangeR >= rangeB {
-            sorted.sort { $0.r < $1.r }
+            sorted.sort { $0.red < $1.red }
         } else if rangeG >= rangeB {
-            sorted.sort { $0.g < $1.g }
+            sorted.sort { $0.green < $1.green }
         } else {
-            sorted.sort { $0.b < $1.b }
+            sorted.sort { $0.blue < $1.blue }
         }
         let mid = sorted.count / 2
         return [sorted[..<mid], sorted[mid...]]
@@ -168,7 +169,7 @@ actor EraColorExtractor {
 
     private func cache(_ rgb: RGB, forKey key: String) {
         if cache[key] == nil { insertionOrder.append(key) }
-        cache[key] = [rgb.r, rgb.g, rgb.b]
+        cache[key] = [rgb.red, rgb.green, rgb.blue]
         Self.evict(cache: &cache, insertionOrder: &insertionOrder)
         scheduleFlush()
     }
@@ -183,7 +184,7 @@ actor EraColorExtractor {
     ) {
         guard cache.count > cacheLimit else { return }
         let excess = min(cache.count - cacheLimit, insertionOrder.count)
-        for k in insertionOrder.prefix(excess) { cache.removeValue(forKey: k) }
+        for key in insertionOrder.prefix(excess) { cache.removeValue(forKey: key) }
         insertionOrder.removeFirst(excess)
     }
 

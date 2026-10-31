@@ -6,7 +6,7 @@ extension MacArtistView {
 
     @ViewBuilder
     func content(_ rows: [MacListRow]) -> some View {
-        if vm.isFiltering && rows.isEmpty && !isMiscMode {
+        if viewModel.isFiltering && rows.isEmpty && !isMiscMode {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if isMiscMode {
@@ -29,14 +29,14 @@ extension MacArtistView {
             VStack(spacing: 0) {
                 pageHeader
                 MiscListView(
-                    vm: vm,
+                    viewModel: viewModel,
                     artistName: artist.name,
                     artistSlug: artist.slug,
                     eraArtByLowercasedName: eraArtByLowercasedName,
                     onShowDescription: showDetails,
                     onOpenLink: openLink
                 )
-                .id(vm.selectedTabKey ?? "misc")
+                .id(viewModel.selectedTabKey ?? "misc")
                 .padding(.bottom, 12)
             }
             .frame(maxWidth: Metrics.contentMaxWidth)
@@ -49,10 +49,10 @@ extension MacArtistView {
             VStack(spacing: 0) {
                 pageHeader
                 MacEraGrid(
-                    vm: vm,
+                    viewModel: viewModel,
                     onSelect: { eraName in
-                        vm.openEra(eraName)
-                        ui.selectedSong = nil
+                        viewModel.openEra(eraName)
+                        uiState.selectedSong = nil
                     },
                     onInfo: showEraInfo
                 )
@@ -69,12 +69,12 @@ extension MacArtistView {
             artistSlug: artist.slug,
             sourceUrl: artist.sourceUrl,
             onToggleExpansion: openEra == nil ? nil : { eraName, ordinal in
-                vm.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
+                viewModel.toggleSongExpansion(eraName: eraName, ordinal: ordinal)
             },
             onPlay: { version, eraName in play(version, eraName: eraName, in: rows) },
             onShowDescription: showDetails,
             onSelect: { row in
-                ui.selectedSong = row?.payload(artistName: artist.name, artistSlug: artist.slug)
+                uiState.selectedSong = row?.payload(artistName: artist.name, artistSlug: artist.slug)
             },
             header: { pageHeader }
         )
@@ -86,9 +86,9 @@ extension MacArtistView {
 
     @ViewBuilder
     private var emptyState: some View {
-        if vm.isSearching {
-            ContentUnavailableView.search(text: vm.content.state.query)
-        } else if vm.recents {
+        if viewModel.isSearching {
+            ContentUnavailableView.search(text: viewModel.content.state.query)
+        } else if viewModel.recents {
             ContentUnavailableView(
                 "No Recent Leaks", systemImage: "clock",
                 description: Text("No versions carry a leak or file date.")
@@ -112,8 +112,8 @@ extension MacArtistView {
     /// arrays the view model already computed off-main; nothing is filtered or
     /// sorted here.
     var visibleRows: [MacListRow] {
-        if vm.isSearching {
-            return vm.content.searchResults.map {
+        if viewModel.isSearching {
+            return viewModel.content.searchResults.map {
                 .song(
                     $0.song,
                     version: $0.version,
@@ -123,8 +123,8 @@ extension MacArtistView {
                 )
             }
         }
-        if vm.recents {
-            return vm.visibleRecents.map {
+        if viewModel.recents {
+            return viewModel.visibleRecents.map {
                 .song(
                     $0.song,
                     version: $0.version,
@@ -134,7 +134,7 @@ extension MacArtistView {
                 )
             }
         }
-        if vm.isBadgeFilterActive {
+        if viewModel.isBadgeFilterActive {
             return flatEraRows
         }
         guard let openEra else { return [] }
@@ -145,7 +145,7 @@ extension MacArtistView {
     /// the shape the badge filters and content tabs need.
     private var flatEraRows: [MacListRow] {
         var out: [MacListRow] = []
-        for era in vm.content.eras {
+        for era in viewModel.content.eras {
             let songs = era.allSongs
             guard !songs.isEmpty else { continue }
             out.append(.header(era.era.name, id: era.era.name))
@@ -163,7 +163,7 @@ extension MacArtistView {
     /// `eraRows` — `rebuildEraRows` emits song/version rows only for the single
     /// expanded era, so filtering by name yields exactly this era's content.
     private func rows(forEra name: String) -> [MacListRow] {
-        vm.eraRows.compactMap { row -> MacListRow? in
+        viewModel.eraRows.compactMap { row -> MacListRow? in
             guard row.eraName == name else { return nil }
             switch row {
             case .card, .divider, .eraGap:
@@ -189,17 +189,17 @@ extension MacArtistView {
     // MARK: - Actions
 
     func showEraInfo(_ name: String) {
-        ui.selectedEra = name
-        ui.inspectorTab = .era
-        ui.showInspector = true
+        uiState.selectedEra = name
+        uiState.inspectorTab = .era
+        uiState.showInspector = true
     }
 
     /// Details is a panel, never a modal — selecting a row already updates it,
     /// and an explicit Details action just makes sure the rail is showing.
     private func showDetails(_ payload: DescriptionSheet.Payload) {
-        ui.selectedSong = payload
-        ui.inspectorTab = .details
-        ui.showInspector = true
+        uiState.selectedSong = payload
+        uiState.inspectorTab = .details
+        uiState.showInspector = true
     }
 
     /// Embeddable hosts get their in-app player; everything else opens in the
@@ -219,7 +219,7 @@ extension MacArtistView {
     /// continues down whatever the user is actually looking at.
     func play(_ version: SongVersion, eraName: String, in rows: [MacListRow]) {
         if let openEra, !isFlatMode, openEra == eraName,
-           let filtered = vm.filteredEra(named: eraName) {
+           let filtered = viewModel.filteredEra(named: eraName) {
             player.playInEra(
                 version, eraName: eraName, artistName: artist.name,
                 artUrl: filtered.era.artUrl ?? "",
@@ -230,8 +230,8 @@ extension MacArtistView {
         let items: [PlaybackListItem] = rows.compactMap { row in
             switch row {
             case .header: return nil
-            case .song(let song, let v, let era, let art, _):
-                guard let picked = v ?? song.bestPlayableVersion, picked.isStreamable else { return nil }
+            case .song(let song, let rowVersion, let era, let art, _):
+                guard let picked = rowVersion ?? song.bestPlayableVersion, picked.isStreamable else { return nil }
                 return PlaybackListItem(
                     version: picked,
                     artistName: artist.name,
@@ -239,10 +239,10 @@ extension MacArtistView {
                     artUrl: art ?? "",
                     artistSlug: artist.slug
                 )
-            case .version(let v, _, let era, let art, _, _):
-                guard v.isStreamable else { return nil }
+            case .version(let rowVersion, _, let era, let art, _, _):
+                guard rowVersion.isStreamable else { return nil }
                 return PlaybackListItem(
-                    version: v,
+                    version: rowVersion,
                     artistName: artist.name,
                     eraName: era,
                     artUrl: art ?? "",

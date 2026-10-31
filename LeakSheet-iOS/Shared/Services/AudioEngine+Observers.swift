@@ -167,8 +167,8 @@ extension AudioEngine {
 
     /// Apple's recommended way to track play/pause/waiting state.
     private func observeTimeControlStatus() {
-        guard let p = player else { return }
-        observations.append(p.observe(\.timeControlStatus, changeHandler: { [weak self] player, _ in
+        guard let player else { return }
+        observations.append(player.observe(\.timeControlStatus, changeHandler: { [weak self] player, _ in
             let status = player.timeControlStatus
             Task { @MainActor [weak self] in
                 self?.handleTimeControlStatus(status)

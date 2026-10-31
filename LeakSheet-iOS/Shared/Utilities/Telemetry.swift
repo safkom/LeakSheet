@@ -28,6 +28,9 @@ nonisolated enum Telemetry {
     /// Logs locally and records the failure in GlitchTip.
     static func report(_ message: String, category: String, attributes: [String: Any] = [:]) {
         Logger(subsystem: "si.safko.LeakSheet", category: category).error("\(message, privacy: .public)")
-        SentrySDK.logger.error(message, attributes: attributes.merging(["category": category]) { a, _ in a })
+        SentrySDK.logger.error(
+            message,
+            attributes: attributes.merging(["category": category]) { current, _ in current }
+        )
     }
 }

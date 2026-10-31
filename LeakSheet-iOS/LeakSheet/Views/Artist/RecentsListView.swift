@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RecentsListView: View {
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
     let artistName: String
     let artistSlug: String
     let sourceUrl: String?
@@ -10,10 +10,10 @@ struct RecentsListView: View {
     @Environment(PlayerViewModel.self) private var player
 
     var body: some View {
-        let visible = vm.visibleRecents
+        let visible = viewModel.visibleRecents
 
         if visible.isEmpty {
-            if vm.isFiltering {
+            if viewModel.isFiltering {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
@@ -36,7 +36,7 @@ struct RecentsListView: View {
                     HStack(spacing: 8) {
                         Text(result.era.name.uppercased())
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(vm.eraDisplay[result.era.name]?.readableHeader ?? .secondary)
+                            .foregroundStyle(viewModel.eraDisplay[result.era.name]?.readableHeader ?? .secondary)
                             // The name wins the row; the rule takes what is left.
                             .layoutPriority(1)
                         Rectangle()
@@ -79,7 +79,7 @@ struct RecentsListView: View {
                         showVersionBadge: true,
                         // Swipe-to-play continues down the recents list like tap.
                         onPlay: { _ in
-                            if let (items, idx) = vm.recentPlayback(for: result.id) {
+                            if let (items, idx) = viewModel.recentPlayback(for: result.id) {
                                 player.playInList(items, startAt: idx)
                             }
                         },
@@ -99,7 +99,7 @@ struct RecentsListView: View {
                 // Same panel as the eras branch; no card above it, so the group rounds
                 // at both ends.
                 .songPanel(
-                    vm.eraDisplay[result.era.name],
+                    viewModel.eraDisplay[result.era.name],
                     isFirst: startsGroup,
                     isLast: idx == visible.count - 1
                         || visible[idx + 1].era.name != result.era.name
@@ -107,8 +107,8 @@ struct RecentsListView: View {
                 .onAppear {
                     // Against the LIVE count, not the `visible` snapshot a fast scroll would append
                     // from repeatedly. Eight rows early so the next page lands in time.
-                    if idx >= vm.visibleRecents.count - 8 {
-                        vm.loadMoreRecents()
+                    if idx >= viewModel.visibleRecents.count - 8 {
+                        viewModel.loadMoreRecents()
                     }
                 }
               }

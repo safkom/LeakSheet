@@ -15,9 +15,9 @@ struct TVBrowseView: View {
     @State private var path: [TVRoute] = []
 
     private var filtered: [DiscoveryArtist] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return artists }
-        return artists.filter { $0.name.lowercased().contains(q) }
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return artists }
+        return artists.filter { $0.name.lowercased().contains(query) }
     }
 
     private let columns = [GridItem(.adaptive(minimum: 340), spacing: 48)]
@@ -85,10 +85,10 @@ struct TVBrowseView: View {
         defer { loading = false }
         do {
             artists = try await APIClient.shared.fetchTrackers()
-                .sorted { a, b in
-                    if a.best == true && b.best != true { return true }
-                    if a.best != true && b.best == true { return false }
-                    return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                .sorted { lhs, rhs in
+                    if lhs.best == true && rhs.best != true { return true }
+                    if lhs.best != true && rhs.best == true { return false }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
                 }
         } catch {
             self.error = error.localizedDescription

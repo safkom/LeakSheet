@@ -5,65 +5,72 @@ extension CreditPageView {
 
     /// Title, tag and badge on one line over the quality pills, with the play control
     /// centred beside both: the era list's nested version row assumes a song header above it.
-    func trackRow(_ c: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
-        let isCurrent = player.isNowPlaying(c.version, inEra: c.eraName)
-        let heard = ListeningHistory.shared.isHeard(c.version, artistSlug: vm.artist.slug, eraName: c.eraName)
-        let detail = [c.version.trackLength, c.version.leakDate]
+    func trackRow(_ credited: CreditProfile.Credited, _ profile: CreditProfile) -> some View {
+        let isCurrent = player.isNowPlaying(credited.version, inEra: credited.eraName)
+        let heard = ListeningHistory.shared.isHeard(
+            credited.version,
+            artistSlug: viewModel.artist.slug,
+            eraName: credited.eraName
+        )
+        let detail = [credited.version.trackLength, credited.version.leakDate]
             .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && $0 != "?:??" }
             .joined(separator: " · ")
         return HStack(spacing: 10) {
             SongPlayControl(
                 isCurrent: isCurrent, isLoading: player.loading, isPlaying: player.isPlaying,
-                canStream: c.version.isStreamable, title: c.version.name, link: c.version.streamableLink,
-                play: { play(c.version, in: profile.streamable) }
+                canStream: credited.version.isStreamable, title: credited.version.name,
+                link: credited.version.streamableLink,
+                play: { play(credited.version, in: profile.streamable) }
             )
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(c.song.baseName)
+                    Text(credited.song.baseName)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(isCurrent ? Color.lsAccent : .primary)
                         .lineLimit(1)
                     if heard {
                         HeardDot()
                     }
-                    if let tag = c.version.versionTag {
+                    if let tag = credited.version.versionTag {
                         Text(tag)
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    if let badge = c.version.badge.flatMap(Badge.init(rawValue:)) {
+                    if let badge = credited.version.badge.flatMap(Badge.init(rawValue:)) {
                         Text(badge.emoji).font(.caption)
                     }
                 }
-                BadgeRowView(version: c.version, trailing: detail.isEmpty ? nil : detail)
+                BadgeRowView(version: credited.version, trailing: detail.isEmpty ? nil : detail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             ThreeDotMenu(
-                version: c.version, song: c.song,
-                artistName: vm.artist.name, artistSlug: vm.artist.slug, sourceUrl: vm.artist.sourceUrl,
-                eraName: c.eraName, eraArt: c.eraArt,
+                version: credited.version, song: credited.song,
+                artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug,
+                sourceUrl: viewModel.artist.sourceUrl,
+                eraName: credited.eraName, eraArt: credited.eraArt,
                 onPlay: { play($0, in: profile.streamable) }, onShowDescription: { description = $0 }
             )
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
-        .onTapGesture { description = payload(c) }
+        .onTapGesture { description = payload(credited) }
         .accessibilityElement(children: .combine)
         .accessibilityValue(heard ? "played" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows details")
     }
 
-    func payload(_ c: CreditProfile.Credited) -> DescriptionSheet.Payload {
+    func payload(_ credited: CreditProfile.Credited) -> DescriptionSheet.Payload {
         DescriptionSheet.Payload(
-            song: c.song, version: c.version, artistName: vm.artist.name, artistSlug: vm.artist.slug,
-            eraName: c.eraName, eraArt: c.eraArt
+            song: credited.song, version: credited.version,
+            artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug,
+            eraName: credited.eraName, eraArt: credited.eraArt
         )
     }
 
-    static func count(_ n: Int, _ noun: String) -> String {
-        "\(n.formatted()) \(n == 1 ? noun : noun + "s")"
+    static func count(_ amount: Int, _ noun: String) -> String {
+        "\(amount.formatted()) \(amount == 1 ? noun : noun + "s")"
     }
 
     func countRow(_ label: String, _ value: String, dot: Color? = nil) -> some View {
@@ -110,7 +117,7 @@ extension CreditPageView {
                 .accessibilityLabel("Shuffle all tracks")
                 Button {
                     Haptics.light()
-                    player.playCreditRadio(list, artistName: vm.artist.name, artistSlug: vm.artist.slug)
+                    player.playCreditRadio(list, artistName: viewModel.artist.name, artistSlug: viewModel.artist.slug)
                 } label: {
                     Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.headline)
@@ -131,8 +138,8 @@ extension CreditPageView {
     private func items(_ list: [CreditProfile.Credited]) -> [PlaybackListItem] {
         list.map {
             PlaybackListItem(
-                version: $0.version, artistName: vm.artist.name, eraName: $0.eraName,
-                artUrl: $0.eraArt ?? "", artistSlug: vm.artist.slug
+                version: $0.version, artistName: viewModel.artist.name, eraName: $0.eraName,
+                artUrl: $0.eraArt ?? "", artistSlug: viewModel.artist.slug
             )
         }
     }

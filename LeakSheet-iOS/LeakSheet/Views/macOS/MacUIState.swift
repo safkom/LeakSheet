@@ -12,7 +12,7 @@ enum MacSelection: Hashable {
 /// A parsed tracker held open across sidebar navigation.
 struct LoadedTracker {
     let artist: Artist
-    let vm: ArtistViewModel
+    let viewModel: ArtistViewModel
 }
 
 /// Mac window + library state. One main window, so a singleton read by the menu

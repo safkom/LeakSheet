@@ -16,7 +16,7 @@ final class FavouritesManager {
         didSet {
             keyIndex = Set(entries.map(\.key))
             // Invalidated here rather than at each mutation, so no write path can miss it.
-            _groupedCache = nil
+            groupedCache = nil
         }
     }
 
@@ -53,7 +53,7 @@ final class FavouritesManager {
         /// Prefers the full stored snapshot; falls back to the legacy flat
         /// fields for entries written before the snapshot field existed.
         var toSongVersion: SongVersion? {
-            if let v = primaryVersion { return v }
+            if let primary = primaryVersion { return primary }
             guard let name = primaryVersionName else { return nil }
             return SongVersion(
                 name: name,
@@ -98,7 +98,7 @@ final class FavouritesManager {
         load()
     }
 
-    @ObservationIgnored var _groupedCache: [GroupedArtist]?
+    @ObservationIgnored var groupedCache: [GroupedArtist]?
 
     // MARK: - Key
 
@@ -217,14 +217,19 @@ final class FavouritesManager {
         primaryVersion: SongVersion?, artistSlug: String, artistName: String,
         sourceUrl: String?, eraName: String, eraArt: String?
     ) -> Bool {
-        let k = Self.key(artistSlug: artistSlug, eraName: eraName, baseName: baseName, discriminator: discriminator)
-        if let idx = entries.firstIndex(where: { $0.key == k }) {
+        let entryKey = Self.key(
+            artistSlug: artistSlug,
+            eraName: eraName,
+            baseName: baseName,
+            discriminator: discriminator
+        )
+        if let idx = entries.firstIndex(where: { $0.key == entryKey }) {
             entries.remove(at: idx)
             save()
             return false
         } else {
             let entry = FavouriteEntry(
-                key: k,
+                key: entryKey,
                 artistSlug: artistSlug,
                 artistName: artistName,
                 sourceUrl: Self.resolvedSourceUrl(

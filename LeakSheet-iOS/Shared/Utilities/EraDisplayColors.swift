@@ -35,7 +35,7 @@ nonisolated struct EraDisplayColors: Equatable, Sendable {
     // MainActor-isolated; derivation happens once per era on the main actor.
     @MainActor
     static func derive(from dominant: Color, in scheme: ColorScheme = .dark) -> EraDisplayColors {
-        let (r, g, b) = dominant.rgbComponents(in: scheme)
+        let (redValue, greenValue, blueValue) = dominant.rgbComponents(in: scheme)
         // Opaque gradient stops. `top`/`bottom` below carry opacity for the
         // render; the contrast decision uses the solid colours.
         let topSolid: Color
@@ -44,9 +44,13 @@ nonisolated struct EraDisplayColors: Equatable, Sendable {
             // Darken the cover colour toward the black background; the multiplier adapts to
             // the cover's brightness (see darkDimming).
             let scale = Self.darkDimming(forLuminance: dominant.relativeLuminance(in: scheme))
-            topSolid = Color(red: r * scale, green: g * scale, blue: b * scale)
+            topSolid = Color(red: redValue * scale, green: greenValue * scale, blue: blueValue * scale)
             let bottomScale = scale * (0.40 / 0.55)
-            bottomSolid = Color(red: r * bottomScale, green: g * bottomScale, blue: b * bottomScale)
+            bottomSolid = Color(
+                red: redValue * bottomScale,
+                green: greenValue * bottomScale,
+                blue: blueValue * bottomScale
+            )
         } else {
             // Tint white WITH the cover instead: the dark multipliers would render every
             // card as a dark slab on a white page.

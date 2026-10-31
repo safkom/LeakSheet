@@ -8,11 +8,11 @@ struct LeakSheetCommands: Commands {
     /// Seconds moved by Skip Forward / Skip Back.
     private static let skipInterval: TimeInterval = 15
 
-    private var showingQueue: Bool { ui.showInspector && ui.inspectorTab == .queue }
-    private var showingDetails: Bool { ui.showInspector && ui.inspectorTab == .details }
+    private var showingQueue: Bool { uiState.showInspector && uiState.inspectorTab == .queue }
+    private var showingDetails: Bool { uiState.showInspector && uiState.inspectorTab == .details }
 
     @State private var player = PlayerViewModel.shared
-    @State private var ui = MacUIState.shared
+    @State private var uiState = MacUIState.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -55,9 +55,9 @@ struct LeakSheetCommands: Commands {
         }
 
         CommandMenu("Go") {
-            Button("Browse") { ui.selection = .browse; openWindow(id: "main") }
+            Button("Browse") { uiState.selection = .browse; openWindow(id: "main") }
                 .keyboardShortcut("1", modifiers: .command)
-            Button("Favourites") { ui.selection = .favourites; openWindow(id: "main") }
+            Button("Favourites") { uiState.selection = .favourites; openWindow(id: "main") }
                 .keyboardShortcut("2", modifiers: .command)
         }
 
@@ -65,17 +65,17 @@ struct LeakSheetCommands: Commands {
         CommandGroup(replacing: .help) {}
 
         CommandMenu("Tracker") {
-            Button("Refresh Tracker") { ui.refreshToken += 1 }
+            Button("Refresh Tracker") { uiState.refreshToken += 1 }
                 .keyboardShortcut("r", modifiers: .command)
                 // Only meaningful with a tracker selected.
-                .disabled(ui.selectedSlug == nil)
+                .disabled(uiState.selectedSlug == nil)
 
             Button("Paste Tracker URL") {
                 guard let pasted = Pasteboard.string?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                     !pasted.isEmpty
                 else { return }
-                ui.pastedURL = pasted
+                uiState.pastedURL = pasted
             }
             .keyboardShortcut("v", modifiers: [.shift, .command])
         }
@@ -84,7 +84,7 @@ struct LeakSheetCommands: Commands {
         // so this nudges a token it observes.
         CommandGroup(replacing: .textEditing) {
             Button("Find") {
-                ui.focusSearchToken += 1
+                uiState.focusSearchToken += 1
                 openWindow(id: "main")
             }
             .keyboardShortcut("f", modifiers: .command)
@@ -95,10 +95,10 @@ struct LeakSheetCommands: Commands {
             // while Now Playing is key has no visible effect.
             Button(showingDetails ? "Hide Song Details" : "Show Song Details") {
                 if showingDetails {
-                    ui.showInspector = false
+                    uiState.showInspector = false
                 } else {
-                    ui.inspectorTab = .details
-                    ui.showInspector = true
+                    uiState.inspectorTab = .details
+                    uiState.showInspector = true
                 }
                 openWindow(id: "main")
             }
@@ -106,10 +106,10 @@ struct LeakSheetCommands: Commands {
 
             Button(showingQueue ? "Hide Queue" : "Show Queue") {
                 if showingQueue {
-                    ui.showInspector = false
+                    uiState.showInspector = false
                 } else {
-                    ui.inspectorTab = .queue
-                    ui.showInspector = true
+                    uiState.inspectorTab = .queue
+                    uiState.showInspector = true
                 }
                 openWindow(id: "main")
             }

@@ -47,12 +47,17 @@ extension ArtistViewModel {
         var byAltTitleKey: [String: [CrossEraRef]] = [:]
 
         /// Same order as `era.allSongs`, which flattens the sections.
-        mutating func add(_ era: Era, at ei: Int) {
-            for (si, section) in (era.sections ?? []).enumerated() {
-                for (sj, song) in section.songs.enumerated() {
-                    for (vi, version) in song.versions.enumerated() {
+        mutating func add(_ era: Era, at eraIndex: Int) {
+            for (sectionIndex, section) in (era.sections ?? []).enumerated() {
+                for (songIndex, song) in section.songs.enumerated() {
+                    for (versionIndex, version) in song.versions.enumerated() {
                         Precomputed.indexCredits(
-                            version, at: CreditHit(era: ei, section: si, song: sj, version: vi),
+                            version, at: CreditHit(
+                                era: eraIndex,
+                                section: sectionIndex,
+                                song: songIndex,
+                                version: versionIndex
+                            ),
                             into: &creditIndex, spellings: &spellings
                         )
                     }
@@ -139,11 +144,11 @@ extension ArtistViewModel {
             var index = TrackerIndex()
             var statsByName: [String: Stats] = [:]
             var eraStats: [Stats] = []
-            for (ei, era) in artist.eras.enumerated() {
+            for (eraIndex, era) in artist.eras.enumerated() {
                 let stats = ArtistViewModel.computeEraStats(era)
                 statsByName[era.name] = stats
                 eraStats.append(stats)
-                index.add(era, at: ei)
+                index.add(era, at: eraIndex)
             }
             let total = eraStats.reduce(0) { $0 + $1.total }
             let available = eraStats.reduce(0) { $0 + $1.available }
@@ -153,7 +158,7 @@ extension ArtistViewModel {
             self.creditIndex = index.creditIndex
             self.creditDisplayNames = index.spellings.mapValues { counts in
                 // Most common spelling; the alphabetically first one wins a tie.
-                counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key ?? ""
+                counts.max { lhs, rhs in lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key > rhs.key }?.key ?? ""
             }
             self.eraStatsByName = statsByName
             var tabStats: [String: Stats] = [:]
@@ -270,8 +275,8 @@ extension ArtistViewModel {
         }
         // Set iteration order is random; era order, then title, is stable.
         linked.sort {
-            let (a, b) = (eraOrder[$0.eraName] ?? .max, eraOrder[$1.eraName] ?? .max)
-            return a != b ? a < b : $0.song.baseName < $1.song.baseName
+            let (lhsOrder, rhsOrder) = (eraOrder[$0.eraName] ?? .max, eraOrder[$1.eraName] ?? .max)
+            return lhsOrder != rhsOrder ? lhsOrder < rhsOrder : $0.song.baseName < $1.song.baseName
         }
         // ponytail: cap the row rather than rank; a generic alias ("Intro") names dozens of songs.
         return Array(linked.prefix(Self.maxLinkedSongs))

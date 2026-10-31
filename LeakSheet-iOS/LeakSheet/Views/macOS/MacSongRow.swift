@@ -43,8 +43,8 @@ struct MacSongRow: View {
 
     /// First alternate title that differs from the base name.
     private var akaTitle: String? {
-        for v in song.versions {
-            if let alt = v.altTitles?.first(where: {
+        for version in song.versions {
+            if let alt = version.altTitles?.first(where: {
                 !$0.isEmpty && $0.caseInsensitiveCompare(song.baseName) != .orderedSame
             }) {
                 return alt
@@ -86,9 +86,9 @@ struct MacSongRow: View {
 
                 // One flowing line, badges then credits.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if !hasMultiple || showVersionBadge, let v = version {
-                        BadgeRowView(version: v)
-                        CreditTagsView(version: v, inline: true)
+                    if !hasMultiple || showVersionBadge, let shown = version {
+                        BadgeRowView(version: shown)
+                        CreditTagsView(version: shown, inline: true)
                     } else if let best = song.bestPlayableVersion {
                         // Collapsed multi-version row: badge the version a play
                         // action would actually reach, not versions.first.
@@ -116,9 +116,9 @@ struct MacSongRow: View {
     /// (a song whose every version was filtered out) get no actions.
     @ViewBuilder
     private var menuItems: some View {
-        if let v = version {
+        if let shown = version {
             SongContextMenu(
-                version: v, song: song,
+                version: shown, song: song,
                 artistName: artistName, artistSlug: artistSlug, sourceUrl: sourceUrl,
                 eraName: eraName, eraArt: eraArt,
                 onPlay: onPlay, onShowDescription: onShowDescription
@@ -139,7 +139,7 @@ struct MacSongRow: View {
                     .foregroundStyle(Color.lsAccent)
             }
         } else if showVersionBadge {
-            if let b = version?.badge, let badge = Badge(rawValue: b) {
+            if let rawBadge = version?.badge, let badge = Badge(rawValue: rawBadge) {
                 Text(badge.emoji).font(.caption)
             } else {
                 Color.clear
@@ -156,10 +156,10 @@ struct MacSongRow: View {
     @ViewBuilder
     private var trailingControls: some View {
         HStack(spacing: 2) {
-            if canStream, let v = version {
-                let downHost = HostHealthStore.shared.downHost(for: v.streamableLink)
+            if canStream, let shown = version {
+                let downHost = HostHealthStore.shared.downHost(for: shown.streamableLink)
                 Button {
-                    play(v)
+                    play(shown)
                 } label: {
                     Image(systemName: "play.fill")
                         .font(.caption)
@@ -207,11 +207,17 @@ struct MacSongRow: View {
         favourites.isFavourited(song: song, artistSlug: artistSlug, eraName: eraName)
     }
 
-    private func play(_ v: SongVersion) {
+    private func play(_ version: SongVersion) {
         if let onPlay {
-            onPlay(v)
+            onPlay(version)
         } else {
-            player.playTrack(v, artistName: artistName, eraName: eraName, artUrl: eraArt ?? "", artistSlug: artistSlug)
+            player.playTrack(
+                version,
+                artistName: artistName,
+                eraName: eraName,
+                artUrl: eraArt ?? "",
+                artistSlug: artistSlug
+            )
         }
     }
 }
