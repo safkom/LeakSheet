@@ -741,9 +741,9 @@ def _display_tab_name(name: str) -> str:
 # See docs/decisions.md::fetcher.py::tab-qualifier-rank
 # The whole qualifier must be the marker: "(New Leaks)" names a subset, not a successor.
 # Version marks count from 2 up: "(1.0)" or "(v1)" names the original.
-_NEW_TAB_QUALIFIER_RE = re.compile(r"^[\(\[]\s*([a-z]+|v?\d+(?:\.0)?)\s*!*\s*[\)\]]$")
+_NEW_TAB_QUALIFIER_RE = re.compile(r"^[\(\[]\s*([a-z]+|v?\d+(?:\.0)?)\s*!*\s*[\)\]]$", re.ASCII)
 _NEW_TAB_WORDS = frozenset({"new", "updated", "current", "latest"})
-_VERSION_MARK_RE = re.compile(r"(v)?(\d+)(\.0)?")
+_VERSION_MARK_RE = re.compile(r"(v)?(\d+)(\.0)?", re.ASCII)
 
 
 def _is_newer_qualifier(qualifier: str) -> bool:

@@ -1794,7 +1794,7 @@ def _derive_media_kind(container: str | None, codec: str | None) -> str:
 
 
 # pillows.su field → normalized key, in output order. LOSSLESS and channels convert below.
-_PILLOWS_FIELDS = (
+_PILLOWS_OUTPUT = (
     ("CONTAINER", "container"), ("CODEC", "codec"), (_TAG_CODEC_PROFILE, "codec_profile"),
     ("BITRATE", "bitrate"), (_TAG_SAMPLE_RATE, "sample_rate"), (_TAG_BITS, "bits_per_sample"),
     ("LOSSLESS", "lossless"), (_TAG_CHANNELS, "channels"), ("DURATION", "duration"),
@@ -1824,7 +1824,7 @@ def _parse_pillows_metadata(text: str) -> dict:
         val = parts[i + 1].strip()
         if val and val.lower() not in ("unknown", "null", "[object object]"):
             pairs[parts[i].strip().upper()] = val
-    for key, name in _PILLOWS_FIELDS:
+    for key, name in _PILLOWS_OUTPUT:
         if key in pairs:
             result[name] = _pillows_value(key, pairs[key])
     result["media_kind"] = _derive_media_kind(result.get("container"), result.get("codec"))

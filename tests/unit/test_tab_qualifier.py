@@ -10,7 +10,7 @@ def test_newer_marks(qualifier):
     assert _is_newer_qualifier(qualifier.lower())
 
 
-@pytest.mark.parametrize("qualifier", ["(v1)", "(1.0)", "(v2.0)", "(2)", "(new leaks)", "(newer)", "(v)"])
+@pytest.mark.parametrize("qualifier", ["(v1)", "(1.0)", "(v2.0)", "(2)", "(new leaks)", "(newer)", "(v)", "(v\u0662)", "(\uff12.0)"])
 def test_not_newer_marks(qualifier):
     assert not _is_newer_qualifier(qualifier)
 
