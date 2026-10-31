@@ -49,7 +49,7 @@ enum StreamResolver {
     /// Query keys Google Docs glues onto every link it rewrites through its redirector:
     /// not part of the file URL, and the sheet parser carries them through verbatim.
     private nonisolated static let googleWrapperKeys: Set<String> = [
-        "sa", "source", "ust", "usg", "ved",
+        "sa", "source", "ust", "usg", "ved"
     ]
 
     /// A link with Google's redirect tracking removed, so it isn't nested into `/stream?url=`.
@@ -119,7 +119,7 @@ enum StreamResolver {
                 let id = link.id(after: "u", allowsSeparators: false)
                 return id.isEmpty ? nil : .pixeldrain(id: id)
             },
-            "drive.google.com": gdrive,
+            "drive.google.com": gdrive
         ]
     }()
 

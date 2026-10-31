@@ -80,7 +80,7 @@ struct CreditLineView: View {
             (.featuring, version.featuring), (.producers, version.producers),
             (.collaboration, version.collaboration), (.refs, version.refs),
             (.director, version.director), (.engineer, version.engineer),
-            (.creditedArtists, version.creditedArtists),
+            (.creditedArtists, version.creditedArtists)
         ].compactMap { type, text in
             guard let text, !text.isEmpty else { return nil }
             return (type, text)

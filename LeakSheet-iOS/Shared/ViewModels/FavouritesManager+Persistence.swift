@@ -12,7 +12,6 @@ extension FavouritesManager {
         eras: [(eraName: String, eraArt: String?, entries: [FavouriteEntry])]
     )
 
-
     var groupedByArtist: [GroupedArtist] {
         // Read `entries` before the cache check: the cache is @ObservationIgnored, so a hit
         // that never touched `entries` would leave the reading view subscribed to nothing.
@@ -179,7 +178,6 @@ extension FavouritesManager {
             return entry.rekeyed(to: newKey, baseName: stripped)
         }
     }
-
 
     /// Persist off the main actor and coalesce bursts of toggles into one write.
     func save() {

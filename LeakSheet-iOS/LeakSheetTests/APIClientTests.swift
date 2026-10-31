@@ -123,7 +123,7 @@ extension APIClientTests {
         let body = Self.ndjson([
             #"{"type":"progress","stage":"parsing","message":"Parsing Unreleased (11.8 MB)"}"#,
             #"{"type":"progress","stage":"tabs","message":"Read Misc","done":2,"total":9}"#,
-            #"{"type":"artist","etag":"8c6f587cdeec162e","bytes":\#(Self.artistBody.count)}"#,
+            #"{"type":"artist","etag":"8c6f587cdeec162e","bytes":\#(Self.artistBody.count)}"#
         ], payload: Self.artistBody)
         nonisolated(unsafe) var accept: String?
         StubProtocol.handler = { req in
@@ -150,7 +150,7 @@ extension APIClientTests {
     @Test func `a streamed failure throws the server's status and message`() async throws {
         let body = Self.ndjson([
             #"{"type":"progress","stage":"fetching","message":"Opening the tracker"}"#,
-            #"{"type":"error","status":403,"detail":"This tracker is private or has been taken down."}"#,
+            #"{"type":"error","status":403,"detail":"This tracker is private or has been taken down."}"#
         ])
         StubProtocol.handler = { req in
             (Self.response(200, headers: ["Content-Type": "application/x-ndjson"], url: req.url!), body)
@@ -167,7 +167,7 @@ extension APIClientTests {
     @Test func `a stream cut off mid-payload says so instead of failing to decode`() async throws {
         let truncated = Self.artistBody.prefix(Self.artistBody.count - 5)
         let body = Self.ndjson([
-            #"{"type":"artist","etag":"8c6f587cdeec162e","bytes":\#(Self.artistBody.count)}"#,
+            #"{"type":"artist","etag":"8c6f587cdeec162e","bytes":\#(Self.artistBody.count)}"#
         ]) + truncated
         StubProtocol.handler = { req in
             (Self.response(200, headers: ["Content-Type": "application/x-ndjson"], url: req.url!), body)

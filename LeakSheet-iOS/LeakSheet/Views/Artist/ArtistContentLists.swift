@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The artist screen's content branches — one `View` type per mode (filters,
-/// search, eras, content tabs, recents), each with narrow inputs so toggling one
-/// mode doesn't share an invalidation boundary with the others.
+// The artist screen's content branches — one `View` type per mode (filters,
+// search, eras, content tabs, recents), each with narrow inputs so toggling one
+// mode doesn't share an invalidation boundary with the others.
 
 // MARK: - Content tabs
 

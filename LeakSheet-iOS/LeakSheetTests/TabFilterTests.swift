@@ -85,7 +85,7 @@ struct WorstOfFilterTests {
             artUrl: nil,
             sections: [Section(name: "", group: nil, songs: [
                 Song(baseName: "Good", songKey: nil, versions: [good], badge: nil),
-                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil),
+                Song(baseName: "Bad", songKey: nil, versions: [bad], badge: nil)
             ])],
             songCount: nil, versionCount: nil
         )
@@ -112,7 +112,7 @@ struct WorstOfFilterTests {
             tabs: [
                 TabSection(kind: "released", name: "Released", entries: []),
                 TabSection(kind: "best_of", name: "Best Of", entries: []),
-                TabSection(kind: "grails", name: "Grails", entries: []),
+                TabSection(kind: "grails", name: "Grails", entries: [])
             ]
         )
         let vm = await MainActor.run { ArtistViewModel(artist: tabbed) }

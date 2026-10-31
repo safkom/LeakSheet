@@ -124,7 +124,7 @@ actor ImageCache {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
         ] as CFDictionary
         return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions)
     }

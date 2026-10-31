@@ -116,7 +116,7 @@ extension ArtistViewModel {
         ) {
             let roles: [(CreditRole, [String?])] = [
                 (.producer, [version.producers]),
-                (.feature, [version.featuring, version.creditedArtists, version.collaboration]),
+                (.feature, [version.featuring, version.creditedArtists, version.collaboration])
             ]
             for (role, fields) in roles {
                 var keys = Set<String>()

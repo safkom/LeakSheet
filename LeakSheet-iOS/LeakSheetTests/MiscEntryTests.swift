@@ -57,7 +57,7 @@ struct MiscEraGroupingTests {
         let entries = [
             entry("c", era: "Graduation"),
             entry("a", era: "The College Dropout"),
-            entry("b", era: "Late Registration"),
+            entry("b", era: "Late Registration")
         ]
         let groups = ArtistViewModel.groupMiscByEra(
             entries,
@@ -71,7 +71,7 @@ struct MiscEraGroupingTests {
         let entries = [
             entry("tweet", era: "Twitter"),
             entry("song", era: "Graduation"),
-            entry("art", era: "Opt Archive"),
+            entry("art", era: "Opt Archive")
         ]
         let groups = ArtistViewModel.groupMiscByEra(
             entries, eraOrder: ["Graduation"]

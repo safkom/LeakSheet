@@ -62,7 +62,7 @@ struct LoadingResilienceTests {
             .connecting,
             .server(message: "Parsing Unreleased (11.8 MB)", done: nil, total: nil),
             .downloading(receivedBytes: 0, expectedBytes: nil),
-            .preparing,
+            .preparing
         ]
         let ranks = ordered.map(TrackerLoader.rank)
         #expect(ranks == ranks.sorted())

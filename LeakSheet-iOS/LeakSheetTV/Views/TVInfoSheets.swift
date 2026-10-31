@@ -13,7 +13,7 @@ struct TVStatsView: View {
             ("Available", stats.available),
             ("Snippets", stats.snippets),
             ("Confirmed", stats.confirmed),
-            ("Full HQ", stats.fullHQ),
+            ("Full HQ", stats.fullHQ)
         ]
         if let t = artist.trackerStats {
             // Every TrackerStats field is optional — a tracker that doesn't
@@ -27,7 +27,7 @@ struct TVStatsView: View {
                 ("Grails", t.grails),
                 ("Wanted", t.wanted),
                 ("Best of", t.bestOf),
-                ("Worst of", t.worstOf),
+                ("Worst of", t.worstOf)
             ]
             out += optional.compactMap { label, value in
                 value.map { (label, $0) }

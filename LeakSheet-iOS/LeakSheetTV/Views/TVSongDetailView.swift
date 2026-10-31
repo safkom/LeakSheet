@@ -183,7 +183,7 @@ struct TVSongDetailView: View {
             ("Length", selected.trackLength),
             ("Leak date", selected.leakDate),
             ("File date", selected.fileDate),
-            ("Type", selected.type),
+            ("Type", selected.type)
         ].compactMap { label, value in
             guard let value, !value.isEmpty else { return nil }
             return (label, value)

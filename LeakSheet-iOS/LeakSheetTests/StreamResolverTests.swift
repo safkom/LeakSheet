@@ -25,7 +25,7 @@ struct StreamResolverTests {
         // streaming._extract_gdrive_id resolves all three forms).
         "https://drive.google.com/open?id=1AbC-x_9",
         "https://drive.google.com/uc?id=1AbC-x_9&export=download",
-        "https://drive.google.com/uc?export=download&id=1AbC-x_9",
+        "https://drive.google.com/uc?export=download&id=1AbC-x_9"
     ])
     func `known hosts are streamable`(url: String) {
         #expect(StreamResolver.isStreamableURL(url))
@@ -42,7 +42,7 @@ struct StreamResolverTests {
         "https://music.froste.lol/song/XYZ",     // non-hex hash
         "https://pixeldrain.com/l/abc123",       // pixeldrain LIST, not a file
         "https://drive.google.com/drive/folders/1AbCdEf",  // gdrive folder (no file id)
-        "",
+        ""
     ])
     func `unknown hosts and malformed links are not streamable`(url: String) {
         #expect(!StreamResolver.isStreamableURL(url))
@@ -109,7 +109,7 @@ struct StreamResolverTests {
             "https://imgur.gg/f/002XdG5",
             "https://krakenfiles.com/view/FJmpAhYHMp/file.html",
             "https://pixeldrain.com/u/aBc123",
-            "https://drive.google.com/file/d/1AbC/view",
+            "https://drive.google.com/file/d/1AbC/view"
         ]
         for link in links {
             guard let url = StreamResolver.originalQualityURL(for: link)?.absoluteString else {
@@ -180,7 +180,7 @@ struct VersionSourceTests {
         "https://pillows.su/f/old-lq",
         "https://www.youtube.com/watch?v=sampled-song",
         "https://pillows.su/f/old-lq",
-        "https://imgur.gg/f/new-lossless",
+        "https://imgur.gg/f/new-lossless"
     ]
 
     @Test func `sources are the playable links, deduplicated, in sheet order`() {
@@ -217,7 +217,7 @@ struct VersionSourceTests {
         ("https://music.froste.lol/song/0a1b2c3d", "froste"),
         ("https://www.krakenfiles.com/view/FJmpAhYHMp/file.html", "kraken"),
         ("https://pixeldrain.com/u/aBc123", "pixeldrain"),
-        ("https://drive.google.com/file/d/1AbC-x_9/view", "gdrive"),
+        ("https://drive.google.com/file/d/1AbC-x_9/view", "gdrive")
     ])
     func `each host maps to its backend provider key`(link: String, provider: String) {
         #expect(StreamResolver.provider(for: link) == provider)

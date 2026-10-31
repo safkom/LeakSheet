@@ -30,7 +30,7 @@ struct PlayThresholdTests {
         (19.0, 40.0, false),  // 50% of 40 s is 20 s, and 19 s is short
         (20.0, 40.0, true),   // exactly 50% of a short track
         (29.0, 200.0, false), // long track: 29 s is short of the 30 s floor
-        (30.0, 200.0, true),
+        (30.0, 200.0, true)
     ] as [(TimeInterval, TimeInterval, Bool)])
     func `reaches at 30 seconds or half the duration`(
         listened: TimeInterval, duration: TimeInterval, expected: Bool
@@ -143,7 +143,7 @@ struct ListeningSummaryTests {
         let (history, _) = makeHistory()
         let eraA = era("Era A", songs: [
             song("Alpha", [version("Alpha", tag: "V1"), version("Alpha", tag: "V2")]),
-            song("Beta", [version("Beta", tag: "V1")]),
+            song("Beta", [version("Beta", tag: "V1")])
         ])
         let early = Date(timeIntervalSince1970: 1_000)
         let late = Date(timeIntervalSince1970: 3_000)
@@ -195,7 +195,7 @@ struct ListeningSummaryTests {
             era("Quiet", songs: [song("Q", [version("Q")])]),
             era("Loud", songs: [song("L", [version("L")])]),
             era("Middle", songs: [song("M", [version("M")])]),
-            era("Unplayed", songs: [song("U", [version("U")])]),
+            era("Unplayed", songs: [song("U", [version("U")])])
         ]
         for _ in 0..<3 { history.record(
             version("L"),
@@ -218,7 +218,7 @@ struct ListeningSummaryTests {
         let (history, _) = makeHistory()
         let eras = [
             era("Zeta", songs: [song("Z", [version("Z")])]),
-            era("Alpha", songs: [song("A", [version("A")])]),
+            era("Alpha", songs: [song("A", [version("A")])])
         ]
         history.record(version("Z"), artistSlug: "artist", artistName: "Artist", eraName: "Zeta", eraArt: nil)
         history.record(version("A"), artistSlug: "artist", artistName: "Artist", eraName: "Alpha", eraArt: nil)

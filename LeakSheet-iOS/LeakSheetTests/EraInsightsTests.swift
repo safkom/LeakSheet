@@ -22,7 +22,7 @@ struct EraInsightsTests {
             ["base_name": "One", "versions": [
                 version("One [V1]", leak: "01/02/2020", quality: "CD Quality", producers: "Maker, Other",
                         link: "https://pillows.su/f/aaa"),
-                version("One [V2]", leak: "not a date", quality: "Lossless", producers: "maker", featuring: "Guest"),
+                version("One [V2]", leak: "not a date", quality: "Lossless", producers: "maker", featuring: "Guest")
             ]],
             ["base_name": "Two", "versions": [
                 version(
@@ -31,20 +31,20 @@ struct EraInsightsTests {
                     file: "05/06/2018",
                     quality: "CD Quality",
                     producers: "Maker & Third"
-                ),
-            ]],
+                )
+            ]]
         ]
         let json: [String: Any] = [
             "name": "Artist", "slug": "artist",
             "eras": [
                 ["name": "First", "sections": [["name": "Main", "songs": songs]]],
                 ["name": "Second", "sections": []],
-                ["name": "Third", "sections": []],
+                ["name": "Third", "sections": []]
             ],
             "tabs": [["kind": "misc", "name": "Misc", "entries": [
                 ["era_name": "first", "name": "Interview", "links": [], "source_tab": "misc"],
-                ["era_name": "Second", "name": "Other", "links": [], "source_tab": "misc"],
-            ]]],
+                ["era_name": "Second", "name": "Other", "links": [], "source_tab": "misc"]
+            ]]]
         ]
         return try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
     }
@@ -71,7 +71,7 @@ struct EraInsightsTests {
             "eras": [[
                 "name": "Only",
                 "sections": [["name": "", "songs": [["base_name": "Song", "versions": versions]]]]
-            ]],
+            ]]
         ]
         let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
         // "Star" leads "Guest" 4 to 2, so it is the sheet's artist; the sheet name is dropped too.
@@ -90,8 +90,8 @@ struct EraInsightsTests {
         let json: [String: Any] = [
             "name": "A", "slug": "a",
             "eras": [["name": "E", "sections": [["name": "", "songs": [["base_name": "S", "versions": [
-                ["name": "S", "date_of_recording": "02/03/2019"], ["name": "S [V2]", "file_date": "01/01/2018"],
-            ]]]]]]],
+                ["name": "S", "date_of_recording": "02/03/2019"], ["name": "S [V2]", "file_date": "01/01/2018"]
+            ]]]]]]]
         ]
         let a = try JSONDecoder().decode(Artist.self, from: JSONSerialization.data(withJSONObject: json))
         #expect(EraInsights.compute(era: a.eras[0], artist: a).fileDates == .init(

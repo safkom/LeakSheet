@@ -44,16 +44,16 @@ extension FilterPipelineFixture {
         let eraA = era("Era A", songs: [
             song("Starred Song", versions: [
                 version("Starred Song", tag: "V1", badge: "best", leakDate: "01/15/2024"),
-                version("Starred Song", tag: "V2", available: "Snippet", leakDate: "03/20/2024"),
+                version("Starred Song", tag: "V2", available: "Snippet", leakDate: "03/20/2024")
             ]),
             song("Plain Song", versions: [
-                version("Plain Song", leakDate: "02/10/2024", altTitles: ["Alias One"]),
-            ]),
+                version("Plain Song", leakDate: "02/10/2024", altTitles: ["Alias One"])
+            ])
         ])
         let eraB = era("Era B", songs: [
             song("Snippet Only", versions: [
-                version("Snippet Only", available: "Snippet", leakDate: "04/01/2024"),
-            ]),
+                version("Snippet Only", available: "Snippet", leakDate: "04/01/2024")
+            ])
         ])
         return Artist(
             name: "Test Artist", slug: "test-artist", sourceUrl: nil,

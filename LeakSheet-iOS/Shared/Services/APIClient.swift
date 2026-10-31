@@ -55,7 +55,7 @@ actor APIClient {
             config.timeoutIntervalForRequest = 90
             config.httpAdditionalHeaders = [
                 "Content-Type": "application/json",
-                "Accept": "application/json",
+                "Accept": "application/json"
             ]
             self.session = URLSession(configuration: config)
         }
@@ -100,7 +100,7 @@ actor APIClient {
             "url": url,
             "artist_name": artistName as Any,
             "use_cache": useCache,
-            "force_refresh": forceRefresh,
+            "force_refresh": forceRefresh
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
@@ -140,8 +140,7 @@ actor APIClient {
         // Chunked delegate download — see DECISIONS.md::APIClient.swift::chunked-download
         let downloadTask = session.dataTask(with: request)
         let (data, response, stream) = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>) in
+            try await withCheckedThrowingContinuation { (continuation: ChunkedDownloadDelegate.Outcome) in
                 downloadTask.delegate = ChunkedDownloadDelegate(
                     onProgress: onProgress, continuation: continuation
                 )
@@ -192,7 +191,9 @@ actor APIClient {
     /// `.server` phases until the artist header; everything after is the payload.
     private nonisolated final class ChunkedDownloadDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         private let onProgress: (@Sendable (LoadPhase) -> Void)?
-        private let continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
+        typealias Outcome = CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
+
+        private let continuation: Outcome
         private var data = Data()
         private var response: URLResponse?
         private var expected: Int64?
@@ -203,7 +204,7 @@ actor APIClient {
 
         init(
             onProgress: (@Sendable (LoadPhase) -> Void)?,
-            continuation: CheckedContinuation<(Data, URLResponse, StreamOutcome?), Error>
+            continuation: Outcome
         ) {
             self.onProgress = onProgress
             self.continuation = continuation

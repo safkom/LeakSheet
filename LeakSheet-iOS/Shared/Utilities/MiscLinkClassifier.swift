@@ -42,17 +42,17 @@ nonisolated enum MiscLinkClassifier {
     /// Hosts whose content plays through their official embed widget.
     private static let embedHosts: Set<String> = [
         "youtube.com", "m.youtube.com", "youtu.be", "vimeo.com",
-        "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com",
+        "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com"
     ]
     /// drive.google.com stays here as a fallback for folder and uc?id=
     /// links; single-file /file/d/ links classify as .stream first via
     /// StreamResolver.
     private static let archiveHosts: Set<String> = [
-        "mega.nz", "mediafire.com", "drive.google.com",
+        "mega.nz", "mediafire.com", "drive.google.com"
     ]
     /// File hosts only: ibb.co and postimg.cc pages are HTML, so they stay links.
     private static let imageHosts: Set<String> = [
-        "i.imgur.com", "i.ibb.co", "i.postimg.cc",
+        "i.imgur.com", "i.ibb.co", "i.postimg.cc"
     ]
 
     /// Classifies a raw link URL. A video file extension wins over the streamable-host
@@ -86,7 +86,7 @@ nonisolated enum MiscLinkClassifier {
         "mediafire.com": "MediaFire",
         "archive.org": "Archive", "web.archive.org": "Archive",
         "instagram.com": "Instagram",
-        "twitter.com": "Twitter/X", "x.com": "Twitter/X",
+        "twitter.com": "Twitter/X", "x.com": "Twitter/X"
     ]
 
     /// Best-effort preview image URL for a link, derivable without fetching

@@ -6,9 +6,9 @@ import AppKit
 import UIKit
 #endif
 
-/// The whole cross-platform shim surface. Everything else in the app is either
-/// already portable or forks inside a file that was platform-specific anyway.
-/// See DECISIONS.md::Platform.swift::shim-surface.
+// The whole cross-platform shim surface. Everything else in the app is either
+// already portable or forks inside a file that was platform-specific anyway.
+// See DECISIONS.md::Platform.swift::shim-surface.
 
 // MARK: - Clipboard
 
