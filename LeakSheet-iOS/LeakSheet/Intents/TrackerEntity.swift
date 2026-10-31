@@ -29,13 +29,13 @@ enum TrackerCatalog {
     /// Offline, an intent can still resolve the trackers in Recents.
     static func allOrRecents() async -> [TrackerEntity] {
         if let all = await all() { return all }
-        return await recents()
+        return recents()
     }
 
     /// Nil when the tracker list can't be fetched, so callers keep what they have.
     static func all() async -> [TrackerEntity]? {
         guard let listed = try? await APIClient.shared.fetchTrackers() else { return nil }
-        let merged = await recents() + listed.map { TrackerEntity(id: $0.url, name: $0.name) }
+        let merged = recents() + listed.map { TrackerEntity(id: $0.url, name: $0.name) }
         var seen = Set<String>()
         return merged.filter { seen.insert(LibraryMatcher.normalize($0.name)).inserted }
     }

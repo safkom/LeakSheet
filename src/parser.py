@@ -715,7 +715,7 @@ _DISCOGRAPHY_STATS_PATTERN = re.compile(
 
 # Any "<int> <word>" pair, used only to count a cell's counts. The lookbehind starts
 # each attempt at a digit run's first digit, keeping this linear.
-_STAT_PAIR_RE = re.compile(r"(?<!\d)\d++\s++[A-Za-z]")
+_STAT_PAIR_RE = re.compile(r"(?<!\d)\d++\s++[A-Za-z]")  # NOSONAR(S8786)
 _MIN_DISCOGRAPHY_PAIRS = 2
 
 
@@ -2964,7 +2964,7 @@ BADGE_SECTION_LABELS = frozenset({
 # Era header rows carry per-era stats in the era column ("3 Released 0 Unreleased").
 # The lookbehind keeps a long digit run linear, as in _STAT_PAIR_RE.
 _MISC_ERA_STATS_RE = re.compile(
-    r"(?<!\d)\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE
+    r"(?<!\d)\d+\s+(?:Released|Unreleased|BTS|On\s+Streaming|Full|Snippet)", re.IGNORECASE  # NOSONAR(S8786)
 )
 
 # Shape-based stats cell match — see docs/decisions.md::parser.py::_STATS_LIKE_ERA_RE

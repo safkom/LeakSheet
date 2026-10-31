@@ -1342,5 +1342,7 @@ pin the network's subnet in ops/casaos/leaksheet.yml before that happens.
   into surrogate halves and reports the halves as duplicates.
 - **S6019** on `models.py` sample-count pattern: the reluctant group grows whenever the
   lookahead fails, so it does match more than zero repetitions.
+- **S8786** on lookbehind-guarded or anchored regexes: they are linear in practice, and
+  `tests/unit/test_regex_linear.py` times every compiled regex in `src/` on adversarial input.
 - **S5332** on `"http://"` literals: they match link text and normalise URLs; no request
   is made over plain HTTP.
