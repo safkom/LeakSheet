@@ -24,9 +24,12 @@ final class AudioEngine {
 
     // MARK: - State
 
-    /// 0…1, applied to every player this engine creates.
-    var volume: Float = 1 {
-        didSet { player?.volume = volume }
+    /// 0…1, applied to every player this engine creates; kept across launches.
+    var volume: Float = UserDefaults.standard.object(forKey: "playerVolume") as? Float ?? 1 {
+        didSet {
+            player?.volume = volume
+            UserDefaults.standard.set(volume, forKey: "playerVolume")
+        }
     }
 
     var currentTrack: SongVersion?

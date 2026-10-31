@@ -131,7 +131,11 @@ struct MacSongList<Header: View>: View {
 
     /// Read from the event: a second `count: 2` gesture delays every single click by the
     /// double-click interval while it waits.
-    private static var isDoubleClick: Bool { (NSApp.currentEvent?.clickCount ?? 1) >= 2 }
+    private static var isDoubleClick: Bool {
+        // clickCount raises on non-mouse events, e.g. a VoiceOver press after arrowing.
+        guard let event = NSApp.currentEvent, [.leftMouseDown, .leftMouseUp].contains(event.type) else { return false }
+        return event.clickCount == 2
+    }
 
     /// → expands the selected multi-version song; ← collapses it, also from one of its
     /// versions, and moves the selection up to the song.
