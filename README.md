@@ -72,8 +72,9 @@ Dependencies live in `pyproject.toml` and are pinned in `uv.lock`; `uv run` sync
 environment before it runs anything. To change one, edit `pyproject.toml` then `uv lock`.
 
 The suite is a marker-gated pyramid (`tests/unit|parse|fetch|api|quality|live`) with one
-shared health definition in `tests/_health.py`. CI runs the offline gate, the Docker builds and the
-Apple targets on every push (`.github/workflows/tests.yml`), and the live trackers daily (`live.yml`).
+shared health definition in `tests/_health.py`. GitLab CI (`.gitlab-ci.yml`) runs the offline gate,
+the security scanners and SonarQube. The public GitHub mirror runs the Docker builds and the Apple
+targets on every push (`.github/workflows/tests.yml`), and the live trackers daily (`live.yml`).
 
 ---
 
