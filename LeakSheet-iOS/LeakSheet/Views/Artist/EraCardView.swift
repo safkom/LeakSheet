@@ -153,12 +153,14 @@ struct EraCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             // One font and one alt-names view in both states, so expanding doesn't draw
             // old and new text over each other mid-animation.
-            Text(era.name)
-                .font(.title3.weight(.semibold))
-                .tracking(-0.3)
-                .foregroundStyle(titleColor)
-                .lineLimit(expanded ? 3 : 2)
-                .multilineTextAlignment(.leading)
+            EraTitle(era: era, maxHeight: 44) {
+                Text(era.name)
+                    .font(.title3.weight(.semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(titleColor)
+                    .lineLimit(expanded ? 3 : 2)
+                    .multilineTextAlignment(.leading)
+            }
 
             if let alts = era.altNames, !alts.isEmpty {
                 altNamesLabel(alts, lineLimit: expanded ? nil : 1)

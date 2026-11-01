@@ -49,4 +49,13 @@ struct WireContractTests {
         let edge = try JSONDecoder().decode(Artist.self, from: Data(contentsOf: url))
         #expect(edge.eras.first?.stats == nil)
     }
+
+    @Test func `title art decodes, and an era without one gives nil`() throws {
+        let era = try #require(try contractArtist().eras.first)
+        #expect(era.titleArtUrl?.hasPrefix("leaksheet:art/v2/") == true)
+
+        let url = try #require(Bundle(for: BundleToken.self).url(forResource: "contract_edge", withExtension: "json"))
+        let edge = try JSONDecoder().decode(Artist.self, from: Data(contentsOf: url))
+        #expect(edge.eras.first?.titleArtUrl == nil)
+    }
 }

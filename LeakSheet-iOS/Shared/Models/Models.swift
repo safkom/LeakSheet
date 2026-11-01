@@ -56,6 +56,8 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
     let versionCount: Int?
     /// The sheet's own counts from the era header (86% of eras); nil when it has none.
     var stats: EraStats? = nil
+    /// A wide title logo the tracker shows instead of a cover; drawn whole in place of the name.
+    var titleArtUrl: String? = nil
 
     var id: String { name }
 
@@ -75,6 +77,7 @@ nonisolated struct Era: Codable, Identifiable, Hashable, Sendable {
         case name, description, timeline, sections
         case altNames = "alt_names"
         case artUrl = "art_url"
+        case titleArtUrl = "title_art_url"
         case songCount = "song_count"
         case versionCount = "version_count"
         case stats
