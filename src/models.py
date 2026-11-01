@@ -343,6 +343,7 @@ class Era(BaseModel):
     stats_raw: str | None = Field(None, description="Raw stats string, e.g. '3 OG File(s)...'")
     stats: EraStats | None = Field(None, description="Parsed era statistics")
     art_url: str | None = Field(None, description="Cover art image URL for this era")
+    title_art_url: str | None = Field(None, description="Wide title logo shown whole in place of the era name")
     highlighted_producers: list[str] = Field(default_factory=list, description="Notable producers for this era")
     sections: list[Section] = Field(default_factory=list)
 
@@ -491,10 +492,12 @@ class Artist(BaseModel):
     # (JSON bytes, ETag) as written to the parse cache, so the API can serve them
     # without re-serializing. model_copy carries it: don't reuse after mutating.
     _wire: tuple[bytes, str] | None = PrivateAttr(default=None)
-    # Era name -> Google's token cover URL behind each slot key in ``art_url``, and the
-    # Art-tab image that may upgrade it; read by the cover warm after a parse.
+    # Slot name (an era, or a title era's "<era>\0cover"/"\0art") -> token URL behind each
+    # slot key, and the Art-tab image that may upgrade it; read by the cover warm.
     _art_sources: dict[str, str] = PrivateAttr(default_factory=dict)
     _art_candidates: dict[str, str] = PrivateAttr(default_factory=dict)
+    # Title-logo era -> a content tab's header image for it, its preferred cover.
+    _tab_art: dict[str, str] = PrivateAttr(default_factory=dict)
     name: str = Field(..., description="Artist name")
     slug: str = Field(..., description="URL-safe identifier")
     source_url: str | None = Field(None, description="Original Google Sheets URL")

@@ -3067,8 +3067,9 @@ def _misc_optional(field: str, val: str) -> str | None:
 class _MiscWalk:
     """The row walk of `parse_misc_tab`: era headers, section labels and entries."""
 
-    def __init__(self, kind: str, col_map: dict[str, int], known_eras: set[str]):
+    def __init__(self, kind: str, col_map: dict[str, int], known_eras: set[str], era_art: dict[str, str] | None = None):
         self.kind = kind
+        self.era_art = era_art
         self.col_map = col_map
         self.known_eras = known_eras
         # Only highlight tabs carry block separators; elsewhere a lone "Special"
@@ -3080,6 +3081,13 @@ class _MiscWalk:
 
     def _text(self, row: list[_Cell], field: str) -> str:
         return _misc_cell_text(row, self.col_map, field)
+
+    def _header_era(self, row: list[_Cell], era: str) -> None:
+        """An era header row: its first image is that era's cover (for title-logo eras)."""
+        self._set_era(era)
+        if self.era_art is not None and era and not self.era_art.get(era):
+            # "" records a header with no image: an API row, worth one htmlview reread.
+            self.era_art[era] = next((url for cell in row for url in cell.images), "")
 
     def _set_era(self, era: str) -> None:
         # A content tab's sub-sections belong to one era. Badge-tab blocks
@@ -3097,7 +3105,7 @@ class _MiscWalk:
         # column (mirrors the main tab's grammar).
         if era_text and _MISC_ERA_STATS_RE.search(era_text):
             if name:
-                self._set_era(name.split("\n")[0].strip())
+                self._header_era(row, name.split("\n")[0].strip())
             return
         if name:
             self._named_row(row, era_text, name)
@@ -3133,7 +3141,7 @@ class _MiscWalk:
             name_key and name_key in self.known_eras and name_key != era_key
             and (stats_era or (not era_text and not has_track_data))
         ):
-            self._set_era(first_line)
+            self._header_era(row, first_line)
             return
         # Bare label rows: docs/decisions.md::parser.py::badge-tab-structural-rows. A divider
         # keyword with no track data is a label even with an aside (Travis's "Project" rows).
@@ -3167,7 +3175,8 @@ class _MiscWalk:
 
 
 def parse_misc_tab(
-    html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = ()
+    html: str | list[list[_Cell]], kind: str, artist_eras: Iterable[str] = (),
+    era_art: dict[str, str] | None = None,
 ) -> list[MiscEntry]:
     """Parse a Misc or Music Videos tab (htmlview HTML, or rows from extract_grid) into MiscEntry rows.
 
@@ -3176,7 +3185,8 @@ def parse_misc_tab(
     recognise header rows — a tab's own era column often abbreviates them
     ("Birds" where the header reads "Birds In The Trap Sing McKnight"). Rows
     keep the literal era label from their era column (or the last era header);
-    no fuzzy matching against main-tab eras.
+    no fuzzy matching against main-tab eras. ``era_art``, when given, collects each
+    era header's first image ("" for a header without one).
     """
     rows = extract_table(html) if isinstance(html, str) else html
     if not rows:
@@ -3184,7 +3194,7 @@ def parse_misc_tab(
     header_idx, col_map = _misc_header(rows)
     if header_idx < 0:
         return []
-    walk = _MiscWalk(kind, col_map, _misc_known_eras(rows, header_idx, col_map, artist_eras))
+    walk = _MiscWalk(kind, col_map, _misc_known_eras(rows, header_idx, col_map, artist_eras), era_art)
     for row in rows[header_idx + 1:]:
         walk.row(row)
     return walk.entries

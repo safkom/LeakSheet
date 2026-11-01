@@ -343,3 +343,95 @@ class TestApiSheetId:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+
+
+class TestTitleEraCover:
+    """An era whose header image is a title logo takes its cover from another tab's header
+    for that era. API rows carry no images, so that tab is read once more from htmlview:
+    see docs/decisions.md::fetcher.py::_is_title_art."""
+
+    LOGO = "https://docs.google.com/sheets-images-rt/debut-logo=w144-h20"
+    COVER = "https://docs.google.com/sheets-images-rt/debut-cover=w134-h133"
+
+    @pytest.fixture
+    def title_workbook(self, monkeypatch):
+        import src.fetcher as fetcher
+
+        header = "<td>(2018) (SynthWave forms the group)</td><td></td>"
+        misc_header = "<td>Debut Era</td><td></td><td></td><td></td>"
+        assert header in WORKBOOK["100"] and misc_header in WORKBOOK["200"]
+        monkeypatch.setitem(WORKBOOK, "100", WORKBOOK["100"].replace(
+            header, f'<td>(2018) (SynthWave forms the group)</td><td><img src="{self.LOGO}"></td>', 1))
+        monkeypatch.setitem(WORKBOOK, "200", WORKBOOK["200"].replace(
+            misc_header, f'<td>Debut Era</td><td></td><td><img src="{self.COVER}"></td><td></td>', 1))
+        logo_slot = fetcher._era_art_base(URL, "Debut Era")
+        monkeypatch.setattr(fetcher, "_is_title_art", lambda base: base == logo_slot)
+
+    async def _artist(self, rec, patch_sheets_client):
+        patch_sheets_client(rec.client())
+        return await async_fetch_and_parse(URL, use_cache=False, write_cache=False)
+
+    @pytest.mark.parametrize("api", [False, True])
+    async def test_the_cover_comes_from_a_content_tab_header(
+        self, title_workbook, monkeypatch, patch_sheets_client, api
+    ):
+        if api:
+            monkeypatch.setenv("LEAKSHEET_GOOGLE_API_KEY", KEY)
+        else:
+            monkeypatch.delenv("LEAKSHEET_GOOGLE_API_KEY", raising=False)
+        rec = Recorder()
+        artist = await self._artist(rec, patch_sheets_client)
+        era = next(e for e in artist.eras if e.name == "Debut Era")
+        assert era.title_art_url and era.art_url and era.art_url != era.title_art_url
+        assert artist._art_sources["Debut Era\0cover"] == self.COVER
+        assert artist._art_sources["Debut Era"] == self.LOGO
+
+    async def test_no_title_era_means_no_extra_htmlview_fetch(self, with_key, patch_sheets_client):
+        rec = Recorder()
+        await self._artist(rec, patch_sheets_client)
+        assert not rec.htmlview_gids() & CONTENT_GIDS
+
+    @staticmethod
+    def _title(monkeypatch, *slot_names: str) -> None:
+        import src.fetcher as fetcher
+
+        slots = {fetcher._era_art_base(URL, name) for name in slot_names}
+        monkeypatch.setattr(fetcher, "_is_title_art", lambda base: base in slots)
+
+    async def test_a_failed_reread_does_not_count_the_api_tab_as_failed(
+        self, title_workbook, with_key, patch_sheets_client
+    ):
+        from src.fetcher import PhaseTimer
+
+        patch_sheets_client(Recorder(fail_gids={"200"}).client())
+        t = PhaseTimer()
+        await async_fetch_and_parse(URL, use_cache=False, write_cache=False, timer=t)
+        assert t.tab_counts()[0] == 0
+
+    async def test_a_title_era_no_content_tab_names_costs_no_reread(
+        self, title_workbook, with_key, monkeypatch, patch_sheets_client
+    ):
+        row = "<td>1 Full</td><td>Sophomore Era</td><td></td><td></td>"
+        logo = '<td><img src="https://docs.google.com/sheets-images-rt/soph-logo=w144-h20"></td>'
+        monkeypatch.setitem(WORKBOOK, "100", WORKBOOK["100"].replace(row, row[:-9] + logo, 1))
+        self._title(monkeypatch, "Sophomore Era")  # no content tab has a Sophomore header
+        rec = Recorder()
+        await self._artist(rec, patch_sheets_client)
+        assert not rec.htmlview_gids() & CONTENT_GIDS
+
+    async def test_a_content_tab_logo_falls_back_to_the_art_tab(
+        self, title_workbook, monkeypatch, patch_sheets_client
+    ):
+        monkeypatch.delenv("LEAKSHEET_GOOGLE_API_KEY", raising=False)
+        self._title(monkeypatch, "Debut Era", "Debut Era\0cover")  # that tab shows the logo too
+        artist = await self._artist(Recorder(), patch_sheets_client)
+        assert "Debut Era\0cover" not in artist._art_sources
+        assert artist._art_sources["Debut Era\0art"].endswith("debut-hq")
+
+    async def test_a_malformed_header_image_url_never_fails_the_parse(
+        self, title_workbook, monkeypatch, patch_sheets_client
+    ):
+        monkeypatch.delenv("LEAKSHEET_GOOGLE_API_KEY", raising=False)
+        monkeypatch.setitem(WORKBOOK, "200", WORKBOOK["200"].replace(self.COVER, "http://[x", 1))
+        artist = await self._artist(Recorder(), patch_sheets_client)
+        assert artist._art_sources["Debut Era\0art"].endswith("debut-hq")

@@ -99,10 +99,12 @@ struct EraInfoSheet: View {
                     }
                     .accessibilityHidden(true)
             }
-            Text(era.name)
-                .font(.title2.weight(.bold))
-                .multilineTextAlignment(.center)
-                .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
+            EraTitle(era: era, maxHeight: 80, alignment: .center) {
+                Text(era.name)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
+            }
             if let alts = era.altNames, !alts.isEmpty {
                 Text(alts.joined(separator: " · "))
                     .font(.subheadline)
