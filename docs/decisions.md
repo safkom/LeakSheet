@@ -384,7 +384,9 @@ needs a switch: `WIRE_VERSION` is written into each entry's meta, and an entry u
 another version is a miss on every read path and never outranks a new parse in the
 collapse guard. Bump it when a field is removed or renamed or a value changes meaning;
 a field that is only added needs no bump, since the apps decode it as optional. A bump
-costs one cold parse per tracker. An entry with no version is version 1.
+costs one cold parse per tracker. An entry with no version is version 1. The first parse
+after a bump is written without the collapse guard, since the retired entry no longer
+counts: a partial parse landing then is served until the next revalidation replaces it.
 
 ## api.py::swr-fast-path — stale-while-revalidate serves raw cached bytes
 
@@ -1055,7 +1057,10 @@ than silent — which was the real defect here.
 
 A parse that recorded failed tab loads is also refused when its content-tab entries fall
 under the same ratio of the stored count, even with the songs intact: a revalidation that
-lost its Misc or Stems tabs otherwise replaced a complete entry for an hour.
+lost its Misc or Stems tabs otherwise replaced a complete entry for an hour. This clause
+holds only for `COLLAPSE_GUARD_TTL`, not the serve window: "failed tabs" counts every tab
+that answered without a table, so a tracker with one permanently broken tab reports them
+on each parse, and a week-long refusal would freeze a real edit to its content tabs.
 
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an

@@ -337,6 +337,26 @@ class TestLostContentTabsDoNotReplaceAGoodEntry:
         assert self._stored_tab_entries() == 45
 
 
+    def test_the_refusal_ends_with_the_short_guard_window(self):
+        """A tab that fails on every parse must not freeze a real edit for the serve window."""
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["parsed_timestamp"] = time.time() - fetcher.COLLAPSE_GUARD_TTL - 60
+        meta_path.write_text(json.dumps(meta))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=1)
+        assert self._stored_tab_entries() == 0
+
+    def test_an_entry_stored_without_a_tab_count_never_refuses(self):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        del meta["tab_entries"]
+        meta_path.write_text(json.dumps(meta))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=1)
+        assert self._stored_tab_entries() == 0
+
+
 class TestWireVersion:
     """A wire-format change must be able to retire every stored parse at once."""
 

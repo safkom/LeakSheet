@@ -173,3 +173,27 @@ async def test_tabs_that_all_answered_without_a_table_are_no_tables():
     async with _tab_client(lambda r: httpx.Response(200, html="<p>empty</p>")) as client:
         with pytest.raises(fetcher.NoTablesError):
             await fetcher._first_tab_with_table(client, SHEET, BASE_WITH_TABS, "T", timeout=5, use_cache=False)
+
+
+def _too_large(request: httpx.Request) -> httpx.Response:
+    raise fetcher.ResponseTooLarge("too big")
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [lambda r: httpx.Response(403), lambda r: httpx.Response(404), _too_large],
+    ids=["403", "404", "oversized"],
+)
+async def test_tabs_that_answered_with_a_refusal_are_still_no_tables(handler):
+    async with _tab_client(handler) as client:
+        with pytest.raises(fetcher.NoTablesError):
+            await fetcher._first_tab_with_table(client, SHEET, BASE_WITH_TABS, "T", timeout=5, use_cache=False)
+
+
+async def test_a_table_in_a_later_tab_is_returned_after_an_earlier_tab_failed():
+    def handler(r):
+        return httpx.Response(429) if "gid=1" in str(r.url) else httpx.Response(200, html="<table><tr><td>x</td></tr></table>")
+
+    async with _tab_client(handler) as client:
+        html, _ = await fetcher._first_tab_with_table(client, SHEET, BASE_WITH_TABS, "T", timeout=5, use_cache=False)
+    assert "<table>" in html

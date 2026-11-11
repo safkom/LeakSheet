@@ -1146,8 +1146,12 @@ def _collapse_reason(
         return None
 
     old_tab_entries = meta.get("tab_entries", 0)
-    # Failed tabs with the songs intact: the content tabs are what went missing.
-    lost_tabs = failed_tabs and tab_entries < old_tab_entries * CACHE_COLLAPSE_RATIO
+    # Failed tabs with the songs intact: the content tabs are what went missing. Only inside
+    # the short window: a tab that fails forever must not freeze a real edit for the week.
+    lost_tabs = (
+        failed_tabs and age <= COLLAPSE_GUARD_TTL
+        and tab_entries < old_tab_entries * CACHE_COLLAPSE_RATIO
+    )
     if (old <= 0 or new >= old * CACHE_COLLAPSE_RATIO) and not lost_tabs:
         return None
 
