@@ -472,6 +472,12 @@ def _client_ip(scope) -> str:
     return chain[-hops] if len(chain) >= hops else peer
 
 
+def _admin_token_ok(scope) -> bool:
+    expected = os.environ.get("LEAKSHEET_ADMIN_TOKEN", "").encode()
+    provided = next((v for k, v in scope.get("headers", ()) if k == b"x-admin-token"), b"")
+    return bool(expected) and hmac.compare_digest(provided, expected)
+
+
 class _RateLimitMiddleware:
     """Opt-in sliding-window per-IP rate limiter (pure ASGI so it never buffers
     the streaming response body).
@@ -501,7 +507,8 @@ class _RateLimitMiddleware:
         # Checked before the opt-in limit below, so the admin endpoint is
         # throttled even with LEAKSHEET_RATE_LIMIT_PER_MIN unset.
         if path.endswith("/cache/clear"):
-            return self._over("|admin", _ADMIN_RATE_LIMIT_PER_MIN, scope)
+            # Only wrong tokens count, so guessing cannot lock the operator out.
+            return not _admin_token_ok(scope) and self._over("|admin", _ADMIN_RATE_LIMIT_PER_MIN, scope)
         try:
             limit = int(os.environ.get("LEAKSHEET_RATE_LIMIT_PER_MIN", "0") or 0)
         except ValueError:
