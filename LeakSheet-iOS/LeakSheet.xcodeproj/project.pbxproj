@@ -242,14 +242,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		E3AA000B2F8D29B40029C2D5 /* Resources */ = {
+		E30045912F8D29B40029C2D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E30045912F8D29B40029C2D5 /* Resources */ = {
+		E3AA000B2F8D29B40029C2D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (

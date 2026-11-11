@@ -138,3 +138,38 @@ async def test_concurrent_unknown_hosts_share_one_feed_refresh(monkeypatch):
 ])
 def test_only_the_schemes_own_default_port_is_dropped(url, expected):
     assert fetcher._normalize_url(url) == expected
+
+
+BASE_WITH_TABS = '<a href="#gid=1">A</a><a href="#gid=2">B</a>'
+
+
+def _tab_client(handler) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _refuse(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("refused", request=request)
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        lambda r: httpx.Response(429),
+        lambda r: httpx.Response(503),
+        _refuse,
+        # One tab answered without a table, the other never answered: still unknown.
+        lambda r: httpx.Response(200, html="<p>empty</p>") if "gid=1" in str(r.url) else httpx.Response(429),
+    ],
+    ids=["429", "503", "transport", "mixed"],
+)
+async def test_tabs_that_failed_upstream_are_a_network_error_not_an_empty_sheet(handler):
+    """An outage must reach the client as a 503, which keeps its cached copy; a 404 hides it."""
+    async with _tab_client(handler) as client:
+        with pytest.raises(fetcher.NetworkError):
+            await fetcher._first_tab_with_table(client, SHEET, BASE_WITH_TABS, "T", timeout=5, use_cache=False)
+
+
+async def test_tabs_that_all_answered_without_a_table_are_no_tables():
+    async with _tab_client(lambda r: httpx.Response(200, html="<p>empty</p>")) as client:
+        with pytest.raises(fetcher.NoTablesError):
+            await fetcher._first_tab_with_table(client, SHEET, BASE_WITH_TABS, "T", timeout=5, use_cache=False)

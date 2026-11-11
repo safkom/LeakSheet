@@ -1526,6 +1526,7 @@ async def _first_tab_with_table(
     page_paths = _page_path_map(base_html)
     gids = _discover_gids(base_html) or list(page_paths) or ["0"]
     last_error = None
+    unreachable = None
     for try_gid in gids:
         try:
             sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
@@ -1534,8 +1535,17 @@ async def _first_tab_with_table(
                 if use_cache:
                     await _async_set_cache(url, r.text, title)
                 return r.text, title
-        except (httpx.HTTPError, ValueError, KeyError) as e:
+            if r.status_code == 429 or r.status_code >= 500:
+                unreachable = f"HTTP {r.status_code}"
+        except ResponseTooLarge as e:
             last_error = e
+        except httpx.HTTPError as e:
+            last_error = unreachable = e
+        except (ValueError, KeyError) as e:
+            last_error = e
+    if unreachable is not None:
+        # A tab that never answered may hold the table: an outage is not an empty sheet.
+        raise NetworkError(f"Could not load every tab of {url}: {unreachable}")
     raise NoTablesError(
         f"No valid sheet data found at {url}. "
         f"Tried GIDs: {gids}. Last error: {last_error}"

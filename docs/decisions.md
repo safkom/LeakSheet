@@ -407,8 +407,8 @@ sheet, a base page whose redirect chain ended on `accounts.google.com`: Google a
 a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
 table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
 where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
-any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
-for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+any 5xx (all `NetworkError`, which `_first_tab_with_table` also raises when a tab never
+answered), `NoTablesError` (every tab answered, none held a table), a disallowed host, and a mirror that redirects elsewhere keep
 serving the stale copy. The next request after a drop is a cold parse that returns the
 real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
 unchanged.
