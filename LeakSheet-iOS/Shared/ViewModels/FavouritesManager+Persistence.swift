@@ -100,7 +100,12 @@ extension FavouritesManager {
 
         guard let data = try? Data(contentsOf: Self.storageFile) else { return }
         do {
-            let stored = try JSONDecoder().decode([FavouriteEntry].self, from: data)
+            let (stored, dropped) = try Self.decodeStored(data)
+            if dropped > 0 {
+                Self.log.error("Skipped \(dropped, privacy: .public) unreadable favourites")
+                // The next save rewrites the file without them: keep the original beside it.
+                try? FileManager.default.copyItem(at: Self.storageFile, to: Self.freshAsideURL())
+            }
             let migrated = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(stored)))
             entries = migrated
             // Persist the rewrite, or it re-runs on every launch forever.
@@ -112,11 +117,28 @@ extension FavouritesManager {
                 """)
             // Keep the unreadable file: the next save would otherwise replace
             // every favourite with whatever the user hearts next.
-            let aside = Self.storageFile.deletingPathExtension().appendingPathExtension("unreadable.json")
-            try? FileManager.default.removeItem(at: aside)
-            try? FileManager.default.moveItem(at: Self.storageFile, to: aside)
+            try? FileManager.default.moveItem(at: Self.storageFile, to: Self.freshAsideURL())
             entries = []
         }
+    }
+
+    /// Decodes entry by entry, so one unreadable favourite does not take the rest with it.
+    nonisolated static func decodeStored(_ data: Data) throws -> (entries: [FavouriteEntry], dropped: Int) {
+        struct Lossy: Decodable {
+            let entry: FavouriteEntry?
+            init(from decoder: Decoder) throws { entry = try? FavouriteEntry(from: decoder) }
+        }
+        let all = try JSONDecoder().decode([Lossy].self, from: data)
+        let kept = all.compactMap(\.entry)
+        return (kept, all.count - kept.count)
+    }
+
+    /// A rescue-file name that never replaces an earlier rescue.
+    private static func freshAsideURL() -> URL {
+        let base = storageFile.deletingPathExtension()
+        let first = base.appendingPathExtension("unreadable.json")
+        guard FileManager.default.fileExists(atPath: first.path) else { return first }
+        return base.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970)).json")
     }
 
     /// Lower-cases the name part of keys saved before `key` did.
