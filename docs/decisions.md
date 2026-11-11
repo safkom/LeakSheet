@@ -376,6 +376,16 @@ treat it as such rather than surfacing an error.
 the rate limiter so a 429 still carries `Access-Control-Allow-Origin` — otherwise a
 browser sees an opaque network error instead of a clean 429 response.
 
+## fetcher.py::WIRE_VERSION — retiring every stored parse
+
+The fast path serves stored bytes unvalidated for up to 7 days (`api.py::swr-fast-path`,
+`api.py::serve-stale-window`), so a wire-format change that old bytes must not survive
+needs a switch: `WIRE_VERSION` is written into each entry's meta, and an entry under
+another version is a miss on every read path and never outranks a new parse in the
+collapse guard. Bump it when a field is removed or renamed or a value changes meaning;
+a field that is only added needs no bump, since the apps decode it as optional. A bump
+costs one cold parse per tracker. An entry with no version is version 1.
+
 ## api.py::swr-fast-path — stale-while-revalidate serves raw cached bytes
 
 The fast path returns the cached JSON bytes as-is: no pydantic validation, no

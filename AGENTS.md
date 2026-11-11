@@ -57,7 +57,7 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 - The API runs 3 gunicorn workers: anything in process memory (rate limiter, single-flight,
   backoff, caches) is per worker. After changing the worker model, grep for "single worker".
 - Cached parsed bytes are the wire bytes: a serialization change changes every ETag, and
-  removing a field needs a cache version bump.
+  removing a field needs a `WIRE_VERSION` bump (`src/fetcher.py`).
 - The Swift side decodes some types through explicit CodingKeys (e.g. `MiscEntry`); the
   shared contract fixture fails when the two sides drift.
 - Swift: default MainActor isolation; value types used off the main actor are `nonisolated`.

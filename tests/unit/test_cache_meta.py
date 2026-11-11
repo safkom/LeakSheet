@@ -307,3 +307,31 @@ class TestTabOnlyTrackerIsServable:
         artist.eras = []
         _set_cached_parsed(URL, artist)
         assert fetcher.get_cached_etag(URL) is None
+
+
+class TestWireVersion:
+    """A wire-format change must be able to retire every stored parse at once."""
+
+    def test_a_bumped_version_makes_every_read_path_miss(self, monkeypatch):
+        _set_cached_parsed(URL, _artist())
+        assert fetcher.get_cached_parsed_bytes(URL) is not None
+        monkeypatch.setattr(fetcher, "WIRE_VERSION", fetcher.WIRE_VERSION + 1)
+        assert fetcher.get_cached_parsed_bytes(URL) is None
+        assert fetcher.get_cached_etag(URL) is None
+        assert fetcher._get_cached_parsed(URL) is None
+
+    def test_an_entry_written_before_versions_existed_counts_as_version_one(self):
+        _set_cached_parsed(URL, _artist())
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        del meta["wire_version"]
+        meta_path.write_text(json.dumps(meta))
+        assert (fetcher.get_cached_parsed_bytes(URL) is not None) == (fetcher.WIRE_VERSION == 1)
+
+    def test_a_retired_entry_does_not_block_its_replacement(self, monkeypatch):
+        big = _artist()
+        big.eras[0].sections[0].songs *= 10
+        _set_cached_parsed(URL, big)
+        monkeypatch.setattr(fetcher, "WIRE_VERSION", fetcher.WIRE_VERSION + 1)
+        _set_cached_parsed(URL, _artist())
+        assert fetcher.get_cached_parsed_bytes(URL) is not None

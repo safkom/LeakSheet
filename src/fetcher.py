@@ -1084,7 +1084,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
     if parsed_file.exists() and meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            if time.time() - _parsed_timestamp(meta) < cache_ttl:
+            if _current_wire(meta) and time.time() - _parsed_timestamp(meta) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.model_validate(data)
         except Exception as e:
@@ -1093,6 +1093,16 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
             # never let cache corruption break a request.
             logger.warning("Parsed cache read failed for %s: %s", url[:80], e)
     return None
+
+
+# Bump when a stored parse must not be served any more: a field removed or renamed, or a
+# value's meaning changed. See docs/decisions.md::fetcher.py::WIRE_VERSION.
+WIRE_VERSION = 1
+
+
+def _current_wire(meta: dict) -> bool:
+    # Entries written before the version existed are version 1.
+    return meta.get("wire_version", 1) == WIRE_VERSION
 
 
 # A parse returning less than this share of the cached entry's tracks is
@@ -1120,6 +1130,8 @@ def _collapse_reason(
         meta = json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
     except (OSError, json.JSONDecodeError):
         meta = {}
+    if not _current_wire(meta):
+        return None
     try:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
@@ -1170,6 +1182,7 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
             _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
             _merge_meta(key, {
                 "content_hash": etag,
+                "wire_version": WIRE_VERSION,
                 "parsed_timestamp": time.time(),
                 # Read back by _collapse_reason, so the collapse check costs a
                 # small sidecar read instead of re-parsing the whole entry.
@@ -1228,8 +1241,9 @@ def clear_cache() -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 def _servable(meta: dict) -> bool:
-    """False for an empty parse on disk: see docs/decisions.md::fetcher.py::cache-collapse-guard."""
-    return meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0
+    """False for an empty parse on disk (docs/decisions.md::fetcher.py::cache-collapse-guard)
+    and for one stored under another wire version (docs/decisions.md::fetcher.py::WIRE_VERSION)."""
+    return _current_wire(meta) and (meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0)
 
 
 def get_cached_etag(url: str) -> str | None:
