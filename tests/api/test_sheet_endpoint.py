@@ -739,6 +739,19 @@ class TestRevalidationBackoff:
         assert calls == [URL]
 
 
+    async def test_an_entry_another_worker_just_refreshed_is_not_parsed_again(self, artist, monkeypatch):
+        calls: list[str] = []
+
+        async def fetch(url, **kwargs):
+            calls.append(url)
+            return artist
+
+        monkeypatch.setattr(api, "async_fetch_and_parse", fetch)
+        _populate_cache(URL, artist, age_seconds=60)
+        await api._background_revalidate(URL)
+        assert calls == []
+
+
 class TestInvalidURL:
     @pytest.mark.parametrize("headers", [{}, {"If-None-Match": '"x"'}, {"Accept": "application/x-ndjson"}])
     def test_a_bad_port_is_a_400_on_every_path(self, api_client, headers):

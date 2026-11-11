@@ -599,3 +599,17 @@ class TestFullSizeCovers:
         google.alive = {thumb, full}
         asyncio.run(api._warm_era_art(_artist(("Donda", thumb)), TRACKER))
         assert read_art_pointer(base) != before
+
+
+def test_one_cover_that_fails_to_store_does_not_fail_the_warm(monkeypatch):
+    """A full disk on one cover must not put a parse that succeeded into revalidation backoff."""
+    warmed: list[str] = []
+
+    async def warm(self, era_name, url):
+        if era_name == "Bad":
+            raise OSError("disk full")
+        warmed.append(era_name)
+
+    monkeypatch.setattr(api._EraArtWarm, "warm", warm)
+    asyncio.run(api._warm_era_art(_artist(("Bad", _cover("a")), ("Good", _cover("b"))), TRACKER))
+    assert warmed == ["Good"]
