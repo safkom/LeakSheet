@@ -38,7 +38,7 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 ## Layout
 
 - `src/api.py` — HTTP layer: `/sheet` (ETag, stale-while-revalidate, NDJSON progress),
-  `/trackers`, `/stream`, `/image-proxy`, `/metadata`, `/cache/clear`, `/health`
+  `/trackers`, `/stream`, `/image-proxy`, `/metadata`, `/hosts`, `/cache/clear`, `/health`
 - `src/fetcher.py` — fetching, tab discovery, disk cache · `src/parser.py` — HTML → `Artist`
 - `src/models.py` — Pydantic models; their `dict()` overrides define the wire format
 - `src/sheets_api.py` — content tabs via one Sheets API v4 call (`LEAKSHEET_GOOGLE_API_KEY`);
@@ -55,7 +55,7 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
 
 - Never commit real tracker content (DMCA). Tests use `tests/fixtures/synthetic/` only.
 - The API runs 3 gunicorn workers: anything in process memory (rate limiter, single-flight,
-  backoff, caches) is per worker. After changing the worker model, grep for "single worker".
+  backoff, caches) is per worker. After changing the worker model, grep for "per worker".
 - Cached parsed bytes are the wire bytes: a serialization change changes every ETag, and
   removing a field needs a cache version bump.
 - The Swift side decodes some types through explicit CodingKeys (e.g. `MiscEntry`); the
@@ -74,6 +74,22 @@ SwiftUI apps (`LeakSheet-iOS/`: iOS, macOS and tvOS from one project).
   every place the shape can reach (e.g. `tests/unit/test_regex_linear.py` times every
   compiled regex in `src/`).
 - **CI:** never hide a red job behind `continue-on-error`.
+- **Reviews:** verify a finding against the cited lines before acting on it; a reviewer
+  that read excerpts reports documented trade-offs as bugs. Check `docs/decisions.md` first.
+
+## Gotchas
+
+- The deploy pulls from the GitHub mirror: wait for GitLab's push mirror before deploying, or
+  the script redeploys the old `main` and exits 0. `/health` reports the same version across
+  commits, so confirm a deploy by image creation time and the server's `git log -1`.
+- GitLab is reachable only with the tailnet up; a push that cannot resolve the host means
+  Tailscale is off, not that the remote is gone.
+- Xcode reorders `project.pbxproj` while it is open: `git checkout` the file before
+  committing unless you changed the project on purpose.
+- `gh pr merge --auto` merges at once on the mirror (no required checks). Do not use it.
+- `tests/tools/yetracker_diff.py` and `-m live` need the network; row counts move daily
+  with the tracker, so compare the gaps before and after a change, not the totals.
+- Offline scripts that import `src` outside pytest need `PYTHONPATH=.`.
 
 ## Docs
 

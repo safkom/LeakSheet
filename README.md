@@ -114,6 +114,8 @@ GET  /api/trackers           → ArtistGrid discovery list (name, url, best, up-
 GET  /api/stream?url=...     → Proxy audio/video from supported hosts (Range support)
 GET  /api/image-proxy?url=…  → Proxy images (CORS bypass, width buckets, disk cache)
 GET  /api/metadata?url=...   → File metadata from provider APIs (incl. media_kind)
+GET  /api/hosts              → Which stream hosts are currently marked down
+GET  /api/health             → Liveness and version
 POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Admin-Token: $LEAKSHEET_ADMIN_TOKEN)
 ```
 
@@ -123,13 +125,15 @@ POST /api/cache/clear        → Clear URL fetch cache (admin — requires X-Adm
 |---|---|---|
 | `LEAKSHEET_ADMIN_TOKEN` | *(unset)* | Shared secret required to call `POST /api/cache/clear`; unset ⇒ endpoint disabled (fail closed) |
 | `LEAKSHEET_RATE_LIMIT_PER_MIN` | `0` (off) | Per-IP req/min cap on `/sheet`, `/stream`, `/metadata`; `/image-proxy` gets 10× this, since one screen loads dozens of covers. `/cache/clear` carries its own fixed cap of 10/min that applies whether or not this is set |
-| `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this when enabling the rate limiter behind a router, or every caller shares one bucket |
+| `LEAKSHEET_TRUSTED_PROXY_HOPS` | `0` | Proxy hops to trust in `X-Forwarded-For`, counted from the right. Set this behind a proxy, or every caller shares one bucket: that includes the always-on `/cache/clear` bucket |
 | `LEAKSHEET_EXTRA_SHEET_HOSTS` | *(unset)* | Extra comma-separated hosts `/sheet` may fetch, on top of the built-in seed and the ArtistGrid feed. `/image-proxy` trusts only the seed plus this list — never the feed — so a feed-only tracker with self-hosted covers must be added here for its art to load |
 | `LEAKSHEET_SHEET_CACHE_MAX_BYTES` | `1073741824` (1 GB) | Disk-cache size cap for fetched sheets/parses |
 | `LEAKSHEET_GID_FETCH_CONCURRENCY` | `6` | Concurrent tab-page fetches across all requests. Each holds a full response body in memory |
 | `LEAKSHEET_GOOGLE_API_KEY` | *(unset)* | Google API key with the Sheets API enabled. Set ⇒ a docs.google.com workbook's content tabs (Misc, Released, Best Of, …) come from one Sheets API v4 call instead of one htmlview page each; main and Art tabs stay on htmlview for their images. Any API failure falls back to htmlview, and a 429 pauses API use for that worker. Unset ⇒ htmlview only |
 | `LEAKSHEET_HUB_LOAD_CONCURRENCY` | `3` | Concurrent hub-workbook tab loads — fetched *and* parsed, so tighter than the above |
 | `LEAKSHEET_IMAGE_RESIZE_CONCURRENCY` | `3` | Concurrent Pillow decodes in `/image-proxy`; each can hold a 15 MB input plus a 20 MP decode |
+| `LEAKSHEET_LOG_LEVEL` | `INFO` | Root log level for the API's own loggers |
+| `SENTRY_DSN` | *(unset)* | GlitchTip (Sentry protocol) project DSN for errors and INFO+ log lines; unset ⇒ off |
 
 > The backend fetches URLs server-side, so every outbound path is guarded. `/sheet` only
 > fetches allowlisted tracker hosts (built-in seed + the ArtistGrid feed +
