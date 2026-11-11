@@ -1145,11 +1145,15 @@ def _collapse_reason(
     if old is None or old_eras is None:
         return None
 
-    if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
+    old_tab_entries = meta.get("tab_entries", 0)
+    # Failed tabs with the songs intact: the content tabs are what went missing.
+    lost_tabs = failed_tabs and tab_entries < old_tab_entries * CACHE_COLLAPSE_RATIO
+    if (old <= 0 or new >= old * CACHE_COLLAPSE_RATIO) and not lost_tabs:
         return None
 
     return (
-        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}, {failed_tabs} failed tabs"
+        f"{new} tracks / {new_eras} eras / {tab_entries} tab entries vs cached "
+        f"{old} / {old_eras} / {old_tab_entries}, {failed_tabs} failed tabs"
     )
 
 

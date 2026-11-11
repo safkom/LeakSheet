@@ -309,6 +309,34 @@ class TestTabOnlyTrackerIsServable:
         assert fetcher.get_cached_etag(URL) is None
 
 
+class TestLostContentTabsDoNotReplaceAGoodEntry:
+    """Same track count, content tabs gone: the songs-only collapse check cannot see it."""
+
+    @staticmethod
+    def _artist_with_tab_entries(count: int) -> Artist:
+        from src.models import MiscEntry, TabSection
+
+        artist = _artist()
+        entries = [MiscEntry(name=f"m{i}", source_tab="misc") for i in range(count)]
+        artist.tabs = [TabSection(kind="misc", name="Misc", entries=entries)] if entries else []
+        return artist
+
+    @staticmethod
+    def _stored_tab_entries() -> int:
+        return json.loads((fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json").read_text())["tab_entries"]
+
+    @pytest.mark.parametrize(("failed_tabs", "kept"), [(1, 50), (0, 0)])
+    def test_only_a_parse_with_failed_tabs_is_refused(self, failed_tabs, kept):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=failed_tabs)
+        assert self._stored_tab_entries() == kept
+
+    def test_a_modest_loss_with_failed_tabs_is_written(self):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(45), failed_tabs=1)
+        assert self._stored_tab_entries() == 45
+
+
 class TestWireVersion:
     """A wire-format change must be able to retire every stored parse at once."""
 

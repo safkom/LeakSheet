@@ -1053,6 +1053,10 @@ genuinely shrunken tracker recovers on its own instead of being frozen for days.
 The refusal is logged at WARNING so a systematically broken tab is visible rather
 than silent — which was the real defect here.
 
+A parse that recorded failed tab loads is also refused when its content-tab entries fall
+under the same ratio of the stored count, even with the songs intact: a revalidation that
+lost its Misc or Stems tabs otherwise replaced a complete entry for an hour.
+
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an
 empty result was served as a hit for an hour and then cached again by the app. It is
