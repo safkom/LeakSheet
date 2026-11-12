@@ -8,6 +8,7 @@ import json
 import logging
 
 import httpx
+import pytest
 
 import src.api as api
 
@@ -91,6 +92,13 @@ class TestMetadataEndpoint:
         data = r.json()
         assert data["provider"] == "froste"
         assert data["bitrate"] == "256kbps"
+
+    @pytest.mark.parametrize("status", [404, 410])
+    def test_a_file_the_provider_no_longer_has_is_a_404(self, api_client, monkeypatch, status):
+        """The host answered about this file: a 503 invites a retry that cannot succeed."""
+        _install(monkeypatch, FakeResp(text="", status=status))
+        r = api_client.get("/metadata", params={"url": "https://music.froste.lol/song/deadbeef"})
+        assert r.status_code == 404
 
     def test_provider_error_is_503(self, api_client, monkeypatch):
         _install(monkeypatch, FakeResp(text="", status=500))

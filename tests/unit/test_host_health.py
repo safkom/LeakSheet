@@ -238,3 +238,36 @@ def test_a_lost_probe_is_replaced_after_its_lease(clock):
     assert host_health.refusing("pillows") is None
     clock[0] += host_health._PROBE_LEASE_S + 1
     assert host_health.refusing("pillows") is None
+
+
+@pytest.mark.parametrize("content", ["[]", '"x"', "7", "null"])
+def test_a_health_file_that_is_not_an_object_reads_as_empty(clock, content):
+    """Any /stream and /hosts call read it: a foreign write must not turn them all into 500s."""
+    host_health._path().parent.mkdir(parents=True, exist_ok=True)
+    host_health._path().write_text(content)
+    assert host_health.down("pillows") is None
+    host_health.record_failure("pillows", PILLOWS, hard=True, error="ConnectError")
+    assert host_health.down("pillows")
+
+
+@pytest.mark.parametrize("exc", [None, httpx.ConnectError("refused"), UpstreamStatusError(404)])
+async def test_an_unwritable_health_file_never_fails_the_stream(clock, monkeypatch, exc):
+    from src import api
+
+    def broken(*args, **kwargs):
+        raise PermissionError("read-only cache")
+
+    for name in ("record_success", "record_failure", "refusing"):
+        monkeypatch.setattr(host_health, name, broken)
+    await api._record_stream_outcome("pillows", PILLOWS, exc)
+    assert await api._health(host_health.refusing, "pillows") is None
+
+
+async def test_imgur_pool_saturation_is_not_reported_as_a_resolver_failure(monkeypatch):
+    """Wrapped into ValueError it counted against imgur: three of them marked the host down."""
+    async def saturated(*args, **kwargs):
+        raise httpx.PoolTimeout("pool")
+
+    monkeypatch.setattr(streaming, "get_capped", saturated)
+    with pytest.raises(httpx.PoolTimeout):
+        await streaming._imgur_cdn_url_from("https://imgur.gg/api/file/abc", [])

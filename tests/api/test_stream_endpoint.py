@@ -421,6 +421,25 @@ class TestSniffSurvivesTinyChunks:
         assert r.headers["content-type"].startswith("audio/ogg")
 
 
+def test_a_host_that_sends_headers_then_fails_the_body_counts_against_it(api_client, monkeypatch):
+    """Success is recorded on headers; a body that never starts must take that back."""
+    class Stalling(FakeStreamResponse):
+        async def aiter_bytes(self, chunk_size=65536):
+            raise httpx.ReadTimeout("no first chunk")
+            yield b""
+
+    outcomes = []
+
+    async def record(provider, link, exc):
+        outcomes.append(type(exc).__name__ if exc else None)
+
+    monkeypatch.setattr(api, "_record_stream_outcome", record)
+    _patch_stream(monkeypatch, Stalling(200, {"content-type": "audio/mp4"}, []))
+    r = api_client.get("/stream", params={"url": PILLOWS})
+    assert r.status_code == 503
+    assert outcomes == [None, "ReadError"]
+
+
 class _TrickleThenHang(httpx.AsyncByteStream):
     """Yields *chunks*, then blocks: a download still in flight."""
 

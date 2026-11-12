@@ -248,6 +248,19 @@ class TestFailedTabs:
         await _parse(rec, patch_sheets_client, timer=timer)
         assert timer.tab_counts() == (1, 4)
 
+    async def test_a_tab_that_loads_but_fails_to_parse_is_a_failed_tab(self, with_key, patch_sheets_client, monkeypatch):
+        """Counted as loaded, its missing content was cached as a complete parse."""
+        from src import fetcher
+        from src.fetcher import PhaseTimer
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("parser bug")
+
+        monkeypatch.setattr(fetcher, "parse_misc_tab", broken)
+        timer = PhaseTimer()
+        await _parse(Recorder(), patch_sheets_client, timer=timer)
+        assert timer.tab_counts()[0] >= 1
+
     async def test_a_failed_api_call_leaves_the_htmlview_accounting_alone(self, with_key, patch_sheets_client):
         from src.fetcher import PhaseTimer
 

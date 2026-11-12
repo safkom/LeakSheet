@@ -31,8 +31,8 @@ _UPSTREAM = {
     "html-200": (httpx.Response(200, text="<html>challenge</html>", headers={"content-type": "text/html"}), 503),
 }
 
-# What the metadata API can't tell apart: it only knows the provider failed.
-_METADATA_STATUS = {404: 503, 429: 503}
+# The metadata API relays "gone" like the others; a throttle it only knows as a failure.
+_METADATA_STATUS = {429: 503}
 
 
 @pytest.fixture

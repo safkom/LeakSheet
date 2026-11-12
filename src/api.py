@@ -224,6 +224,12 @@ def _sniff_audio_format(header: bytes) -> str | None:
     # "OggS", not any byte starting 'O', which would misclassify tiny bodies.
     if 0 < len(header) < 4 and b"OggS".startswith(header):
         return _MIME_OGG
+    # The same probe on FLAC and ID3-tagged MP3; two bytes at least, 'f' or 'I' alone says nothing.
+    if 2 <= len(header) < 4:
+        if b"fLaC".startswith(header):
+            return _MIME_FLAC
+        if b"ID3".startswith(header):
+            return _MIME_MPEG
 
     # FLAC — "fLaC"
     if header[:4] == b"fLaC":
@@ -1564,9 +1570,9 @@ async def _google_resized(url: str, width: int, headers: dict, base_headers: dic
     try:
         # Capped, like the fallback path: a plain .get() buffers the whole body.
         resp, gdata = await _get_image_capped(google_url, headers)
-    except httpx.HTTPError as exc:
-        # Fall through to the original URL + Pillow path.
-        logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
+    except (httpx.HTTPError, HTTPException) as exc:
+        # Fall through to the original URL + Pillow path; it runs its own checks.
+        logger.warning("image proxy: Google CDN resize failed for %s: %r", url[:80], exc)
         return None
     ct = resp.headers.get("content-type", "")
     if resp.status_code == 200 and _is_raster_image(ct):
@@ -1967,7 +1973,11 @@ async def _fetch_metadata(url: str, meta_url: str, provider: str) -> Response:
             # so fall back to a HEAD probe before giving up.
             result = await _pillows_stream_head_fallback(url) if provider == "pillows" else None
             if result is None:
-                raise HTTPException(status_code=503, detail=f"Provider returned {resp.status_code}")
+                # 404/410 is the host answering about this file: a 503 invites a useless retry.
+                gone = resp.status_code in (404, 410)
+                raise HTTPException(
+                    status_code=404 if gone else 503, detail=f"Provider returned {resp.status_code}"
+                )
         payload = json.dumps(result)
         _metadata_cache.set(meta_url, payload)
         return _metadata_response(payload, "miss")
@@ -2220,6 +2230,15 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
             break
 
 
+async def _health(fn, *args, **kwargs):
+    """Run host-health bookkeeping; an unwritable cache directory is no verdict, not a 500."""
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except OSError as e:
+        logger.warning("host health unavailable: %s", e)
+        return None
+
+
 async def _record_stream_outcome(provider: str | None, link: str, exc: Exception | None) -> None:
     """Feed one /stream upstream outcome into the shared provider health."""
     if provider is None:
@@ -2227,7 +2246,7 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     if exc is None or isinstance(exc, NonMediaError) or (
         isinstance(exc, UpstreamStatusError) and exc.status_code < 500
     ):
-        await asyncio.to_thread(host_health.record_success, provider)  # the host answered
+        await _health(host_health.record_success, provider)  # the host answered
         return
     if isinstance(exc, httpx.PoolTimeout):
         return  # our own pool is saturated: the host was never asked
@@ -2237,9 +2256,7 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
         hard = False
     else:
         return  # a bug of ours says nothing about the host
-    await asyncio.to_thread(
-        host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__
-    )
+    await _health(host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__)
 
 
 @app.get("/hosts")
@@ -2263,7 +2280,7 @@ async def _stream_target(url: str) -> tuple[str, str | None]:
     # A provider known to be down is refused at once, until a retry is due: see
     # docs/decisions.md::host_health.py.
     provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
+    if provider and (outage := await _health(host_health.refusing, provider)):
         raise HTTPException(
             status_code=503,
             detail=f"{outage['host']} is temporarily unavailable",
@@ -2490,7 +2507,12 @@ async def proxy_stream(
     # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
     # A 206 to a suffix range ('bytes=-N') starts at the file TAIL: never sniff it.
     if resp.status_code == 200 or (range_start == 0 and not is_suffix_range):
-        head = await body.sniff(url)
+        try:
+            head = await body.sniff(url)
+        except HTTPException:
+            # Headers arrived, the body did not: the success recorded on headers was premature.
+            await _record_stream_outcome(provider, url, httpx.ReadError("no first chunk"))
+            raise
         sniffed = _sniff_audio_format(head[:_SNIFF_BYTES])
         if sniffed:
             ct = sniffed

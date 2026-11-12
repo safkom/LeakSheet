@@ -639,6 +639,8 @@ async def _imgur_cdn_url_from(url: str, statuses: list[int]) -> str:
     """The cdnUrl one imgur host reports; ValueError (with the status noted) otherwise."""
     try:
         resp = await get_capped(_get_shared_client(), url, {"User-Agent": _STREAM_USER_AGENT})
+    except httpx.PoolTimeout:
+        raise  # our own pool is saturated: imgur was never asked, so it is not a failure
     except httpx.HTTPError as exc:
         raise ValueError(f"imgur.gg API request failed: {exc}") from exc
     if resp.status_code != 200:
@@ -802,11 +804,13 @@ async def _gdrive_confirm_url(resp: httpx.Response) -> str:
     """The confirm-form URL of a virus-scan interstitial. The read is capped: the form is
     always near the top, and an uncapped decompressed read of a crafted page could OOM."""
     buf = bytearray()
-    async for chunk in resp.aiter_bytes():
-        buf.extend(chunk)
-        if len(buf) >= _SCRAPER_READ_CAP:
-            break
-    await resp.aclose()
+    try:
+        async for chunk in resp.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) >= _SCRAPER_READ_CAP:
+                break
+    finally:
+        await resp.aclose()
     fields = parse_gdrive_confirm_form(bytes(buf[:_SCRAPER_READ_CAP]).decode("utf-8", errors="ignore"))
     if not fields:
         raise GdriveInterstitialError("drive.google.com returned HTML with no recognisable confirm form")
