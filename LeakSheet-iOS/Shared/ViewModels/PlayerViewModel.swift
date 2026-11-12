@@ -9,6 +9,7 @@ final class PlayerViewModel {
     static let shared = PlayerViewModel()
 
     private let engine = AudioEngine.shared
+    @ObservationIgnored private var smartShuffleGeneration = 0
 
     var currentTrack: SongVersion? { engine.currentTrack }
     var artistName: String { engine.artistName }
@@ -200,6 +201,11 @@ final class PlayerViewModel {
     /// Favourites shuffled, with suggestions from trackers already in the cache: a favourite
     /// whose tracker was never loaded gets none.
     func playSmartShuffle(_ entries: [FavouritesManager.FavouriteEntry]) async {
+        // Building the station reads whole cached trackers: a second tap, or a song the user
+        // starts meanwhile, must win over this call's late start.
+        smartShuffleGeneration += 1
+        let generation = smartShuffleGeneration
+        let playingAtStart = engine.currentTrack?.id
         let favourites: [PlaybackListItem] = entries.compactMap { entry in
             guard let version = entry.toSongVersion, version.isStreamable else { return nil }
             return PlaybackListItem(version: version, artistName: entry.artistName, eraName: entry.eraName,
@@ -220,6 +226,7 @@ final class PlayerViewModel {
             ) },
             using: &rng
         )
+        guard generation == smartShuffleGeneration, engine.currentTrack?.id == playingAtStart else { return }
         playInList(station, startAt: 0)
     }
 

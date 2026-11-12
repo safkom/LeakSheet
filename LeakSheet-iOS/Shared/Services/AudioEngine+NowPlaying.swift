@@ -111,7 +111,11 @@ extension AudioEngine {
             return .success
         }
         commandCenter.pauseCommand.addTarget { @Sendable [weak self] _ in
-            Task { @MainActor in self?.player?.pause() }
+            Task { @MainActor in
+                // A pause during a call must hold when the call ends.
+                self?.resumeAfterInterruption = false
+                self?.player?.pause()
+            }
             return .success
         }
         // The Mac's play/pause key and a wired headset's button send this, not play/pause.
@@ -194,6 +198,8 @@ extension AudioEngine {
             let reason = rawReason.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
             MainActor.assumeIsolated {
                 guard let self, reason == .oldDeviceUnavailable else { return }
+                // Headphones gone mid-call: the end of the call must not resume on the speaker.
+                self.resumeAfterInterruption = false
                 self.player?.pause()
                 self.isPlaying = false
             }

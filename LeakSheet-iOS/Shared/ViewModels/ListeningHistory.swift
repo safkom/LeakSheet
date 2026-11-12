@@ -33,6 +33,22 @@ final class ListeningHistory {
     nonisolated struct Snapshot: Codable, Sendable {
         var plays: [String: [String: Tally]]
         var recent: [RecentPlay]
+
+        init(plays: [String: [String: Tally]], recent: [RecentPlay]) {
+            self.plays = plays
+            self.recent = recent
+        }
+
+        /// `recent` embeds whole versions: one that no longer decodes must not cost every play count.
+        init(from decoder: Decoder) throws {
+            struct Lossy: Decodable {
+                let play: RecentPlay?
+                init(from decoder: Decoder) throws { play = try? RecentPlay(from: decoder) }
+            }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            plays = try container.decode([String: [String: Tally]].self, forKey: .plays)
+            recent = (try? container.decode([Lossy].self, forKey: .recent))?.compactMap(\.play) ?? []
+        }
     }
 
     /// artistSlug → version key → tally.

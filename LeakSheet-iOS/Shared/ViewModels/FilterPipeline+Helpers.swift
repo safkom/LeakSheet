@@ -246,11 +246,12 @@ extension ArtistViewModel {
         if dateStr.wholeMatch(of: /\d{1,2}\/\d{1,2}\/\d{2}/) != nil {
             return _shortYearSlashFmt.date(from: dateStr)?.timeIntervalSince1970
         }
+        // The dominant form first: DECISIONS.md::FilterPipeline.swift::date-format-priority.
+        if let date = _abbrevMonthDayFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _slashFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _isoFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _iso8601Fmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _dayFirstFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
-        if let date = _abbrevMonthDayFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _fullMonthDayFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _monthYearFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
         if let date = _abbrevMonthYearFmt.date(from: dateStr) { return date.timeIntervalSince1970 }
