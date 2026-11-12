@@ -12,7 +12,8 @@ struct BadgePill: View {
     var prominent: Bool = false
 
     var body: some View {
-        Text(text)
+        // A whole free-text cell can land here, and fixedSize draws it past the row.
+        Text(text.count > 40 ? text.prefix(39) + "…" : text)
             .font(prominent ? .footnote.weight(.semibold) : .caption2.weight(.semibold))
             .foregroundStyle(variant.color)
             .padding(.horizontal, prominent ? 10 : 7)

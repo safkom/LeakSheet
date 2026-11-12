@@ -5,6 +5,11 @@ extension SongDescriptionSheet {
     var artHeader: some View {
         // Prominent album art with gradient
         VStack(spacing: 12) {
+            // A version from an era without art has no extraction to replace the old accent.
+            Color.clear.frame(height: 0)
+                .onChange(of: active.eraArt) { _, art in
+                    if art == nil { accentColor = nil }
+                }
             if let artUrl = active.eraArt, let url = APIClient.shared.imageProxyURL(
                 for: artUrl,
                 width: 640
@@ -62,12 +67,11 @@ extension SongDescriptionSheet {
         VStack(alignment: .leading, spacing: 2) {
             Text(displayName)
                 .font(.title.weight(.bold))
-                // .white, not .primary: a dynamic colour resolves to black in the
-                // contrast maths, greying the title until the artwork task lands.
-                .foregroundStyle((accentColor ?? .white).ensureReadable(
-                    against: .lsBackground,
-                    in: colorScheme
-                ))
+                // No accent: plain .primary. Run through the contrast maths, a
+                // stand-in colour comes out mid-grey in light appearance.
+                .foregroundStyle(
+                    accentColor.map { $0.ensureReadable(against: .lsBackground, in: colorScheme) } ?? Color.primary
+                )
             if let sub = subtitle {
                 Text(sub)
                     .font(.subheadline)
@@ -209,7 +213,8 @@ extension SongDescriptionSheet {
         // Links — filter to valid URLs first so the header
         // never renders above an empty list.
         let validLinks = (active.version.links ?? []).compactMap { link in
-            URL(string: link).map { (raw: link, url: $0) }
+            // Only what the sheet can open: a pill for anything else does nothing.
+            URL(string: link).flatMap { SafariItem.isWebURL($0) ? (raw: link, url: $0) : nil }
         }
         if !validLinks.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
