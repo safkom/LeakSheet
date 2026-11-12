@@ -101,6 +101,13 @@ struct ListeningHistoryTests {
         #expect(history.recent.last?.version.name == "Song 5")
     }
 
+    @Test func `an unreadable recent play does not cost the play counts`() throws {
+        let json = #"{"plays":{"a":{"k":{"count":3,"last":0}}},"recent":[{"id":7}]}"#
+        let snapshot = try JSONDecoder().decode(ListeningHistory.Snapshot.self, from: Data(json.utf8))
+        #expect(snapshot.plays["a"]?["k"]?.count == 3)
+        #expect(snapshot.recent.isEmpty)
+    }
+
     @Test func `save and load round trip`() async {
         let (history, file) = makeHistory()
         let song = version("Hurricane", tag: "V4")

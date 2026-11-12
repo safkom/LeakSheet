@@ -195,6 +195,7 @@ final class AudioEngine {
         // timeControlStatus, not isPlaying/loading: a stall reads isPlaying=false, loading=true
         // yet must pause, while a paused player with a stale loading flag must play.
         if player.timeControlStatus != .paused {
+            resumeAfterInterruption = false
             player.pause()
             isPlaying = false
         } else {
