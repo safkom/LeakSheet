@@ -223,6 +223,12 @@ def _sniff_audio_format(header: bytes) -> str | None:
     # "OggS", not any byte starting 'O', which would misclassify tiny bodies.
     if 0 < len(header) < 4 and b"OggS".startswith(header):
         return _MIME_OGG
+    # The same probe on FLAC and ID3-tagged MP3; two bytes at least, 'f' or 'I' alone says nothing.
+    if 2 <= len(header) < 4:
+        if b"fLaC".startswith(header):
+            return _MIME_FLAC
+        if b"ID3".startswith(header):
+            return _MIME_MPEG
 
     # FLAC — "fLaC"
     if header[:4] == b"fLaC":
@@ -1953,7 +1959,11 @@ async def _fetch_metadata(url: str, meta_url: str, provider: str) -> Response:
             # so fall back to a HEAD probe before giving up.
             result = await _pillows_stream_head_fallback(url) if provider == "pillows" else None
             if result is None:
-                raise HTTPException(status_code=503, detail=f"Provider returned {resp.status_code}")
+                # 404/410 is the host answering about this file: a 503 invites a useless retry.
+                gone = resp.status_code in (404, 410)
+                raise HTTPException(
+                    status_code=404 if gone else 503, detail=f"Provider returned {resp.status_code}"
+                )
         payload = json.dumps(result)
         _metadata_cache.set(meta_url, payload)
         return _metadata_response(payload, "miss")
@@ -2483,7 +2493,12 @@ async def proxy_stream(
     # The first body byte is file byte 0 on a 200, or on a 206 whose range starts at 0.
     # A 206 to a suffix range ('bytes=-N') starts at the file TAIL: never sniff it.
     if resp.status_code == 200 or (range_start == 0 and not is_suffix_range):
-        head = await body.sniff(url)
+        try:
+            head = await body.sniff(url)
+        except HTTPException:
+            # Headers arrived, the body did not: the success recorded on headers was premature.
+            await _record_stream_outcome(provider, url, httpx.ReadError("no first chunk"))
+            raise
         sniffed = _sniff_audio_format(head[:_SNIFF_BYTES])
         if sniffed:
             ct = sniffed

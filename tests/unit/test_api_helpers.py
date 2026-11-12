@@ -270,3 +270,18 @@ def test_infer_artist_name_aliases(title, expected):
     from src.fetcher import _infer_artist_name
 
     assert _infer_artist_name(title) == expected
+
+
+@pytest.mark.parametrize(
+    ("head", "mime"),
+    [
+        # A two-byte range probe must get the type the full response gets.
+        (b"Og", "audio/ogg"), (b"fL", "audio/flac"), (b"ID", "audio/mpeg"), (b"\xff\xfb", "audio/mpeg"),
+        (b"fLaC", "audio/flac"), (b"ID3", "audio/mpeg"),
+        (b"f", None), (b"I", None), (b"fx", None), (b"IX", None), (b"<h", None),
+    ],
+)
+def test_a_short_probe_is_sniffed_like_the_full_head(head, mime):
+    from src.api import _sniff_audio_format
+
+    assert _sniff_audio_format(head) == mime
