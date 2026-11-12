@@ -24,6 +24,11 @@ struct ContentView: View {
     private func consumeDeepLink() {
         guard let pending = DeepLinkRouter.shared.pending else { return }
         DeepLinkRouter.shared.pending = nil
+        // Behind a sheet or an open tracker the load would run unseen.
+        showFavourites = false
+        showSettings = false
+        showBrowse = false
+        path.removeAll()
         pendingBrowse = pending
     }
 
