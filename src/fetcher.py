@@ -1746,6 +1746,7 @@ class _SecondaryTabs:
         except Exception as e:
             # Content tabs optional; WARNING keeps systematic failures visible.
             logger.warning("Content tab %s load failed: %s", gid_val, e)
+            self.t.tab_loaded(gid_val, False)  # fetched or not, its content is missing
         self._finished(display_name)
 
 
@@ -1957,6 +1958,7 @@ async def _load_hub_tab(
             return display, parsed
         except Exception as e:
             logger.warning("Hub tab %s (%s) failed: %s", gid_val, display, e)
+            fetch_kw["t"].tab_loaded(gid_val, False)  # fetched or not, its content is missing
             return None
 
 
