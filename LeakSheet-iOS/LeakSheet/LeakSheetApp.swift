@@ -46,6 +46,8 @@ struct LeakSheetApp: App {
             NowPlayingView()
                 .environment(PlayerViewModel.shared)
                 .environment(FavouritesManager.shared)
+                // The playing tracker's model, so song details resolve the full version set.
+                .environment(MacUIState.shared.trackers[PlayerViewModel.shared.artistSlug]?.viewModel)
                 .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 460, height: 700)
