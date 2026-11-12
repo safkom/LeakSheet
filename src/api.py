@@ -652,6 +652,10 @@ async def _background_revalidate(url: str) -> None:
     key = _normalize_url(url)
     if time.monotonic() < _revalidate_backoff.get(key, 0.0):
         return
+    # Each worker schedules this for the same stale entry; the first to finish refreshes it.
+    age = await async_get_cached_age(url)
+    if age is not None and age < DEFAULT_CACHE_TTL:
+        return
     try:
         artist, warm = await _parse_once(url, cache_ttl=0, use_cache=True, write_cache=True)
         await asyncio.shield(warm)
@@ -1515,7 +1519,12 @@ async def _warm_era_art(artist, tracker_url: str) -> None:
     if not covers:
         return
     warm = _EraArtWarm(tracker_url, artist._art_candidates)
-    await asyncio.gather(*(warm.warm(name, url) for name, url in covers.items()))
+    results = await asyncio.gather(
+        *(warm.warm(name, url) for name, url in covers.items()), return_exceptions=True
+    )
+    for name, result in zip(covers, results, strict=True):
+        if isinstance(result, Exception):  # one cover is never worth the parse's outcome
+            logger.warning("cover warm failed for %s / %s: %r", tracker_url[:80], name, result)
 
 
 async def _store_slot_original(slot: str, data: bytes, ct: str) -> None:

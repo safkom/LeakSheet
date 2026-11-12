@@ -1084,7 +1084,7 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
     if parsed_file.exists() and meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
-            if time.time() - _parsed_timestamp(meta) < cache_ttl:
+            if _current_wire(meta) and time.time() - _parsed_timestamp(meta) < cache_ttl:
                 data = json.loads(parsed_file.read_text(encoding="utf-8"))
                 return Artist.model_validate(data)
         except Exception as e:
@@ -1093,6 +1093,16 @@ def _get_cached_parsed(url: str, cache_ttl: float = DEFAULT_CACHE_TTL) -> Artist
             # never let cache corruption break a request.
             logger.warning("Parsed cache read failed for %s: %s", url[:80], e)
     return None
+
+
+# Bump when a stored parse must not be served any more: a field removed or renamed, or a
+# value's meaning changed. See docs/decisions.md::fetcher.py::WIRE_VERSION.
+WIRE_VERSION = 1
+
+
+def _current_wire(meta: dict) -> bool:
+    # Entries written before the version existed are version 1.
+    return meta.get("wire_version", 1) == WIRE_VERSION
 
 
 # A parse returning less than this share of the cached entry's tracks is
@@ -1120,6 +1130,8 @@ def _collapse_reason(
         meta = json.loads((CACHE_DIR / f"{key}.meta.json").read_text())
     except (OSError, json.JSONDecodeError):
         meta = {}
+    if not _current_wire(meta):
+        return None
     try:
         age = time.time() - _parsed_timestamp(meta)
     except TypeError:
@@ -1133,11 +1145,19 @@ def _collapse_reason(
     if old is None or old_eras is None:
         return None
 
-    if old <= 0 or new >= old * CACHE_COLLAPSE_RATIO:
+    old_tab_entries = meta.get("tab_entries", 0)
+    # Failed tabs with the songs intact: the content tabs are what went missing. Only inside
+    # the short window: a tab that fails forever must not freeze a real edit for the week.
+    lost_tabs = (
+        failed_tabs and age <= COLLAPSE_GUARD_TTL
+        and tab_entries < old_tab_entries * CACHE_COLLAPSE_RATIO
+    )
+    if (old <= 0 or new >= old * CACHE_COLLAPSE_RATIO) and not lost_tabs:
         return None
 
     return (
-        f"{new} tracks / {new_eras} eras vs cached {old} / {old_eras}, {failed_tabs} failed tabs"
+        f"{new} tracks / {new_eras} eras / {tab_entries} tab entries vs cached "
+        f"{old} / {old_eras} / {old_tab_entries}, {failed_tabs} failed tabs"
     )
 
 
@@ -1170,6 +1190,7 @@ def _set_cached_parsed(url: str, artist: Artist, failed_tabs: int = 0) -> None:
             _atomic_write_bytes(CACHE_DIR / f"{key}.parsed.json", body)
             _merge_meta(key, {
                 "content_hash": etag,
+                "wire_version": WIRE_VERSION,
                 "parsed_timestamp": time.time(),
                 # Read back by _collapse_reason, so the collapse check costs a
                 # small sidecar read instead of re-parsing the whole entry.
@@ -1228,8 +1249,9 @@ def clear_cache() -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 def _servable(meta: dict) -> bool:
-    """False for an empty parse on disk: see docs/decisions.md::fetcher.py::cache-collapse-guard."""
-    return meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0
+    """False for an empty parse on disk (docs/decisions.md::fetcher.py::cache-collapse-guard)
+    and for one stored under another wire version (docs/decisions.md::fetcher.py::WIRE_VERSION)."""
+    return _current_wire(meta) and (meta.get("total_versions") != 0 or meta.get("tab_entries", 0) > 0)
 
 
 def get_cached_etag(url: str) -> str | None:
@@ -1526,6 +1548,7 @@ async def _first_tab_with_table(
     page_paths = _page_path_map(base_html)
     gids = _discover_gids(base_html) or list(page_paths) or ["0"]
     last_error = None
+    unreachable = None
     for try_gid in gids:
         try:
             sheet_url = _build_sheet_html_url(url, try_gid, page_paths)
@@ -1534,8 +1557,17 @@ async def _first_tab_with_table(
                 if use_cache:
                     await _async_set_cache(url, r.text, title)
                 return r.text, title
-        except (httpx.HTTPError, ValueError, KeyError) as e:
+            if r.status_code == 429 or r.status_code >= 500:
+                unreachable = f"HTTP {r.status_code}"
+        except ResponseTooLarge as e:
             last_error = e
+        except httpx.HTTPError as e:
+            last_error = unreachable = e
+        except (ValueError, KeyError) as e:
+            last_error = e
+    if unreachable is not None:
+        # A tab that never answered may hold the table: an outage is not an empty sheet.
+        raise NetworkError(f"Could not load every tab of {url}: {unreachable}")
     raise NoTablesError(
         f"No valid sheet data found at {url}. "
         f"Tried GIDs: {gids}. Last error: {last_error}"

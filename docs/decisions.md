@@ -376,6 +376,18 @@ treat it as such rather than surfacing an error.
 the rate limiter so a 429 still carries `Access-Control-Allow-Origin` — otherwise a
 browser sees an opaque network error instead of a clean 429 response.
 
+## fetcher.py::WIRE_VERSION — retiring every stored parse
+
+The fast path serves stored bytes unvalidated for up to 7 days (`api.py::swr-fast-path`,
+`api.py::serve-stale-window`), so a wire-format change that old bytes must not survive
+needs a switch: `WIRE_VERSION` is written into each entry's meta, and an entry under
+another version is a miss on every read path and never outranks a new parse in the
+collapse guard. Bump it when a field is removed or renamed or a value changes meaning;
+a field that is only added needs no bump, since the apps decode it as optional. A bump
+costs one cold parse per tracker. An entry with no version is version 1. The first parse
+after a bump is written without the collapse guard, since the retired entry no longer
+counts: a partial parse landing then is served until the next revalidation replaces it.
+
 ## api.py::swr-fast-path — stale-while-revalidate serves raw cached bytes
 
 The fast path returns the cached JSON bytes as-is: no pydantic validation, no
@@ -407,8 +419,8 @@ sheet, a base page whose redirect chain ended on `accounts.google.com`: Google a
 a private sheet with a redirect to the sign-in page, which comes back as a 200 with no
 table (`_raise_if_signed_out`; `_get_capped` keeps the final request so `.url` shows
 where the chain ended). Nothing else deletes: a timeout, a connection error, a 429 or
-any 5xx (all `NetworkError`), `NoTablesError` (it also covers every sub-page failing
-for transport reasons), a disallowed host, and a mirror that redirects elsewhere keep
+any 5xx (all `NetworkError`, which `_first_tab_with_table` also raises when a tab never
+answered), `NoTablesError` (every tab answered, none held a table), a disallowed host, and a mirror that redirects elsewhere keep
 serving the stale copy. The next request after a drop is a cold parse that returns the
 real 400 or 403. `SourceGoneError` subclasses `InvalidURLError` so the cold-path 400 is
 unchanged.
@@ -1066,6 +1078,13 @@ than the 7-day serve window, see `api.py::serve-stale-window`); past that a
 genuinely shrunken tracker recovers on its own instead of being frozen for days.
 The refusal is logged at WARNING so a systematically broken tab is visible rather
 than silent — which was the real defect here.
+
+A parse that recorded failed tab loads is also refused when its content-tab entries fall
+under the same ratio of the stored count, even with the songs intact: a revalidation that
+lost its Misc or Stems tabs otherwise replaced a complete entry for an hour. This clause
+holds only for `COLLAPSE_GUARD_TTL`, not the serve window: "failed tabs" counts every tab
+that answered without a table, so a tracker with one permanently broken tab reports them
+on each parse, and a week-long refusal would freeze a real edit to its content tabs.
 
 An empty parse (zero versions) is refused before the no-entry early return, so the
 discovery fallback and the base-page branch are covered with the rest: cached, an

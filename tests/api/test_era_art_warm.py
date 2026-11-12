@@ -613,6 +613,20 @@ class TestFullSizeCovers:
         assert read_art_pointer(base) != before
 
 
+def test_one_cover_that_fails_to_store_does_not_fail_the_warm(monkeypatch):
+    """A full disk on one cover must not put a parse that succeeded into revalidation backoff."""
+    warmed: list[str] = []
+
+    async def warm(self, era_name, url):
+        if era_name == "Bad":
+            raise OSError("disk full")
+        warmed.append(era_name)
+
+    monkeypatch.setattr(api._EraArtWarm, "warm", warm)
+    asyncio.run(api._warm_era_art(_artist(("Bad", _cover("a")), ("Good", _cover("b"))), TRACKER))
+    assert warmed == ["Good"]
+
+
 class TestTitleArt:
     """Some trackers put the era's title logo in the header row and no cover: a wide
     transparent banner shown as album art. Only the downloaded bytes reveal its shape:

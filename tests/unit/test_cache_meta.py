@@ -307,3 +307,79 @@ class TestTabOnlyTrackerIsServable:
         artist.eras = []
         _set_cached_parsed(URL, artist)
         assert fetcher.get_cached_etag(URL) is None
+
+
+class TestLostContentTabsDoNotReplaceAGoodEntry:
+    """Same track count, content tabs gone: the songs-only collapse check cannot see it."""
+
+    @staticmethod
+    def _artist_with_tab_entries(count: int) -> Artist:
+        from src.models import MiscEntry, TabSection
+
+        artist = _artist()
+        entries = [MiscEntry(name=f"m{i}", source_tab="misc") for i in range(count)]
+        artist.tabs = [TabSection(kind="misc", name="Misc", entries=entries)] if entries else []
+        return artist
+
+    @staticmethod
+    def _stored_tab_entries() -> int:
+        return json.loads((fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json").read_text())["tab_entries"]
+
+    @pytest.mark.parametrize(("failed_tabs", "kept"), [(1, 50), (0, 0)])
+    def test_only_a_parse_with_failed_tabs_is_refused(self, failed_tabs, kept):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=failed_tabs)
+        assert self._stored_tab_entries() == kept
+
+    def test_a_modest_loss_with_failed_tabs_is_written(self):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(45), failed_tabs=1)
+        assert self._stored_tab_entries() == 45
+
+
+    def test_the_refusal_ends_with_the_short_guard_window(self):
+        """A tab that fails on every parse must not freeze a real edit for the serve window."""
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["parsed_timestamp"] = time.time() - fetcher.COLLAPSE_GUARD_TTL - 60
+        meta_path.write_text(json.dumps(meta))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=1)
+        assert self._stored_tab_entries() == 0
+
+    def test_an_entry_stored_without_a_tab_count_never_refuses(self):
+        _set_cached_parsed(URL, self._artist_with_tab_entries(50))
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        del meta["tab_entries"]
+        meta_path.write_text(json.dumps(meta))
+        _set_cached_parsed(URL, self._artist_with_tab_entries(0), failed_tabs=1)
+        assert self._stored_tab_entries() == 0
+
+
+class TestWireVersion:
+    """A wire-format change must be able to retire every stored parse at once."""
+
+    def test_a_bumped_version_makes_every_read_path_miss(self, monkeypatch):
+        _set_cached_parsed(URL, _artist())
+        assert fetcher.get_cached_parsed_bytes(URL) is not None
+        monkeypatch.setattr(fetcher, "WIRE_VERSION", fetcher.WIRE_VERSION + 1)
+        assert fetcher.get_cached_parsed_bytes(URL) is None
+        assert fetcher.get_cached_etag(URL) is None
+        assert fetcher._get_cached_parsed(URL) is None
+
+    def test_an_entry_written_before_versions_existed_counts_as_version_one(self):
+        _set_cached_parsed(URL, _artist())
+        meta_path = fetcher.CACHE_DIR / f"{_cache_key(URL)}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        del meta["wire_version"]
+        meta_path.write_text(json.dumps(meta))
+        assert (fetcher.get_cached_parsed_bytes(URL) is not None) == (fetcher.WIRE_VERSION == 1)
+
+    def test_a_retired_entry_does_not_block_its_replacement(self, monkeypatch):
+        big = _artist()
+        big.eras[0].sections[0].songs *= 10
+        _set_cached_parsed(URL, big)
+        monkeypatch.setattr(fetcher, "WIRE_VERSION", fetcher.WIRE_VERSION + 1)
+        _set_cached_parsed(URL, _artist())
+        assert fetcher.get_cached_parsed_bytes(URL) is not None
