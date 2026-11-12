@@ -845,6 +845,14 @@ class TestTimelineParsing:
         assert events[0].event == "Ye is born in Atlanta"
         assert "Roc-A-Fella" in events[1].event
 
+    @pytest.mark.parametrize(
+        ("line", "event"),
+        [("(2016) (Drops A) and (B)", "(Drops A) and (B)"), ("(2016) (Drops A (the demo) twice)", "Drops A (the demo) twice")],
+    )
+    def test_only_one_wrapping_paren_group_is_stripped(self, line, event):
+        from src.models import parse_timeline
+        assert parse_timeline(line)[0].event == event
+
     def test_keem_format(self):
         from src.models import parse_timeline
         events = parse_timeline('(2016) Baby Keem releases "Come Thru" to soundcloud.\n(August 16, 2018) Hearts & Darts on streaming.')
@@ -2307,6 +2315,15 @@ class TestMiscTabUnits:
         from src.parser import parse_misc_tab
         assert parse_misc_tab("<html><body>no table</body></html>", "misc") == []
 
+    @pytest.mark.parametrize(
+        ("header", "is_links"),
+        [("Link(s)", True), ("Link(s):", True), ("Links", True), ("Link", True),
+         ("Link Status", False), ("Linked Era", False), ("LinkedIn", False)],
+    )
+    def test_only_a_link_header_names_the_links_column(self, header, is_links):
+        from src.parser import _MISC_COLUMN_ALIASES, _misc_header_key
+        assert (_MISC_COLUMN_ALIASES.get(_misc_header_key(header)) == "links") == is_links
+
     def test_colon_suffixed_headers(self):
         # Same colon-suffix grammar the 2026-07-20 sweep found on main tabs
         # exists on secondary tabs; _misc_header_key must strip it too.
@@ -2602,3 +2619,49 @@ class TestEngineerAndLocationColumns:
         from src.parser import _Cell, detect_columns
         assert detect_columns([_Cell(text=h) for h in ("Era", "Name", "Studio")]).get("recording_location") == 2
         assert detect_columns([_Cell(text=h) for h in ("Era", "Name", "Engineers")]).get("engineer") == 2
+
+
+def test_tagged_stub_merge_keys_each_era_once(monkeypatch):
+    """One match key per era, not one per (empty era, era) pair: a hostile tab has thousands."""
+    from src import parser
+    from src.models import Era, Section, Song, SongVersion
+
+    def full(name):
+        song = Song(base_name="s", versions=[SongVersion(name="s")])
+        return Era(name=name, sections=[Section(songs=[song])])
+
+    eras = [era for i in range(200) for era in (Era(name=f"Name{i} [V2]"), full(f"Name{i}"))]
+    calls = 0
+    real = parser._era_match_key
+
+    def counting(name, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real(name, **kwargs)
+
+    monkeypatch.setattr(parser, "_era_match_key", counting)
+    merged = parser._merge_tagged_stubs(eras)
+    assert len(merged) == 200 and all(e.sections for e in merged)
+    assert calls <= 2 * len(eras)
+
+
+def _era_table(rows):
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f"<table><tr><td>Era</td><td>Name</td><td>Notes</td></tr>{body}</table>"
+
+
+def test_a_repeated_numeric_era_value_is_an_era():
+    """Albums are named "21" and "25"; only a one-off number is a changelog or count cell."""
+    from src.parser import parse_sheet
+
+    artist = parse_sheet(_era_table([
+        ("21", "Song A", "n"), ("21", "Song B", "n"), ("25", "Song C", "n"), ("25", "Song D", "n"),
+    ]), "X")
+    assert [(e.name, len(e.sections[0].songs)) for e in artist.eras] == [("21", 2), ("25", 2)]
+
+
+def test_a_one_off_number_is_still_not_an_era():
+    from src.parser import parse_sheet
+
+    artist = parse_sheet(_era_table([("7", "Join the server", ""), ("Real Era", "Song A", "n")]), "X")
+    assert [e.name for e in artist.eras] == ["Real Era"]

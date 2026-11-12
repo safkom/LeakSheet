@@ -1144,12 +1144,13 @@ def _merge_tagged_stubs(eras: list[Era]) -> list[Era]:
     """Version-tagged empty eras merge into ANY era with a matching base name:
     "HiTunes [V3]" (0 songs) → "HiTunes" (has songs)."""
     merged_away: set[int] = set()
+    with_songs: dict[str, Era] = {}
+    for era in eras:
+        if _era_song_count(era) > 0:
+            with_songs.setdefault(_era_match_key(era.name), era)
     for empty_era in [e for e in eras if _era_song_count(e) == 0]:
         base_key = _era_match_key(empty_era.name)
-        target = next((
-            t for t in eras
-            if base_key and t is not empty_era and _era_match_key(t.name) == base_key and _era_song_count(t) > 0
-        ), None)
+        target = with_songs.get(base_key) if base_key else None
         if target is not None:
             _transfer_era_metadata(empty_era, target)
             merged_away.add(id(empty_era))
@@ -2101,6 +2102,10 @@ class _SheetWalk:
         else:
             self._unknown_era_first(row_idx, row, row_era)
 
+    def _era_like(self, row_era: str) -> bool:
+        # A bare number the column repeats is an album title ("21"), not a count or a date.
+        return _looks_like_era_name(row_era) or (row_era.isdigit() and self.era_value_counts[row_era] > 1)
+
     def _unknown_era_under_current(self, row: list[_Cell], row_era: str, current: Era) -> None:
         """No key matched, but an era is open: same name (case-insensitive) joins it,
         a different one may start a new era."""
@@ -2112,7 +2117,7 @@ class _SheetWalk:
                 self._add(current, version)
             elif sum(1 for c in row if c.text.strip()) <= 3:
                 current.sections.append(Section(name=row_era))
-        elif version and _looks_like_era_name(row_era):
+        elif version and self._era_like(row_era):
             self._plausible_new_era(row_era, version, current)
         elif version:
             # Not a plausible era name but has song data: the current era is the fallback.
@@ -2146,7 +2151,7 @@ class _SheetWalk:
     def _unknown_era_first(self, row_idx: int, row: list[_Cell], row_era: str) -> None:
         """No era open yet: auto-create one from this row (trackers with no era headers,
         Young Thug etc.)."""
-        if not _looks_like_era_name(row_era):
+        if not self._era_like(row_era):
             # Announcements, footers and other non-era rows
             self._unmatched(row_idx, row)
             return
@@ -2976,9 +2981,6 @@ def _misc_header_key(text: str) -> str:
     paren = key.find("(")
     if paren > 0:
         key = key[:paren]
-    # "Link(s)" — the paren is part of the name, keep a special case
-    if text.strip().lower().startswith("link"):
-        key = "links"
     # Colon-suffixed headers ("Era:", "Type:"): strip like detect_columns does.
     return re.sub(r"\s+", " ", key.strip().lower()).rstrip(":").strip()
 

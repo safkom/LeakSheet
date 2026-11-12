@@ -1017,6 +1017,18 @@ def parse_song_credits(raw_name: str) -> SongCredits:
 _TIMELINE_LINE_PATTERN = re.compile(r"^\(([^)]+)\)\s*(.*)", re.MULTILINE)
 
 
+def _one_paren_group(text: str) -> bool:
+    """True when the opening paren closes at the very end: "(a (b) c)", not "(a) and (b)"."""
+    if not (text.startswith("(") and text.endswith(")")):
+        return False
+    depth = 0
+    for i, ch in enumerate(text):
+        depth += (ch == "(") - (ch == ")")
+        if depth == 0:
+            return i == len(text) - 1
+    return False
+
+
 def parse_timeline(text: str) -> list[TimelineEvent]:
     """Parse timeline text into a list of TimelineEvent objects.
 
@@ -1033,11 +1045,7 @@ def parse_timeline(text: str) -> list[TimelineEvent]:
         if m:
             date = m.group(1).strip()
             rest = m.group(2).strip()
-            # Strip wrapping parens from event if present
-            if rest.startswith("(") and rest.endswith(")"):
-                event = rest[1:-1].strip()
-            else:
-                event = rest
+            event = rest[1:-1].strip() if _one_paren_group(rest) else rest
             if date and event:
                 events.append(TimelineEvent(date=date, event=event))
     return events
