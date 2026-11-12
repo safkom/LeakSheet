@@ -82,12 +82,16 @@ struct LandingView: View {
         }
         .background(Color.lsBackground)
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: pendingBrowse) { _, newValue in
-            guard let picked = newValue else { return }
-            loader.url = picked.url
-            pendingBrowse = nil
-            Task { await handleParse(picked.url, artistName: picked.name) }
-        }
+        .onChange(of: pendingBrowse) { _, _ in openPending() }
+        .onChange(of: loader.loading) { _, _ in openPending() }
+    }
+
+    /// A load in flight refuses a second one, so the pick waits for it instead of vanishing.
+    private func openPending() {
+        guard let picked = pendingBrowse, !loader.loading else { return }
+        loader.url = picked.url
+        pendingBrowse = nil
+        Task { await handleParse(picked.url, artistName: picked.name) }
     }
 
     private func handleParse(_ urlString: String, artistName: String? = nil) async {
