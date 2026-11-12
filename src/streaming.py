@@ -638,6 +638,8 @@ async def _imgur_cdn_url_from(url: str, statuses: list[int]) -> str:
     """The cdnUrl one imgur host reports; ValueError (with the status noted) otherwise."""
     try:
         resp = await get_capped(_get_shared_client(), url, {"User-Agent": _STREAM_USER_AGENT})
+    except httpx.PoolTimeout:
+        raise  # our own pool is saturated: imgur was never asked, so it is not a failure
     except httpx.HTTPError as exc:
         raise ValueError(f"imgur.gg API request failed: {exc}") from exc
     if resp.status_code != 200:

@@ -2206,6 +2206,15 @@ async def _slice_byte_stream(source, range_start: int, range_end: int):
             break
 
 
+async def _health(fn, *args, **kwargs):
+    """Run host-health bookkeeping; an unwritable cache directory is no verdict, not a 500."""
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except OSError as e:
+        logger.warning("host health unavailable: %s", e)
+        return None
+
+
 async def _record_stream_outcome(provider: str | None, link: str, exc: Exception | None) -> None:
     """Feed one /stream upstream outcome into the shared provider health."""
     if provider is None:
@@ -2213,7 +2222,7 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
     if exc is None or isinstance(exc, NonMediaError) or (
         isinstance(exc, UpstreamStatusError) and exc.status_code < 500
     ):
-        await asyncio.to_thread(host_health.record_success, provider)  # the host answered
+        await _health(host_health.record_success, provider)  # the host answered
         return
     if isinstance(exc, httpx.PoolTimeout):
         return  # our own pool is saturated: the host was never asked
@@ -2223,9 +2232,7 @@ async def _record_stream_outcome(provider: str | None, link: str, exc: Exception
         hard = False
     else:
         return  # a bug of ours says nothing about the host
-    await asyncio.to_thread(
-        host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__
-    )
+    await _health(host_health.record_failure, provider, link, hard=hard, error=type(exc).__name__)
 
 
 @app.get("/hosts")
@@ -2249,7 +2256,7 @@ async def _stream_target(url: str) -> tuple[str, str | None]:
     # A provider known to be down is refused at once, until a retry is due: see
     # docs/decisions.md::host_health.py.
     provider = host_health.provider_of(stream_url)
-    if provider and (outage := await asyncio.to_thread(host_health.refusing, provider)):
+    if provider and (outage := await _health(host_health.refusing, provider)):
         raise HTTPException(
             status_code=503,
             detail=f"{outage['host']} is temporarily unavailable",

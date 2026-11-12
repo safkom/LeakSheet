@@ -86,6 +86,8 @@ def _read() -> dict:
         state = json.loads(path.read_text())
     except (OSError, ValueError):
         state = {}
+    if not isinstance(state, dict):  # valid JSON of another shape, from a foreign writer
+        state = {}
     _cache = (str(path), st.st_ino, st.st_mtime_ns, state)
     return state
 
