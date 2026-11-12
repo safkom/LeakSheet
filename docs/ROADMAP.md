@@ -25,15 +25,20 @@ Confirmed in code, not yet fixed. Each needs a live check or an owner decision f
   the pinned name falls out of Recents. Needs a migration of stored favourites.
 - **Contract fixture that can fail**: most optional fields in `contract.json` are null, so a
   renamed wire key decodes to nil unnoticed. Populate every field and assert the key paths.
-- **Open requests during a load** (`TrackerLoader.load` refuses silently) and **deep links
-  behind an open sheet** (`ContentView.consumeDeepLink`).
 - **Pull-to-refresh resets search, filters and expansion** (`ArtistView.refresh`).
-- **Mac inspector selection** goes stale after search, filter or refresh; the Now Playing
-  window gets no `ArtistViewModel`.
-- **Stream pool isolation**: `/metadata` and the resolvers share the 50-connection stream
-  client, so slow stream readers can starve them.
+- **Mac Era inspector** keeps a stale era after leaving it (`MacUIState.selectedEra`).
+- **Stream pool isolation**: `/metadata`, the resolvers and the health prober's resolve step
+  share the 50-connection stream client, so slow stream readers can starve them.
 - **Harvested tracker hosts are per worker**: persist the list in the cache directory.
 - **Failed stream halts auto-advance** (`AudioEngine` `.failed`): skip to the next item, or
   keep stopping. Owner decision.
+- **imgur answer without `cdnUrl`**: `docs/decisions.md` (host health) says it counts as the
+  host answering; the code counts a soft failure. Pick one. Owner decision.
+- **Same-named songs in one era** resolve to the first in the details sheet
+  (`ArtistViewModel.resolvedSong`), and the era sheet looks its era up by name.
+- **Image cache orphans**: eviction sweeps `img_*.bin` only, not metas or temp files.
+- **Apple Music library tally on the main actor** on every tracker-list load
+  (`MusicLibraryService.libraryArtists`).
+- **A cover that times out is missed for the session** (`ImageCache.loadImage`).
 
 Pick these up when a user reports one, or as the next fix batch.
