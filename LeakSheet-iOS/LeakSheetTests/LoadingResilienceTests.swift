@@ -123,4 +123,25 @@ struct LoadingResilienceTests {
         let shown = TrackerLoader.friendlyLoadError(status: status, fallback: APIClient.bareStatusMessage(status))
         #expect(shown.contains("timed out"))
     }
+
+    // MARK: - Cached copy on failure
+
+    @Test(arguments: [(0, true), (500, true), (503, true), (524, true), (400, false), (403, false), (404, false)])
+    func `only a failure that says nothing about the tracker serves the cached copy`(status: Int, serves: Bool) {
+        #expect(TrackerLoader.servesCachedCopy(onStatus: status) == serves)
+    }
+
+    // MARK: - Favourites file
+
+    @Test func `one unreadable favourite does not take the others with it`() throws {
+        let good = #"{"key":"a::e::s","artistSlug":"a","artistName":"A","eraName":"E","songBaseName":"S","songVersionCount":1,"addedAt":0}"#
+        let data = Data("[\(good),{\"key\":7},\(good)]".utf8)
+        let (entries, dropped) = try FavouritesManager.decodeStored(data)
+        #expect(entries.count == 2)
+        #expect(dropped == 1)
+    }
+
+    @Test func `a favourites file that is not a list still fails as a whole`() {
+        #expect(throws: (any Error).self) { try FavouritesManager.decodeStored(Data("{}".utf8)) }
+    }
 }

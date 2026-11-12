@@ -169,9 +169,7 @@ final class TrackerLoader {
             await CacheService.shared.touch(url: request.url)
             return .done(await replayFromCache(request.url, artistName: request.artistName, recents: request.recents))
         case .httpError(let status, let msg):
-            // 5xx only. A 4xx is the server answering ABOUT this tracker (404/410 gone, 403
-            // refused); serving the cached copy would hide that forever.
-            if status >= 500,
+            if Self.servesCachedCopy(onStatus: status),
                let cached = await offlineFallback(
                    request.url,
                    artistName: request.artistName,
@@ -302,6 +300,12 @@ final class TrackerLoader {
     ///
     /// A 502/503 carrying the server's own message ("Could not reach the tracker
     /// source.") shows it. `fallback` is `APIClient.bareStatusMessage` otherwise.
+    /// 5xx, and 0 (a download the client saw cut off): the server never answered ABOUT this
+    /// tracker. A 4xx did (404/410 gone, 403 refused); the cached copy would hide that forever.
+    nonisolated static func servesCachedCopy(onStatus status: Int) -> Bool {
+        status >= 500 || status == 0
+    }
+
     nonisolated static func friendlyLoadError(status: Int, fallback: String) -> String {
         if status == 502 || status == 503, fallback != APIClient.bareStatusMessage(status) {
             return fallback
