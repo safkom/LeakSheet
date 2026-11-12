@@ -803,11 +803,13 @@ async def _gdrive_confirm_url(resp: httpx.Response) -> str:
     """The confirm-form URL of a virus-scan interstitial. The read is capped: the form is
     always near the top, and an uncapped decompressed read of a crafted page could OOM."""
     buf = bytearray()
-    async for chunk in resp.aiter_bytes():
-        buf.extend(chunk)
-        if len(buf) >= _SCRAPER_READ_CAP:
-            break
-    await resp.aclose()
+    try:
+        async for chunk in resp.aiter_bytes():
+            buf.extend(chunk)
+            if len(buf) >= _SCRAPER_READ_CAP:
+                break
+    finally:
+        await resp.aclose()
     fields = parse_gdrive_confirm_form(bytes(buf[:_SCRAPER_READ_CAP]).decode("utf-8", errors="ignore"))
     if not fields:
         raise GdriveInterstitialError("drive.google.com returned HTML with no recognisable confirm form")

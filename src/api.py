@@ -1550,9 +1550,9 @@ async def _google_resized(url: str, width: int, headers: dict, base_headers: dic
     try:
         # Capped, like the fallback path: a plain .get() buffers the whole body.
         resp, gdata = await _get_image_capped(google_url, headers)
-    except httpx.HTTPError as exc:
-        # Fall through to the original URL + Pillow path.
-        logger.warning("image proxy: Google CDN resize failed for %s: %s", url[:80], exc)
+    except (httpx.HTTPError, HTTPException) as exc:
+        # Fall through to the original URL + Pillow path; it runs its own checks.
+        logger.warning("image proxy: Google CDN resize failed for %s: %r", url[:80], exc)
         return None
     ct = resp.headers.get("content-type", "")
     if resp.status_code == 200 and _is_raster_image(ct):
