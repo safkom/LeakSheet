@@ -80,6 +80,8 @@ extension MacArtistView {
         )
         // Fresh selection per mode/era — the list is a different list.
         .id(openEra ?? "flat")
+        // The new list starts unselected without telling anyone: clear the Details panel too.
+        .onChange(of: openEra ?? "flat") { _, _ in uiState.selectedSong = nil }
         .frame(maxWidth: Metrics.contentMaxWidth)
         .frame(maxWidth: .infinity)
     }
