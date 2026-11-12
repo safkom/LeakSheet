@@ -82,11 +82,13 @@ private struct MacEraTile: View {
                     .scaleEffect(hovering ? 1.02 : 1)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(era.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                    EraTitle(era: era, maxHeight: 32) {
+                        Text(era.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
                     Text("\(songCount) song\(songCount == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(.secondary)

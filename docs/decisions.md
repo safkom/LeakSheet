@@ -517,6 +517,30 @@ download is a different picture, so the payload changes exactly when the cover d
 sheet-cache eviction skips `imgalias_*` for the same reason, and a cache hit touches
 the entry's mtime so a cover still in use is not evicted before stale copies.
 
+## fetcher.py::_is_title_art — a wide title logo is not a cover
+
+Some trackers put the era's title logo in the header row (Carti's Narcissist: a white,
+transparent 1600x398 PNG) and no cover, so the parser's first header image is the logo.
+Nothing in the sheet says so: htmlview's `=wW-hH` suffix is the cell box (every
+$uicideboy$ era reads `w102-h20`), and the Sheets API has no in-cell images. Only the
+bytes do. `_finalize` reads the size of the slot's warmed original, and an image at
+least 2:1 wide moves from `art_url` to `title_art_url`, which the apps show whole in
+place of the name. Photo covers reach 3:2 (Tyler's), so 2:1 leaves room. An image never
+warmed stays the cover until the parse after its first warm: probing every header
+image during a cold parse would cost more than one revalidation of delay. The verdict
+is read from the stored image, so an evicted original or a sheet that swaps its art is
+judged one parse late, then corrects itself.
+
+A title era's cover is the first image in another content tab's header for the same
+era (Carti's Official tracker shows the cover there, in `<era>\0cover`), else the era's
+Art-tab image (`<era>\0art`), without the same-picture check of `art-tab-identity`:
+there is no header cover to compare with. Each source has its own slot, so one whose
+stored image is the logo again is skipped without flapping. Sheets API rows carry no
+images, so the API-served tabs whose header names a title era are read once more from
+htmlview; other trackers pay nothing. dHash squashes every image to 17x16, so a
+white-on-clear logo and a dark square cover can hash alike: "same picture" also needs
+aspect ratios within 25%, or the warm would overwrite the logo with an Art-tab cover.
+
 ## api.py::image-proxy-etag — ETag is scoped to the disk cache
 
 Only width-bounded image-proxy requests are disk-cached, so only they get an ETag —

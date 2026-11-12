@@ -517,6 +517,18 @@ class TestArtTabUpgrade:
         }
         assert stored == {"A": _drawn(1, 340), "B": _drawn(2, 102, "JPEG"), "C": _drawn(4, 102, "JPEG")}
 
+    def test_a_same_hash_picture_of_another_shape_is_not_an_upgrade(self, google):
+        """dHash squashes both to 17x16, so a title logo and a plain square cover can hash
+        alike; a different aspect ratio means a different picture."""
+        main, tab = _cover("logo"), _cover("square")
+        google.content.update({main: _png(1600, 398), tab: _png(1600, 1600)})
+        google.alive = {main, tab}
+        artist = _artist(("Narcissist", main))
+        artist._art_candidates = {"Narcissist": tab}
+        asyncio.run(api._warm_era_art(artist, TRACKER))
+        key = api._image_cache_key(api._era_art_base(TRACKER, "Narcissist"), None)
+        assert api._read_image_cache(key)[0] == _png(1600, 398)
+
     def test_a_rewarm_decodes_each_image_once_for_its_fingerprint(self, google, monkeypatch):
         main, tab = _cover("main"), _cover("tab")
         google.content.update({main: _drawn(1, 102, "JPEG"), tab: _drawn(1, 340)})
@@ -613,3 +625,82 @@ def test_one_cover_that_fails_to_store_does_not_fail_the_warm(monkeypatch):
     monkeypatch.setattr(api._EraArtWarm, "warm", warm)
     asyncio.run(api._warm_era_art(_artist(("Bad", _cover("a")), ("Good", _cover("b"))), TRACKER))
     assert warmed == ["Good"]
+
+
+class TestTitleArt:
+    """Some trackers put the era's title logo in the header row and no cover: a wide
+    transparent banner shown as album art. Only the downloaded bytes reveal its shape:
+    htmlview's =wW-hH suffix is the cell box, not the image."""
+
+    @pytest.fixture
+    def warmed(self, google, monkeypatch, tmp_path):
+        monkeypatch.setattr(fetcher, "CACHE_DIR", tmp_path)
+
+        def warm(era: str, width: int, height: int) -> None:
+            url = _cover(f"{era}-{width}x{height}")
+            google.alive.add(url)
+            google.content[url] = _png(width, height)
+            asyncio.run(api._warm_era_art(_artist((era, url)), TRACKER))
+
+        return warm
+
+    def _finalized(self, era: str) -> Era:
+        artist = _artist((era, _cover(f"{era}-next-parse")))
+        fetcher._finalize(artist, TRACKER)
+        return artist.eras[0]
+
+    def test_a_wide_logo_becomes_title_art_not_cover(self, warmed):
+        warmed("Narcissist", 1600, 398)
+        era = self._finalized("Narcissist")
+        assert era.art_url is None
+        assert era.title_art_url.startswith(api._era_art_base(TRACKER, "Narcissist") + "?v=")
+
+    def test_a_square_cover_stays_the_cover(self, warmed):
+        warmed("MUSIC", 1080, 1065)
+        era = self._finalized("MUSIC")
+        assert era.art_url.startswith(api._era_art_base(TRACKER, "MUSIC") + "?v=")
+        assert era.title_art_url is None
+
+    def test_a_landscape_photo_cover_stays_the_cover(self, warmed):
+        warmed("Bodega", 320, 213)
+        assert self._finalized("Bodega").title_art_url is None
+
+    def test_exactly_two_to_one_is_title_art(self, warmed):
+        warmed("Banner", 800, 400)
+        assert self._finalized("Banner").title_art_url is not None
+
+    def test_a_title_era_keeps_its_logo_warmed(self, warmed):
+        """The logo slot must keep being refreshed, or its verdict and image expire."""
+        warmed("Narcissist", 1600, 398)
+        artist = _artist(("Narcissist", _cover("Narcissist-next-parse")))
+        fetcher._finalize(artist, TRACKER)
+        assert "Narcissist" in api._warm_covers(artist)
+
+    def test_a_title_era_takes_its_cover_from_the_art_tab(self, warmed, google):
+        warmed("Narcissist", 1600, 398)
+        cover = _cover("art-tab-square")
+        google.alive.add(cover)
+        google.content[cover] = _drawn(7, 400)
+        artist = _artist(("Narcissist", _cover("Narcissist-next-parse")))
+        artist._art_candidates = {"Narcissist": cover}
+        fetcher._finalize(artist, TRACKER)
+        era = artist.eras[0]
+        assert era.title_art_url.startswith(api._era_art_base(TRACKER, "Narcissist") + "?v=")
+        assert era.art_url and era.art_url.split("?")[0] != era.title_art_url.split("?")[0]
+
+        asyncio.run(api._warm_era_art(artist, TRACKER))
+        google.alive.clear()  # both tokens die: each slot serves its own stored copy
+        r = TestClient(app).get("/image-proxy", params={"url": era.art_url})
+        assert r.status_code == 200 and r.content == _drawn(7, 400)
+        logo = TestClient(app).get("/image-proxy", params={"url": era.title_art_url})
+        assert logo.status_code == 200 and logo.content == _png(1600, 398)
+
+    def test_a_title_era_without_an_art_tab_cover_has_none(self, warmed):
+        warmed("Narcissist", 1600, 398)
+        assert self._finalized("Narcissist").art_url is None
+
+    def test_an_image_never_warmed_stays_the_cover(self, google, monkeypatch, tmp_path):
+        monkeypatch.setattr(fetcher, "CACHE_DIR", tmp_path)
+        era = self._finalized("Unwarmed")
+        assert era.art_url.startswith("leaksheet:art/v2/")
+        assert era.title_art_url is None

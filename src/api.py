@@ -55,6 +55,7 @@ from src.fetcher import (
     AccessDeniedError,
     CACHE_DIR,
     _era_art_base,
+    _image_cache_key,
     read_art_pointer,
     _SAME_ART_MAX_DISTANCE,
     _dhash,
@@ -1088,10 +1089,6 @@ def _rewrite_google_size(url: str, w: int) -> str | None:
     return _GOOGLE_SIZE_SUFFIX_RE.sub("", url) + f"=s{w}"
 
 
-def _image_cache_key(url: str, w: int | None) -> str:
-    return hashlib.sha256(f"{url}|{w or 0}".encode()).hexdigest()
-
-
 def _image_cache_paths(key: str):
     return CACHE_DIR / f"img_{key}.bin", CACHE_DIR / f"img_{key}.meta.json"
 
@@ -1361,24 +1358,34 @@ def _full_size_cover_url(url: str) -> str:
     return url
 
 
-def _pixel_count(data: bytes) -> int:
+def _image_size(data: bytes) -> tuple[int, int]:
     import io
 
     from PIL import Image
 
     try:
         with Image.open(io.BytesIO(data)) as img:
-            return img.width * img.height
+            return img.width, img.height
     except Exception:
-        return 0
+        return 0, 0
 
 
-def _fingerprint(data: bytes) -> tuple[int, int | None]:
-    """(pixel count, dHash) of an image: decoded once, compared many times."""
-    return _pixel_count(data), _dhash(data)
+# Width/height ratio two copies of one picture may differ by (a 4:5 re-export of a
+# square); logos start at 2:1 and covers end at 3:2.
+_SAME_ART_MAX_ASPECT_DRIFT = 1.25
 
 
-def _same_fingerprint(a: tuple[int, int | None], b: tuple[int, int | None]) -> bool:
+def _fingerprint(data: bytes) -> tuple[int, int | None, float]:
+    """(pixel count, dHash, aspect ratio) of an image: decoded once, compared many times."""
+    width, height = _image_size(data)
+    return width * height, _dhash(data), width / height if height else 0.0
+
+
+def _same_fingerprint(a: tuple[int, int | None, float], b: tuple[int, int | None, float]) -> bool:
+    # dHash squashes every image to 17x16, so a 4:1 title logo and a square cover can
+    # hash alike: the shape has to match too (docs/decisions.md::fetcher.py::_is_title_art).
+    if not (a[2] and b[2] and max(a[2], b[2]) / min(a[2], b[2]) <= _SAME_ART_MAX_ASPECT_DRIFT):
+        return False
     return a[1] is not None and b[1] is not None and (a[1] ^ b[1]).bit_count() <= _SAME_ART_MAX_DISTANCE
 
 
@@ -1409,9 +1416,9 @@ class _Fingerprints:
     """Per-era memo of image fingerprints, computed off the event loop."""
 
     def __init__(self) -> None:
-        self._fps: dict[bytes, tuple[int, int | None]] = {}
+        self._fps: dict[bytes, tuple[int, int | None, float]] = {}
 
-    async def of(self, data: bytes) -> tuple[int, int | None]:
+    async def of(self, data: bytes) -> tuple[int, int | None, float]:
         if data not in self._fps:
             self._fps[data] = await asyncio.to_thread(_fingerprint, data)
         return self._fps[data]

@@ -162,9 +162,11 @@ struct TVArtistView: View {
                 HStack(spacing: 20) {
                     eraArt(era)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(era.name)
-                            .font(.title3.weight(.semibold))
-                            .lineLimit(2)
+                        EraTitle(era: era, maxHeight: 56) {
+                            Text(era.name)
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(2)
+                        }
                         Text("\(filtered.stats.total) versions · \(filtered.stats.available) available")
                             .font(.caption)
                             .foregroundStyle(.secondary)

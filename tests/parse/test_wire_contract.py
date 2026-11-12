@@ -46,6 +46,8 @@ STEMS = _table([
 def contract_payload() -> dict:
     artist = parse_sheet(MAIN, "Contract Artist")
     artist.tabs.append(TabSection(kind="stems", name="Stems", entries=parse_misc_tab(STEMS, "stems", ["Contract Era"])))
+    # Set by _finalize from the warmed image's shape, which a parse alone never sees.
+    artist.eras[0].title_art_url = f"leaksheet:art/v2/{'0' * 32}/{'1' * 32}?v=1"
     body, _etag = serialize_artist(artist)
     return json.loads(body)
 

@@ -34,7 +34,7 @@ import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, NoReturn
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urljoin, urlparse, urlencode
 
 import httpx
 
@@ -1725,6 +1725,9 @@ class _SecondaryTabs:
         self.fetch_kw = fetch_kw
         self.t: PhaseTimer = fetch_kw["t"]
         self.tab_results: dict[str, list] = {}
+        # gid -> {era header name: its first image}; API rows have none, so those gids are kept.
+        self.tab_art: dict[str, dict[str, str]] = {}
+        self.api_served: list[tuple[str, str]] = []
 
     def _finished(self, name: str) -> None:
         self.done += 1
@@ -1749,6 +1752,60 @@ class _SecondaryTabs:
             logger.warning("Art tab load failed for %s: %s", self.url_norm[:80], e)
         self._finished("Art")
 
+    async def title_era_covers(self, content_tabs: list[tuple[str, str, str]]) -> dict[str, str]:
+        """{era: a content tab's header image} for eras whose own header image is a title logo.
+
+        see docs/decisions.md::fetcher.py::_is_title_art
+        """
+        eras = [era for era in self.artist.eras if era.art_url]
+        if not content_tabs or not eras:
+            return {}
+        verdicts = await asyncio.to_thread(
+            lambda: [_is_title_art(_era_art_base(self.url_norm, era.name)) for era in eras]
+        )
+        titles = [era for era, title in zip(eras, verdicts, strict=True) if title]
+        # API rows carry no images: reread from htmlview only the tabs whose header names a
+        # title era without one.
+        reread = [
+            (gid_val, kind) for gid_val, kind in self.api_served
+            if any(self._tab_image(era, [(gid_val, kind, "")]) == "" for era in titles)
+        ]
+        if reread:
+            await asyncio.gather(*(self._reread_art(gid_val, kind) for gid_val, kind in reread))
+        return {era.name: url for era in titles if (url := self._tab_image(era, content_tabs))}
+
+    async def _reread_art(self, gid_val: str, kind: str) -> None:
+        # The tab's content came from the API: a failed reread must not mark it failed.
+        loaded = self.t.tabs.get(gid_val)
+        try:
+            result = await self._fetch(gid_val)
+            if result:
+                art = self.tab_art[gid_val] = {}
+                await asyncio.to_thread(parse_misc_tab, result[1], kind, [era.name for era in self.artist.eras], art)
+        except Exception as e:  # a cover is never worth failing the parse
+            logger.warning("Content tab %s art reread failed: %s", gid_val, e)
+        finally:
+            if loaded is not None:
+                self.t.tabs[gid_val] = loaded
+
+    def _tab_image(self, era: Era, content_tabs: list[tuple[str, str, str]]) -> str | None:
+        """The first content tab (in tab order) whose header names this era: its image, ""
+        when that header has none, None when no header names it."""
+        keys = {_era_match_key(name, keep_discriminators=True) for name in (era.name, *era.alt_names)} - {""}
+        found = None
+        for gid_val, _kind, _name in content_tabs:
+            for header, url in self.tab_art.get(gid_val, {}).items():
+                if _era_match_key(header, keep_discriminators=True) not in keys:
+                    continue
+                if not url:
+                    found = ""
+                    continue
+                try:
+                    return urljoin(self.url_norm, url)
+                except ValueError:  # a malformed src on a self-hosted tracker
+                    continue
+        return found
+
     async def _api_rows(self, gid_val: str) -> list | None:
         if self.api_tabs is None:
             return None
@@ -1770,10 +1827,13 @@ class _SecondaryTabs:
                 with self.t.phase("misc_fetch"):
                     result = await self._fetch(gid_val)
                 source = result[1] if result else None
+            else:
+                self.api_served.append((gid_val, kind))
             if source is not None:
+                art = self.tab_art[gid_val] = {}
                 with self.t.phase("misc_parse"):
                     self.tab_results[gid_val] = await asyncio.to_thread(
-                        parse_misc_tab, source, kind, [era.name for era in self.artist.eras],
+                        parse_misc_tab, source, kind, [era.name for era in self.artist.eras], art,
                     )
         except Exception as e:
             # Content tabs optional; WARNING keeps systematic failures visible.
@@ -1830,6 +1890,7 @@ async def _load_secondary_tabs_with(
         secondary.append(loader.load_art(art_gid))
     if secondary:
         await asyncio.gather(*secondary)
+    artist._tab_art = await loader.title_era_covers(content_tabs)
     badge_tabs = _file_content_tabs(artist, content_tabs, loader.tab_results)
     if badge_tabs:
         # One O(songs) index build for all badge tabs, off the event loop.
@@ -2057,6 +2118,28 @@ def _era_art_base(tracker_url: str, era_name: str) -> str:
     return f"leaksheet:art/v2/{tracker}/{era}"
 
 
+def _image_cache_key(url: str, w: int | None) -> str:
+    return hashlib.sha256(f"{url}|{w or 0}".encode()).hexdigest()
+
+
+# Wider than any cover seen (photo covers reach 3:2); a title logo banner is 4:1.
+_TITLE_ART_MIN_ASPECT = 2.0
+
+
+def _is_title_art(base: str) -> bool:
+    """True when the slot's warmed original is a wide title logo, not a cover. Blocking.
+
+    see docs/decisions.md::fetcher.py::_is_title_art
+    """
+    from PIL import Image
+
+    try:
+        with Image.open(CACHE_DIR / f"img_{_image_cache_key(base, None)}.bin") as img:
+            return img.width >= _TITLE_ART_MIN_ASPECT * img.height
+    except Exception:  # not warmed yet, or unreadable: keep it as the cover
+        return False
+
+
 def _art_pointer_key(base: str) -> str:
     return "imgsrc_" + hashlib.sha256(base.encode()).hexdigest()
 
@@ -2106,7 +2189,36 @@ def _finalize(artist: Artist, url_norm: str) -> None:
             continue
         sources[era.name] = url
         era.art_url = f"{base}?v={version}"
+        if _is_title_art(base):
+            era.title_art_url, era.art_url = era.art_url, _title_era_cover(artist, era.name, url_norm, sources)
     artist._art_sources = sources
+
+
+def _title_era_cover(artist: Artist, era_name: str, url_norm: str, sources: dict[str, str]) -> str | None:
+    """A cover slot for an era whose header image is its title logo. Blocking.
+
+    A content tab's header image first, then the Art tab; each in its own slot, so one
+    that turns out to be the logo again is skipped without flapping. See
+    docs/decisions.md::fetcher.py::_is_title_art
+    """
+    for slot_name, url in (
+        (f"{era_name}\0cover", artist._tab_art.get(era_name, "")),
+        (f"{era_name}\0art", artist._art_candidates.get(era_name, "")),
+    ):
+        url = "https:" + url if url.startswith("//") else url
+        if not url.startswith((_HTTP, _HTTPS)) or not _image_host_allowed(url):
+            continue
+        base = _era_art_base(url_norm, slot_name)
+        if _is_title_art(base):
+            continue
+        try:
+            version = update_art_pointer(base, src=url)["v"]
+        except OSError as e:
+            logger.warning("cover pointer write failed for %s: %s", base, e)
+            return None
+        sources[slot_name] = url
+        return f"{base}?v={version}"
+    return None
 
 
 class _FetchRun:
