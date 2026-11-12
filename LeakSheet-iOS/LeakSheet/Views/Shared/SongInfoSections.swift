@@ -304,7 +304,7 @@ struct EvidenceSection: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             ForEach(sources, id: \.url) { source in
-                if let url = URL(string: source.url) {
+                if let url = URL(string: source.url), SafariItem.isWebURL(url) {
                     Button {
                         onOpenLink(url)
                     } label: {

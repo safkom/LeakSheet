@@ -85,6 +85,8 @@ struct CreditPageView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .task(id: role) {
+            // Popping back from a collaborator's page re-runs the task: the profile still stands.
+            guard profile?.role != role else { return }
             profile = CreditProfile.compute(
                 key: ref.key, role: role, artist: viewModel.artist,
                 index: viewModel.creditIndex, displayNames: viewModel.creditDisplayNames
@@ -266,7 +268,8 @@ struct CreditPageView: View {
     }
 
     private func allSongsSection(_ profile: CreditProfile) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // Lazy per era: a prolific producer's page holds hundreds of rows.
+        LazyVStack(alignment: .leading, spacing: 16) {
             Text("All Songs")
                 .font(.title3.weight(.bold))
             ForEach(Array(profile.eras.enumerated()), id: \.offset) { _, era in

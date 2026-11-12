@@ -163,4 +163,24 @@ struct MiscLinkClassifierTests {
     @Test func `non-embeddable links have no embed url`() {
         #expect(MiscLinkClassifier.embedURL(for: "https://example.com/page") == nil)
     }
+
+    @Test(arguments: [
+        "https://www.youtube.com/watch?v=../../redirect%3Fq%3Dhttps://example.com",
+        "https://youtu.be/..%2F..%2Fredirect",
+        "https://www.youtube.com/embed/a%3Fb=c",
+        "https://www.youtube.com/watch?v=abc",
+    ])
+    func `a youtube id outside the id alphabet is not embedded`(link: String) {
+        #expect(MiscLinkClassifier.embedURL(for: link) == nil)
+    }
+
+    @Test(arguments: [
+        ("https://www.youtube.com/embed/dQw4w9WgXcQ", true), ("https://consent.youtube.com/m", true),
+        ("https://player.vimeo.com/video/1", true), ("about:blank", true),
+        ("https://example.com/", false), ("https://youtube.com.example.com/", false),
+        ("https://notyoutube.com/", false),
+    ])
+    func `the embed sheet stays on the provider's own sites`(link: String, stays: Bool) throws {
+        #expect(EmbedNavigationPolicy.staysInPlayer(try #require(URL(string: link))) == stays)
+    }
 }

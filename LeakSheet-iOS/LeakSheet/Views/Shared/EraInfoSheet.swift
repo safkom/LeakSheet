@@ -103,7 +103,10 @@ struct EraInfoSheet: View {
                 Text(era.name)
                     .font(.title2.weight(.bold))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle((accentColor ?? .white).ensureReadable(against: .lsBackground, in: colorScheme))
+                    .foregroundStyle(
+                        accentColor.map { $0.ensureReadable(against: .lsBackground, in: colorScheme) }
+                            ?? Color.primary
+                    )
             }
             if let alts = era.altNames, !alts.isEmpty {
                 Text(alts.joined(separator: " · "))

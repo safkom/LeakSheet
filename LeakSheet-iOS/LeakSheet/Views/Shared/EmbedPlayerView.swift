@@ -21,6 +21,8 @@ struct EmbedPlayerView: View {
         NavigationStack {
             EmbedWebView(url: item.embedURL)
                 .ignoresSafeArea(edges: .bottom)
+                // Two players at once: the Mac has no audio session to arbitrate.
+                .onAppear { AudioEngine.shared.pause() }
                 .navigationTitle(item.title)
                 #if os(iOS)
                 .toolbarTitleDisplayMode(.inline)
@@ -56,18 +58,55 @@ private func makeEmbedWebView(url: URL) -> WKWebView {
     return webView
 }
 
+/// Keeps the sheet on the provider's player: it has no address bar, so a page the
+/// player links to opens in the browser instead of inside it.
+final class EmbedNavigationPolicy: NSObject, WKNavigationDelegate {
+    /// The providers' own sites, subdomains included (a consent page is one of them).
+    nonisolated static let playerSites = ["youtube.com", "youtube-nocookie.com", "vimeo.com", "soundcloud.com"]
+
+    nonisolated static func staysInPlayer(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return url.scheme == "about" }
+        return playerSites.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    func webView(
+        _ webView: WKWebView, decidePolicyFor action: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        guard action.targetFrame?.isMainFrame != false, let url = action.request.url else { return .allow }
+        if Self.staysInPlayer(url) { return .allow }
+        if action.navigationType == .linkActivated, SafariItem.isWebURL(url) {
+            #if os(macOS)
+            NSWorkspace.shared.open(url)
+            #else
+            await UIApplication.shared.open(url)
+            #endif
+        }
+        return .cancel
+    }
+}
+
 #if os(macOS)
 private struct EmbedWebView: NSViewRepresentable {
     let url: URL
 
-    func makeNSView(context: Context) -> WKWebView { makeEmbedWebView(url: url) }
+    func makeCoordinator() -> EmbedNavigationPolicy { EmbedNavigationPolicy() }
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = makeEmbedWebView(url: url)
+        webView.navigationDelegate = context.coordinator
+        return webView
+    }
     func updateNSView(_ webView: WKWebView, context: Context) {}
 }
 #else
 private struct EmbedWebView: UIViewRepresentable {
     let url: URL
 
-    func makeUIView(context: Context) -> WKWebView { makeEmbedWebView(url: url) }
+    func makeCoordinator() -> EmbedNavigationPolicy { EmbedNavigationPolicy() }
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = makeEmbedWebView(url: url)
+        webView.navigationDelegate = context.coordinator
+        return webView
+    }
     func updateUIView(_ webView: WKWebView, context: Context) {}
 }
 #endif

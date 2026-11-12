@@ -186,6 +186,14 @@ final class AudioEngine {
         }
     }
 
+    /// Pause and keep it paused: for another sound source taking over (an embed player).
+    func pause() {
+        guard let player, player.timeControlStatus != .paused else { return }
+        resumeAfterInterruption = false
+        player.pause()
+        isPlaying = false
+    }
+
     func togglePlay() {
         // A failed or missing item cannot resume: rebuild it, keeping the queue contexts.
         guard let player, let item = player.currentItem, item.status != .failed else {

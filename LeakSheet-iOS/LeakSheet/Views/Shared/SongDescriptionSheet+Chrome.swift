@@ -47,7 +47,12 @@ extension SongDescriptionSheet {
             toggleFavourite()
             Haptics.light()
         } label: {
-            Label("Favourite", systemImage: "heart")
+            let isFav = favourites.isFavouritedByVersion(
+                active.version,
+                artistSlug: payload.artistSlug ?? payload.artistName.slugified,
+                eraName: active.eraName
+            )
+            Label(isFav ? "Remove from Favourites" : "Favourite", systemImage: isFav ? "heart.slash" : "heart")
         }
         if let link = active.version.links?.first {
             Button {
