@@ -91,3 +91,29 @@ def test_a_one_char_era_used_on_many_rows_is_still_an_era():
         ["X", "Leaked Song", "second", "2:00", "Jan 2, 2020", "Full", "CD Quality", ""],
     ])
     assert "X" in [e.name for e in parse_sheet(html, "Test").eras]
+
+
+def _img(name: str) -> str:
+    return f'<img src="https://docs.google.com/sheets-images-rt/{name}=w134-h133">'
+
+
+ART_ROWS = _table([
+    ["Era", "Name", "Notes", "Track Length", "Leak Date", "Available Length", "Quality", "Link(s)"],
+    ["7 Total Full<br>2 Snippet", "Alpha Era<br>(Aka)", "(01/01/2001) (Start)", "", _img("alpha-cover"), "", "", ""],
+    ["Alpha Era", "Song A", "vocals", "2:01", "Apr 4, 2011", "Full", "High Quality", ""],
+    ["", "Beta Era", "", "", _img("beta-cover"), "", "", ""],
+    ["Beta Era", "Song B", "demo", "1:29", "Apr 4, 2011", "Full", "High Quality", ""],
+    ["Beta Era", "Song C " + _img("song-art"), "demo", "1:30", "Apr 5, 2011", "Full", "High Quality", ""],
+])
+
+
+def test_content_tab_era_headers_report_their_cover_images():
+    """A title-logo era borrows its cover from another tab's header for the same era:
+    see docs/decisions.md::fetcher.py::_is_title_art."""
+    era_art: dict[str, str] = {}
+    entries = parse_misc_tab(ART_ROWS, "stems", ["Alpha Era", "Beta Era"], era_art=era_art)
+    assert [e.name for e in entries] == ["Song A", "Song B", "Song C"]
+    assert era_art == {
+        "Alpha Era": "https://docs.google.com/sheets-images-rt/alpha-cover=w134-h133",
+        "Beta Era": "https://docs.google.com/sheets-images-rt/beta-cover=w134-h133",
+    }
