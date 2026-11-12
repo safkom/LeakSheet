@@ -169,6 +169,20 @@ class TestAdminRateLimit:
         finally:
             api._rate_hits.clear()
 
+    def test_the_right_token_is_not_locked_out_by_wrong_guesses(self, api_client, monkeypatch):
+        """Anyone could fill the bucket and 429 the operator; only wrong tokens are counted."""
+        monkeypatch.setenv("LEAKSHEET_ADMIN_TOKEN", "s3cret-admin-token")
+        api._rate_hits.clear()
+        api._rate_hits["testclient|admin"] = (
+            [time.monotonic()] * api._ADMIN_RATE_LIMIT_PER_MIN
+        )
+        try:
+            assert api_client.post("/cache/clear", headers={"X-Admin-Token": "guess"}).status_code == 429
+            r = api_client.post("/cache/clear", headers={"X-Admin-Token": "s3cret-admin-token"})
+            assert r.status_code == 200
+        finally:
+            api._rate_hits.clear()
+
     def test_uses_its_own_bucket(self, api_client, monkeypatch):
         """A busy /sheet client must not exhaust the admin budget, or vice
         versa — otherwise ordinary traffic locks the operator out."""

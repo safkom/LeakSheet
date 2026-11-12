@@ -78,6 +78,7 @@ def _ip_is_public(ip_str: str) -> bool:
     return ip.is_global and not (
         ip.is_private or ip.is_loopback or ip.is_link_local
         or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        or getattr(ip, "is_site_local", False)  # fec0::/10, which is_global lets through
     )
 
 
