@@ -128,7 +128,8 @@ final class AudioEngine {
         eraName: String = "",
         artUrl: String = "",
         artistSlug: String = "",
-        preservingQueueContext: Bool = false
+        preservingQueueContext: Bool = false,
+        resumeAt: TimeInterval = 0
     ) {
         // Ad-hoc playback must not inherit a leftover era/list cursor, or auto-advance
         // walks off into an unrelated song.
@@ -167,7 +168,7 @@ final class AudioEngine {
         let asset = AVURLAsset(url: initialURL)
         let playerItem = AVPlayerItem(asset: asset)
         playerItem.preferredForwardBufferDuration = 10
-        setupPlayer(with: playerItem)
+        setupPlayer(with: playerItem, restoreTime: resumeAt)
         player?.play()
         updateNowPlayingInfo()
         startLoadingTimeout()
@@ -207,8 +208,9 @@ final class AudioEngine {
     /// Reload the current track from scratch without clearing the era/list/queue contexts.
     func retryCurrent() {
         guard let track = currentTrack else { return }
+        // A stream that died three minutes in resumes there, not at the start.
         playTrack(track, artistName: artistName, eraName: eraName, artUrl: artUrl,
-                  artistSlug: artistSlug, preservingQueueContext: true)
+                  artistSlug: artistSlug, preservingQueueContext: true, resumeAt: currentTime)
     }
 
     /// Start playback, never stop it.
