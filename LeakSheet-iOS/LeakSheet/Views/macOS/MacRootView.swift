@@ -45,7 +45,6 @@ struct MacRootView: View {
             }
             .background(Color.lsBackground)
         }
-        .frame(minWidth: 900, minHeight: 620)
         .inspector(isPresented: $uiState.showInspector) {
             MacInspector()
                 .environment(PlayerViewModel.shared)
@@ -53,6 +52,9 @@ struct MacRootView: View {
                 .environment(vmForInspector)
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 460)
         }
+        // After the inspector, so the minimum covers it: before, the content minimum grew
+        // past the default window when the inspector opened.
+        .frame(minWidth: 900, minHeight: 620)
         // ⇧⌘V routes a pasted URL into the Browse pane and loads it.
         .onChange(of: uiState.pastedURL) { _, pasted in
             guard let pasted else { return }
