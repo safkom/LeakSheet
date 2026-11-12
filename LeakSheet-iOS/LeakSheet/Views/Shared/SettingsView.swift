@@ -5,6 +5,9 @@ struct SettingsView: View {
     @AppStorage(AudioEngine.originalQualityKey) private var useOriginalQuality: Bool = true
     @AppStorage(AudioEngine.autoplayNextKey) private var autoplayNext: Bool = true
     @AppStorage(APIClient.baseURLDefaultsKey) private var customServerURL: String = ""
+    /// What is being typed. `APIClient.baseURL` reads the stored key live, so binding the
+    /// field to it made every half-typed address the server for requests in flight.
+    @State private var serverDraft = ""
     @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .platformDefault
     @AppStorage(ListeningHistory.enabledKey) private var recordHistory = true
     @Environment(\.dismiss) private var dismiss
@@ -31,8 +34,14 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 
+    /// An invalid draft is dropped: the stored address keeps working.
+    private func commitServerDraft() {
+        guard !customURLInvalid else { return }
+        customServerURL = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var customURLInvalid: Bool {
-        let trimmed = customServerURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && !APIClient.isValidServerURL(trimmed)
     }
 
@@ -180,7 +189,8 @@ struct SettingsView: View {
                 }
 
                 SwiftUI.Section {
-                    TextField(APIClient.defaultBaseURL, text: $customServerURL)
+                    TextField(APIClient.defaultBaseURL, text: $serverDraft)
+                        .onSubmit(commitServerDraft)
                         .autocorrectionDisabled()
                         .urlFieldTraits()
                         .font(.subheadline.monospaced())
@@ -221,8 +231,12 @@ struct SettingsView: View {
                 cacheSizeBytes = await CacheService.shared.cacheSizeBytes()
                 imageCacheBytes = await ImageCache.shared.diskUsageBytes()
             }
-            .onAppear { openedBaseURL = APIClient.baseURL }
+            .onAppear {
+                openedBaseURL = APIClient.baseURL
+                serverDraft = customServerURL
+            }
             .onDisappear {
+                commitServerDraft()
                 guard APIClient.baseURL != openedBaseURL else { return }
                 // Cached trackers and host health belong to the server they came from.
                 Task {

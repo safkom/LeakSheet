@@ -163,4 +163,14 @@ struct MiscLinkClassifierTests {
     @Test func `non-embeddable links have no embed url`() {
         #expect(MiscLinkClassifier.embedURL(for: "https://example.com/page") == nil)
     }
+
+    @Test(arguments: [
+        "https://www.youtube.com/watch?v=../../redirect%3Fq%3Dhttps://example.com",
+        "https://youtu.be/..%2F..%2Fredirect",
+        "https://www.youtube.com/embed/a%3Fb=c",
+        "https://www.youtube.com/watch?v=abc",
+    ])
+    func `a youtube id outside the id alphabet is not embedded`(link: String) {
+        #expect(MiscLinkClassifier.embedURL(for: link) == nil)
+    }
 }

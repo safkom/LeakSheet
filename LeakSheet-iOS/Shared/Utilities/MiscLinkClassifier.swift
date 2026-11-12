@@ -137,7 +137,18 @@ nonisolated enum MiscLinkClassifier {
         return host
     }
 
+    /// The id goes into the embed URL's path: anything but an id's own alphabet could
+    /// steer it to another youtube.com page ("../../redirect?q=…").
     private static func youTubeVideoID(from urlString: String) -> String? {
+        guard let id = rawYouTubeVideoID(from: urlString),
+              (6...20).contains(id.utf8.count),
+              id.utf8.allSatisfy({ $0 < 128 && (Character(UnicodeScalar($0)).isLetter
+                  || Character(UnicodeScalar($0)).isNumber || $0 == UInt8(ascii: "_") || $0 == UInt8(ascii: "-")) })
+        else { return nil }
+        return id
+    }
+
+    private static func rawYouTubeVideoID(from urlString: String) -> String? {
         guard let components = URLComponents(string: urlString),
               let host = normalizedHost(URL(string: urlString) ?? URL(fileURLWithPath: "/"))
         else { return nil }
