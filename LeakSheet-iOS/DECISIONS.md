@@ -659,3 +659,13 @@ must stop; a list stops at its own end. Era Radio uses the filtered era, like Pl
 `bestPlayableVersion` (skipped when not streamable). Smart Shuffle suggests only versions the user has
 not heard, from trackers already in the cache, so a favourite whose tracker was never loaded gets no
 suggestion.
+
+## MacSongList.swift::own-selection — the list keeps its own selection
+
+`List(selection:)` is not used on the Mac song list. When the system selection changes after a
+trackpad scroll, the table behind `List` drops the measured heights of the rows above the
+viewport and falls back to estimates; with rows of different heights (page header, era
+headers, wrapped badges) the content then shifts under the pointer. A change that stays
+outside the `List` leaves the table alone, so the selection lives in `MacListSelection`, the
+row background and the VoiceOver trait read it in their own views, and Up/Down are handled
+with `onKeyPress` plus `ScrollViewReader`.

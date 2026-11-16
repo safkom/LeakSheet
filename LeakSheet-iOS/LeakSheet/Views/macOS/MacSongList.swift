@@ -23,9 +23,9 @@ enum MacListRow: Identifiable {
     }
 }
 
-/// One flat, selectable list of song/version rows. `List(selection:)` gives the Mac
-/// behaviours for free; Return plays the selection, double-click the row under the
-/// pointer, and the selection drives the Details inspector.
+/// One flat, selectable list of song/version rows. Click and Up/Down select, Return plays
+/// the selection, double-click the row under the pointer, and the selection drives the
+/// Details inspector.
 struct MacSongList<Header: View>: View {
     let rows: [MacListRow]
     let artistName: String
@@ -44,6 +44,7 @@ struct MacSongList<Header: View>: View {
     /// Owned here, not bound from the host: as a `@Binding` to the artist screen's
     /// `@State`, every arrow key rebuilt the host's whole row array.
     @State private var selected = MacListSelection()
+    @FocusState private var listFocused: Bool
 
     private var selection: MacListRow.ID? { selected.id }
 
@@ -54,35 +55,51 @@ struct MacSongList<Header: View>: View {
     }
 
     var body: some View {
-        // `body` never reads the selection: a list-wide update re-measures the rows above the
-        // viewport and shifts the scroll position.
-        List(selection: Binding(get: { selected.id }, set: { select($0) })) {
-            header
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-                .selectionDisabled()
+        // No `List(selection:)`: see DECISIONS.md::MacSongList.swift::own-selection.
+        ScrollViewReader { proxy in
+            List {
+                header
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .selectionDisabled()
 
-            ForEach(rows) { row in
-                rowView(row)
-                    // Own the selection fill rather than letting the table paint a saturated accent
-                    // slab over era-tinted panels.
-                    .listRowBackground(MacSelectionFill(selected: selected, id: row.id))
+                ForEach(rows) { row in
+                    rowView(row)
+                        // Own the selection fill rather than letting the table paint a saturated accent
+                        // slab over era-tinted panels.
+                        .listRowBackground(MacSelectionFill(selected: selected, id: row.id))
+                        .modifier(MacSelectedTrait(selected: selected, id: row.id))
+                }
+            }
+            .listStyle(.inset)
+            .focusable()
+            .focused($listFocused)
+            .focusEffectDisabled()
+            .onKeyPress(.upArrow) { moveSelection(by: -1, proxy) }
+            .onKeyPress(.downArrow) { moveSelection(by: 1, proxy) }
+            .onKeyPress(.return) { playSelection() ? .handled : .ignored }
+            .onKeyPress(.rightArrow) { setSelectionExpanded(true) }
+            .onKeyPress(.leftArrow) { setSelectionExpanded(false) }
+            // Space is safe here (see DECISIONS.md::LeakSheetCommands.swift::arrow-modifiers):
+            // `onKeyPress` fires only while the list has focus.
+            .onKeyPress(.space) {
+                guard PlayerViewModel.shared.currentTrack != nil else {
+                    return playSelection() ? .handled : .ignored
+                }
+                PlayerViewModel.shared.togglePlay()
+                return .handled
             }
         }
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
-        .onKeyPress(.return) { playSelection() ? .handled : .ignored }
-        .onKeyPress(.rightArrow) { setSelectionExpanded(true) }
-        .onKeyPress(.leftArrow) { setSelectionExpanded(false) }
-        // Space is safe here (see DECISIONS.md::LeakSheetCommands.swift::arrow-modifiers):
-        // `onKeyPress` fires only while the list has focus.
-        .onKeyPress(.space) {
-            guard PlayerViewModel.shared.currentTrack != nil else {
-                return playSelection() ? .handled : .ignored
-            }
-            PlayerViewModel.shared.togglePlay()
-            return .handled
-        }
+    }
+
+    /// Up/Down step over headers to the next song or version row.
+    private func moveSelection(by step: Int, _ proxy: ScrollViewProxy) -> KeyPress.Result {
+        var index = rows.firstIndex { $0.id == selected.id } ?? (step > 0 ? -1 : rows.count)
+        repeat { index += step } while rows.indices.contains(index) && !rows[index].isSelectable
+        guard rows.indices.contains(index) else { return .handled }
+        select(rows[index].id)
+        proxy.scrollTo(rows[index].id)
+        return .handled
     }
 
     @ViewBuilder
@@ -113,6 +130,7 @@ struct MacSongList<Header: View>: View {
             // row. The tap gesture takes the click from the List, so it sets the selection.
             .onTapGesture {
                 select(row.id)
+                listFocused = true
                 if Self.isDoubleClick {
                     // On a multi-version row the first click already expanded it.
                     if let picked = version, picked.isStreamable { onPlay(picked, eraName) }
@@ -133,6 +151,7 @@ struct MacSongList<Header: View>: View {
             )
             .onTapGesture {
                 select(row.id)
+                listFocused = true
                 if Self.isDoubleClick, version.isStreamable { onPlay(version, eraName) }
             }
         }
@@ -211,6 +230,16 @@ private struct MacSelectionFill: View {
     }
 }
 
+/// VoiceOver's "selected", read outside the list body like the fill.
+private struct MacSelectedTrait: ViewModifier {
+    let selected: MacListSelection
+    let id: MacListRow.ID
+
+    func body(content: Content) -> some View {
+        content.accessibilityAddTraits(selected.id == id ? .isSelected : [])
+    }
+}
+
 /// Cover, name and song count: the list's counterpart of the iOS era card.
 private struct MacEraHeaderRow: View {
     let era: Era
@@ -246,6 +275,13 @@ private struct MacEraHeaderRow: View {
 }
 
 extension MacListRow {
+    var isSelectable: Bool {
+        switch self {
+        case .header, .eraHeader: false
+        case .song, .version: true
+        }
+    }
+
     /// The detail payload this row describes, for the Details inspector.
     func payload(artistName: String, artistSlug: String) -> SongDetailPayload? {
         switch self {
