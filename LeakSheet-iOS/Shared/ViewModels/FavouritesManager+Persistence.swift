@@ -88,7 +88,8 @@ extension FavouritesManager {
         if let legacyData = UserDefaults.standard.data(forKey: Self.storageKey),
            let migrated = try? JSONDecoder().decode([FavouriteEntry].self, from: legacyData) {
             // Migrate here too: this branch returns early, and holds the oldest keys.
-            entries = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(migrated)))
+            entries = Self.migratingAll(migrated)
+            trackerUrlBySlug = Self.trackerUrls(bySlugIn: entries)
             // Written synchronously, and the old copy removed only once the new one exists,
             // so there is never a moment with neither.
             if let data = try? JSONEncoder().encode(entries),
@@ -106,10 +107,15 @@ extension FavouritesManager {
                 // The next save rewrites the file without them: keep the original beside it.
                 try? FileManager.default.copyItem(at: Self.storageFile, to: Self.freshAsideURL())
             }
-            let migrated = Self.migratingKeyCase(Self.migratingPlaceholderKeys(Self.migratingVersionTags(stored)))
+            let migrated = Self.migratingAll(stored)
             entries = migrated
+            trackerUrlBySlug = Self.trackerUrls(bySlugIn: migrated)
             // Persist the rewrite, or it re-runs on every launch forever.
-            if migrated.map(\.key) != stored.map(\.key) { save() }
+            if migrated.map(\.key) != stored.map(\.key) {
+                // Keys are rewritten in place: keep the file as it was beside the new one.
+                if dropped == 0 { try? FileManager.default.copyItem(at: Self.storageFile, to: Self.freshAsideURL()) }
+                save()
+            }
         } catch {
             Self.log.error("""
                 Failed to decode favourites (\(data.count, privacy: .public) bytes): \
@@ -120,6 +126,60 @@ extension FavouritesManager {
             try? FileManager.default.moveItem(at: Self.storageFile, to: Self.freshAsideURL())
             entries = []
         }
+    }
+
+    private static func migratingAll(_ stored: [FavouriteEntry]) -> [FavouriteEntry] {
+        migratingTrackerKeys(
+            migratingKeyCase(migratingPlaceholderKeys(migratingVersionTags(stored))),
+            recents: RecentTrackersManager.shared.trackers
+        )
+    }
+
+    /// Moves slug keys onto the tracker URL: the entry's own, or the one Recents has for an
+    /// unambiguous slug. Entries with no URL to be found keep their slug key.
+    static func migratingTrackerKeys(
+        _ stored: [FavouriteEntry], recents: [RecentTrackersManager.RecentTracker]
+    ) -> [FavouriteEntry] {
+        var seen = Set<String>()
+        return stored.compactMap { entry in
+            let url = resolvedSourceUrl(entry.sourceUrl, artistSlug: entry.artistSlug, recents: recents)
+            let rekeyed = rekeying(entry, toTrackerUrl: url)
+            // One tracker saved under two slugs can hold the same song twice.
+            return seen.insert(rekeyed.key).inserted ? rekeyed : nil
+        }
+    }
+
+    /// The url-less favourites saved under `slug` take `sourceUrl`; the rest are untouched.
+    static func adoptingTracker(_ entries: [FavouriteEntry], slug: String, sourceUrl: String) -> [FavouriteEntry] {
+        var seen = Set(entries.map(\.key))
+        return entries.map { entry in
+            guard entry.artistSlug == slug, (entry.sourceUrl ?? "").isEmpty else { return entry }
+            let rekeyed = rekeying(entry, toTrackerUrl: sourceUrl)
+            return seen.insert(rekeyed.key).inserted ? rekeyed : entry
+        }
+    }
+
+    /// Swaps the slug at the front of the key for the URL identity, keeping the rest
+    /// (era, name, placeholder discriminator) as stored.
+    private static func rekeying(_ entry: FavouriteEntry, toTrackerUrl url: String?) -> FavouriteEntry {
+        let slugPrefix = entry.artistSlug.lowercased() + "::"
+        let identity = trackerIdentity(slug: entry.artistSlug, sourceUrl: url).lowercased()
+        guard let url, !url.isEmpty, entry.key.hasPrefix(slugPrefix), identity != entry.artistSlug.lowercased()
+        else { return entry }
+        return entry.rekeyed(
+            to: identity + "::" + entry.key.dropFirst(slugPrefix.count),
+            baseName: entry.songBaseName, sourceUrl: url
+        )
+    }
+
+    /// Slug to tracker URL, for the slugs whose favourites all name one tracker.
+    static func trackerUrls(bySlugIn entries: [FavouriteEntry]) -> [String: String] {
+        var urls: [String: Set<String>] = [:]
+        for entry in entries {
+            guard let url = entry.sourceUrl, !url.isEmpty else { continue }
+            urls[entry.artistSlug, default: []].insert(url)
+        }
+        return urls.compactMapValues { $0.count == 1 ? $0.first : nil }
     }
 
     /// Decodes entry by entry, so one unreadable favourite does not take the rest with it.
@@ -173,7 +233,7 @@ extension FavouritesManager {
                   let discriminator = discriminator(for: entry.primaryVersion)
             else { return entry }
             let newKey = key(
-                artistSlug: entry.artistSlug, eraName: entry.eraName,
+                artistSlug: entry.trackerIdentity, eraName: entry.eraName,
                 baseName: entry.songBaseName, discriminator: discriminator
             )
             guard newKey != entry.key, !seen.contains(newKey) else { return entry }
@@ -192,7 +252,7 @@ extension FavouritesManager {
                   let swiftRange = Range(match.range, in: name)
             else { return entry }
             let stripped = String(name[name.startIndex..<swiftRange.lowerBound])
-            let newKey = key(artistSlug: entry.artistSlug, eraName: entry.eraName, baseName: stripped)
+            let newKey = key(artistSlug: entry.trackerIdentity, eraName: entry.eraName, baseName: stripped)
             // Another version of the same song is already favourited under the stripped
             // name: leave this one alone rather than create a duplicate key.
             guard !seen.contains(newKey) else { return entry }

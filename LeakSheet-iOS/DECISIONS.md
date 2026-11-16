@@ -161,6 +161,24 @@ wasted work.
 the still-stale (unfiltered) `content` would briefly render every song in every era.
 `applyFilters()`'s completion rebuilds once `content` actually matches the new state.
 
+## FavouritesManager.swift::tracker-key — favourites are keyed by tracker URL
+
+The key is `{tracker}::{eraName}::{baseName}`, where `tracker` is the normalized tracker URL
+(`trackerIdentity`) and the artist slug only when no URL is known. The slug comes from the
+artist name, which one tracker can change (see `TrackerLoader.swift::sticky-artist-name`) and
+two trackers can share; the URL does neither.
+
+Views still ask by slug, because the player and the details sheet do not carry the URL.
+`trackerUrlBySlug` answers which tracker a slug means: the one last loaded under it
+(`noteTracker`, called by `TrackerLoader`), seeded at launch from the favourites themselves
+when all of a slug's entries name one URL. A slug that two saved trackers share stays
+unresolved until one of them is opened.
+
+Stored entries migrate at load (`migratingTrackerKeys`): the slug at the front of the key is
+swapped for the entry's URL, or the one Recents has for an unambiguous slug. An entry with no
+URL to be found keeps its slug key, and the first tracker opened under that slug claims it
+(`adoptingTracker`). The file as it was is copied beside the rewritten one.
+
 ## FavouritesManager.swift::concurrent-persist — why @concurrent is required
 
 `@concurrent` forces `persist` off the caller's actor. Without it, under
