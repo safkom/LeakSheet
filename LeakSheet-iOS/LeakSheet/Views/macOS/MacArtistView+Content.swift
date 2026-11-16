@@ -150,7 +150,7 @@ extension MacArtistView {
         for era in viewModel.content.eras {
             let songs = era.allSongs
             guard !songs.isEmpty else { continue }
-            out.append(.header(era.era.name, id: era.era.name))
+            out.append(.eraHeader(era.era, songCount: songs.count))
             for (ordinal, song) in songs.enumerated() {
                 out.append(.song(
                     song, version: song.bestPlayableVersion ?? song.versions.first,
@@ -231,7 +231,7 @@ extension MacArtistView {
         }
         let items: [PlaybackListItem] = rows.compactMap { row in
             switch row {
-            case .header: return nil
+            case .header, .eraHeader: return nil
             case .song(let song, let rowVersion, let era, let art, _):
                 guard let picked = rowVersion ?? song.bestPlayableVersion, picked.isStreamable else { return nil }
                 return PlaybackListItem(

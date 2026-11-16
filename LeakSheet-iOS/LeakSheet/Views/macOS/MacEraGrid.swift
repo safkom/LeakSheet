@@ -122,7 +122,7 @@ private struct MacEraTile: View {
 
 /// Loads an era cover and reports its dominant colour once, so the grid seeds
 /// the same `eraDisplay` cache the song list reads.
-private struct MacEraCover: View {
+struct MacEraCover: View {
     let url: URL
     let cacheKey: String
     let onColorExtracted: (Color) -> Void

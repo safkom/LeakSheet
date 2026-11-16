@@ -5,12 +5,15 @@ import SwiftUI
 /// `.version` carry an id. Top-level because the list is generic over its header.
 enum MacListRow: Identifiable {
     case header(String, id: String)
+    /// An era's cover, name and song count above its songs in a list spanning eras.
+    case eraHeader(Era, songCount: Int)
     case song(Song, version: SongVersion?, eraName: String, eraArt: String?, ordinal: Int)
     case version(SongVersion, song: Song, eraName: String, eraArt: String?, index: Int, ordinal: Int)
 
     var id: String {
         switch self {
         case .header(_, let id): "h:\(id)"
+        case .eraHeader(let era, _): "e:\(era.name)"
         // Version id included: two versions of one song can both match a search
         // (as in FilterPipeline.SearchResult.id).
         case .song(let song, let version, let era, _, let ordinal):
@@ -93,6 +96,11 @@ struct MacSongList<Header: View>: View {
                 .padding(.top, 10)
                 .selectionDisabled()
 
+        case .eraHeader(let era, let songCount):
+            MacEraHeaderRow(era: era, songCount: songCount)
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
+
         case .song(let song, let version, let eraName, let eraArt, let ordinal):
             MacSongRow(
                 song: song, version: version,
@@ -169,7 +177,7 @@ struct MacSongList<Header: View>: View {
     private func playSelection() -> Bool {
         guard let selection, let row = rows.first(where: { $0.id == selection }) else { return false }
         switch row {
-        case .header:
+        case .header, .eraHeader:
             return false
         case .song(let song, let version, let eraName, _, _):
             guard let picked = version ?? song.bestPlayableVersion, picked.isStreamable else { return false }
@@ -183,11 +191,45 @@ struct MacSongList<Header: View>: View {
     }
 }
 
+/// Cover, name and song count: the list's counterpart of the iOS era card.
+private struct MacEraHeaderRow: View {
+    let era: Era
+    let songCount: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let art = era.artUrl, let url = APIClient.shared.imageProxyURL(for: art, width: 480) {
+                    MacEraCover(url: url, cacheKey: art, onColorExtracted: { _ in })
+                } else {
+                    ArtworkPlaceholder(cornerRadius: 0)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(era.name)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                Text("\(songCount) song\(songCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 extension MacListRow {
     /// The detail payload this row describes, for the Details inspector.
     func payload(artistName: String, artistSlug: String) -> SongDetailPayload? {
         switch self {
-        case .header:
+        case .header, .eraHeader:
             nil
         case .song(let song, let version, let eraName, let eraArt, _):
             (version ?? song.bestPlayableVersion ?? song.versions.first).map {
