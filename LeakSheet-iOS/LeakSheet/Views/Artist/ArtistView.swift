@@ -69,6 +69,7 @@ struct ArtistView: View {
             return
         }
         let refreshedVM = await ArtistViewModel.make(artist: fresh)
+        if let old = viewModel ?? preparedVM { await refreshedVM.adoptUserState(from: old) }
         displayed = fresh
         viewModel = refreshedVM
         lastUpdated = .now

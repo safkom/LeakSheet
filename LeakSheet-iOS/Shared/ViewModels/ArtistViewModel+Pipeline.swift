@@ -148,6 +148,30 @@ extension ArtistViewModel {
         )
     }
 
+    /// Carry what the user set up on the view model a pull-to-refresh replaces: filters,
+    /// search, the open era and expanded songs, where the refreshed tracker still has them.
+    func adoptUserState(from old: ArtistViewModel) async {
+        bestOf = old.bestOf
+        worstOf = old.worstOf
+        grails = old.grails
+        recents = old.recents
+        noSnippets = old.noSnippets
+        selectedTabKey = availableTabs.contains { $0.id == old.selectedTabKey } ? old.selectedTabKey : nil
+        // Before `searchQuery`, whose didSet shows the spinner when the two differ.
+        debouncedQuery = old.debouncedQuery
+        searchQuery = old.searchQuery
+        colorScheme = old.colorScheme
+        applyFilters()
+        await filterTask?.value
+        // After the filter pass, which clears the expanded songs.
+        let eraNames = Set(artist.eras.map(\.name))
+        expandedEra = old.expandedEra.flatMap { eraNames.contains($0) ? $0 : nil }
+        expandedSongs = old.expandedSongs.filter { key in
+            eraNames.contains { key.hasPrefix($0 + "::") }
+        }
+        rebuildEraRows()
+    }
+
     func applyFilters() {
         let previousTask = filterTask
         previousTask?.cancel()

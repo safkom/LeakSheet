@@ -25,7 +25,6 @@ Confirmed in code, not yet fixed. Each needs a live check or an owner decision f
   the pinned name falls out of Recents. Needs a migration of stored favourites.
 - **Contract fixture that can fail**: most optional fields in `contract.json` are null, so a
   renamed wire key decodes to nil unnoticed. Populate every field and assert the key paths.
-- **Pull-to-refresh resets search, filters and expansion** (`ArtistView.refresh`).
 - **Mac Era inspector** keeps a stale era after leaving it (`MacUIState.selectedEra`).
 - **Stream pool isolation**: `/metadata`, the resolvers and the health prober's resolve step
   share the 50-connection stream client, so slow stream readers can starve them.
