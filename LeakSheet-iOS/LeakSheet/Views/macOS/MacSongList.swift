@@ -43,11 +43,20 @@ struct MacSongList<Header: View>: View {
 
     /// Owned here, not bound from the host: as a `@Binding` to the artist screen's
     /// `@State`, every arrow key rebuilt the host's whole row array.
-    @State private var selection: MacListRow.ID?
-    @Environment(\.colorScheme) private var colorScheme
+    @State private var selected = MacListSelection()
+
+    private var selection: MacListRow.ID? { selected.id }
+
+    private func select(_ id: MacListRow.ID?) {
+        guard id != selected.id else { return }
+        selected.id = id
+        onSelect(id.flatMap { id in rows.first { $0.id == id } })
+    }
 
     var body: some View {
-        List(selection: $selection) {
+        // `body` never reads the selection: a list-wide update re-measures the rows above the
+        // viewport and shifts the scroll position.
+        List(selection: Binding(get: { selected.id }, set: { select($0) })) {
             header
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
@@ -57,20 +66,11 @@ struct MacSongList<Header: View>: View {
                 rowView(row)
                     // Own the selection fill rather than letting the table paint a saturated accent
                     // slab over era-tinted panels.
-                    .listRowBackground(
-                        row.id == selection
-                            ? RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.lsSelection(colorScheme))
-                                .padding(.horizontal, 6)
-                            : nil
-                    )
+                    .listRowBackground(MacSelectionFill(selected: selected, id: row.id))
             }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .onChange(of: selection) { _, id in
-            onSelect(id.flatMap { id in rows.first { $0.id == id } })
-        }
         .onKeyPress(.return) { playSelection() ? .handled : .ignored }
         .onKeyPress(.rightArrow) { setSelectionExpanded(true) }
         .onKeyPress(.leftArrow) { setSelectionExpanded(false) }
@@ -112,7 +112,7 @@ struct MacSongList<Header: View>: View {
             // A multi-version song opens on ONE click: its versions are the point of the
             // row. The tap gesture takes the click from the List, so it sets the selection.
             .onTapGesture {
-                selection = row.id
+                select(row.id)
                 if Self.isDoubleClick {
                     // On a multi-version row the first click already expanded it.
                     if let picked = version, picked.isStreamable { onPlay(picked, eraName) }
@@ -132,7 +132,7 @@ struct MacSongList<Header: View>: View {
                 onShowDescription: onShowDescription
             )
             .onTapGesture {
-                selection = row.id
+                select(row.id)
                 if Self.isDoubleClick, version.isStreamable { onPlay(version, eraName) }
             }
         }
@@ -162,7 +162,7 @@ struct MacSongList<Header: View>: View {
             return .handled
         case .version(_, _, let eraName, _, _, let ordinal) where !expand:
             if let parent = rows[..<index].lastIndex(where: { if case .song = $0 { true } else { false } }) {
-                self.selection = rows[parent].id
+                select(rows[parent].id)
             }
             onToggleExpansion(eraName, ordinal)
             return .handled
@@ -187,6 +187,26 @@ struct MacSongList<Header: View>: View {
             guard version.isStreamable else { return false }
             onPlay(version, eraName)
             return true
+        }
+    }
+}
+
+/// A reference, so a selection change invalidates only the rows that read it.
+@Observable
+final class MacListSelection {
+    var id: MacListRow.ID?
+}
+
+private struct MacSelectionFill: View {
+    let selected: MacListSelection
+    let id: MacListRow.ID
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if selected.id == id {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.lsSelection(colorScheme))
+                .padding(.horizontal, 6)
         }
     }
 }
