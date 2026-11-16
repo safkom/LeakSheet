@@ -81,6 +81,12 @@ pixeldrain). `/image-proxy` resizes and caches covers from allowlisted image hos
 - **Deploy:** run `ops/deploy.sh` on the server. It resets the checkout to `origin/main`,
   builds both images, renders `ops/casaos/leaksheet.yml` with `~/LeakSheet/.env`, and
   restarts the CasaOS app. Never `docker compose up` in the checkout.
+- **Rollback:** a deploy of a new commit first tags the running images `:previous`. To go
+  back, on the server: `docker tag leaksheet-api:previous leaksheet-api:latest`, the same
+  for `leaksheet-web`, then
+  `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/casaos/apps:/var/lib/casaos/apps -w /var/lib/casaos/apps/leaksheet docker:cli compose up -d --force-recreate`.
+  The checkout stays on the new commit, so the next `ops/deploy.sh` rebuilds it: fix or
+  revert `main` first.
 - **Timeouts:** gunicorn 90 s < nginx 120 s < Cloudflare 125 s, so a wedged worker is
   recycled before either proxy gives up.
 - **Signals:**

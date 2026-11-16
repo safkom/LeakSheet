@@ -5,7 +5,15 @@
 set -eu
 cd "$(dirname "$0")/.."
 # The full ref: a local branch named origin/main would shadow the remote one.
+before=$(git rev-parse HEAD)
 git fetch -q origin && git reset -q --hard refs/remotes/origin/main
+# Keep the running images as :previous for a rollback. A re-run of the same commit keeps
+# the older pair instead of overwriting it with a copy of :latest.
+if [ "$before" != "$(git rev-parse HEAD)" ]; then
+  for image in leaksheet-api leaksheet-web; do
+    docker tag "$image:latest" "$image:previous" 2>/dev/null || true
+  done
+fi
 docker compose build -q api web
 set -a; [ -f .env ] && . ./.env; set +a
 export LEAKSHEET_TRUSTED_PROXY_HOPS="${LEAKSHEET_TRUSTED_PROXY_HOPS:-}" \
