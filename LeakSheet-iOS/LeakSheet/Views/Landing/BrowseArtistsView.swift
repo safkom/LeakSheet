@@ -92,7 +92,10 @@ struct BrowseArtistsView: View {
                     .scrollContentBackground(.hidden)
                     // .task below runs once per process, so pull-to-refresh is how the list picks
                     // up feed changes.
-                    .refreshable { await loadArtists(force: true) }
+                    .refreshable {
+                        MusicLibraryService.forgetLibrary()
+                        await loadArtists(force: true)
+                    }
                     // Same placement as the artist screen (ArtistView.swift): `.automatic` puts
                     // the field in the bottom slot on iPhone.
                     #if os(iOS)
@@ -118,6 +121,8 @@ struct BrowseArtistsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.lsBackground)
             .task { await loadArtists() }
+            // The sheet is gone: its recommendation pass has no one to show the result to.
+            .onDisappear { recommendTask?.cancel() }
             .onAppear { loadingUrl = "" }
     }
 
