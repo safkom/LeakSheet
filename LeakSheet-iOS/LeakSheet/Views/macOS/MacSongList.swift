@@ -72,6 +72,7 @@ struct MacSongList<Header: View>: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             .focusable()
             .focused($listFocused)
             .focusEffectDisabled()
