@@ -73,6 +73,7 @@ struct BrowseArtistsView: View {
                             Button("Find trackers for my music library", systemImage: "music.note.list") {
                                 Task { await recommendFromLibrary(request: true) }
                             }
+                            .listRowBackground(Color.clear)
                         }
                         if libraryAccess == .denied && searchText.isEmpty {
                             // Denied and restricted (parental controls) look alike here, so no "go to Settings".
@@ -80,6 +81,7 @@ struct BrowseArtistsView: View {
                                   systemImage: "music.note.list")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                                .listRowBackground(Color.clear)
                         }
                         if !recommended.isEmpty && searchText.isEmpty {
                             SwiftUI.Section("For you") { ForEach(recommended, content: row) }
@@ -179,6 +181,8 @@ struct BrowseArtistsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 rowText(artist)
+                    // Else the separator starts at the initials, whose width varies per row.
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
 
                 Spacer()
 
