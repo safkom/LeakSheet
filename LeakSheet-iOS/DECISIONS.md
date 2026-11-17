@@ -222,6 +222,15 @@ Content branches follow the COMPUTED state (`content.state`), not the live chip
 flags — the chips flip instantly while the previous content stays up until the new
 one lands, so a branch never renders data computed for another mode.
 
+## ArtistView.swift::refresh-handle — nothing big reachable from pull-to-refresh
+
+SwiftUI keeps the `.refreshable` action of a tracker screen alive after the screen is popped
+(seen on iOS 27: one `ArtistViewModel` and its tracker, 20-35 MB for a large one, per
+tracker opened, never freed). The action closure therefore captures only a `RefreshHandle`,
+whose `run` the screen sets on appear and clears on disappear. `ContentView` keeps its
+prepared view model in a reference (`PreparedArtist`) for the same reason: old copies of the
+view kept in SwiftUI's cached closures would each hold the view model they were made with.
+
 ## ArtistView.swift::search-field-placement — navigationBarDrawer, displayMode .always
 
 `navigationBarDrawer` pins the search field under the navigation bar at the TOP of
