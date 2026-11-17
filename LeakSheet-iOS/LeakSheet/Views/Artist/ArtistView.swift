@@ -16,6 +16,7 @@ struct ArtistView: View {
     /// Pull-to-refresh goes through the landing screen's loader: it keeps the artist's
     /// name (favourites key), falls back to the saved copy, and reports failure.
     @State private var refresher = TrackerLoader()
+    @State private var refreshHandle = RefreshHandle()
     @Environment(RecentTrackersManager.self) private var recents
 
     /// The artist currently shown — the pushed value until a pull-to-refresh
@@ -28,7 +29,7 @@ struct ArtistView: View {
                 ArtistContentView(
                     artist: current, viewModel: viewModel,
                     lastUpdated: lastUpdated,
-                    onRefresh: refresh
+                    refreshHandle: refreshHandle
                 )
             } else {
                 // Sub-second placeholder while the stats/content pass runs off-main.
@@ -57,6 +58,9 @@ struct ArtistView: View {
             // ArtistViewModel.make); warm the rest now. Cancelled when the screen goes away.
             await viewModel?.warmEraArt()
         }
+        .onAppear { refreshHandle.run = refresh }
+        // The pull-to-refresh action outlives this screen: see DECISIONS.md::ArtistView.swift::refresh-handle
+        .onDisappear { refreshHandle.run = nil }
     }
 
     /// Force-refetch the tracker, rebuild the view model, and stamp the data
@@ -79,7 +83,7 @@ private struct ArtistContentView: View {
     let artist: Artist
     @Bindable var viewModel: ArtistViewModel
     let lastUpdated: Date?
-    let onRefresh: () async -> Void
+    let refreshHandle: RefreshHandle
 
     @State private var showDescription: DescriptionSheet.Payload?
     @State private var eraInfo: EraRef?
@@ -104,11 +108,11 @@ private struct ArtistContentView: View {
     /// MiscListView takes a small dictionary instead of the whole era tree.
     private let eraArtByLowercasedName: [String: String?]
 
-    init(artist: Artist, viewModel: ArtistViewModel, lastUpdated: Date?, onRefresh: @escaping () async -> Void) {
+    init(artist: Artist, viewModel: ArtistViewModel, lastUpdated: Date?, refreshHandle: RefreshHandle) {
         self.artist = artist
         self.viewModel = viewModel
         self.lastUpdated = lastUpdated
-        self.onRefresh = onRefresh
+        self.refreshHandle = refreshHandle
         var eraArt: [String: String?] = [:]
         for era in artist.eras {
             let key = era.name.lowercased()
@@ -214,7 +218,8 @@ private struct ArtistContentView: View {
                 }
             }
         }
-        .refreshable { await onRefresh() }
+        // Captures only the handle, never this view: see DECISIONS.md::ArtistView.swift::refresh-handle
+        .refreshable { [refreshHandle] in await refreshHandle.run?() }
         // The mini player floats over the list: a soft edge keeps row text from bleeding through.
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         // The bar's safe-area inset never reaches this list: DECISIONS.md::ContentView.swift::mini-player-inset
@@ -346,6 +351,11 @@ private struct ArtistContentView: View {
             }
         }
     }
+}
+
+/// What pull-to-refresh calls, set while the screen is shown.
+final class RefreshHandle {
+    var run: (() async -> Void)?
 }
 
 /// Identifies the era whose info sheet is open.

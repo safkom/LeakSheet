@@ -10,7 +10,8 @@ struct ContentView: View {
     /// View model built while the landing screen still shows its loading
     /// state, handed to the pushed screen so the app has ONE loading state
     /// per tracker instead of "Loading…" followed by "Preparing…".
-    @State private var prepared: (slug: String, vm: ArtistViewModel)?
+    @State private var preparedBox = PreparedArtist()
+    private var prepared: (slug: String, vm: ArtistViewModel)? { preparedBox.value }
     /// See DECISIONS.md::ContentView.swift::mini-player-inset.
     @State private var miniPlayerHeight: CGFloat = 0
 
@@ -40,7 +41,7 @@ struct ContentView: View {
                     // (off-main filter/stats pass) before navigating.
                     let viewModel = await ArtistViewModel.make(artist: artist)
                     viewModel.loadNotice = notice
-                    prepared = (artist.slug, viewModel)
+                    preparedBox.value = (artist.slug, viewModel)
                     withAnimation { path.append(artist) }
                 },
                 onBrowseTapped: { showBrowse = true },
@@ -101,6 +102,13 @@ struct ContentView: View {
             }
         }
     }
+}
+
+/// Holds the prepared view model by reference: SwiftUI keeps old copies of this view in
+/// closures it caches, and a value in `@State` would keep every tracker opened alive.
+@Observable
+final class PreparedArtist {
+    var value: (slug: String, vm: ArtistViewModel)?
 }
 
 extension EnvironmentValues {
