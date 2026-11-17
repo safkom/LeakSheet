@@ -3,7 +3,8 @@ import Observation
 import OSLog
 
 /// Manages favourited songs, persisted as a JSON file.
-/// Composite key: "artistSlug::eraName::baseName"
+/// Composite key: "tracker::eraName::baseName", the tracker being its normalized URL when
+/// known and the artist slug otherwise: DECISIONS.md::FavouritesManager.swift::tracker-key
 @MainActor
 @Observable
 final class FavouritesManager {
@@ -22,6 +23,13 @@ final class FavouritesManager {
 
     /// `entries` keys, for O(1) `isFavourited` during scroll.
     private var keyIndex: Set<String> = []
+
+    /// Tracker URL per slug: views ask by slug, keys are built from the URL.
+    var trackerUrlBySlug: [String: String] = [:] {
+        didSet { identityBySlug = trackerUrlBySlug.mapValues { Self.trackerIdentity(slug: "", sourceUrl: $0) } }
+    }
+    /// `trackerUrlBySlug` normalized once, not per row per scroll frame.
+    @ObservationIgnored private var identityBySlug: [String: String] = [:]
 
     nonisolated struct FavouriteEntry: Codable, Identifiable, Sendable {
         var id: String { key }
@@ -68,11 +76,16 @@ final class FavouritesManager {
             )
         }
 
+        /// The tracker part of this entry's key.
+        var trackerIdentity: String {
+            FavouritesManager.trackerIdentity(slug: artistSlug, sourceUrl: sourceUrl)
+        }
+
         /// Copy with a new key/base name — see `migratingVersionTags`.
-        func rekeyed(to newKey: String, baseName: String) -> FavouriteEntry {
+        func rekeyed(to newKey: String, baseName: String, sourceUrl: String? = nil) -> FavouriteEntry {
             FavouriteEntry(
                 key: newKey, artistSlug: artistSlug, artistName: artistName,
-                sourceUrl: sourceUrl, eraName: eraName, eraArt: eraArt,
+                sourceUrl: sourceUrl ?? self.sourceUrl, eraName: eraName, eraArt: eraArt,
                 songBaseName: baseName, songVersionCount: songVersionCount,
                 badge: badge, addedAt: addedAt, primaryVersion: primaryVersion,
                 primaryVersionName: primaryVersionName, primaryVersionTag: primaryVersionTag,
@@ -102,8 +115,32 @@ final class FavouritesManager {
 
     // MARK: - Key
 
-    /// Favourite identity: artist + era + song name, lower-cased (the parser groups
-    /// names that differ only in case).
+    /// The tracker part of a key: the normalized URL, so one tracker keeps its favourites
+    /// when its slug changes and two trackers sharing a slug keep theirs apart.
+    nonisolated static func trackerIdentity(slug: String, sourceUrl: String?) -> String {
+        guard let sourceUrl, !sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return slug }
+        return TrackerURLNormalizer.normalize(sourceUrl)
+    }
+
+    /// The identity for a slug a view asks about: the tracker last opened under it.
+    private func identity(forSlug slug: String) -> String {
+        identityBySlug[slug] ?? slug
+    }
+
+    /// Called when a tracker loads: later queries by its slug mean this tracker, and
+    /// favourites saved under the slug without a URL become its own.
+    func noteTracker(slug: String, sourceUrl: String?) {
+        guard let sourceUrl, !sourceUrl.isEmpty, trackerUrlBySlug[slug] != sourceUrl else { return }
+        trackerUrlBySlug[slug] = sourceUrl
+        let adopted = Self.adoptingTracker(entries, slug: slug, sourceUrl: sourceUrl)
+        if adopted.map(\.key) != entries.map(\.key) {
+            entries = adopted
+            save()
+        }
+    }
+
+    /// Favourite identity: tracker + era + song name, lower-cased (the parser groups
+    /// names that differ only in case). `artistSlug` takes a `trackerIdentity`.
     ///
     /// A placeholder name ("???") identifies nothing, so placeholders ALONE also carry
     /// the file link, the same discriminator the now-playing indicator uses.
@@ -132,7 +169,7 @@ final class FavouritesManager {
         // Set, not `entries.contains { }`: this runs once per visible row on
         // every scroll frame, against an array that grows with the library.
         keyIndex.contains(Self.key(
-            artistSlug: artistSlug, eraName: eraName,
+            artistSlug: identity(forSlug: artistSlug), eraName: eraName,
             baseName: baseName, discriminator: discriminator
         ))
     }
@@ -217,8 +254,14 @@ final class FavouritesManager {
         primaryVersion: SongVersion?, artistSlug: String, artistName: String,
         sourceUrl: String?, eraName: String, eraArt: String?
     ) -> Bool {
+        // Removal needs no URL: the slug already resolves to the tracker it was saved under.
+        let resolvedUrl = Self.resolvedSourceUrl(
+            sourceUrl ?? trackerUrlBySlug[artistSlug], artistSlug: artistSlug,
+            recents: RecentTrackersManager.shared.trackers
+        )
+        if let resolvedUrl { trackerUrlBySlug[artistSlug] = resolvedUrl }
         let entryKey = Self.key(
-            artistSlug: artistSlug,
+            artistSlug: Self.trackerIdentity(slug: artistSlug, sourceUrl: resolvedUrl),
             eraName: eraName,
             baseName: baseName,
             discriminator: discriminator
@@ -232,9 +275,7 @@ final class FavouritesManager {
                 key: entryKey,
                 artistSlug: artistSlug,
                 artistName: artistName,
-                sourceUrl: Self.resolvedSourceUrl(
-                    sourceUrl, artistSlug: artistSlug, recents: RecentTrackersManager.shared.trackers
-                ),
+                sourceUrl: resolvedUrl,
                 eraName: eraName,
                 eraArt: eraArt,
                 songBaseName: baseName,

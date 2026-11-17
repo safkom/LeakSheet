@@ -377,3 +377,100 @@ struct FavouriteSourceUrlTests {
         #expect(FavouritesManager.resolvedSourceUrl(nil, artistSlug: "ye", recents: [recent, alt]) == nil)
     }
 }
+
+struct FavouriteTrackerKeyTests {
+    private typealias Manager = FavouritesManager
+    private let url = "https://docs.google.com/spreadsheets/d/AAA/htmlview"
+    private let otherUrl = "https://docs.google.com/spreadsheets/d/BBB/htmlview"
+
+    private func stored(
+        slug: String, url: String?, era: String = "Era", song: String = "Song", link: String? = nil
+    ) -> Manager.FavouriteEntry {
+        Manager.FavouriteEntry(
+            key: Manager.key(
+                artistSlug: slug, eraName: era, baseName: song, discriminator: link
+            ),
+            artistSlug: slug, artistName: slug, sourceUrl: url,
+            eraName: era, eraArt: nil, songBaseName: song, songVersionCount: 1,
+            badge: nil, addedAt: .distantPast, primaryVersion: link.map { version(song, link: $0) },
+            primaryVersionName: nil, primaryVersionTag: nil, links: nil, quality: nil,
+            availableLength: nil, notes: nil, trackLength: nil, leakDate: nil
+        )
+    }
+
+    private func recent(_ slug: String, _ url: String) -> RecentTrackersManager.RecentTracker {
+        RecentTrackersManager.RecentTracker(
+            name: slug, slug: slug, sourceUrl: url, totalSongs: 0, artUrl: nil, availableCount: 0, snippetCount: 0
+        )
+    }
+
+    @Test func `one tracker under two slugs gives one key`() {
+        let first = Manager.key(
+            artistSlug: Manager.trackerIdentity(slug: "billie-eilish", sourceUrl: url),
+            eraName: "Era", baseName: "Song"
+        )
+        let second = Manager.key(
+            artistSlug: Manager.trackerIdentity(slug: "billie-eilish-alt-3", sourceUrl: url + "#gid=0"),
+            eraName: "Era", baseName: "Song"
+        )
+        #expect(first == second)
+    }
+
+    @Test func `two trackers sharing a slug give different keys`() {
+        #expect(Manager.trackerIdentity(slug: "ye", sourceUrl: url) != Manager.trackerIdentity(slug: "ye", sourceUrl: otherUrl))
+    }
+
+    @Test func `no url falls back to the slug`() {
+        #expect(Manager.trackerIdentity(slug: "ye", sourceUrl: nil) == "ye")
+        #expect(Manager.trackerIdentity(slug: "ye", sourceUrl: "") == "ye")
+    }
+
+    @Test func `stored slug keys move onto the entry's url and keep the discriminator`() {
+        let placeholder = stored(slug: "ye", url: url, song: "???", link: "https://pillows.su/f/Abc")
+        let migrated = Manager.migratingTrackerKeys([stored(slug: "ye", url: url), placeholder], recents: [])
+        let identity = Manager.trackerIdentity(slug: "ye", sourceUrl: url)
+        #expect(migrated.map(\.key) == [
+            Manager.key(artistSlug: identity, eraName: "Era", baseName: "Song"),
+            Manager.key(artistSlug: identity, eraName: "Era", baseName: "???", discriminator: "https://pillows.su/f/Abc"),
+        ])
+        // A second pass changes nothing, and neither do the older migrations.
+        #expect(Manager.migratingTrackerKeys(migrated, recents: []).map(\.key) == migrated.map(\.key))
+        let rerun = Manager.migratingKeyCase(Manager.migratingPlaceholderKeys(Manager.migratingVersionTags(migrated)))
+        #expect(rerun.map(\.key) == migrated.map(\.key))
+    }
+
+    @Test func `an entry without a url takes it from recents, unless the slug is ambiguous`() {
+        let entry = stored(slug: "ye", url: nil)
+        let resolved = Manager.migratingTrackerKeys([entry], recents: [recent("ye", url)])
+        #expect(resolved[0].sourceUrl == url)
+        #expect(resolved[0].key.hasPrefix(Manager.trackerIdentity(slug: "ye", sourceUrl: url).lowercased()))
+
+        let ambiguous = Manager.migratingTrackerKeys([entry], recents: [recent("ye", url), recent("ye", otherUrl)])
+        #expect(ambiguous[0].key == entry.key)
+        #expect(ambiguous[0].sourceUrl == nil)
+    }
+
+    @Test func `the same song saved under two slugs of one tracker becomes one favourite`() {
+        let migrated = Manager.migratingTrackerKeys(
+            [stored(slug: "billie-eilish", url: url), stored(slug: "billie-eilish-alt-3", url: url)], recents: []
+        )
+        #expect(migrated.count == 1)
+    }
+
+    @Test func `opening a tracker claims the url-less favourites saved under its slug`() {
+        let entries = [stored(slug: "ye", url: nil), stored(slug: "joji", url: nil), stored(slug: "ye", url: otherUrl)]
+        let adopted = Manager.adoptingTracker(entries, slug: "ye", sourceUrl: url)
+        #expect(adopted.map(\.sourceUrl) == [url, nil, otherUrl])
+        #expect(adopted[0].key.hasPrefix(Manager.trackerIdentity(slug: "ye", sourceUrl: url).lowercased()))
+        #expect(adopted[1].key == entries[1].key)
+        #expect(adopted[2].key == entries[2].key)
+    }
+
+    @Test func `slugs resolve to a tracker only when the favourites agree on it`() {
+        let entries = [
+            stored(slug: "ye", url: url), stored(slug: "ye", url: otherUrl),
+            stored(slug: "joji", url: url), stored(slug: "none", url: nil),
+        ]
+        #expect(Manager.trackerUrls(bySlugIn: entries) == ["joji": url])
+    }
+}

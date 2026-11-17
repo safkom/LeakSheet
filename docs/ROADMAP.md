@@ -21,8 +21,6 @@ operational problem.
 
 Confirmed in code, not yet fixed. Each needs a live check or an owner decision first.
 
-- **Favourites keyed by tracker URL** (`FavouritesManager.key`): the slug key breaks when
-  the pinned name falls out of Recents. Needs a migration of stored favourites.
 - **Contract fixture that can fail**: most optional fields in `contract.json` are null, so a
   renamed wire key decodes to nil unnoticed. Populate every field and assert the key paths.
 - **Mac Era inspector** keeps a stale era after leaving it (`MacUIState.selectedEra`).

@@ -128,6 +128,7 @@ final class TrackerLoader {
             await CacheService.shared.cacheTracker(url: request.url, data: result.rawData, etag: etag)
         }
         request.recents.saveTracker(artist: result.artist)
+        FavouritesManager.shared.noteTracker(slug: result.artist.slug, sourceUrl: result.artist.sourceUrl)
         return result.artist
     }
 
@@ -209,6 +210,7 @@ final class TrackerLoader {
         guard let cachedArtist = await CacheService.shared.getCachedArtist(for: trimmed),
               artistName == nil || artistName == cachedArtist.name else { return nil }
         recents.saveTracker(artist: cachedArtist)
+        FavouritesManager.shared.noteTracker(slug: cachedArtist.slug, sourceUrl: cachedArtist.sourceUrl)
         return cachedArtist
     }
 
@@ -280,6 +282,7 @@ final class TrackerLoader {
                 await CacheService.shared.cacheTracker(url: trimmed, data: result.rawData, etag: etag)
             }
             recents.saveTracker(artist: result.artist)
+            FavouritesManager.shared.noteTracker(slug: result.artist.slug, sourceUrl: result.artist.sourceUrl)
             return result.artist
         } catch is CancellationError {
             // The user navigated away, as in load(): no banner, no telemetry.
