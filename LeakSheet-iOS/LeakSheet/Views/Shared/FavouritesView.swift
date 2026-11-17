@@ -215,7 +215,8 @@ struct FavouritesView: View {
                     }
                 }
                 if !favourites.entries.isEmpty {
-                    ToolbarItem(placement: .secondaryAction) {
+                    // A Mac puts .secondaryAction mid-toolbar, away from Smart Shuffle.
+                    ToolbarItem(placement: Self.clearPlacement) {
                         Button("Clear All", systemImage: "trash", role: .destructive) {
                             showClearConfirm = true
                         }
@@ -223,6 +224,12 @@ struct FavouritesView: View {
                 }
             }
     }
+
+    #if os(macOS)
+    private static let clearPlacement = ToolbarItemPlacement.primaryAction
+    #else
+    private static let clearPlacement = ToolbarItemPlacement.secondaryAction
+    #endif
 
     private var favArtPlaceholder: some View {
         ArtworkPlaceholder(cornerRadius: 6)
