@@ -25,7 +25,11 @@ final class FavouritesManager {
     private var keyIndex: Set<String> = []
 
     /// Tracker URL per slug: views ask by slug, keys are built from the URL.
-    var trackerUrlBySlug: [String: String] = [:]
+    var trackerUrlBySlug: [String: String] = [:] {
+        didSet { identityBySlug = trackerUrlBySlug.mapValues { Self.trackerIdentity(slug: "", sourceUrl: $0) } }
+    }
+    /// `trackerUrlBySlug` normalized once, not per row per scroll frame.
+    @ObservationIgnored private var identityBySlug: [String: String] = [:]
 
     nonisolated struct FavouriteEntry: Codable, Identifiable, Sendable {
         var id: String { key }
@@ -120,7 +124,7 @@ final class FavouritesManager {
 
     /// The identity for a slug a view asks about: the tracker last opened under it.
     private func identity(forSlug slug: String) -> String {
-        Self.trackerIdentity(slug: slug, sourceUrl: trackerUrlBySlug[slug])
+        identityBySlug[slug] ?? slug
     }
 
     /// Called when a tracker loads: later queries by its slug mean this tracker, and
