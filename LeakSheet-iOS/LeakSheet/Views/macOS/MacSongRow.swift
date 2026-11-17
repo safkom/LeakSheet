@@ -78,7 +78,8 @@ struct MacSongRow: View {
                     if let aka = akaTitle, !indented {
                         Text(aka)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            // .tertiary falls under 2:1 on the light background.
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .accessibilityLabel("Also known as \(aka)")
                     }

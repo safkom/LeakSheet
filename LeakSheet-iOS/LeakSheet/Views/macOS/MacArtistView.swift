@@ -72,6 +72,8 @@ struct MacArtistView: View {
         // ⌘F focuses the search field; the command bumps a token because focus state
         // belongs to this view.
         .onChange(of: uiState.focusSearchToken) { _, _ in searchFocused = true }
+        // The Era tab then follows the open era rather than one picked before.
+        .onChange(of: openEra) { _, _ in uiState.selectedEra = nil }
         .toolbar { toolbarItems }
         // Esc leaves an open era, as ⌘[ does.
         .onExitCommand {

@@ -194,6 +194,7 @@ struct MacRootView: View {
             .frame(maxWidth: Metrics.contentMaxWidth)
 
             Divider().overlay(Color.lsBorder)
+                .frame(maxWidth: Metrics.contentMaxWidth)
 
             // embedded: the split view already supplies the title and toolbar.
             BrowseArtistsView(
@@ -202,6 +203,8 @@ struct MacRootView: View {
                 },
                 embedded: true
             )
+            // Same column as the field and shelf above, as the tracker pages do.
+            .frame(maxWidth: Metrics.contentMaxWidth)
         }
         .navigationTitle("Browse")
     }

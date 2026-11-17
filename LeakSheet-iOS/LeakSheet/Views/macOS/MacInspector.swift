@@ -37,7 +37,10 @@ struct MacInspector: View {
                     }
                 case .era:
                     // The inspector's view model is optional (no tracker open); EraInfoSheet needs one.
-                    if let eraName = uiState.selectedEra, let artistVM {
+                    // The era whose info button was used, else the open one; never one this tracker lacks.
+                    if let artistVM, let eraName = [uiState.selectedEra, artistVM.expandedEra]
+                        .compactMap({ $0 })
+                        .first(where: { name in artistVM.artist.eras.contains { $0.name == name } }) {
                         EraInfoSheet(eraName: eraName, embedded: true)
                             .environment(artistVM)
                             .id(eraName)

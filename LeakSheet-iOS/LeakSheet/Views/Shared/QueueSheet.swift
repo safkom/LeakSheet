@@ -41,7 +41,9 @@ struct QueueSheet: View {
 
                     Divider().overlay(Color.lsBorder)
 
+                    // Fill the rail, or a short empty state centres the header in it.
                     content
+                        .frame(maxHeight: .infinity)
                 }
             } else {
                 NavigationStack {

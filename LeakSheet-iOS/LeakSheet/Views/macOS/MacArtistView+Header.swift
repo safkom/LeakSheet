@@ -48,6 +48,15 @@ extension MacArtistView {
                     isActive: viewModel.noSnippets,
                     tint: .filterNoSnippets
                 ) { viewModel.toggleNoSnippets() }
+                // Filters narrow the songs; the chips after this switch to another section.
+                if !viewModel.availableTabs.isEmpty {
+                    // A Rectangle: Divider in a custom layout draws a full-width line.
+                    Rectangle()
+                        .fill(Color.lsBorder)
+                        .frame(width: 1, height: 18)
+                        .padding(.horizontal, 2)
+                        .accessibilityHidden(true)
+                }
                 ForEach(viewModel.availableTabs) { tab in
                     MacFilterChip(
                         label: ContentTabsView.labelText(for: tab.name),
