@@ -27,6 +27,41 @@ struct ArtistViewModelRowTests: FilterPipelineFixture {
         }
     }
 
+    @Test @MainActor func `a refreshed view model adopts filters, search and expansion`() async {
+        let old = ArtistViewModel(artist: artist)
+        old.noSnippets = true
+        old.applyFilters()
+        await old.filterTask?.value
+        old.toggleEra("Era A")
+        old.toggleSongExpansion(eraName: "Era A", ordinal: 0)
+        old.toggleSongExpansion(eraName: "Gone Era", ordinal: 0)
+
+        let fresh = ArtistViewModel(artist: artist)
+        await fresh.adoptUserState(from: old)
+
+        #expect(fresh.noSnippets)
+        #expect(fresh.content.state == old.content.state)
+        #expect(fresh.content.eras.map(\.era.name) == old.content.eras.map(\.era.name))
+        #expect(fresh.expandedEra == "Era A")
+        // An era the refreshed tracker no longer has cannot stay expanded.
+        #expect(fresh.expandedSongs == ["Era A::0"])
+        #expect(!fresh.isFiltering)
+    }
+
+    @Test @MainActor func `a refreshed view model drops a tab the tracker no longer has`() async {
+        let old = ArtistViewModel(artist: artist)
+        old.selectedTabKey = "gone::Tab"
+        old.searchQuery = "song"
+        old.debouncedQuery = "song"
+
+        let fresh = ArtistViewModel(artist: artist)
+        await fresh.adoptUserState(from: old)
+
+        #expect(fresh.selectedTabKey == nil)
+        #expect(fresh.searchQuery == "song")
+        #expect(fresh.content.state.query == "song")
+    }
+
     @Test @MainActor func `leaving a tab rebuilds era rows when returning to the base state`() {
         let vm = ArtistViewModel(artist: artist)
         vm.toggleEra("Era A")
