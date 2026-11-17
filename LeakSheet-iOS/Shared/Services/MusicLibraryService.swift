@@ -29,8 +29,29 @@ enum MusicLibraryService {
         #endif
     }
 
+    /// One read per process: every Explore open asked for the whole library again, and
+    /// opens that overlapped each held a full copy of it.
+    private static var libraryRead: Task<[LibraryArtist], Never>?
+
     /// Artists from the library's songs, with summed play counts. Empty when access is missing.
-    static func libraryArtists() async -> [LibraryArtist] {
+    static func libraryArtists(
+        load: @escaping @Sendable () async -> [LibraryArtist] = readLibrary
+    ) async -> [LibraryArtist] {
+        if let libraryRead { return await libraryRead.value }
+        let read = Task { await load() }
+        libraryRead = read
+        let artists = await read.value
+        // Empty also means "no access yet": the next call must ask again.
+        if artists.isEmpty, libraryRead == read { libraryRead = nil }
+        return artists
+    }
+
+    /// Pull-to-refresh: the next call reads the library again.
+    static func forgetLibrary() { libraryRead = nil }
+
+    /// Off the main actor: a large library is tens of thousands of songs to walk.
+    @concurrent
+    private nonisolated static func readLibrary() async -> [LibraryArtist] {
         #if os(tvOS)
         []
         #else
