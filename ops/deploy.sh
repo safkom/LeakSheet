@@ -3,31 +3,36 @@
 # CasaOS app `leaksheet` from ops/casaos/leaksheet.yml with ~/LeakSheet/.env filled in.
 # Never `docker compose up` in the checkout itself: that starts a second, legacy copy.
 set -eu
-cd "$(dirname "$0")/.."
-# The full ref: a local branch named origin/main would shadow the remote one.
-before=$(git rev-parse HEAD)
-git fetch -q origin && git reset -q --hard refs/remotes/origin/main
-# Keep the running images as :previous for a rollback. A re-run of the same commit keeps
-# the older pair instead of overwriting it with a copy of :latest.
-if [ "$before" != "$(git rev-parse HEAD)" ]; then
-  for image in leaksheet-api leaksheet-web; do
-    docker tag "$image:latest" "$image:previous" 2>/dev/null || true
-  done
-fi
-docker compose build -q api web
-set -a; [ -f .env ] && . ./.env; set +a
-export LEAKSHEET_TRUSTED_PROXY_HOPS="${LEAKSHEET_TRUSTED_PROXY_HOPS:-}" \
-       LEAKSHEET_RATE_LIMIT_PER_MIN="${LEAKSHEET_RATE_LIMIT_PER_MIN:-}" SENTRY_DSN="${SENTRY_DSN:-}" \
-       LEAKSHEET_GOOGLE_API_KEY="${LEAKSHEET_GOOGLE_API_KEY:-}"
-sh ops/check-env.sh
-python3 -c 'import os, sys; sys.stdout.write(os.path.expandvars(open(sys.argv[1]).read()))' \
-  ops/casaos/leaksheet.yml |
-  docker run --rm -i -v /var/lib/casaos/apps:/apps alpine \
-    sh -c 'mkdir -p /apps/leaksheet && cat > /apps/leaksheet/docker-compose.yml && chmod 600 /apps/leaksheet/docker-compose.yml'
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/casaos/apps:/var/lib/casaos/apps \
-  -w /var/lib/casaos/apps/leaksheet docker:cli compose up -d
-# nginx is config-only and cheap to restart; this also drops a web container whose image
-# was replaced under it.
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/casaos/apps:/var/lib/casaos/apps \
-  -w /var/lib/casaos/apps/leaksheet docker:cli compose up -d --no-deps --force-recreate web
-git log --oneline -1
+# One function, parsed whole before it runs: the reset below rewrites this file mid-run.
+deploy() {
+  cd "$(dirname "$0")/.."
+  # The full ref: a local branch named origin/main would shadow the remote one.
+  before=$(git rev-parse HEAD)
+  git fetch -q origin && git reset -q --hard refs/remotes/origin/main
+  # Keep the running images as :previous for a rollback. A re-run of the same commit keeps
+  # the older pair instead of overwriting it with a copy of :latest.
+  if [ "$before" != "$(git rev-parse HEAD)" ]; then
+    for image in leaksheet-api leaksheet-web; do
+      docker tag "$image:latest" "$image:previous" 2>/dev/null || true
+    done
+  fi
+  docker compose build -q api web
+  set -a; [ -f .env ] && . ./.env; set +a
+  export LEAKSHEET_TRUSTED_PROXY_HOPS="${LEAKSHEET_TRUSTED_PROXY_HOPS:-}" \
+         LEAKSHEET_RATE_LIMIT_PER_MIN="${LEAKSHEET_RATE_LIMIT_PER_MIN:-}" SENTRY_DSN="${SENTRY_DSN:-}" \
+         LEAKSHEET_GOOGLE_API_KEY="${LEAKSHEET_GOOGLE_API_KEY:-}"
+  sh ops/check-env.sh
+  python3 -c 'import os, sys; sys.stdout.write(os.path.expandvars(open(sys.argv[1]).read()))' \
+    ops/casaos/leaksheet.yml |
+    docker run --rm -i -v /var/lib/casaos/apps:/apps alpine \
+      sh -c 'mkdir -p /apps/leaksheet && cat > /apps/leaksheet/docker-compose.yml && chmod 600 /apps/leaksheet/docker-compose.yml'
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/casaos/apps:/var/lib/casaos/apps \
+    -w /var/lib/casaos/apps/leaksheet docker:cli compose up -d
+  # nginx is config-only and cheap to restart; this also drops a web container whose image
+  # was replaced under it.
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /var/lib/casaos/apps:/var/lib/casaos/apps \
+    -w /var/lib/casaos/apps/leaksheet docker:cli compose up -d --no-deps --force-recreate web
+  git log --oneline -1
+}
+deploy "$@"
+exit
