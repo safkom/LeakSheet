@@ -67,7 +67,7 @@ extension AudioEngine {
 
         // Duration observer: `.status` fires once, often before a progressive (or FLAC/VBR)
         // body knows its duration. Captures only `dur`: AVPlayerItem is not Sendable.
-        observations.append(item.observe(\.duration) { [weak self] item, _ in
+        observations.append(item.observe(\.duration) { @Sendable [weak self] item, _ in
             let dur = item.duration
             Task { @MainActor [weak self] in
                 guard let self,
@@ -81,7 +81,7 @@ extension AudioEngine {
 
         // Status observer — restore seek position once ready. KVO fires on arbitrary
         // threads: capture values before hopping to MainActor (Swift 6 isolation).
-        observations.append(item.observe(\.status) { [weak self] item, _ in
+        observations.append(item.observe(\.status) { @Sendable [weak self] item, _ in
             let status = item.status
             let dur = item.duration
             let errDesc = item.error?.localizedDescription
@@ -98,7 +98,7 @@ extension AudioEngine {
         })
 
         // Buffer observers — show loading when buffer runs dry
-        observations.append(item.observe(\.isPlaybackBufferEmpty) { [weak self] item, _ in
+        observations.append(item.observe(\.isPlaybackBufferEmpty) { @Sendable [weak self] item, _ in
             let empty = item.isPlaybackBufferEmpty
             Task { @MainActor [weak self] in
                 guard let self, self.isCurrentItem(itemID) else { return }
@@ -110,7 +110,7 @@ extension AudioEngine {
                 }
             }
         })
-        observations.append(item.observe(\.isPlaybackLikelyToKeepUp) { [weak self] item, _ in
+        observations.append(item.observe(\.isPlaybackLikelyToKeepUp) { @Sendable [weak self] item, _ in
             let keepUp = item.isPlaybackLikelyToKeepUp
             Task { @MainActor [weak self] in
                 guard let self, self.isCurrentItem(itemID) else { return }
@@ -168,7 +168,7 @@ extension AudioEngine {
     /// Apple's recommended way to track play/pause/waiting state.
     private func observeTimeControlStatus() {
         guard let player else { return }
-        observations.append(player.observe(\.timeControlStatus, changeHandler: { [weak self] player, _ in
+        observations.append(player.observe(\.timeControlStatus, changeHandler: { @Sendable [weak self] player, _ in
             let status = player.timeControlStatus
             Task { @MainActor [weak self] in
                 self?.handleTimeControlStatus(status)

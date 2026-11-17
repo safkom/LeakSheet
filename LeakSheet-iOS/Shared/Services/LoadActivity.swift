@@ -33,7 +33,7 @@ final class LoadActivity {
     private static let identifier = "si.safko.LeakSheet.load"
     private static let delay: Duration = .seconds(2)
 
-    private struct TaskBox: @unchecked Sendable { let task: BGContinuedProcessingTask }
+    private nonisolated struct TaskBox: @unchecked Sendable { let task: BGContinuedProcessingTask }
 
     private var registered = false
     private var generation = 0
@@ -75,7 +75,9 @@ final class LoadActivity {
     private func submit() {
         if !registered {
             registered = true
-            BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.identifier, using: nil) { task in
+            // @Sendable: the scheduler calls this on its own queue, and a closure inheriting the
+            // main actor traps there (EXC_BREAKPOINT in _dispatch_assert_queue_fail).
+            BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.identifier, using: nil) { @Sendable task in
                 guard let task = task as? BGContinuedProcessingTask else { return }
                 let box = TaskBox(task: task)
                 Task { @MainActor in LoadActivity.shared.attach(box.task) }
@@ -102,7 +104,8 @@ final class LoadActivity {
         self.task = task
         task.progress.totalUnitCount = 100
         let box = TaskBox(task: task)
-        task.expirationHandler = { [weak self] in
+        // @Sendable for the same reason: the system calls it off the main thread.
+        task.expirationHandler = { @Sendable [weak self] in
             Task { @MainActor in self?.expire(box.task) }
         }
         push()
